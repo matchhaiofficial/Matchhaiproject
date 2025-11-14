@@ -39,8 +39,8 @@ export default StyleSheet.create({
     backgroundColor: '#3a3a3a',
     overflow: 'hidden',
   },
+  // width is controlled per step (25%, 50%, 75%, 100%)
   stepperBarFill: {
-    width: '25%', // step 1 of 4
     height: '100%',
     backgroundColor: COLORS.accent,
   },
@@ -148,6 +148,37 @@ export default StyleSheet.create({
   },
   helperError: {
     color: COLORS.error,
+  },
+
+  // ---- Chips / options (Step 2) ----
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+  },
+  optionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#3a3a3a',
+    backgroundColor: '#1f1f1f',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  optionChipActive: {
+    backgroundColor: '#1e2a38',
+    borderColor: COLORS.accent,
+  },
+  optionChipText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: 13,
+  },
+  optionChipTextActive: {
+    color: COLORS.text,
   },
 
   // ---- Button ----
