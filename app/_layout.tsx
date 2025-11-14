@@ -13,6 +13,7 @@ import { useFonts as useMartel, Martel_400Regular } from '@expo-google-fonts/mar
 // Theme + Auth provider
 import { COLORS } from '../src/theme';
 import AuthProvider from '../src/context/AuthContext';
+import { OnboardingProvider } from '../src/context/OnboardingContext';
 
 export default function RootLayout() {
   const [montLoaded] = useMontserrat({ Montserrat_700Bold });
@@ -24,15 +25,17 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
-          }}
-        />
-      </View>
+      <OnboardingProvider>
+        <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: COLORS.background },
+            }}
+          />
+        </View>
+      </OnboardingProvider>
     </AuthProvider>
   );
 }
