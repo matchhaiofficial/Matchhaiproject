@@ -1,7 +1,7 @@
 // app/auth/register.tsx
-import { MaterialIcons } from '@expo/vector-icons';
-import { Link, router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { MaterialIcons } from "@expo/vector-icons";
+import { Link, router } from "expo-router";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,29 +12,39 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 
-import LogoHalo from '../../src/components/LogoHalo';
-import { signUpWithEmail } from '../../src/services/authService';
-import { isPhoneAvailable, isUsernameAvailable } from '../../src/services/userService';
-import { COLORS } from '../../src/theme';
-import styles from './register.styles';
+import LogoHalo from "../../src/components/LogoHalo";
+import { signUpWithEmail } from "../../src/services/authService";
+import {
+  isPhoneAvailable,
+  isUsernameAvailable,
+} from "../../src/services/userService";
+import { COLORS } from "../../src/theme";
+import styles from "./register.styles";
 
-type FocusField = 'fullName' | 'username' | 'email' | 'phone' | 'password' | null;
-type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
+type FocusField =
+  | "fullName"
+  | "username"
+  | "email"
+  | "phone"
+  | "password"
+  | null;
+type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 
 export default function Register() {
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
 
   const [focused, setFocused] = useState<FocusField>(null);
 
-  const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
-  const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>('idle');
+  const [usernameStatus, setUsernameStatus] =
+    useState<AvailabilityStatus>("idle");
+  const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
 
   const [loading, setLoading] = useState(false);
 
@@ -49,24 +59,25 @@ export default function Register() {
   } = useMemo(() => {
     const nameValid = fullName.trim().length >= 3;
 
-    // basic: letters, numbers, underscores; length 3–20
     const usernameTrimmed = username.trim();
     const usernameFormatValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameTrimmed);
 
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
     const emailValid = emailRegex.test(email.trim());
 
-    const normalizedPhone = phone.replace(/\D/g, '');
-    const phoneFormatValid = normalizedPhone.length >= 10 && normalizedPhone.length <= 13;
+    const normalizedPhone = phone.replace(/\D/g, "");
+    const phoneFormatValid =
+      normalizedPhone.length >= 10 && normalizedPhone.length <= 13;
 
     const passwordValid = password.length >= 6;
 
     const usernameOk =
       usernameFormatValid &&
-      (usernameStatus === 'idle' || usernameStatus === 'available');
+      (usernameStatus === "idle" || usernameStatus === "available");
+
     const phoneOk =
       phoneFormatValid &&
-      (phoneStatus === 'idle' || phoneStatus === 'available');
+      (phoneStatus === "idle" || phoneStatus === "available");
 
     return {
       isFullNameValid: nameValid,
@@ -75,123 +86,150 @@ export default function Register() {
       isPhoneFormatValid: phoneFormatValid,
       isPasswordValid: passwordValid,
       isFormValid:
-        nameValid &&
-        usernameOk &&
-        emailValid &&
-        phoneOk &&
-        passwordValid &&
-        usernameStatus !== 'checking' &&
-        phoneStatus !== 'checking',
+        nameValid && usernameOk && emailValid && phoneOk && passwordValid,
     };
   }, [fullName, username, email, phone, password, usernameStatus, phoneStatus]);
 
   // ---------- Keyboard handling ----------
-  const Container: any = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
   const containerProps =
-    Platform.OS === 'ios'
-      ? { style: styles.screen, behavior: 'padding' as const, keyboardVerticalOffset: 0 }
+    Platform.OS === "ios"
+      ? {
+          style: styles.screen,
+          behavior: "padding" as const,
+          keyboardVerticalOffset: 0,
+        }
       : { style: styles.screen };
 
   // ---------- Availability checks ----------
   const handleUsernameBlur = async () => {
     const trimmed = username.trim();
     if (!trimmed || !isUsernameFormatValid) {
-      setUsernameStatus('idle');
+      setUsernameStatus("idle");
       return;
     }
 
     try {
-      setUsernameStatus('checking');
+      setUsernameStatus("checking");
       const available = await isUsernameAvailable(trimmed);
-      setUsernameStatus(available ? 'available' : 'taken');
+      setUsernameStatus(available ? "available" : "taken");
     } catch {
-      setUsernameStatus('error');
+      setUsernameStatus("error");
     }
   };
 
   const handlePhoneBlur = async () => {
-    const normalized = phone.replace(/\D/g, '');
+    const normalized = phone.replace(/\D/g, "");
     if (!normalized || !isPhoneFormatValid) {
-      setPhoneStatus('idle');
+      setPhoneStatus("idle");
       return;
     }
 
     try {
-      setPhoneStatus('checking');
+      setPhoneStatus("checking");
       const available = await isPhoneAvailable(normalized);
-      setPhoneStatus(available ? 'available' : 'taken');
+      setPhoneStatus(available ? "available" : "taken");
     } catch {
-      setPhoneStatus('error');
+      setPhoneStatus("error");
     }
   };
 
   // reset availability when typing
   const handleUsernameChange = (value: string) => {
     setUsername(value);
-    if (usernameStatus !== 'idle') setUsernameStatus('idle');
+    if (usernameStatus !== "idle") setUsernameStatus("idle");
   };
 
   const handlePhoneChange = (value: string) => {
     setPhone(value);
-    if (phoneStatus !== 'idle') setPhoneStatus('idle');
+    if (phoneStatus !== "idle") setPhoneStatus("idle");
   };
 
   // ---------- Submit ----------
   const handleRegister = async () => {
+    console.log("[Register] handleRegister called");
+    console.log("[Register] isFormValid:", isFormValid, {
+      fullName,
+      username,
+      email,
+      phone,
+      passwordLen: password.length,
+      usernameStatus,
+      phoneStatus,
+    });
+
     if (!isFormValid) {
       Alert.alert(
-        'Check details',
-        'Please complete all fields correctly before continuing.'
+        "Check details",
+        "Please complete all fields correctly before continuing."
       );
       return;
     }
 
     setLoading(true);
-    const res = await signUpWithEmail(
-      email.trim(),
-      password,
-      fullName.trim(),
-      username.trim(),
-      phone
-    );
-    setLoading(false);
+    console.log("[Register] submitting step 1 …");
 
-    if (!res.ok) {
-      Alert.alert('Sign Up Failed', res.message);
-      return;
+    try {
+      console.log("[Register] calling signUpWithEmail");
+      const res = await signUpWithEmail(
+        email.trim(),
+        password,
+        fullName.trim(),
+        username.trim(),
+        phone
+      );
+      console.log("[Register] signUpWithEmail result:", res);
+
+      if (!res || !res.ok) {
+        console.log("[Register] signUpWithEmail reported failure");
+        Alert.alert(
+          "Sign Up Failed",
+          res?.message ?? "Something went wrong. Please try again."
+        );
+        return;
+      }
+
+      console.log("[Register] success → navigating to /auth/register-step2");
+      router.replace("/auth/register-step2");
+    } catch (err) {
+      console.error("[Register] unexpected error during sign up", err);
+      Alert.alert(
+        "Sign Up Failed",
+        "Unexpected error while creating your account. Please try again."
+      );
+    } finally {
+      console.log("[Register] finally: setLoading(false)");
+      setLoading(false);
     }
-
-    // For now go straight to home; later we’ll route to step 2
-    router.replace('/home');
   };
 
   // ---------- Helper: availability helper text ----------
   const renderAvailabilityHelper = (
     status: AvailabilityStatus,
-    type: 'username' | 'phone'
+    type: "username" | "phone"
   ) => {
-    if (status === 'idle') return null;
+    if (status === "idle") return null;
 
-    let text = '';
+    let text = "";
     const style: any[] = [styles.helperText];
 
-    if (status === 'checking') {
-      text = type === 'username' ? 'Checking username…' : 'Checking number…';
+    if (status === "checking") {
+      text = type === "username" ? "Checking username…" : "Checking number…";
       style.push(styles.helperWarning);
-    } else if (status === 'available') {
+    } else if (status === "available") {
       text =
-        type === 'username'
-          ? 'Looks good! Username is available.'
-          : 'Looks good! Number is available.';
+        type === "username"
+          ? "Looks good! Username is available."
+          : "Looks good! Number is available.";
       style.push(styles.helperOk);
-    } else if (status === 'taken') {
+    } else if (status === "taken") {
       text =
-        type === 'username'
-          ? 'This username is already taken.'
-          : 'This phone number is already in use.';
+        type === "username"
+          ? "This username is already taken."
+          : "This phone number is already in use.";
       style.push(styles.helperError);
     } else {
-      text = 'Could not verify right now. Please try again.';
+      text = "Could not verify right now. Please try again.";
       style.push(styles.helperWarning);
     }
 
@@ -217,11 +255,13 @@ export default function Register() {
           <View style={styles.stepperTopRow}>
             <View>
               <Text style={styles.stepperTitle}>Create your account</Text>
-              <Text style={styles.stepperSubtitle}>Step 1 of 4 · Account details</Text>
+              <Text style={styles.stepperSubtitle}>
+                Step 1 of 4 · Account details
+              </Text>
             </View>
           </View>
           <View style={styles.stepperBar}>
-            <View style={styles.stepperBarFill} />
+            <View style={[styles.stepperBarFill, { width: "25%" }]} />
           </View>
           <View style={styles.stepperDotsRow}>
             <View style={[styles.stepperDot, styles.stepperDotActive]} />
@@ -243,7 +283,9 @@ export default function Register() {
           <View
             style={[
               styles.inputBox,
-              isFullNameValid && fullName.trim().length > 0 && styles.inputBoxValidShadow,
+              isFullNameValid &&
+                fullName.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -264,11 +306,16 @@ export default function Register() {
                 selectionColor={COLORS.accent}
                 value={fullName}
                 onChangeText={setFullName}
-                onFocus={() => setFocused('fullName')}
+                onFocus={() => setFocused("fullName")}
                 onBlur={() => setFocused(null)}
               />
             </View>
-            <View style={[styles.focusBar, { opacity: focused === 'fullName' ? 1 : 0 }]} />
+            <View
+              style={[
+                styles.focusBar,
+                { opacity: focused === "fullName" ? 1 : 0 },
+              ]}
+            />
           </View>
         </View>
 
@@ -278,7 +325,9 @@ export default function Register() {
           <View
             style={[
               styles.inputBox,
-              isUsernameFormatValid && username.trim().length > 0 && styles.inputBoxValidShadow,
+              isUsernameFormatValid &&
+                username.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -301,7 +350,7 @@ export default function Register() {
                 autoCorrect={false}
                 value={username}
                 onChangeText={handleUsernameChange}
-                onFocus={() => setFocused('username')}
+                onFocus={() => setFocused("username")}
                 onBlur={() => {
                   setFocused(null);
                   handleUsernameBlur();
@@ -310,31 +359,36 @@ export default function Register() {
               {username.trim().length > 0 && (
                 <MaterialIcons
                   name={
-                    usernameStatus === 'checking'
-                      ? 'hourglass-top'
-                      : usernameStatus === 'available'
-                      ? 'check-circle'
-                      : usernameStatus === 'taken'
-                      ? 'error-outline'
+                    usernameStatus === "checking"
+                      ? "hourglass-top"
+                      : usernameStatus === "available"
+                      ? "check-circle"
+                      : usernameStatus === "taken"
+                      ? "error-outline"
                       : isUsernameFormatValid
-                      ? 'check-circle'
-                      : 'error-outline'
+                      ? "check-circle"
+                      : "error-outline"
                   }
                   size={18}
                   style={styles.suffixIcon}
                   color={
-                    usernameStatus === 'taken'
+                    usernameStatus === "taken"
                       ? COLORS.error
-                      : usernameStatus === 'available' || isUsernameFormatValid
-                      ? '#8bc34a'
+                      : usernameStatus === "available" || isUsernameFormatValid
+                      ? "#8bc34a"
                       : COLORS.muted
                   }
                 />
               )}
             </View>
-            <View style={[styles.focusBar, { opacity: focused === 'username' ? 1 : 0 }]} />
+            <View
+              style={[
+                styles.focusBar,
+                { opacity: focused === "username" ? 1 : 0 },
+              ]}
+            />
           </View>
-          {renderAvailabilityHelper(usernameStatus, 'username')}
+          {renderAvailabilityHelper(usernameStatus, "username")}
         </View>
 
         {/* Email Address */}
@@ -343,7 +397,9 @@ export default function Register() {
           <View
             style={[
               styles.inputBox,
-              isEmailValid && email.trim().length > 0 && styles.inputBoxValidShadow,
+              isEmailValid &&
+                email.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -368,11 +424,16 @@ export default function Register() {
                 autoComplete="email"
                 value={email}
                 onChangeText={setEmail}
-                onFocus={() => setFocused('email')}
+                onFocus={() => setFocused("email")}
                 onBlur={() => setFocused(null)}
               />
             </View>
-            <View style={[styles.focusBar, { opacity: focused === 'email' ? 1 : 0 }]} />
+            <View
+              style={[
+                styles.focusBar,
+                { opacity: focused === "email" ? 1 : 0 },
+              ]}
+            />
           </View>
         </View>
 
@@ -382,7 +443,9 @@ export default function Register() {
           <View
             style={[
               styles.inputBox,
-              isPhoneFormatValid && phone.trim().length > 0 && styles.inputBoxValidShadow,
+              isPhoneFormatValid &&
+                phone.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -406,7 +469,7 @@ export default function Register() {
                 autoCorrect={false}
                 value={phone}
                 onChangeText={handlePhoneChange}
-                onFocus={() => setFocused('phone')}
+                onFocus={() => setFocused("phone")}
                 onBlur={() => {
                   setFocused(null);
                   handlePhoneBlur();
@@ -415,31 +478,36 @@ export default function Register() {
               {phone.trim().length > 0 && (
                 <MaterialIcons
                   name={
-                    phoneStatus === 'checking'
-                      ? 'hourglass-top'
-                      : phoneStatus === 'available'
-                      ? 'check-circle'
-                      : phoneStatus === 'taken'
-                      ? 'error-outline'
+                    phoneStatus === "checking"
+                      ? "hourglass-top"
+                      : phoneStatus === "available"
+                      ? "check-circle"
+                      : phoneStatus === "taken"
+                      ? "error-outline"
                       : isPhoneFormatValid
-                      ? 'check-circle'
-                      : 'error-outline'
+                      ? "check-circle"
+                      : "error-outline"
                   }
                   size={18}
                   style={styles.suffixIcon}
                   color={
-                    phoneStatus === 'taken'
+                    phoneStatus === "taken"
                       ? COLORS.error
-                      : phoneStatus === 'available' || isPhoneFormatValid
-                      ? '#8bc34a'
+                      : phoneStatus === "available" || isPhoneFormatValid
+                      ? "#8bc34a"
                       : COLORS.muted
                   }
                 />
               )}
             </View>
-            <View style={[styles.focusBar, { opacity: focused === 'phone' ? 1 : 0 }]} />
+            <View
+              style={[
+                styles.focusBar,
+                { opacity: focused === "phone" ? 1 : 0 },
+              ]}
+            />
           </View>
-          {renderAvailabilityHelper(phoneStatus, 'phone')}
+          {renderAvailabilityHelper(phoneStatus, "phone")}
         </View>
 
         {/* Password */}
@@ -448,7 +516,9 @@ export default function Register() {
           <View
             style={[
               styles.inputBox,
-              isPasswordValid && password.length > 0 && styles.inputBoxValidShadow,
+              isPasswordValid &&
+                password.length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -473,19 +543,27 @@ export default function Register() {
                 autoComplete="password"
                 value={password}
                 onChangeText={setPassword}
-                onFocus={() => setFocused('password')}
+                onFocus={() => setFocused("password")}
                 onBlur={() => setFocused(null)}
               />
-              <Pressable onPress={() => setPasswordVisible(v => !v)} hitSlop={10}>
+              <Pressable
+                onPress={() => setPasswordVisible((v) => !v)}
+                hitSlop={10}
+              >
                 <MaterialIcons
-                  name={passwordVisible ? 'visibility' : 'visibility-off'}
+                  name={passwordVisible ? "visibility" : "visibility-off"}
                   size={18}
                   style={styles.suffixIcon}
                   color={COLORS.muted}
                 />
               </Pressable>
             </View>
-            <View style={[styles.focusBar, { opacity: focused === 'password' ? 1 : 0 }]} />
+            <View
+              style={[
+                styles.focusBar,
+                { opacity: focused === "password" ? 1 : 0 },
+              ]}
+            />
           </View>
         </View>
 
@@ -504,7 +582,7 @@ export default function Register() {
               !isFormValid || loading ? styles.primaryBtnDisabled : null,
               pressed && !loading && isFormValid && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
+            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
             {loading ? (
               <ActivityIndicator color="#fff" />
@@ -516,7 +594,7 @@ export default function Register() {
 
         {/* Bottom link */}
         <Text style={styles.bottomText}>
-          Already have an account?{' '}
+          Already have an account?{" "}
           <Link href="/auth/login" style={{ color: COLORS.accent }}>
             Sign In
           </Link>
