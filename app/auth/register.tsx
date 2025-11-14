@@ -1,8 +1,9 @@
-// app/auth/register/index.tsx (Registration Step 1)
+// app/auth/register.tsx
 import { MaterialIcons } from '@expo/vector-icons';
 import { Link, router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -13,30 +14,29 @@ import {
   View,
 } from 'react-native';
 
-import LogoHalo from '../../../src/components/LogoHalo';
-import OnboardingStepper from '../../../src/components/OnboardingStepper';
-import { useOnboarding } from '../../../src/context/OnboardingContext';
-import { isPhoneAvailable, isUsernameAvailable } from '../../../src/services/userService';
-import { COLORS } from '../../../src/theme';
-import styles from './Step1BasicInfo.styles';
+import LogoHalo from '../../src/components/LogoHalo';
+import { signUpWithEmail } from '../../src/services/authService';
+import { isPhoneAvailable, isUsernameAvailable } from '../../src/services/userService';
+import { COLORS } from '../../src/theme';
+import styles from './register.styles';
 
 type FocusField = 'fullName' | 'username' | 'email' | 'phone' | 'password' | null;
 type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
 
-export default function RegisterStep1() {
-  const { profile, updateOnboardingProfile } = useOnboarding();
-
-  const [fullName, setFullName] = useState(profile.fullName);
-  const [username, setUsername] = useState(profile.username);
-  const [email, setEmail] = useState(profile.email);
-  const [phone, setPhone] = useState(profile.phone);
-  const [password, setPassword] = useState(profile.password);
+export default function Register() {
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
 
   const [focused, setFocused] = useState<FocusField>(null);
 
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>('idle');
+
+  const [loading, setLoading] = useState(false);
 
   // ---------- Validation ----------
   const {
@@ -75,20 +75,22 @@ export default function RegisterStep1() {
       isPhoneFormatValid: phoneFormatValid,
       isPasswordValid: passwordValid,
       isFormValid:
-        nameValid && usernameOk && emailValid && phoneOk && passwordValid,
+        nameValid &&
+        usernameOk &&
+        emailValid &&
+        phoneOk &&
+        passwordValid &&
+        usernameStatus !== 'checking' &&
+        phoneStatus !== 'checking',
     };
   }, [fullName, username, email, phone, password, usernameStatus, phoneStatus]);
 
   // ---------- Keyboard handling ----------
-  const Container = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  const Container: any = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
   const containerProps =
     Platform.OS === 'ios'
-      ? ({
-          style: styles.screen,
-          behavior: 'padding' as const,
-          keyboardVerticalOffset: 0,
-        } as const)
-      : ({ style: styles.screen } as const);
+      ? { style: styles.screen, behavior: 'padding' as const, keyboardVerticalOffset: 0 }
+      : { style: styles.screen };
 
   // ---------- Availability checks ----------
   const handleUsernameBlur = async () => {
@@ -135,7 +137,7 @@ export default function RegisterStep1() {
   };
 
   // ---------- Submit ----------
-  const handleContinue = () => {
+  const handleRegister = async () => {
     if (!isFormValid) {
       Alert.alert(
         'Check details',
@@ -143,15 +145,24 @@ export default function RegisterStep1() {
       );
       return;
     }
-    updateOnboardingProfile({
-      fullName: fullName.trim(),
-      username: username.trim(),
-      email: email.trim(),
-      phone,
-      password,
-    });
 
-    router.push('/auth/register/step-2');
+    setLoading(true);
+    const res = await signUpWithEmail(
+      email.trim(),
+      password,
+      fullName.trim(),
+      username.trim(),
+      phone
+    );
+    setLoading(false);
+
+    if (!res.ok) {
+      Alert.alert('Sign Up Failed', res.message);
+      return;
+    }
+
+    // For now go straight to home; later we’ll route to step 2
+    router.replace('/home');
   };
 
   // ---------- Helper: availability helper text ----------
@@ -162,31 +173,31 @@ export default function RegisterStep1() {
     if (status === 'idle') return null;
 
     let text = '';
-    let helperVariant;
+    const style: any[] = [styles.helperText];
 
     if (status === 'checking') {
       text = type === 'username' ? 'Checking username…' : 'Checking number…';
-      helperVariant = styles.helperWarning;
+      style.push(styles.helperWarning);
     } else if (status === 'available') {
       text =
         type === 'username'
           ? 'Looks good! Username is available.'
           : 'Looks good! Number is available.';
-      helperVariant = styles.helperOk;
+      style.push(styles.helperOk);
     } else if (status === 'taken') {
       text =
         type === 'username'
           ? 'This username is already taken.'
           : 'This phone number is already in use.';
-      helperVariant = styles.helperError;
+      style.push(styles.helperError);
     } else {
       text = 'Could not verify right now. Please try again.';
-      helperVariant = styles.helperWarning;
+      style.push(styles.helperWarning);
     }
 
     return (
       <View style={styles.helperTextRow}>
-        <Text style={[styles.helperText, helperVariant]}>{text}</Text>
+        <Text style={style as any}>{text}</Text>
       </View>
     );
   };
@@ -201,12 +212,24 @@ export default function RegisterStep1() {
         {/* Logo */}
         <LogoHalo />
 
-        <OnboardingStepper
-          title="Create your account"
-          subtitle="Step 1 of 3 · Account details"
-          currentStep={1}
-          totalSteps={3}
-        />
+        {/* Stepper */}
+        <View style={styles.stepperWrapper}>
+          <View style={styles.stepperTopRow}>
+            <View>
+              <Text style={styles.stepperTitle}>Create your account</Text>
+              <Text style={styles.stepperSubtitle}>Step 1 of 4 · Account details</Text>
+            </View>
+          </View>
+          <View style={styles.stepperBar}>
+            <View style={styles.stepperBarFill} />
+          </View>
+          <View style={styles.stepperDotsRow}>
+            <View style={[styles.stepperDot, styles.stepperDotActive]} />
+            <View style={styles.stepperDot} />
+            <View style={styles.stepperDot} />
+            <View style={styles.stepperDot} />
+          </View>
+        </View>
 
         {/* Headings */}
         <Text style={styles.heading}>Let’s get started</Text>
@@ -468,19 +491,26 @@ export default function RegisterStep1() {
 
         {/* Primary button */}
         <View
-          style={[styles.buttonShadowWrapper, isFormValid && styles.buttonShadowWrapperActive]}
+          style={[
+            styles.buttonShadowWrapper,
+            isFormValid && !loading && styles.buttonShadowWrapperActive,
+          ]}
         >
           <Pressable
-            onPress={handleContinue}
-            disabled={!isFormValid}
+            onPress={handleRegister}
+            disabled={loading || !isFormValid}
             style={({ pressed }) => [
               styles.primaryBtn,
-              !isFormValid ? styles.primaryBtnDisabled : null,
-              pressed && isFormValid && { opacity: 0.92 },
+              !isFormValid || loading ? styles.primaryBtnDisabled : null,
+              pressed && !loading && isFormValid && { opacity: 0.92 },
             ]}
             android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
           >
-            <Text style={styles.primaryBtnText}>Continue</Text>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryBtnText}>Sign Up</Text>
+            )}
           </Pressable>
         </View>
 

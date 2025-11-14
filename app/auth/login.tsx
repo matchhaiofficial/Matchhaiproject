@@ -44,15 +44,11 @@ export default function Login() {
   }, [emailOrPhone, password]);
 
   // Keyboard handling (iOS only)
-  const Container = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  const Container: any = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
   const containerProps =
     Platform.OS === 'ios'
-      ? ({
-          style: styles.screen,
-          behavior: 'padding' as const,
-          keyboardVerticalOffset: 0,
-        } as const)
-      : ({ style: styles.screen } as const);
+      ? { style: styles.screen, behavior: 'padding' as const, keyboardVerticalOffset: 0 }
+      : { style: styles.screen };
 
   const handleLogin = async () => {
     if (!isFormValid) {
