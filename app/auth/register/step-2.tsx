@@ -146,13 +146,7 @@ export default function RegisterStep2LocationGames() {
                   ]}
                   android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
                 >
-                  {game.image ? (
-                    <Image source={game.image} style={styles.gameThumbnail} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.gameThumbnailFallback}>
-                      <MaterialIcons name="sports-esports" size={20} color={COLORS.muted} />
-                    </View>
-                  )}
+                  <Image source={game.image} style={styles.gameThumbnail} resizeMode="cover" />
                   <View style={styles.gameContent}>
                     <Text style={styles.gameTitle}>{game.name}</Text>
                     <Text style={styles.gameDescription}>{game.description}</Text>
