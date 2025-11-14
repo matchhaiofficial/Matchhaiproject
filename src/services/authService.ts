@@ -53,12 +53,18 @@ export type AuthResult =
  * and with the new one from register step 1:
  *   signUpWithEmail(email, password, fullName, username, phone)
  */
+export type OnboardingProfileExtras = {
+  karachiArea?: string | null;
+  selectedGames?: string[];
+};
+
 export async function signUpWithEmail(
   email: string,
   password: string,
   displayName?: string,
   username?: string,
-  phone?: string
+  phone?: string,
+  extras?: OnboardingProfileExtras
 ): Promise<AuthResult> {
   try {
     const trimmedEmail = email.trim();
@@ -80,6 +86,9 @@ export async function signUpWithEmail(
       const usernameLower = usernameTrimmed ? usernameTrimmed.toLowerCase() : null;
       const normalizedPhone = phone ? normalizePhoneForSave(phone) : null;
 
+      const karachiArea = extras?.karachiArea ?? null;
+      const selectedGames = extras?.selectedGames ? [...extras.selectedGames] : [];
+
       await setDoc(doc(db, 'users', uid), {
         uid,
         email: trimmedEmail.toLowerCase(),
@@ -87,6 +96,8 @@ export async function signUpWithEmail(
         username: usernameTrimmed,
         usernameLower,
         phone: normalizedPhone,
+        karachiArea,
+        selectedGames,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
