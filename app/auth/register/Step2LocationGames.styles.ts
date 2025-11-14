@@ -65,15 +65,6 @@ export default StyleSheet.create({
     marginRight: SPACING.md,
     backgroundColor: COLORS.surface,
   },
-  gameThumbnailFallback: {
-    width: 56,
-    height: 56,
-    borderRadius: RADII.md,
-    marginRight: SPACING.md,
-    backgroundColor: COLORS.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   gameContent: {
     flex: 1,
   },
