@@ -1,9 +1,7 @@
-// app/auth/register.tsx
 import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -15,11 +13,11 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
-import { signUpWithEmail } from "../../src/services/authService";
 import {
   isPhoneAvailable,
   isUsernameAvailable,
 } from "../../src/services/userService";
+import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
@@ -33,11 +31,13 @@ type FocusField =
 type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 
 export default function Register() {
-  const [fullName, setFullName] = useState("");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
+  const { step1, setStep1 } = useOnboardingStore();
+
+  const [fullName, setFullName] = useState(step1.fullName);
+  const [username, setUsername] = useState(step1.username);
+  const [email, setEmail] = useState(step1.email);
+  const [phone, setPhone] = useState(step1.phone);
+  const [password, setPassword] = useState(step1.password);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
   const [focused, setFocused] = useState<FocusField>(null);
@@ -46,7 +46,11 @@ export default function Register() {
     useState<AvailabilityStatus>("idle");
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
 
-  const [loading, setLoading] = useState(false);
+  // when we hydrate, if fields already have values, show "available" by default
+  useEffect(() => {
+    if (step1.username) setUsernameStatus("available");
+    if (step1.phone) setPhoneStatus("available");
+  }, [step1.username, step1.phone]);
 
   // ---------- Validation ----------
   const {
@@ -145,19 +149,8 @@ export default function Register() {
     if (phoneStatus !== "idle") setPhoneStatus("idle");
   };
 
-  // ---------- Submit ----------
-  const handleRegister = async () => {
-    console.log("[Register] handleRegister called");
-    console.log("[Register] isFormValid:", isFormValid, {
-      fullName,
-      username,
-      email,
-      phone,
-      passwordLen: password.length,
-      usernameStatus,
-      phoneStatus,
-    });
-
+  // ---------- Submit (LOCAL ONLY) ----------
+  const handleNext = () => {
     if (!isFormValid) {
       Alert.alert(
         "Check details",
@@ -166,41 +159,16 @@ export default function Register() {
       return;
     }
 
-    setLoading(true);
-    console.log("[Register] submitting step 1 …");
+    // Persist in Zustand (and AsyncStorage via persist)
+    setStep1({
+      fullName: fullName.trim(),
+      username: username.trim(),
+      email: email.trim(),
+      phone,
+      password,
+    });
 
-    try {
-      console.log("[Register] calling signUpWithEmail");
-      const res = await signUpWithEmail(
-        email.trim(),
-        password,
-        fullName.trim(),
-        username.trim(),
-        phone
-      );
-      console.log("[Register] signUpWithEmail result:", res);
-
-      if (!res || !res.ok) {
-        console.log("[Register] signUpWithEmail reported failure");
-        Alert.alert(
-          "Sign Up Failed",
-          res?.message ?? "Something went wrong. Please try again."
-        );
-        return;
-      }
-
-      console.log("[Register] success → navigating to /auth/register-step2");
-      router.replace("/auth/register-step2");
-    } catch (err) {
-      console.error("[Register] unexpected error during sign up", err);
-      Alert.alert(
-        "Sign Up Failed",
-        "Unexpected error while creating your account. Please try again."
-      );
-    } finally {
-      console.log("[Register] finally: setLoading(false)");
-      setLoading(false);
-    }
+    router.push("/auth/register-step2");
   };
 
   // ---------- Helper: availability helper text ----------
@@ -571,24 +539,20 @@ export default function Register() {
         <View
           style={[
             styles.buttonShadowWrapper,
-            isFormValid && !loading && styles.buttonShadowWrapperActive,
+            isFormValid && styles.buttonShadowWrapperActive,
           ]}
         >
           <Pressable
-            onPress={handleRegister}
-            disabled={loading || !isFormValid}
+            onPress={handleNext}
+            disabled={!isFormValid}
             style={({ pressed }) => [
               styles.primaryBtn,
-              !isFormValid || loading ? styles.primaryBtnDisabled : null,
-              pressed && !loading && isFormValid && { opacity: 0.92 },
+              !isFormValid ? styles.primaryBtnDisabled : null,
+              pressed && isFormValid && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Sign Up</Text>
-            )}
+            <Text style={styles.primaryBtnText}>Continue</Text>
           </Pressable>
         </View>
 

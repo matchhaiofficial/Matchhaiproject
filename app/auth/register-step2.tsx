@@ -1,51 +1,58 @@
-// app/auth/register-step2.tsx
-import { MaterialIcons } from '@expo/vector-icons';
-import { Link, router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { MaterialIcons } from "@expo/vector-icons";
+import { Link, router } from "expo-router";
+import React, { useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import {
-    CS2_ROLES,
-    FC_FORMATIONS,
-    GAME_OPTIONS,
-    KARACHI_AREAS,
-    TEKKEN_CHARACTERS,
-} from '../../constants/profileOptions';
-import LogoHalo from '../../src/components/LogoHalo';
-import { COLORS } from '../../src/theme';
-import styles from './register.styles';
+  CS2_ROLES,
+  FC_FORMATIONS,
+  GAME_OPTIONS,
+  KARACHI_AREAS,
+  TEKKEN_CHARACTERS,
+} from "../../constants/profileOptions";
+import LogoHalo from "../../src/components/LogoHalo";
+import { useOnboardingStore } from "../../src/store/onboardingStore";
+import { COLORS } from "../../src/theme";
+import styles from "./register.styles";
 
 type Cs2Role = (typeof CS2_ROLES)[number];
 type FcFormation = (typeof FC_FORMATIONS)[number];
 type TekkenCharacter = (typeof TEKKEN_CHARACTERS)[number];
 
 export default function RegisterStep2() {
+  console.log("[Step2] mounted");
+  const { step2, setStep2 } = useOnboardingStore();
+
   // ---- State ----
-  // ⬇️ multiple areas, up to 5
-  const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
+  const [selectedAreas, setSelectedAreas] = useState<string[]>(
+    step2.selectedAreas
+  );
 
-  const [playsCs2, setPlaysCs2] = useState(false);
-  const [playsFc, setPlaysFc] = useState(false);
-  const [playsTekken, setPlaysTekken] = useState(false);
+  const [playsCs2, setPlaysCs2] = useState<boolean>(step2.playsCs2);
+  const [playsFc, setPlaysFc] = useState<boolean>(step2.playsFc);
+  const [playsTekken, setPlaysTekken] = useState<boolean>(step2.playsTekken);
 
-  const [cs2Role, setCs2Role] = useState<Cs2Role | null>(null);
+  const [cs2Role, setCs2Role] = useState<Cs2Role | null>(
+    (step2.cs2Role as Cs2Role) || null
+  );
 
-  const [fcTeam, setFcTeam] = useState('');
-  const [fcFormation, setFcFormation] = useState<FcFormation | null>(null);
+  const [fcTeam, setFcTeam] = useState(step2.fcTeam);
+  const [fcFormation, setFcFormation] = useState<FcFormation | null>(
+    (step2.fcFormation as FcFormation) || null
+  );
 
-  const [tekkenFavorites, setTekkenFavorites] = useState<TekkenCharacter[]>([]);
-
-  const [loading, setLoading] = useState(false);
+  const [tekkenFavorites, setTekkenFavorites] = useState<TekkenCharacter[]>(
+    step2.tekkenFavorites as TekkenCharacter[]
+  );
 
   // ---- Validation ----
   const {
@@ -56,11 +63,8 @@ export default function RegisterStep2() {
     isTekkenValid,
     isFormValid,
   } = useMemo(() => {
-    // ✅ at least 1 area, up to 5 handled by toggle logic
     const locationValid = selectedAreas.length > 0;
-
     const anyGame = playsCs2 || playsFc || playsTekken;
-
     const cs2Valid = !playsCs2 || !!cs2Role;
 
     const fcTeamValid = !playsFc || fcTeam.trim().length >= 2;
@@ -93,28 +97,28 @@ export default function RegisterStep2() {
     tekkenFavorites,
   ]);
 
-  // ---- Keyboard handling (same pattern as Step 1) ----
-  const Container: any = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  // ---- Keyboard handling ----
+  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
   const containerProps =
-    Platform.OS === 'ios'
-      ? { style: styles.screen, behavior: 'padding' as const, keyboardVerticalOffset: 0 }
+    Platform.OS === "ios"
+      ? {
+          style: styles.screen,
+          behavior: "padding" as const,
+          keyboardVerticalOffset: 0,
+        }
       : { style: styles.screen };
 
   // ---- Helpers ----
-
-  // ⬇️ toggle multiple areas, max 5
   const toggleArea = (area: string) => {
-    setSelectedAreas(prev => {
+    setSelectedAreas((prev) => {
       const isSelected = prev.includes(area);
       if (isSelected) {
-        // unselect
-        return prev.filter(a => a !== area);
+        return prev.filter((a) => a !== area);
       }
-      // not selected yet
       if (prev.length >= 5) {
         Alert.alert(
-          'Limit reached',
-          'You can select up to 5 areas where you want to play.'
+          "Limit reached",
+          "You can select up to 5 areas where you want to play."
         );
         return prev;
       }
@@ -122,56 +126,60 @@ export default function RegisterStep2() {
     });
   };
 
-  const toggleGame = (key: 'cs2' | 'fc26' | 'tekken8') => {
-    if (key === 'cs2') {
-      setPlaysCs2(prev => !prev);
+  const toggleGame = (key: "cs2" | "fc26" | "tekken8") => {
+    if (key === "cs2") {
+      setPlaysCs2((prev: boolean) => !prev);
       if (playsCs2) setCs2Role(null);
     }
-    if (key === 'fc26') {
-      setPlaysFc(prev => !prev);
+    if (key === "fc26") {
+      setPlaysFc((prev: boolean) => !prev);
       if (playsFc) {
-        setFcTeam('');
+        setFcTeam("");
         setFcFormation(null);
       }
     }
-    if (key === 'tekken8') {
-      setPlaysTekken(prev => !prev);
+    if (key === "tekken8") {
+      setPlaysTekken((prev: boolean) => !prev);
       if (playsTekken) setTekkenFavorites([]);
     }
   };
 
   const toggleTekkenCharacter = (char: TekkenCharacter) => {
-    setTekkenFavorites(prev => {
+    setTekkenFavorites((prev) => {
       if (prev.includes(char)) {
-        return prev.filter(c => c !== char);
+        return prev.filter((c) => c !== char);
       }
       if (prev.length >= 3) {
-        return prev; // max 3
+        return prev;
       }
       return [...prev, char];
     });
   };
 
-  // ---- Submit ----
-  const handleContinue = async () => {
+  // ---- Submit (LOCAL ONLY) ----
+  const handleContinue = () => {
     if (!isFormValid) {
       Alert.alert(
-        'Check details',
-        'Please select your area(s), choose at least one game, and fill the required preferences.'
+        "Check details",
+        "Please select your area(s), choose at least one game, and fill the required preferences."
       );
       return;
     }
 
-    setLoading(true);
-    try {
-      // TODO: Save preferences to Firestore (user profile doc)
-      // For now just go to home; later we can send to Step 3.
-      router.replace('/home');
-    } catch (e) {
-      Alert.alert('Could not save', 'Something went wrong while saving your preferences.');
-    } finally {
-      setLoading(false);
-    }
+    console.log("[Step2] saving and going to step 3");
+
+    setStep2({
+      selectedAreas,
+      playsCs2,
+      playsFc,
+      playsTekken,
+      cs2Role: cs2Role ?? null,
+      fcTeam: fcTeam.trim(),
+      fcFormation: fcFormation ?? null,
+      tekkenFavorites,
+    });
+
+    router.push("/auth/register-step3");
   };
 
   return (
@@ -195,7 +203,7 @@ export default function RegisterStep2() {
             </View>
           </View>
           <View style={styles.stepperBar}>
-            <View style={[styles.stepperBarFill, { width: '50%' }]} />
+            <View style={[styles.stepperBarFill, { width: "50%" }]} />
           </View>
           <View style={styles.stepperDotsRow}>
             <View style={[styles.stepperDot, styles.stepperDotActive]} />
@@ -208,14 +216,15 @@ export default function RegisterStep2() {
         {/* Headings */}
         <Text style={styles.heading}>Where do you queue from?</Text>
         <Text style={styles.sub}>
-          Tell us your areas and favourite games so we can match you with the right squad.
+          Tell us your areas and favourite games so we can match you with the
+          right squad.
         </Text>
 
         {/* Location */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Your areas in Karachi (up to 5)</Text>
           <View style={styles.chipRow}>
-            {KARACHI_AREAS.map(area => {
+            {KARACHI_AREAS.map((area) => {
               const active = selectedAreas.includes(area);
               return (
                 <Pressable
@@ -257,17 +266,17 @@ export default function RegisterStep2() {
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Which games do you play regularly?</Text>
           <View style={styles.chipRow}>
-            {GAME_OPTIONS.map(game => {
+            {GAME_OPTIONS.map((game) => {
               const active =
-                (game.key === 'cs2' && playsCs2) ||
-                (game.key === 'fc26' && playsFc) ||
-                (game.key === 'tekken8' && playsTekken);
+                (game.key === "cs2" && playsCs2) ||
+                (game.key === "fc26" && playsFc) ||
+                (game.key === "tekken8" && playsTekken);
 
               return (
                 <Pressable
                   key={game.key}
                   onPress={() =>
-                    toggleGame(game.key as 'cs2' | 'fc26' | 'tekken8')
+                    toggleGame(game.key as "cs2" | "fc26" | "tekken8")
                   }
                   style={({ pressed }) => [
                     styles.optionChip,
@@ -301,7 +310,7 @@ export default function RegisterStep2() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>CS2 · What’s your main role?</Text>
             <View style={styles.chipRow}>
-              {CS2_ROLES.map(role => {
+              {CS2_ROLES.map((role) => {
                 const active = cs2Role === role;
                 return (
                   <Pressable
@@ -369,7 +378,7 @@ export default function RegisterStep2() {
               FC 26 · Preferred formation
             </Text>
             <View style={styles.chipRow}>
-              {FC_FORMATIONS.map(form => {
+              {FC_FORMATIONS.map((form) => {
                 const active = fcFormation === form;
                 return (
                   <Pressable
@@ -408,7 +417,7 @@ export default function RegisterStep2() {
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Tekken 8 · Favourite characters</Text>
             <View style={styles.chipRow}>
-              {TEKKEN_CHARACTERS.map(char => {
+              {TEKKEN_CHARACTERS.map((char) => {
                 const active = tekkenFavorites.includes(char);
                 return (
                   <Pressable
@@ -447,34 +456,41 @@ export default function RegisterStep2() {
           </View>
         )}
 
+        {/* Back to Step 1 */}
+        <Pressable
+          onPress={() => {
+            console.log("[Step2] back to step 1");
+            router.push("/auth/register");
+          }}
+          style={styles.backLinkWrapper}
+        >
+          <Text style={styles.backLinkText}>← Back to account details</Text>
+        </Pressable>
+
         {/* Continue button */}
         <View
           style={[
             styles.buttonShadowWrapper,
-            isFormValid && !loading && styles.buttonShadowWrapperActive,
+            isFormValid && styles.buttonShadowWrapperActive,
           ]}
         >
           <Pressable
             onPress={handleContinue}
-            disabled={loading || !isFormValid}
+            disabled={!isFormValid}
             style={({ pressed }) => [
               styles.primaryBtn,
-              !isFormValid || loading ? styles.primaryBtnDisabled : null,
-              pressed && !loading && isFormValid && { opacity: 0.92 },
+              !isFormValid ? styles.primaryBtnDisabled : null,
+              pressed && isFormValid && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
+            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Continue</Text>
-            )}
+            <Text style={styles.primaryBtnText}>Continue</Text>
           </Pressable>
         </View>
 
-        {/* Back to login (just a safety link) */}
+        {/* Back to login (safety link) */}
         <Text style={styles.bottomText}>
-          Want to sign in instead?{' '}
+          Want to sign in instead?{" "}
           <Link href="/auth/login" style={{ color: COLORS.accent }}>
             Go to login
           </Link>

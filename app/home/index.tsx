@@ -14,8 +14,16 @@ export default function Home() {
   // ✅ Redirect away when user becomes null (after logout)
   useEffect(() => {
     if (!loading && !user) {
-      // you can also use '/' if you want the index gate
+      console.log("[Home] mounted / updated", { loading, hasUser: !!user });
       router.replace('/auth/login');
+    }
+  }, [loading, user]);
+
+    // ✅ Redirect away when user becomes null (after logout)
+  useEffect(() => {
+    if (!loading && !user) {
+      console.log("[Home] no user → redirecting to /auth/login");
+      router.replace("/auth/login");
     }
   }, [loading, user]);
 
