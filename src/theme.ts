@@ -19,6 +19,8 @@ export const COLORS = {
   steamBorder: '#66c0f4',
   faceitBorder: '#ff5500',
   eaBorder: '#5c2d91',
+  xboxBorder: '#107c10',
+  psBorder: '#00439c',
 };
 
 // 🔤 Fonts
