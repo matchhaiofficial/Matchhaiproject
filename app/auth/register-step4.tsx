@@ -3,35 +3,29 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { signUpWithEmail } from "../../src/services/authService";
 import {
-    saveOnboardingStep2,
-    saveOnboardingStep3Platforms,
+  saveOnboardingStep2,
+  saveOnboardingStep3Platforms,
 } from "../../src/services/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
 export default function RegisterStep4() {
-  const {
-    step1,
-    step2,
-    step3,
-    step4,
-    setStep4,
-    resetAll,
-  } = useOnboardingStore();
+  const { step1, step2, step3, step4, setStep4, resetAll } =
+    useOnboardingStore();
 
   console.log("[Step4] mounted", { step1, step2, step3, step4 });
 
@@ -48,27 +42,22 @@ export default function RegisterStep4() {
 
   const connectedPlatforms = useMemo(() => {
     const platforms: string[] = [];
-    if (step3.steam) platforms.push("Steam");
-    if (step3.faceit) platforms.push("FACEIT");
-    if (step3.ea) platforms.push("EA");
-    if (step3.xbox) platforms.push("Xbox");
-    if (step3.psn) platforms.push("PSN");
+    if (step3.steamProfileUrl?.trim()) platforms.push("Steam");
+    if (step3.faceitProfileUrl?.trim()) platforms.push("FACEIT");
+    if (step3.eaProfileUrl?.trim()) platforms.push("EA / FC");
+    if (step3.xboxGamertag?.trim()) platforms.push("Xbox");
+    if (step3.psnOnlineId?.trim()) platforms.push("PSN");
     return platforms;
   }, [step3]);
 
   const allAgreementsChecked =
-    step4.agreeTerms &&
-    step4.agreePrivacy &&
-    step4.consentMatchHistory;
+    step4.agreeTerms && step4.agreePrivacy && step4.consentMatchHistory;
 
-  const toggleAgreeTerms = () =>
-    setStep4({ agreeTerms: !step4.agreeTerms });
+  const toggleAgreeTerms = () => setStep4({ agreeTerms: !step4.agreeTerms });
   const toggleAgreePrivacy = () =>
     setStep4({ agreePrivacy: !step4.agreePrivacy });
   const toggleConsentMatchHistory = () =>
-    setStep4({
-      consentMatchHistory: !step4.consentMatchHistory,
-    });
+    setStep4({ consentMatchHistory: !step4.consentMatchHistory });
 
   // ---- Keyboard container ----
   const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
@@ -93,12 +82,7 @@ export default function RegisterStep4() {
 
     const { fullName, username, email, phone, password } = step1;
 
-    if (
-      !fullName.trim() ||
-      !username.trim() ||
-      !email.trim() ||
-      !password
-    ) {
+    if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
       Alert.alert(
         "Missing details",
         "Some of your basic account details are missing. Please go back and complete Step 1."
@@ -155,10 +139,7 @@ export default function RegisterStep4() {
       console.log("[Step4] saveOnboardingStep2 result", resStep2);
 
       if (!resStep2.ok) {
-        Alert.alert(
-          "Could not save preferences",
-          resStep2.message
-        );
+        Alert.alert("Could not save preferences", resStep2.message);
         return;
       }
 
@@ -166,19 +147,17 @@ export default function RegisterStep4() {
 
       // 3) Save Step 3 (platforms)
       const resStep3 = await saveOnboardingStep3Platforms({
-        steam: step3.steam,
-        faceit: step3.faceit,
-        ea: step3.ea,
-        xbox: step3.xbox,
-        psn: step3.psn,
+        steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
+        faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
+        eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
+        xboxGamertag: (step3.xboxGamertag || "").trim() || null,
+        psnOnlineId: (step3.psnOnlineId || "").trim() || null,
       });
+
       console.log("[Step4] saveOnboardingStep3Platforms result", resStep3);
 
       if (!resStep3.ok) {
-        Alert.alert(
-          "Could not save platforms",
-          resStep3.message
-        );
+        Alert.alert("Could not save platforms", resStep3.message);
         return;
       }
 
@@ -232,77 +211,115 @@ export default function RegisterStep4() {
         {/* Headings */}
         <Text style={styles.heading}>Almost ready</Text>
         <Text style={styles.sub}>
-          Confirm your account details, location, games and connected
-          platforms before creating your MatchHai profile.
+          Confirm your account details, location, games and connected platforms
+          before creating your MatchHai profile.
         </Text>
 
-        {/* Account summary card */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeaderRow}>
-            <MaterialIcons
-              name="person"
-              size={16}
-              color={COLORS.accent}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.summaryTitle}>Account details</Text>
+        {/* Account details review */}
+        <View style={styles.reviewSectionCard}>
+          <View style={styles.reviewSectionHeaderRow}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <MaterialIcons
+                name="person"
+                size={16}
+                color={COLORS.accent}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.reviewSectionTitle}>Account details</Text>
+            </View>
+            <Pressable onPress={() => router.replace("/auth/register")}>
+              <Text style={styles.reviewEditLink}>Edit</Text>
+            </Pressable>
           </View>
 
-          <View style={styles.summaryRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.summaryLabel}>Full name</Text>
-              <Text style={styles.summaryValue}>
-                {step1.fullName || "Not set"}
-              </Text>
-            </View>
-            <View style={{ flex: 1, paddingLeft: 8 }}>
-              <Text style={styles.summaryLabel}>Username</Text>
-              <Text style={styles.summaryValue}>
-                {step1.username || "Not set"}
-              </Text>
-            </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Full name</Text>
+            <Text
+              style={[
+                styles.reviewValue,
+                !step1.fullName && styles.reviewValueMuted,
+              ]}
+              numberOfLines={1}
+            >
+              {step1.fullName || "Not set"}
+            </Text>
           </View>
 
-          <View style={styles.summaryRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.summaryLabel}>Email</Text>
-              <Text style={styles.summaryValue}>
-                {step1.email || "Not set"}
-              </Text>
-            </View>
-            <View style={{ flex: 1, paddingLeft: 8 }}>
-              <Text style={styles.summaryLabel}>Phone</Text>
-              <Text style={styles.summaryValue}>
-                {step1.phone || "Not set"}
-              </Text>
-            </View>
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Username</Text>
+            <Text
+              style={[
+                styles.reviewValue,
+                !step1.username && styles.reviewValueMuted,
+              ]}
+              numberOfLines={1}
+            >
+              {step1.username || "Not set"}
+            </Text>
+          </View>
+
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Email</Text>
+            <Text
+              style={[
+                styles.reviewValue,
+                !step1.email && styles.reviewValueMuted,
+              ]}
+              numberOfLines={1}
+            >
+              {step1.email || "Not set"}
+            </Text>
+          </View>
+
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Phone</Text>
+            <Text
+              style={[
+                styles.reviewValue,
+                !step1.phone && styles.reviewValueMuted,
+              ]}
+              numberOfLines={1}
+            >
+              {step1.phone || "Not set"}
+            </Text>
           </View>
         </View>
 
-        {/* Location & games summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeaderRow}>
-            <MaterialIcons
-              name="map"
-              size={16}
-              color={COLORS.accent}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.summaryTitle}>Location & games</Text>
+        {/* Location & games review */}
+        <View style={styles.reviewSectionCard}>
+          <View style={styles.reviewSectionHeaderRow}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <MaterialIcons
+                name="map"
+                size={16}
+                color={COLORS.accent}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.reviewSectionTitle}>Location & games</Text>
+            </View>
+            <Pressable onPress={() => router.replace("/auth/register-step2")}>
+              <Text style={styles.reviewEditLink}>Edit</Text>
+            </Pressable>
           </View>
 
-          <View style={styles.summaryRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.summaryLabel}>Areas in Karachi</Text>
-              <Text style={styles.summaryValue}>
-                {step2.selectedAreas.length
-                  ? step2.selectedAreas.join(", ")
-                  : "Not selected"}
-              </Text>
-            </View>
-            <View style={{ flex: 1, paddingLeft: 8 }}>
-              <Text style={styles.summaryLabel}>Games selected</Text>
-              {selectedGames.length ? (
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Areas in Karachi</Text>
+            <Text
+              style={[
+                styles.reviewValue,
+                !step2.selectedAreas.length && styles.reviewValueMuted,
+              ]}
+            >
+              {step2.selectedAreas.length
+                ? step2.selectedAreas.join(", ")
+                : "Not selected"}
+            </Text>
+          </View>
+
+          <View style={[styles.reviewRow, { marginBottom: 0 }]}>
+            <Text style={styles.reviewLabel}>Games selected</Text>
+            {selectedGames.length ? (
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
                 <View style={styles.chipRow}>
                   {selectedGames.map((g) => (
                     <View key={g} style={styles.summaryChip}>
@@ -310,29 +327,36 @@ export default function RegisterStep4() {
                     </View>
                   ))}
                 </View>
-              ) : (
-                <Text style={styles.summaryValue}>None</Text>
-              )}
-            </View>
+              </View>
+            ) : (
+              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
+                None
+              </Text>
+            )}
           </View>
         </View>
 
-        {/* Platforms summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeaderRow}>
-            <MaterialIcons
-              name="sports-esports"
-              size={16}
-              color={COLORS.accent}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.summaryTitle}>Connected platforms</Text>
+        {/* Platforms review */}
+        <View style={styles.reviewSectionCard}>
+          <View style={styles.reviewSectionHeaderRow}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <MaterialIcons
+                name="sports-esports"
+                size={16}
+                color={COLORS.accent}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.reviewSectionTitle}>Connected platforms</Text>
+            </View>
+            <Pressable onPress={() => router.replace("/auth/register-step3")}>
+              <Text style={styles.reviewEditLink}>Edit</Text>
+            </Pressable>
           </View>
 
-          <View style={styles.summaryRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.summaryLabel}>Platforms</Text>
-              {connectedPlatforms.length ? (
+          {connectedPlatforms.length ? (
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Platforms</Text>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
                 <View style={styles.chipRow}>
                   {connectedPlatforms.map((p) => (
                     <View key={p} style={styles.summaryChip}>
@@ -340,87 +364,71 @@ export default function RegisterStep4() {
                     </View>
                   ))}
                 </View>
-              ) : (
-                <Text style={styles.summaryValue}>
-                  No platforms connected yet
-                </Text>
-              )}
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Platforms</Text>
+              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
+                No platforms connected yet
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* Agreements */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeaderRow}>
-            <MaterialIcons
-              name="gavel"
-              size={16}
-              color={COLORS.accent}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.summaryTitle}>Agreements</Text>
-          </View>
+        {/* Agreements (custom checkbox UI) */}
+        <View style={styles.termsWrapper}>
+          <Text style={styles.termsHeading}>Agreements</Text>
 
-          <Pressable
-            onPress={toggleAgreeTerms}
-            style={styles.platformHeaderRow}
-          >
-            <MaterialIcons
-              name={
-                step4.agreeTerms
-                  ? "check-box"
-                  : "check-box-outline-blank"
-              }
-              size={20}
-              color={COLORS.accent}
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.summaryValue}>
-              I agree to the Terms of Service
+          <Pressable onPress={toggleAgreeTerms} style={styles.termRow}>
+            <View
+              style={[
+                styles.termBox,
+                step4.agreeTerms && styles.termBoxChecked,
+              ]}
+            >
+              {step4.agreeTerms && <View style={styles.termBoxInner} />}
+            </View>
+            <Text style={styles.termText}>
+              I agree to the{" "}
+              <Text style={styles.termLink}>Terms of Service</Text>.
             </Text>
           </Pressable>
 
-          <Pressable
-            onPress={toggleAgreePrivacy}
-            style={[styles.platformHeaderRow, { marginTop: 8 }]}
-          >
-            <MaterialIcons
-              name={
-                step4.agreePrivacy
-                  ? "check-box"
-                  : "check-box-outline-blank"
-              }
-              size={20}
-              color={COLORS.accent}
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.summaryValue}>
-              I agree to the Privacy Policy
+          <Pressable onPress={toggleAgreePrivacy} style={styles.termRow}>
+            <View
+              style={[
+                styles.termBox,
+                step4.agreePrivacy && styles.termBoxChecked,
+              ]}
+            >
+              {step4.agreePrivacy && <View style={styles.termBoxInner} />}
+            </View>
+            <Text style={styles.termText}>
+              I agree to the <Text style={styles.termLink}>Privacy Policy</Text>
+              .
             </Text>
           </Pressable>
 
-          <Pressable
-            onPress={toggleConsentMatchHistory}
-            style={[styles.platformHeaderRow, { marginTop: 8 }]}
-          >
-            <MaterialIcons
-              name={
-                step4.consentMatchHistory
-                  ? "check-box"
-                  : "check-box-outline-blank"
-              }
-              size={20}
-              color={COLORS.accent}
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.summaryValue}>
-              I consent to MatchHai using my match history for
-              matchmaking & stats.
+          <Pressable onPress={toggleConsentMatchHistory} style={styles.termRow}>
+            <View
+              style={[
+                styles.termBox,
+                step4.consentMatchHistory && styles.termBoxChecked,
+              ]}
+            >
+              {step4.consentMatchHistory && (
+                <View style={styles.termBoxInner} />
+              )}
+            </View>
+            <Text style={styles.termText}>
+              I consent to MatchHai using my match history for matchmaking &
+              stats.
             </Text>
           </Pressable>
 
           {!allAgreementsChecked && (
-            <View style={[styles.helperTextRow, { marginTop: 8 }]}>
+            <View style={styles.helperTextRow}>
               <Text style={[styles.helperText, styles.helperWarning]}>
                 Please tick all three checkboxes to continue.
               </Text>
@@ -428,14 +436,12 @@ export default function RegisterStep4() {
           )}
         </View>
 
-        {/* Back to Step 3 */}
+        {/* Back to Step 3 (safety link) */}
         <Pressable
           onPress={() => router.replace("/auth/register-step3")}
           style={{ alignSelf: "center", marginBottom: 12 }}
         >
-          <Text style={{ color: COLORS.accent }}>
-            ← Back to platforms
-          </Text>
+          <Text style={{ color: COLORS.accent }}>← Back to platforms</Text>
         </Pressable>
 
         {/* Final Sign Up button */}
@@ -463,9 +469,7 @@ export default function RegisterStep4() {
             {submitting ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.primaryBtnText}>
-                Sign up & start playing
-              </Text>
+              <Text style={styles.primaryBtnText}>Sign up & start playing</Text>
             )}
           </Pressable>
         </View>

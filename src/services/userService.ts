@@ -11,6 +11,8 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebaseConfig";
+import type { FaceitProfileSummary } from "../services/faceitApi";
+import type { SteamProfileSummary } from "../services/steamApi";
 
 function normalizePhone(raw: string) {
   // keep digits only (so +92, spaces, etc. are normalized)
@@ -161,19 +163,24 @@ export async function fetchOnboardingSummary(): Promise<
   }
 }
 
-// ---- Onboarding Step 3: Connected platforms ----
+// ---- Onboarding Step 3: Platform profile links ----
 
 export interface OnboardingStep3Platforms {
-  steam: boolean;
-  faceit: boolean;
-  ea: boolean;
-  xbox: boolean;
-  psn: boolean;
+  steamProfileUrl: string | null;
+  faceitProfileUrl: string | null;
+  eaProfileUrl: string | null;
+  xboxGamertag: string | null;
+  psnOnlineId: string | null;
+
+  // optional, from API lookups
+  steamProfile?: SteamProfileSummary | null;
+  faceitProfile?: FaceitProfileSummary | null;
 }
 
+
 /**
- * Save connected platforms for the user.
- * (This is still "soft" — just flags, no real OAuth yet.)
+ * Save platform profile links for the user.
+ * We store URLs / IDs only — no OAuth, no actual account connection yet.
  */
 export async function saveOnboardingStep3Platforms(
   platforms: OnboardingStep3Platforms
@@ -187,11 +194,22 @@ export async function saveOnboardingStep3Platforms(
     const userRef = doc(db, "users", user.uid);
 
     await updateDoc(userRef, {
-      platformSteam: platforms.steam,
-      platformFaceit: platforms.faceit,
-      platformEa: platforms.ea,
-      platformXbox: platforms.xbox,
-      platformPsn: platforms.psn,
+      steamProfileUrl: platforms.steamProfileUrl ?? null,
+      faceitProfileUrl: platforms.faceitProfileUrl ?? null,
+      eaProfileUrl: platforms.eaProfileUrl ?? null,
+      xboxGamertag: platforms.xboxGamertag ?? null,
+      psnOnlineId: platforms.psnOnlineId ?? null,
+
+      // flatten summaries so they’re easy to query later
+      steamId: platforms.steamProfile?.steamId ?? null,
+      steamPersonaName: platforms.steamProfile?.personaName ?? null,
+      steamCs2Hours: platforms.steamProfile?.cs2Hours ?? null,
+      faceitId: platforms.faceitProfile?.faceitId ?? null,
+      faceitNickname: platforms.faceitProfile?.nickname ?? null,
+      faceitGame: platforms.faceitProfile?.game ?? null,
+      faceitElo: platforms.faceitProfile?.elo ?? null,
+      faceitSkillLevel: platforms.faceitProfile?.skillLevel ?? null,
+
       onboardingStep: 3,
       updatedAt: serverTimestamp(),
     });
@@ -201,7 +219,9 @@ export async function saveOnboardingStep3Platforms(
     console.log("[userService] saveOnboardingStep3Platforms error", e);
     return {
       ok: false,
-      message: "Could not save your connected platforms. Please try again.",
+      message: "Could not save your platform links. Please try again.",
     };
   }
 }
+
+

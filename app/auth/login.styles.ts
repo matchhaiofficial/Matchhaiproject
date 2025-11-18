@@ -94,6 +94,21 @@ export default StyleSheet.create({
     opacity: 0,
   },
 
+  // 🔽🔽🔽 ADD THESE HELPER STYLES 🔽🔽🔽
+  helperTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.xs,
+  },
+  helperText: {
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+  },
+  helperWarning: {
+    color: '#ffb74d',
+  },
+  // 🔼🔼🔼 END OF NEW STYLES 🔼🔼🔼
+
   forgotRow: {
     marginTop: SPACING.xs,         // 4
     marginBottom: SPACING.lg + 2,  // ~18

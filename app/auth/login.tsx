@@ -1,7 +1,7 @@
 // app/auth/login.tsx
-import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
-import { Link, router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { MaterialIcons } from "@expo/vector-icons";
+import { Link, router } from "expo-router";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,18 +12,19 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 
-import LogoHalo from '../../src/components/LogoHalo';
-import { signInWithEmail } from '../../src/services/authService';
-import { COLORS } from '../../src/theme';
-import styles from './login.styles';
+import LogoHalo from "../../src/components/LogoHalo";
+import { signInWithEmail } from "../../src/services/authService";
+import { COLORS } from "../../src/theme";
+import styles from "./login.styles";
 
 export default function Login() {
-  const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const [emailOrPhone, setEmailOrPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [emailFocused, setEmailFocused] = useState(false);
   const [passFocused, setPassFocused] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
@@ -44,48 +45,44 @@ export default function Login() {
   }, [emailOrPhone, password]);
 
   // Keyboard handling (iOS only)
-  const Container: any = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
   const containerProps =
-    Platform.OS === 'ios'
-      ? { style: styles.screen, behavior: 'padding' as const, keyboardVerticalOffset: 0 }
+    Platform.OS === "ios"
+      ? {
+          style: styles.screen,
+          behavior: "padding" as const,
+          keyboardVerticalOffset: 0,
+        }
       : { style: styles.screen };
 
   const handleLogin = async () => {
     if (!isFormValid) {
       Alert.alert(
-        'Check details',
-        'Please enter a valid email/phone and a password of at least 6 characters.'
+        "Check details",
+        "Please enter a valid email/phone and a password of at least 6 characters."
       );
       return;
     }
 
-    setLoading(true);
-    const res = await signInWithEmail(emailOrPhone, password);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const res = await signInWithEmail(emailOrPhone, password);
+      setLoading(false);
 
-    if (!res.ok) {
-      Alert.alert('Sign In Failed', res.message);
-      return;
+      if (!res.ok) {
+        Alert.alert("Sign In Failed", res.message);
+        return;
+      }
+
+      router.replace("/home");
+    } catch (e) {
+      setLoading(false);
+      Alert.alert("Sign In Failed", "Something went wrong. Please try again.");
     }
-
-    router.replace('/home');
   };
 
   const handleForgotPassword = () => {
-    Alert.alert('Coming soon', 'Forgot Password flow will be added in the next milestone.');
-  };
-
-  // Social login stubs
-  const handleSteamLogin = () => {
-    Alert.alert('Coming soon', 'Steam login will be available in a future update.');
-  };
-
-  const handleFaceitLogin = () => {
-    Alert.alert('Coming soon', 'FACEIT login will be available in a future update.');
-  };
-
-  const handleEALogin = () => {
-    Alert.alert('Coming soon', 'EA Account login will be available in a future update.');
+    router.push("/auth/forgot-password");
   };
 
   return (
@@ -109,7 +106,9 @@ export default function Login() {
           <View
             style={[
               styles.inputBox,
-              isEmailValid && emailOrPhone.trim().length > 0 && styles.inputBoxValidShadow,
+              isEmailValid &&
+                emailOrPhone.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -141,15 +140,17 @@ export default function Login() {
 
               {emailOrPhone.trim().length > 0 && (
                 <MaterialIcons
-                  name={isEmailValid ? 'check-circle' : 'error-outline'}
+                  name={isEmailValid ? "check-circle" : "error-outline"}
                   size={20}
                   style={styles.suffixIcon}
-                  color={isEmailValid ? '#4CAF50' : '#FF5252'}
+                  color={isEmailValid ? "#4CAF50" : "#FF5252"}
                 />
               )}
             </View>
 
-            <View style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]} />
+            <View
+              style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]}
+            />
           </View>
         </View>
 
@@ -160,7 +161,9 @@ export default function Login() {
           <View
             style={[
               styles.inputBox,
-              isPasswordValid && password.length > 0 && styles.inputBoxValidShadow,
+              isPasswordValid &&
+                password.length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -190,9 +193,12 @@ export default function Login() {
                 onBlur={() => setPassFocused(false)}
               />
 
-              <Pressable onPress={() => setPasswordVisible(v => !v)} hitSlop={10}>
+              <Pressable
+                onPress={() => setPasswordVisible((v) => !v)}
+                hitSlop={10}
+              >
                 <MaterialIcons
-                  name={passwordVisible ? 'visibility' : 'visibility-off'}
+                  name={passwordVisible ? "visibility" : "visibility-off"}
                   size={20}
                   style={styles.suffixIcon}
                   color={COLORS.muted}
@@ -226,7 +232,7 @@ export default function Login() {
               !isFormValid || loading ? styles.primaryBtnDisabled : null,
               pressed && !loading && isFormValid && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
+            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
             {loading ? (
               <ActivityIndicator color="#fff" />
@@ -236,70 +242,9 @@ export default function Login() {
           </Pressable>
         </View>
 
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or continue with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Social login buttons */}
-        <View style={styles.socialButtonsWrapper}>
-          <Pressable
-            onPress={handleSteamLogin}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              styles.socialSteam,
-              pressed && { opacity: 0.9 },
-            ]}
-          >
-            <FontAwesome5
-              name="steam"
-              size={18}
-              style={styles.socialIcon}
-              color="#cfd8dc"
-            />
-            <Text style={styles.socialBtnText}>Login with Steam</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={handleFaceitLogin}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              styles.socialFaceit,
-              pressed && { opacity: 0.9 },
-            ]}
-          >
-            <FontAwesome5
-              name="fire-alt"
-              size={18}
-              style={styles.socialIcon}
-              color="#ffe0b2"
-            />
-            <Text style={styles.socialBtnText}>Login with FACEIT</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={handleEALogin}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              styles.socialEA,
-              pressed && { opacity: 0.9 },
-            ]}
-          >
-            <FontAwesome5
-              name="gamepad"
-              size={18}
-              style={styles.socialIcon}
-              color="#e1bee7"
-            />
-            <Text style={styles.socialBtnText}>Login with EA Account</Text>
-          </Pressable>
-        </View>
-
         {/* Bottom link */}
         <Text style={styles.bottomText}>
-          New here?{' '}
+          New here?{" "}
           <Link href="/auth/register" style={{ color: COLORS.accent }}>
             Create an account
           </Link>
