@@ -3,6 +3,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+// ✅ NEW: import the summary types used in Step 3
+import type { FaceitProfileSummary } from "../services/faceitApi";
+import type { SteamProfileSummary } from "../services/steamApi";
+
 type Step1Data = {
   fullName: string;
   username: string;
@@ -22,12 +26,17 @@ type Step2Data = {
   tekkenFavorites: string[];
 };
 
+// ✅ UPDATED: extend Step3Data to include steamProfile + faceitProfile
 type Step3Data = {
-  steam: boolean;
-  faceit: boolean;
-  ea: boolean;
-  xbox: boolean;
-  psn: boolean;
+  steamProfileUrl: string;
+  faceitProfileUrl: string;
+  eaProfileUrl: string;
+  xboxGamertag: string;
+  psnOnlineId: string;
+
+  // hydrated from API lookups (optional)
+  steamProfile: SteamProfileSummary | null;
+  faceitProfile: FaceitProfileSummary | null;
 };
 
 type Step4Data = {
@@ -94,12 +103,15 @@ const initialState: Omit<
     fcFormation: null,
     tekkenFavorites: [],
   },
+  // ✅ UPDATED: add steamProfile + faceitProfile in the initial state
   step3: {
-    steam: false,
-    faceit: false,
-    ea: false,
-    xbox: false,
-    psn: false,
+    steamProfileUrl: "",
+    faceitProfileUrl: "",
+    eaProfileUrl: "",
+    xboxGamertag: "",
+    psnOnlineId: "",
+    steamProfile: null,
+    faceitProfile: null,
   },
   step4: {
     agreeTerms: false,
@@ -113,8 +125,7 @@ export const useOnboardingStore = create<OnboardingState>()(
     (set) => ({
       ...initialState,
 
-      setCurrentStep: (step: number) =>
-        set(() => ({ currentStep: step })),
+      setCurrentStep: (step: number) => set(() => ({ currentStep: step })),
 
       // core helpers
       setStep1: (data) =>

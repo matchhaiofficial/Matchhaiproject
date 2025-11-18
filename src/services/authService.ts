@@ -47,11 +47,6 @@ export type AuthResult =
  * `displayName` = full name shown in Firebase Auth
  * `username`    = MatchHai handle (saved in Firestore + `usernameLower`)
  * `phone`       = normalized and saved in Firestore
- *
- * This signature stays compatible with the old usage:
- *   signUpWithEmail(email, password, displayName)
- * and with the new one from register step 1:
- *   signUpWithEmail(email, password, fullName, username, phone)
  */
 export async function signUpWithEmail(
   email: string,

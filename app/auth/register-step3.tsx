@@ -4,20 +4,42 @@ import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import {
+  FaceitProfileSummary,
+  fetchFaceitProfileFromUrl,
+} from "../../src/services/faceitApi";
+import {
+  fetchSteamProfileFromUrl,
+  SteamProfileSummary,
+} from "../../src/services/steamApi";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
-type PlatformKey = "steam" | "faceit" | "ea" | "xbox" | "psn";
+// --- FACEIT LEVEL ICONS ---
+const faceitLevelIcons: Record<number, any> = {
+  1: require("../../assets/images/faceit-levels/Level 1.png"),
+  2: require("../../assets/images/faceit-levels/Level 2.png"),
+  3: require("../../assets/images/faceit-levels/Level 3.png"),
+  4: require("../../assets/images/faceit-levels/Level 4.png"),
+  5: require("../../assets/images/faceit-levels/Level 5.png"),
+  6: require("../../assets/images/faceit-levels/Level 6.png"),
+  7: require("../../assets/images/faceit-levels/Level 7.png"),
+  8: require("../../assets/images/faceit-levels/Level 8.png"),
+  9: require("../../assets/images/faceit-levels/Level 9.png"),
+  10: require("../../assets/images/faceit-levels/Level 10.png"),
+};
 
 export default function RegisterStep3() {
   const { step2, step3, setStep3 } = useOnboardingStore();
@@ -29,31 +51,42 @@ export default function RegisterStep3() {
     playsTekken: step2.playsTekken,
   });
 
-  const [areasPreferred, setAreasPreferred] = useState<string[]>(
-    step2.selectedAreas
+  const [areasPreferred] = useState<string[]>(step2.selectedAreas);
+  const [playsCs2] = useState(step2.playsCs2);
+  const [playsFc] = useState(step2.playsFc);
+  const [playsTekken] = useState(step2.playsTekken);
+
+  // local editable fields for links / IDs
+  const [steamProfileUrl, setSteamProfileUrl] = useState(
+    step3.steamProfileUrl ?? ""
   );
-  const [playsCs2, setPlaysCs2] = useState(step2.playsCs2);
-  const [playsFc, setPlaysFc] = useState(step2.playsFc);
-  const [playsTekken, setPlaysTekken] = useState(step2.playsTekken);
+  const [faceitProfileUrl, setFaceitProfileUrl] = useState(
+    step3.faceitProfileUrl ?? ""
+  );
+  const [eaProfileUrl, setEaProfileUrl] = useState(step3.eaProfileUrl ?? "");
+  const [xboxGamertag, setXboxGamertag] = useState(step3.xboxGamertag ?? "");
+  const [psnOnlineId, setPsnOnlineId] = useState(step3.psnOnlineId ?? "");
 
-  // platform selections
-  const [steamConnected, setSteamConnected] = useState<boolean>(step3.steam);
-  const [faceitConnected, setFaceitConnected] = useState<boolean>(step3.faceit);
-  const [eaConnected, setEaConnected] = useState<boolean>(step3.ea);
-  const [xboxConnected, setXboxConnected] = useState<boolean>(step3.xbox);
-  const [psnConnected, setPsnConnected] = useState<boolean>(step3.psn);
+  // fetched summaries
+  const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(
+    step3.steamProfile ?? null
+  );
+  const [faceitProfile, setFaceitProfile] =
+    useState<FaceitProfileSummary | null>(step3.faceitProfile ?? null);
 
+  const [steamLoading, setSteamLoading] = useState(false);
+  const [faceitLoading, setFaceitLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // if user somehow comes here without step2 filled, send them back
   const isFocused = useIsFocused();
 
-  // if user somehow comes here without step2 filled, send them back
+  // derived flags
+  const steamVerified = !!steamProfile;
+  const faceitVerified = !!faceitProfile;
+
+  // If user somehow comes here without step2 filled, send them back
   useEffect(() => {
-    if (!isFocused) {
-      // screen is mounted (maybe preloaded) but not active: do nothing
-      return;
-    }
+    if (!isFocused) return;
 
     if (
       !step2.selectedAreas.length &&
@@ -75,19 +108,24 @@ export default function RegisterStep3() {
     return games;
   }, [playsCs2, playsFc, playsTekken]);
 
-  // --- validation logic ---
+  // --- validation logic for links ---
   const { cs2Ok, fcOk, tekkenOk, isFormValid } = useMemo(() => {
-    const hasSteam = steamConnected;
-    const hasFaceit = faceitConnected;
-    const hasEa = eaConnected;
-    const hasXbox = xboxConnected;
-    const hasPsn = psnConnected;
+    const steam = (steamProfileUrl ?? "").trim();
+    const faceit = (faceitProfileUrl ?? "").trim();
+    const ea = (eaProfileUrl ?? "").trim();
+    const xbox = (xboxGamertag ?? "").trim();
+    const psn = (psnOnlineId ?? "").trim();
 
-    const cs2Valid = !playsCs2 || hasSteam || hasFaceit;
+    const steamFilled = steam.length > 0;
+    const faceitFilled = faceit.length > 0;
+    const eaFilled = ea.length > 0;
+    const xboxFilled = xbox.length > 0;
+    const psnFilled = psn.length > 0;
 
-    const fcValid = !playsFc || hasSteam || hasEa || hasXbox || hasPsn;
-
-    const tekkenValid = !playsTekken || hasSteam || hasXbox || hasPsn;
+    const cs2Valid = !playsCs2 || steamFilled || faceitFilled;
+    const fcValid =
+      !playsFc || steamFilled || eaFilled || xboxFilled || psnFilled;
+    const tekkenValid = !playsTekken || steamFilled || xboxFilled || psnFilled;
 
     return {
       cs2Ok: cs2Valid,
@@ -99,11 +137,11 @@ export default function RegisterStep3() {
     playsCs2,
     playsFc,
     playsTekken,
-    steamConnected,
-    faceitConnected,
-    eaConnected,
-    xboxConnected,
-    psnConnected,
+    steamProfileUrl,
+    faceitProfileUrl,
+    eaProfileUrl,
+    xboxGamertag,
+    psnOnlineId,
   ]);
 
   // --- keyboard container ---
@@ -117,12 +155,47 @@ export default function RegisterStep3() {
         }
       : { style: styles.screen };
 
-  const togglePlatform = (key: PlatformKey) => {
-    if (key === "steam") setSteamConnected((p: boolean) => !p);
-    if (key === "faceit") setFaceitConnected((p: boolean) => !p);
-    if (key === "ea") setEaConnected((p: boolean) => !p);
-    if (key === "xbox") setXboxConnected((p: boolean) => !p);
-    if (key === "psn") setPsnConnected((p: boolean) => !p);
+  const handleSteamLookup = async () => {
+    const url = steamProfileUrl.trim();
+    if (!url) {
+      Alert.alert("Steam", "Please paste your Steam profile link first.");
+      return;
+    }
+
+    setSteamLoading(true);
+    const res = await fetchSteamProfileFromUrl(url);
+    setSteamLoading(false);
+
+    if (!res.ok) {
+      Alert.alert("Steam lookup failed", res.message);
+      setSteamProfile(null);
+      return;
+    }
+
+    setSteamProfile(res.data);
+  };
+
+  const handleFaceitLookup = async () => {
+    const value = faceitProfileUrl.trim();
+    if (!value) {
+      Alert.alert(
+        "FACEIT",
+        "Please paste your FACEIT profile link or nickname first."
+      );
+      return;
+    }
+
+    setFaceitLoading(true);
+    const res = await fetchFaceitProfileFromUrl(value);
+    setFaceitLoading(false);
+
+    if (!res.ok) {
+      Alert.alert("FACEIT lookup failed", res.message);
+      setFaceitProfile(null);
+      return;
+    }
+
+    setFaceitProfile(res.data);
   };
 
   const handleContinue = () => {
@@ -130,71 +203,82 @@ export default function RegisterStep3() {
       const messages: string[] = [];
 
       if (playsCs2 && !cs2Ok) {
-        messages.push("• CS2: connect Steam or FACEIT.");
+        messages.push("• CS2: add at least a Steam or FACEIT profile link.");
       }
       if (playsFc && !fcOk) {
-        messages.push("• FC 26: connect Steam, EA, Xbox or PlayStation.");
+        messages.push(
+          "• FC 26: add at least one link (Steam, EA, Xbox or PlayStation)."
+        );
       }
       if (playsTekken && !tekkenOk) {
-        messages.push("• Tekken 8: connect Steam, Xbox or PlayStation.");
+        messages.push(
+          "• Tekken 8: add at least one link (Steam, Xbox or PlayStation)."
+        );
       }
 
       Alert.alert(
-        "Connect your accounts",
+        "Add your profile links",
         messages.length
           ? messages.join("\n")
-          : "Please connect at least one platform for each game you selected."
+          : "Please add at least one platform link for each game you selected."
       );
       return;
     }
 
     setSaving(true);
-    console.log("[Step3] saving platforms and going to step 4");
-    // persist in store
-    setStep3({
-      steam: steamConnected,
-      faceit: faceitConnected,
-      ea: eaConnected,
-      xbox: xboxConnected,
-      psn: psnConnected,
-    });
-    setSaving(false);
+    console.log("[Step3] saving platform links and going to step 4");
 
+    setStep3({
+      steamProfileUrl: steamProfileUrl.trim(),
+      faceitProfileUrl: faceitProfileUrl.trim(),
+      eaProfileUrl: eaProfileUrl.trim(),
+      xboxGamertag: xboxGamertag.trim(),
+      psnOnlineId: psnOnlineId.trim(),
+      steamProfile,
+      faceitProfile,
+    });
+
+    setSaving(false);
     router.push("/auth/register-step4");
   };
 
+  // Show only platforms that make sense, same as before
   const showSteam = playsCs2 || playsFc || playsTekken;
   const showFaceit = playsCs2;
   const showEa = playsFc;
   const showXbox = playsFc || playsTekken;
   const showPsn = playsFc || playsTekken;
 
-  // Dynamic subtitles
+  // Dynamic helper subtitles
   const steamGames: string[] = [];
   if (playsCs2) steamGames.push("CS2");
   if (playsFc) steamGames.push("FC 26");
   if (playsTekken) steamGames.push("Tekken 8");
   const steamSubtitle = steamGames.length
-    ? `Covers: ${steamGames.join(" · ")}`
-    : "Link your Steam account.";
+    ? `Paste your Steam profile link for ${steamGames.join(" · ")}.`
+    : "Paste your Steam profile link.";
 
   const eaSubtitle = playsFc
-    ? "Required for FC 26 verification (clubs, divisions)."
-    : "Link your EA account.";
+    ? "FC 26: paste a link we can use (club page or EA ID)."
+    : "Paste your EA account / club link.";
 
   const xboxSubtitleParts: string[] = [];
   if (playsFc) xboxSubtitleParts.push("FC 26");
   if (playsTekken) xboxSubtitleParts.push("Tekken 8");
   const xboxSubtitle = xboxSubtitleParts.length
-    ? `Use your Xbox account for ${xboxSubtitleParts.join(" & ")}.`
-    : "Link your Xbox account.";
+    ? `Enter your Xbox gamertag for ${xboxSubtitleParts.join(" & ")}.`
+    : "Enter your Xbox gamertag.";
 
   const psnSubtitleParts: string[] = [];
   if (playsFc) psnSubtitleParts.push("FC 26");
   if (playsTekken) psnSubtitleParts.push("Tekken 8");
   const psnSubtitle = psnSubtitleParts.length
-    ? `Use your PSN account for ${psnSubtitleParts.join(" & ")}.`
-    : "Link your PlayStation Network account.";
+    ? `Enter your PSN ID for ${psnSubtitleParts.join(" & ")}.`
+    : "Enter your PlayStation Network ID.";
+
+  // helper for FACEIT icon
+  const faceitLevelIcon =
+    faceitProfile?.skillLevel && faceitLevelIcons[faceitProfile.skillLevel];
 
   return (
     <Container {...containerProps}>
@@ -209,9 +293,9 @@ export default function RegisterStep3() {
         <View style={styles.stepperWrapper}>
           <View style={styles.stepperTopRow}>
             <View>
-              <Text style={styles.stepperTitle}>Connect your platforms</Text>
+              <Text style={styles.stepperTitle}>Account links</Text>
               <Text style={styles.stepperSubtitle}>
-                Step 3 of 4 · Link your gaming accounts
+                Step 3 of 4 · Add your profile links
               </Text>
             </View>
           </View>
@@ -266,14 +350,14 @@ export default function RegisterStep3() {
 
         {/* Platforms section */}
         <Text style={[styles.heading, { marginTop: 18 }]}>
-          Connect gaming platforms
+          Add your account links
         </Text>
         <Text style={styles.sub}>
-          Link your accounts so we can verify your skill level and match
-          history.
+          Paste the profile links or IDs you use for ranked play. We&apos;ll use
+          these for verification and matchmaking.
         </Text>
 
-        {/* Steam & FACEIT */}
+        {/* Steam */}
         {showSteam && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
@@ -284,25 +368,75 @@ export default function RegisterStep3() {
                 <Text style={styles.platformTitle}>Steam</Text>
                 <Text style={styles.platformSubtitle}>{steamSubtitle}</Text>
               </View>
-              {steamConnected && (
-                <Text style={styles.platformConnectedBadge}>Connected</Text>
-              )}
             </View>
+
+            <View
+              style={[
+                styles.inputBox,
+                styles.inputRow,
+                { marginTop: 10, marginBottom: 8 },
+              ]}
+            >
+              <MaterialIcons
+                name="link"
+                size={18}
+                style={styles.prefixIcon}
+                color={
+                  steamProfileUrl.trim().length > 0
+                    ? COLORS.accent
+                    : COLORS.muted
+                }
+              />
+              <TextInput
+                placeholder="https://steamcommunity.com/id/yourprofile"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={steamProfileUrl}
+                onChangeText={setSteamProfileUrl}
+              />
+            </View>
+
             <Pressable
-              onPress={() => togglePlatform("steam")}
+              onPress={handleSteamLookup}
+              disabled={steamLoading || !steamProfileUrl.trim()}
               style={({ pressed }) => [
                 styles.platformButton,
-                steamConnected && styles.platformButtonActiveSteam,
-                pressed && { opacity: 0.9 },
+                steamVerified && { backgroundColor: "#1DB954" },
+                pressed && !steamLoading && { opacity: 0.9 },
               ]}
             >
               <Text style={styles.platformButtonText}>
-                {steamConnected ? "Disconnect Steam" : "Connect Steam"}
+                {steamLoading
+                  ? "Checking..."
+                  : steamVerified
+                  ? "Steam verified"
+                  : "Verify Steam profile"}
               </Text>
             </Pressable>
+
+            {steamProfile && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={styles.summaryLabel}>Verified profile</Text>
+                <Text
+                  style={[
+                    styles.summaryValue,
+                    { color: COLORS.accent, fontWeight: "600" },
+                  ]}
+                >
+                  {steamProfile.personaName}{" "}
+                  {steamProfile.cs2Hours != null
+                    ? `· CS2: ~${Math.round(steamProfile.cs2Hours)} hours`
+                    : ""}
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
+        {/* FACEIT */}
         {showFaceit && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
@@ -316,25 +450,106 @@ export default function RegisterStep3() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.platformTitle}>FACEIT</Text>
                 <Text style={styles.platformSubtitle}>
-                  CS2 only: retrieve your FACEIT Elo and match history.
+                  CS2 only: paste your FACEIT profile link or nickname.
                 </Text>
               </View>
-              {faceitConnected && (
-                <Text style={styles.platformConnectedBadge}>Connected</Text>
-              )}
             </View>
+
+            <View
+              style={[
+                styles.inputBox,
+                styles.inputRow,
+                { marginTop: 10, marginBottom: 8 },
+              ]}
+            >
+              <MaterialIcons
+                name="link"
+                size={18}
+                style={styles.prefixIcon}
+                color={
+                  faceitProfileUrl.trim().length > 0
+                    ? COLORS.accent
+                    : COLORS.muted
+                }
+              />
+              <TextInput
+                placeholder="https://www.faceit.com/en/players/yourname"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={faceitProfileUrl}
+                onChangeText={setFaceitProfileUrl}
+              />
+            </View>
+
             <Pressable
-              onPress={() => togglePlatform("faceit")}
+              onPress={handleFaceitLookup}
+              disabled={faceitLoading || !faceitProfileUrl.trim()}
               style={({ pressed }) => [
                 styles.platformButton,
-                faceitConnected && styles.platformButtonActiveFaceit,
-                pressed && { opacity: 0.9 },
+                faceitVerified && { backgroundColor: "#1DB954" },
+                pressed && !faceitLoading && { opacity: 0.9 },
               ]}
             >
               <Text style={styles.platformButtonText}>
-                {faceitConnected ? "Disconnect FACEIT" : "Connect FACEIT"}
+                {faceitLoading
+                  ? "Checking..."
+                  : faceitVerified
+                  ? "FACEIT verified"
+                  : "Verify FACEIT profile"}
               </Text>
             </Pressable>
+
+            {faceitProfile && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={styles.summaryLabel}>Verified profile</Text>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text
+                    style={[
+                      styles.summaryValue,
+                      { color: COLORS.accent, fontWeight: "600" },
+                    ]}
+                  >
+                    {faceitProfile.nickname}
+                  </Text>
+
+                  {/* spacer */}
+                  <View style={{ width: 8 }} />
+
+                  {/* ELO */}
+                  {faceitProfile.elo != null && (
+                    <Text style={styles.summaryValue}>
+                      ELO {faceitProfile.elo}
+                    </Text>
+                  )}
+
+                  {/* Level icon / fallback text */}
+                  {faceitProfile.skillLevel != null && (
+                    <View
+                      style={{
+                        marginLeft: 8,
+                        flexDirection: "row",
+                        alignItems: "center",
+                      }}
+                    >
+                      {faceitLevelIcon ? (
+                        <Image
+                          source={faceitLevelIcon}
+                          style={{ width: 24, height: 24 }}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <Text style={styles.summaryValue}>
+                          Level {faceitProfile.skillLevel}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
           </View>
         )}
 
@@ -350,25 +565,30 @@ export default function RegisterStep3() {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.platformTitle}>EA Account</Text>
+                <Text style={styles.platformTitle}>EA Account / Club</Text>
                 <Text style={styles.platformSubtitle}>{eaSubtitle}</Text>
               </View>
-              {eaConnected && (
-                <Text style={styles.platformConnectedBadge}>Connected</Text>
-              )}
             </View>
-            <Pressable
-              onPress={() => togglePlatform("ea")}
-              style={({ pressed }) => [
-                styles.platformButton,
-                eaConnected && styles.platformButtonActive,
-                pressed && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {eaConnected ? "Disconnect EA" : "Connect EA"}
-              </Text>
-            </Pressable>
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
+              <MaterialIcons
+                name="link"
+                size={18}
+                style={styles.prefixIcon}
+                color={
+                  eaProfileUrl.trim().length > 0 ? COLORS.accent : COLORS.muted
+                }
+              />
+              <TextInput
+                placeholder="Club link or EA ID (optional)"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={eaProfileUrl}
+                onChangeText={setEaProfileUrl}
+              />
+            </View>
           </View>
         )}
 
@@ -386,22 +606,27 @@ export default function RegisterStep3() {
                 <Text style={styles.platformTitle}>Xbox</Text>
                 <Text style={styles.platformSubtitle}>{xboxSubtitle}</Text>
               </View>
-              {xboxConnected && (
-                <Text style={styles.platformConnectedBadge}>Connected</Text>
-              )}
             </View>
-            <Pressable
-              onPress={() => togglePlatform("xbox")}
-              style={({ pressed }) => [
-                styles.platformButton,
-                xboxConnected && styles.platformButtonActive,
-                pressed && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {xboxConnected ? "Disconnect Xbox" : "Connect Xbox"}
-              </Text>
-            </Pressable>
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
+              <MaterialIcons
+                name="person"
+                size={18}
+                style={styles.prefixIcon}
+                color={
+                  xboxGamertag.trim().length > 0 ? COLORS.accent : COLORS.muted
+                }
+              />
+              <TextInput
+                placeholder="Your Xbox gamertag"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={xboxGamertag}
+                onChangeText={setXboxGamertag}
+              />
+            </View>
           </View>
         )}
 
@@ -419,22 +644,27 @@ export default function RegisterStep3() {
                 <Text style={styles.platformTitle}>PlayStation Network</Text>
                 <Text style={styles.platformSubtitle}>{psnSubtitle}</Text>
               </View>
-              {psnConnected && (
-                <Text style={styles.platformConnectedBadge}>Connected</Text>
-              )}
             </View>
-            <Pressable
-              onPress={() => togglePlatform("psn")}
-              style={({ pressed }) => [
-                styles.platformButton,
-                psnConnected && styles.platformButtonActive,
-                pressed && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {psnConnected ? "Disconnect PSN" : "Connect PSN"}
-              </Text>
-            </Pressable>
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
+              <MaterialIcons
+                name="person"
+                size={18}
+                style={styles.prefixIcon}
+                color={
+                  psnOnlineId.trim().length > 0 ? COLORS.accent : COLORS.muted
+                }
+              />
+              <TextInput
+                placeholder="Your PSN online ID"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={psnOnlineId}
+                onChangeText={setPsnOnlineId}
+              />
+            </View>
           </View>
         )}
 
@@ -442,21 +672,21 @@ export default function RegisterStep3() {
         {playsCs2 && !cs2Ok && (
           <View style={styles.helperTextRow}>
             <Text style={[styles.helperText, styles.helperWarning]}>
-              CS2: connect at least Steam or FACEIT.
+              CS2: add at least a Steam or FACEIT link.
             </Text>
           </View>
         )}
         {playsFc && !fcOk && (
           <View style={styles.helperTextRow}>
             <Text style={[styles.helperText, styles.helperWarning]}>
-              FC 26: connect Steam, EA, Xbox or PlayStation.
+              FC 26: add at least one link (Steam, EA, Xbox or PlayStation).
             </Text>
           </View>
         )}
         {playsTekken && !tekkenOk && (
           <View style={styles.helperTextRow}>
             <Text style={[styles.helperText, styles.helperWarning]}>
-              Tekken 8: connect Steam, Xbox or PlayStation.
+              Tekken 8: add at least one link (Steam, Xbox or PlayStation).
             </Text>
           </View>
         )}
