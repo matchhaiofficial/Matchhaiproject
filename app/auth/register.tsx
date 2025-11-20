@@ -1,8 +1,8 @@
+// app/auth/register.tsx
 import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +13,7 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useToast } from "../../src/hooks/useToast";
 import {
   isPhoneAvailable,
   isUsernameAvailable,
@@ -30,12 +31,59 @@ type FocusField =
   | null;
 type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 
+// 📱 Pakistani phone formatter (same as login)
+const formatPakistaniPhone = (value: string) => {
+  const numeric = value.replace(/\D/g, "");
+  if (!numeric) return value;
+
+  let prefix = "";
+  let rest = numeric;
+
+  if (numeric.startsWith("92")) {
+    prefix = "+92 ";
+    rest = numeric.slice(2);
+  } else if (numeric.startsWith("0")) {
+    prefix = "0";
+    rest = numeric.slice(1);
+  } else {
+    // not clearly Pakistani → don't format
+    return value;
+  }
+
+  let formatted = prefix;
+
+  if (rest.length <= 3) {
+    formatted += rest;
+  } else if (rest.length <= 7) {
+    formatted += rest.slice(0, 3) + " " + rest.slice(3);
+  } else {
+    formatted +=
+      rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
+  }
+
+  return formatted.trim();
+};
+
 export default function Register() {
   const { step1, setStep1 } = useOnboardingStore();
+  const { showToast } = useToast();
 
   const [fullName, setFullName] = useState(step1.fullName);
   const [username, setUsername] = useState(step1.username);
-  const [email, setEmail] = useState(step1.email);
+
+  // store only the local part in state, derive from existing email
+  const [email, setEmail] = useState(() => {
+    const e = (step1.email || "").trim();
+    if (!e) return "";
+    const gmailSuffix = "@gmail.com";
+    if (e.toLowerCase().endsWith(gmailSuffix)) {
+      return e.slice(0, -gmailSuffix.length);
+    }
+    const atIndex = e.indexOf("@");
+    if (atIndex > 0) return e.slice(0, atIndex);
+    return e;
+  });
+
   const [phone, setPhone] = useState(step1.phone);
   const [password, setPassword] = useState(step1.password);
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -52,7 +100,7 @@ export default function Register() {
     if (step1.phone) setPhoneStatus("available");
   }, [step1.username, step1.phone]);
 
-  // ---------- Validation ----------
+  // ---------- Validation + password rules ----------
   const {
     isFullNameValid,
     isUsernameFormatValid,
@@ -60,20 +108,77 @@ export default function Register() {
     isPhoneFormatValid,
     isPasswordValid,
     isFormValid,
+    hasUpper,
+    hasLower,
+    hasNumber,
+    hasSpecial,
+    isLengthValid,
+    strengthLabel,
+    strengthColor,
+    strengthWidth,
   } = useMemo(() => {
     const nameValid = fullName.trim().length >= 3;
 
     const usernameTrimmed = username.trim();
     const usernameFormatValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameTrimmed);
 
+    // email: local part + @gmail.com
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
-    const emailValid = emailRegex.test(email.trim());
+    const localPart = email.trim();
+    const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
+    const emailValid = emailRegex.test(fullEmail);
 
-    const normalizedPhone = phone.replace(/\D/g, "");
-    const phoneFormatValid =
-      normalizedPhone.length >= 10 && normalizedPhone.length <= 13;
+    // ---- Phone validation (same as Login) ----
+    const phoneTrimmed = phone.trim();
+    const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
+    const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
+    const phoneFormatValid = phoneRegex.test(normalizedPhone);
 
-    const passwordValid = password.length >= 6;
+    // --- password rules ---
+    const hasUpperRule = /[A-Z]/.test(password);
+    const hasLowerRule = /[a-z]/.test(password);
+    const hasNumberRule = /[0-9]/.test(password);
+    const hasSpecialRule = /[^A-Za-z0-9]/.test(password);
+    const lengthOkRule = password.length >= 8;
+
+    const rulesMet = [
+      hasUpperRule,
+      hasLowerRule,
+      hasNumberRule,
+      hasSpecialRule,
+      lengthOkRule,
+    ].filter(Boolean).length;
+
+    let strengthLbl: string | null = null;
+    let strengthClr = COLORS.muted;
+    let strengthPct = 0;
+
+    if (password.length > 0) {
+      if (rulesMet <= 2) {
+        strengthLbl = "Weak";
+        strengthClr = "#ef5350";
+        strengthPct = 25;
+      } else if (rulesMet === 3) {
+        strengthLbl = "Fair";
+        strengthClr = "#ffb74d";
+        strengthPct = 50;
+      } else if (rulesMet === 4) {
+        strengthLbl = "Strong";
+        strengthClr = COLORS.success; // ✅ system green
+        strengthPct = 75;
+      } else {
+        strengthLbl = "Very strong";
+        strengthClr = COLORS.success; // same green for max
+        strengthPct = 100;
+      }
+    }
+
+    const passwordValid =
+      hasUpperRule &&
+      hasLowerRule &&
+      hasNumberRule &&
+      hasSpecialRule &&
+      lengthOkRule;
 
     const usernameOk =
       usernameFormatValid &&
@@ -91,8 +196,33 @@ export default function Register() {
       isPasswordValid: passwordValid,
       isFormValid:
         nameValid && usernameOk && emailValid && phoneOk && passwordValid,
+
+      // password rule flags for UI
+      hasUpper: hasUpperRule,
+      hasLower: hasLowerRule,
+      hasNumber: hasNumberRule,
+      hasSpecial: hasSpecialRule,
+      isLengthValid: lengthOkRule,
+
+      strengthLabel: strengthLbl,
+      strengthColor: strengthClr,
+      strengthWidth: strengthPct,
     };
-  }, [fullName, username, email, phone, password, usernameStatus, phoneStatus]);
+  }, [
+    fullName,
+    username,
+    email,
+    phone,
+    password,
+    usernameStatus,
+    phoneStatus,
+  ]);
+
+  // Derived flag: all 4 visible requirements satisfied?
+  const allCharRequirementsMet =
+    hasUpper && hasLower && hasNumber && hasSpecial;
+  const showRequirements =
+    password.length > 0 && !allCharRequirementsMet;
 
   // ---------- Keyboard handling ----------
   const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
@@ -123,15 +253,18 @@ export default function Register() {
   };
 
   const handlePhoneBlur = async () => {
-    const normalized = phone.replace(/\D/g, "");
-    if (!normalized || !isPhoneFormatValid) {
+    const phoneTrimmed = phone.trim();
+    const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
+    const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
+
+    if (!normalizedPhone || !phoneRegex.test(normalizedPhone)) {
       setPhoneStatus("idle");
       return;
     }
 
     try {
       setPhoneStatus("checking");
-      const available = await isPhoneAvailable(normalized);
+      const available = await isPhoneAvailable(normalizedPhone);
       setPhoneStatus(available ? "available" : "taken");
     } catch {
       setPhoneStatus("error");
@@ -144,26 +277,40 @@ export default function Register() {
     if (usernameStatus !== "idle") setUsernameStatus("idle");
   };
 
+  // Email local-part change: only allow letters, numbers, and simple symbols
+  const handleEmailChange = (value: string) => {
+    const cleaned = value.replace(/[^a-zA-Z0-9._%+-]/g, "");
+    setEmail(cleaned);
+  };
+
+  // Phone: mimic Login’s format logic
   const handlePhoneChange = (value: string) => {
-    setPhone(value);
+    let next = value;
+    if (/^[\d+\s-]*$/.test(value)) {
+      next = formatPakistaniPhone(value);
+    }
+    setPhone(next);
     if (phoneStatus !== "idle") setPhoneStatus("idle");
   };
 
   // ---------- Submit (LOCAL ONLY) ----------
   const handleNext = () => {
     if (!isFormValid) {
-      Alert.alert(
-        "Check details",
-        "Please complete all fields correctly before continuing."
-      );
+      showToast({
+        type: "info",
+        title: "Check details",
+        message: "Please complete all fields correctly before continuing.",
+      });
       return;
     }
 
-    // Persist in Zustand (and AsyncStorage via persist)
+    const localPart = email.trim();
+    const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
+
     setStep1({
       fullName: fullName.trim(),
       username: username.trim(),
-      email: email.trim(),
+      email: fullEmail,
       phone,
       password,
     });
@@ -248,14 +395,7 @@ export default function Register() {
         {/* Full Name */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Full Name</Text>
-          <View
-            style={[
-              styles.inputBox,
-              isFullNameValid &&
-                fullName.trim().length > 0 &&
-                styles.inputBoxValidShadow,
-            ]}
-          >
+          <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
               <MaterialIcons
                 name="person"
@@ -290,14 +430,7 @@ export default function Register() {
         {/* Username */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Username</Text>
-          <View
-            style={[
-              styles.inputBox,
-              isUsernameFormatValid &&
-                username.trim().length > 0 &&
-                styles.inputBoxValidShadow,
-            ]}
-          >
+          <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
               <MaterialIcons
                 name="alternate-email"
@@ -343,7 +476,7 @@ export default function Register() {
                     usernameStatus === "taken"
                       ? COLORS.error
                       : usernameStatus === "available" || isUsernameFormatValid
-                      ? "#8bc34a"
+                      ? COLORS.success
                       : COLORS.muted
                   }
                 />
@@ -362,14 +495,7 @@ export default function Register() {
         {/* Email Address */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email Address</Text>
-          <View
-            style={[
-              styles.inputBox,
-              isEmailValid &&
-                email.trim().length > 0 &&
-                styles.inputBoxValidShadow,
-            ]}
-          >
+          <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
               <MaterialIcons
                 name="email"
@@ -382,19 +508,19 @@ export default function Register() {
                 }
               />
               <TextInput
-                placeholder="Enter your email address"
+                placeholder="yourname"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
                 selectionColor={COLORS.accent}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="email"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={handleEmailChange}
                 onFocus={() => setFocused("email")}
                 onBlur={() => setFocused(null)}
               />
+              <Text style={styles.emailSuffix}>@gmail.com</Text>
             </View>
             <View
               style={[
@@ -408,14 +534,7 @@ export default function Register() {
         {/* Phone Number */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Phone Number</Text>
-          <View
-            style={[
-              styles.inputBox,
-              isPhoneFormatValid &&
-                phone.trim().length > 0 &&
-                styles.inputBoxValidShadow,
-            ]}
-          >
+          <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
               <MaterialIcons
                 name="phone-android"
@@ -428,7 +547,7 @@ export default function Register() {
                 }
               />
               <TextInput
-                placeholder="03XXXXXXXXX"
+                placeholder="03XX XXX XXXX"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
                 selectionColor={COLORS.accent}
@@ -462,7 +581,7 @@ export default function Register() {
                     phoneStatus === "taken"
                       ? COLORS.error
                       : phoneStatus === "available" || isPhoneFormatValid
-                      ? "#8bc34a"
+                      ? COLORS.success
                       : COLORS.muted
                   }
                 />
@@ -481,14 +600,7 @@ export default function Register() {
         {/* Password */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Password</Text>
-          <View
-            style={[
-              styles.inputBox,
-              isPasswordValid &&
-                password.length > 0 &&
-                styles.inputBoxValidShadow,
-            ]}
-          >
+          <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
               <MaterialIcons
                 name="lock"
@@ -508,7 +620,6 @@ export default function Register() {
                 secureTextEntry={!passwordVisible}
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="password"
                 value={password}
                 onChangeText={setPassword}
                 onFocus={() => setFocused("password")}
@@ -533,15 +644,79 @@ export default function Register() {
               ]}
             />
           </View>
+
+          {/* Strength meter ABOVE requirements */}
+          {password.length > 0 && (
+            <View style={styles.passwordStrengthWrapper}>
+              <View style={styles.strengthMeterTrack}>
+                <View
+                  style={[
+                    styles.strengthMeterFill,
+                    {
+                      width: `${strengthWidth}%`,
+                      backgroundColor: strengthColor,
+                    } as any,
+                  ]}
+                />
+              </View>
+              {strengthLabel ? (
+                <Text
+                  style={[
+                    styles.strengthLabel,
+                    { color: strengthColor || COLORS.muted },
+                  ]}
+                >
+                  Strength: {strengthLabel}
+                </Text>
+              ) : null}
+            </View>
+          )}
+
+          {/* Password requirements — only if NOT all met */}
+          {showRequirements && (
+            <View style={styles.passwordRequirementsRow}>
+              <View style={styles.requirementColumn}>
+                <Text
+                  style={[
+                    styles.passwordRequirementText,
+                    hasUpper && styles.passwordRequirementTextDone,
+                  ]}
+                >
+                  {hasUpper ? "✓" : "×"} 1 uppercase character
+                </Text>
+                <Text
+                  style={[
+                    styles.passwordRequirementText,
+                    hasLower && styles.passwordRequirementTextDone,
+                  ]}
+                >
+                  {hasLower ? "✓" : "×"} 1 lowercase character
+                </Text>
+              </View>
+              <View style={styles.requirementColumn}>
+                <Text
+                  style={[
+                    styles.passwordRequirementText,
+                    hasNumber && styles.passwordRequirementTextDone,
+                  ]}
+                >
+                  {hasNumber ? "✓" : "×"} 1 numeric character
+                </Text>
+                <Text
+                  style={[
+                    styles.passwordRequirementText,
+                    hasSpecial && styles.passwordRequirementTextDone,
+                  ]}
+                >
+                  {hasSpecial ? "✓" : "×"} 1 special character
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Primary button */}
-        <View
-          style={[
-            styles.buttonShadowWrapper,
-            isFormValid && styles.buttonShadowWrapperActive,
-          ]}
-        >
+        <View style={[styles.buttonShadowWrapper]}>
           <Pressable
             onPress={handleNext}
             disabled={!isFormValid}

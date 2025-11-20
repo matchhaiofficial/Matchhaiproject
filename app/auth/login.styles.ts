@@ -18,14 +18,14 @@ export default StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: SPACING.screenPadding,
-    justifyContent: 'center',
+    // justifyContent intentionally removed to avoid keyboard/focus jumping
   },
 
   heading: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
     fontSize: TEXT_SIZES.heading,
-    marginBottom: SPACING.xs + 2, // ~6
+    marginBottom: SPACING.xs + 2,
     textAlign: 'center',
   },
 
@@ -33,26 +33,26 @@ export default StyleSheet.create({
     color: COLORS.muted,
     fontFamily: FONTS.subheading,
     fontSize: TEXT_SIZES.subheading,
-    marginBottom: SPACING.lg + 2, // ~18
+    marginBottom: SPACING.lg + 2,
     textAlign: 'center',
   },
 
   fieldGroup: {
-    marginBottom: SPACING.md, // 12
+    marginBottom: SPACING.md,
   },
 
   label: {
     color: 'rgba(253, 253, 253, 0.8)',
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.label,
-    marginBottom: SPACING.xs + 2, // ~6
+    marginBottom: SPACING.xs + 2,
   },
 
   inputBox: {
     backgroundColor: COLORS.inputBackground,
-    borderRadius: RADII.md, // 12
-    paddingHorizontal: SPACING.md, // 12
-    paddingVertical: SPACING.xs, // 4
+    borderRadius: RADII.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
   },
@@ -63,12 +63,12 @@ export default StyleSheet.create({
   },
 
   prefixIcon: {
-    marginRight: SPACING.sm, // 8
+    marginRight: SPACING.sm,
     opacity: 0.9,
   },
 
   suffixIcon: {
-    marginLeft: SPACING.sm, // 8
+    marginLeft: SPACING.sm,
   },
 
   input: {
@@ -76,7 +76,7 @@ export default StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.input,
-    paddingVertical: SPACING.sm + 2, // ~10
+    paddingVertical: SPACING.sm + 2,
   },
 
   inputBoxValidShadow: {
@@ -85,16 +85,15 @@ export default StyleSheet.create({
 
   focusBar: {
     position: 'absolute',
-    left: SPACING.md - 2,       // ~10
+    left: SPACING.md - 2,
     right: SPACING.md - 2,
-    bottom: SPACING.xs + 2,     // ~6
+    bottom: SPACING.xs + 2,
     height: 2,
     borderRadius: 1,
     backgroundColor: COLORS.accent,
     opacity: 0,
   },
 
-  // 🔽🔽🔽 ADD THESE HELPER STYLES 🔽🔽🔽
   helperTextRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -107,11 +106,74 @@ export default StyleSheet.create({
   helperWarning: {
     color: '#ffb74d',
   },
-  // 🔼🔼🔼 END OF NEW STYLES 🔼🔼🔼
+
+  errorText: {
+    marginTop: SPACING.xs,
+    color: COLORS.error,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+  },
+
+  // 🔐 Password requirement grid
+  passwordHintGrid: {
+    marginTop: SPACING.xs,
+  },
+  passwordHintRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: SPACING.xs,
+  },
+  passwordHintItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: SPACING.sm,
+  },
+  passwordHintIcon: {
+    marginRight: 4,
+    fontSize: 12,
+  },
+  passwordHintIconDone: {
+    color: '#66bb6a', // green
+  },
+  passwordHintIconPending: {
+    color: '#e57373', // red-ish
+  },
+  passwordHintText: {
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+  },
+  passwordHintTextDone: {
+    color: COLORS.text,
+  },
+  passwordHintTextPending: {
+    color: COLORS.muted,
+  },
+
+  // 🔋 Password strength meter
+  strengthWrapper: {
+    marginTop: SPACING.xs,
+  },
+  strengthBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#444',
+    overflow: 'hidden',
+  },
+  strengthBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  strengthLabel: {
+    marginTop: 4,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    color: COLORS.muted,
+  },
 
   forgotRow: {
-    marginTop: SPACING.xs,         // 4
-    marginBottom: SPACING.lg + 2,  // ~18
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.lg + 2,
     alignItems: 'flex-end',
   },
 
@@ -124,7 +186,7 @@ export default StyleSheet.create({
 
   buttonShadowWrapper: {
     width: '100%',
-    marginTop: SPACING.xs, // 4
+    marginTop: SPACING.xs,
   },
 
   buttonShadowWrapperActive: {
@@ -133,8 +195,8 @@ export default StyleSheet.create({
 
   primaryBtn: {
     backgroundColor: COLORS.accent,
-    borderRadius: RADII.lg, // 14
-    paddingVertical: SPACING.lg - 2, // ~14
+    borderRadius: RADII.lg,
+    paddingVertical: SPACING.lg - 2,
     alignItems: 'center',
   },
 
@@ -145,14 +207,14 @@ export default StyleSheet.create({
   primaryBtnText: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.body, // 15/16ish
+    fontSize: TEXT_SIZES.body,
   },
 
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.xl,      // 20
-    marginBottom: SPACING.md,   // 12
+    marginTop: SPACING.xl,
+    marginBottom: SPACING.md,
   },
 
   dividerLine: {
@@ -162,30 +224,30 @@ export default StyleSheet.create({
   },
 
   dividerText: {
-    marginHorizontal: SPACING.sm + 2, // ~10
+    marginHorizontal: SPACING.sm + 2,
     color: COLORS.muted,
     fontFamily: FONTS.body,
-    fontSize: TEXT_SIZES.caption, // 12
+    fontSize: TEXT_SIZES.caption,
   },
 
   socialButtonsWrapper: {
-    marginBottom: SPACING.lg, // 16
+    marginBottom: SPACING.lg,
   },
 
   socialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: RADII.md, // 12
+    borderRadius: RADII.md,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
     backgroundColor: COLORS.cardBackground,
-    paddingVertical: SPACING.md, // 12
-    marginBottom: SPACING.sm, // 8
+    paddingVertical: SPACING.md,
+    marginBottom: SPACING.sm,
   },
 
   socialIcon: {
-    marginRight: SPACING.sm + 2, // ~10
+    marginRight: SPACING.sm + 2,
   },
 
   socialBtnText: {
@@ -209,7 +271,7 @@ export default StyleSheet.create({
   bottomText: {
     color: COLORS.muted,
     textAlign: 'center',
-    marginTop: SPACING.sm, // 8
+    marginTop: SPACING.sm,
     fontFamily: FONTS.body,
   },
 });

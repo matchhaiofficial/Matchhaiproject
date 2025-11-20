@@ -1,12 +1,11 @@
 // app/_layout.tsx
-
 export const unstable_settings = { initialRouteName: "auth/login" };
 
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 
 // Fonts
 import { Lora_400Regular, useFonts as useLora } from "@expo-google-fonts/lora";
@@ -16,8 +15,10 @@ import {
   useFonts as useMontserrat,
 } from "@expo-google-fonts/montserrat";
 
-// Theme + Auth provider
+// Theme + Auth provider + Toast
+import ToastHost from "../components/ToastHost";
 import AuthProvider from "../src/context/AuthContext";
+import { useToast } from "../src/hooks/useToast";
 import { COLORS } from "../src/theme";
 
 export default function RootLayout() {
@@ -26,9 +27,8 @@ export default function RootLayout() {
   const [martelLoaded] = useMartel({ Martel_400Regular });
 
   const ready = montLoaded && loraLoaded && martelLoaded;
+  const { showToast } = useToast();
 
-  // ❗ Hooks must be called unconditionally, so this useEffect
-  // must come BEFORE any `if (!ready) return null;`
   useEffect(() => {
     const handleDeepLink = (event: { url: string }) => {
       const { url } = event;
@@ -41,30 +41,39 @@ export default function RootLayout() {
       const params = parsed.queryParams || {};
 
       if (path === "oauth") {
-        const provider = params.provider as string | undefined;
+        const provider = (params.provider as string | undefined) || "Provider";
         const error = params.error as string | undefined;
         const nickname = params.nickname as string | undefined;
         const faceitId = params.faceitId as string | undefined;
         const steamId = params.steamId as string | undefined;
 
         if (error) {
-          Alert.alert(
-            "Social login failed",
-            `${provider || "Provider"}: ${decodeURIComponent(error)}`
-          );
+          showToast({
+            type: "error",
+            title: "Social login failed",
+            message: `${provider}: ${decodeURIComponent(error)}`,
+          });
           return;
         }
 
         if (provider === "faceit") {
-          Alert.alert(
-            "FACEIT login callback",
-            `nickname=${nickname || ""}\nfaceitId=${faceitId || ""}`
-          );
-          // TODO: later -> use Firebase custom token + navigate to /home
+          showToast({
+            type: "success",
+            title: "FACEIT login callback",
+            message: `nickname=${nickname || ""} · faceitId=${faceitId || ""}`,
+          });
         } else if (provider === "steam") {
-          Alert.alert("Steam login callback", `steamId=${steamId || ""}`);
+          showToast({
+            type: "success",
+            title: "Steam login callback",
+            message: `steamId=${steamId || ""}`,
+          });
         } else {
-          Alert.alert("OAuth callback", `Unknown provider: ${provider}`);
+          showToast({
+            type: "info",
+            title: "OAuth callback",
+            message: `Unknown provider: ${provider}`,
+          });
         }
       }
     };
@@ -73,7 +82,7 @@ export default function RootLayout() {
     return () => {
       sub.remove();
     };
-  }, []); // runs once
+  }, [showToast]);
 
   if (!ready) return null;
 
@@ -87,6 +96,8 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: COLORS.background },
           }}
         />
+        {/* Global toast host */}
+        <ToastHost />
       </View>
     </AuthProvider>
   );
