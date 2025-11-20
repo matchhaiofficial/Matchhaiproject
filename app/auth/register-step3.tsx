@@ -1,9 +1,9 @@
+// app/auth/register-step3.tsx
 import { MaterialIcons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useToast } from "../../src/hooks/useToast";
 import {
   FaceitProfileSummary,
   fetchFaceitProfileFromUrl,
@@ -43,6 +44,7 @@ const faceitLevelIcons: Record<number, any> = {
 
 export default function RegisterStep3() {
   const { step2, step3, setStep3 } = useOnboardingStore();
+  const { showToast } = useToast();
 
   console.log("[Step3] mounted with step2:", {
     selectedAreas: step2.selectedAreas,
@@ -108,8 +110,18 @@ export default function RegisterStep3() {
     return games;
   }, [playsCs2, playsFc, playsTekken]);
 
-  // --- validation logic for links ---
-  const { cs2Ok, fcOk, tekkenOk, isFormValid } = useMemo(() => {
+  // --- validation logic for links + soft "looks weird" hints ---
+  const {
+    cs2Ok,
+    fcOk,
+    tekkenOk,
+    isFormValid,
+    steamLooksWeird,
+    faceitLooksWeird,
+    eaLooksWeird,
+    xboxLooksWeird,
+    psnLooksWeird,
+  } = useMemo(() => {
     const steam = (steamProfileUrl ?? "").trim();
     const faceit = (faceitProfileUrl ?? "").trim();
     const ea = (eaProfileUrl ?? "").trim();
@@ -122,16 +134,44 @@ export default function RegisterStep3() {
     const xboxFilled = xbox.length > 0;
     const psnFilled = psn.length > 0;
 
+    // existing “does this game have at least one platform” logic
     const cs2Valid = !playsCs2 || steamFilled || faceitFilled;
     const fcValid =
       !playsFc || steamFilled || eaFilled || xboxFilled || psnFilled;
-    const tekkenValid = !playsTekken || steamFilled || xboxFilled || psnFilled;
+    const tekkenValid =
+      !playsTekken || steamFilled || xboxFilled || psnFilled;
+
+    // --- soft format checks (warnings only) ---
+
+    // generic URL check: http(s) + non-space
+    const urlRegex = /^https?:\/\/\S+$/;
+
+    // Steam: prefer a proper URL
+    const steamWeird = steamFilled && !urlRegex.test(steam);
+
+    // FACEIT: either URL or simple nickname
+    const faceitNicknameRegex = /^[A-Za-z0-9_]{3,30}$/;
+    const faceitWeird =
+      faceitFilled &&
+      !urlRegex.test(faceit) &&
+      !faceitNicknameRegex.test(faceit);
+
+    // Very short IDs → likely typo
+    const eaWeird = eaFilled && ea.length < 3;
+    const xboxWeird = xboxFilled && xbox.length < 3;
+    const psnWeird = psnFilled && psn.length < 3;
 
     return {
       cs2Ok: cs2Valid,
       fcOk: fcValid,
       tekkenOk: tekkenValid,
       isFormValid: cs2Valid && fcValid && tekkenValid,
+
+      steamLooksWeird: steamWeird,
+      faceitLooksWeird: faceitWeird,
+      eaLooksWeird: eaWeird,
+      xboxLooksWeird: xboxWeird,
+      psnLooksWeird: psnWeird,
     };
   }, [
     playsCs2,
@@ -158,7 +198,11 @@ export default function RegisterStep3() {
   const handleSteamLookup = async () => {
     const url = steamProfileUrl.trim();
     if (!url) {
-      Alert.alert("Steam", "Please paste your Steam profile link first.");
+      showToast({
+        type: "info",
+        title: "Steam profile",
+        message: "Please paste your Steam profile link first.",
+      });
       return;
     }
 
@@ -167,21 +211,33 @@ export default function RegisterStep3() {
     setSteamLoading(false);
 
     if (!res.ok) {
-      Alert.alert("Steam lookup failed", res.message);
+      showToast({
+        type: "error",
+        title: "Steam lookup failed",
+        message: res.message || "We couldn’t verify this Steam profile.",
+      });
       setSteamProfile(null);
       return;
     }
 
     setSteamProfile(res.data);
+    showToast({
+      type: "success",
+      title: "Steam linked",
+      message: res.data.personaName
+        ? `Found profile: ${res.data.personaName}.`
+        : "Steam profile verified.",
+    });
   };
 
   const handleFaceitLookup = async () => {
     const value = faceitProfileUrl.trim();
     if (!value) {
-      Alert.alert(
-        "FACEIT",
-        "Please paste your FACEIT profile link or nickname first."
-      );
+      showToast({
+        type: "info",
+        title: "FACEIT profile",
+        message: "Paste your FACEIT profile link or nickname first.",
+      });
       return;
     }
 
@@ -190,12 +246,23 @@ export default function RegisterStep3() {
     setFaceitLoading(false);
 
     if (!res.ok) {
-      Alert.alert("FACEIT lookup failed", res.message);
+      showToast({
+        type: "error",
+        title: "FACEIT lookup failed",
+        message: res.message || "We couldn’t verify this FACEIT profile.",
+      });
       setFaceitProfile(null);
       return;
     }
 
     setFaceitProfile(res.data);
+    showToast({
+      type: "success",
+      title: "FACEIT linked",
+      message: res.data.nickname
+        ? `Found profile: ${res.data.nickname}.`
+        : "FACEIT profile verified.",
+    });
   };
 
   const handleContinue = () => {
@@ -203,25 +270,28 @@ export default function RegisterStep3() {
       const messages: string[] = [];
 
       if (playsCs2 && !cs2Ok) {
-        messages.push("• CS2: add at least a Steam or FACEIT profile link.");
+        messages.push("CS2: add at least a Steam or FACEIT profile link.");
       }
       if (playsFc && !fcOk) {
         messages.push(
-          "• FC 26: add at least one link (Steam, EA, Xbox or PlayStation)."
+          "FC 26: add at least one link (Steam, EA, Xbox or PlayStation)."
         );
       }
       if (playsTekken && !tekkenOk) {
         messages.push(
-          "• Tekken 8: add at least one link (Steam, Xbox or PlayStation)."
+          "Tekken 8: add at least one link (Steam, Xbox or PlayStation)."
         );
       }
 
-      Alert.alert(
-        "Add your profile links",
-        messages.length
-          ? messages.join("\n")
-          : "Please add at least one platform link for each game you selected."
-      );
+      showToast({
+        type: "info",
+        title: "Add your profile links",
+        message:
+          messages.length > 0
+            ? messages.join(" ")
+            : "Please add at least one platform link for each game you selected.",
+      });
+
       return;
     }
 
@@ -242,7 +312,7 @@ export default function RegisterStep3() {
     router.push("/auth/register-step4");
   };
 
-  // Show only platforms that make sense, same as before
+  // Show only platforms that make sense
   const showSteam = playsCs2 || playsFc || playsTekken;
   const showFaceit = playsCs2;
   const showEa = playsFc;
@@ -395,7 +465,12 @@ export default function RegisterStep3() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={steamProfileUrl}
-                onChangeText={setSteamProfileUrl}
+                onChangeText={(text) => {
+                  setSteamProfileUrl(text);
+                  if (steamProfile) {
+                    setSteamProfile(null);
+                  }
+                }}
               />
             </View>
 
@@ -430,6 +505,15 @@ export default function RegisterStep3() {
                   {steamProfile.cs2Hours != null
                     ? `· CS2: ~${Math.round(steamProfile.cs2Hours)} hours`
                     : ""}
+                </Text>
+              </View>
+            )}
+
+            {steamLooksWeird && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  This doesn&apos;t look like a full Steam profile link. Make
+                  sure it starts with https://steamcommunity.com/...
                 </Text>
               </View>
             )}
@@ -480,7 +564,12 @@ export default function RegisterStep3() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={faceitProfileUrl}
-                onChangeText={setFaceitProfileUrl}
+                onChangeText={(text) => {
+                  setFaceitProfileUrl(text);
+                  if (faceitProfile) {
+                    setFaceitProfile(null);
+                  }
+                }}
               />
             </View>
 
@@ -550,6 +639,16 @@ export default function RegisterStep3() {
                 </View>
               </View>
             )}
+
+            {faceitLooksWeird && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  This doesn&apos;t look like a FACEIT link or nickname. Use
+                  your profile URL or a simple nickname (letters, numbers,
+                  underscore).
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -589,6 +688,15 @@ export default function RegisterStep3() {
                 onChangeText={setEaProfileUrl}
               />
             </View>
+
+            {eaLooksWeird && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  That looks very short. Please double-check your EA ID or club
+                  link.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -613,7 +721,9 @@ export default function RegisterStep3() {
                 size={18}
                 style={styles.prefixIcon}
                 color={
-                  xboxGamertag.trim().length > 0 ? COLORS.accent : COLORS.muted
+                  xboxGamertag.trim().length > 0
+                    ? COLORS.accent
+                    : COLORS.muted
                 }
               />
               <TextInput
@@ -627,6 +737,14 @@ export default function RegisterStep3() {
                 onChangeText={setXboxGamertag}
               />
             </View>
+
+            {xboxLooksWeird && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  That gamertag looks very short. Please double-check it.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -665,6 +783,14 @@ export default function RegisterStep3() {
                 onChangeText={setPsnOnlineId}
               />
             </View>
+
+            {psnLooksWeird && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  That PSN ID looks very short. Please double-check it.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 

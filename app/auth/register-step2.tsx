@@ -1,25 +1,25 @@
-import { MaterialIcons } from "@expo/vector-icons";
+// app/auth/register-step2.tsx
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import {
   CS2_ROLES,
   FC_FORMATIONS,
+  FC_LEAGUES,
   GAME_OPTIONS,
   KARACHI_AREAS,
   TEKKEN_CHARACTERS,
 } from "../../constants/profileOptions";
 import LogoHalo from "../../src/components/LogoHalo";
+import { useToast } from "../../src/hooks/useToast";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -28,9 +28,13 @@ type Cs2Role = (typeof CS2_ROLES)[number];
 type FcFormation = (typeof FC_FORMATIONS)[number];
 type TekkenCharacter = (typeof TEKKEN_CHARACTERS)[number];
 
+// keep league id simple so TS doesn’t complain
+type FcLeagueId = string;
+
 export default function RegisterStep2() {
   console.log("[Step2] mounted");
   const { step2, setStep2 } = useOnboardingStore();
+  const { showToast } = useToast();
 
   // ---- State ----
   const [selectedAreas, setSelectedAreas] = useState<string[]>(
@@ -45,6 +49,17 @@ export default function RegisterStep2() {
     (step2.cs2Role as Cs2Role) || null
   );
 
+  // FC league inferred from saved team
+  const [selectedFcLeagueId, setSelectedFcLeagueId] =
+    useState<FcLeagueId | null>(() => {
+      if (!step2.fcTeam) return null;
+      const teamName = step2.fcTeam;
+      const league = FC_LEAGUES.find((lg) =>
+        lg.teams.some((t) => t === teamName)
+      );
+      return league ? (league.id as FcLeagueId) : null;
+    });
+
   const [fcTeam, setFcTeam] = useState(step2.fcTeam);
   const [fcFormation, setFcFormation] = useState<FcFormation | null>(
     (step2.fcFormation as FcFormation) || null
@@ -52,6 +67,14 @@ export default function RegisterStep2() {
 
   const [tekkenFavorites, setTekkenFavorites] = useState<TekkenCharacter[]>(
     step2.tekkenFavorites as TekkenCharacter[]
+  );
+
+  const currentFcLeague = useMemo(
+    () =>
+      selectedFcLeagueId
+        ? FC_LEAGUES.find((lg) => lg.id === selectedFcLeagueId) ?? null
+        : null,
+    [selectedFcLeagueId]
   );
 
   // ---- Validation ----
@@ -63,14 +86,24 @@ export default function RegisterStep2() {
     isTekkenValid,
     isFormValid,
   } = useMemo(() => {
-    const locationValid = selectedAreas.length > 0;
+    const locationValid =
+      selectedAreas.length > 0 && selectedAreas.length <= 5;
+
     const anyGame = playsCs2 || playsFc || playsTekken;
     const cs2Valid = !playsCs2 || !!cs2Role;
 
-    const fcTeamValid = !playsFc || fcTeam.trim().length >= 2;
+    const leagueTeams = currentFcLeague?.teams ?? [];
+    const fcTeamValid =
+      !playsFc ||
+      (!!selectedFcLeagueId &&
+        !!fcTeam &&
+        leagueTeams.some((t) => t === fcTeam));
+
     const fcFormationValid = !playsFc || !!fcFormation;
 
-    const tekkenValid = !playsTekken || tekkenFavorites.length > 0;
+    const tekkenValid =
+      !playsTekken ||
+      (tekkenFavorites.length > 0 && tekkenFavorites.length <= 3);
 
     return {
       isLocationValid: locationValid,
@@ -95,6 +128,8 @@ export default function RegisterStep2() {
     fcTeam,
     fcFormation,
     tekkenFavorites,
+    selectedFcLeagueId,
+    currentFcLeague,
   ]);
 
   // ---- Keyboard handling ----
@@ -116,10 +151,12 @@ export default function RegisterStep2() {
         return prev.filter((a) => a !== area);
       }
       if (prev.length >= 5) {
-        Alert.alert(
-          "Limit reached",
-          "You can select up to 5 areas where you want to play."
-        );
+        showToast({
+          type: "warning",
+          title: "Limit reached",
+          message:
+            "You can select up to 5 areas where you want to play.",
+        });
         return prev;
       }
       return [...prev, area];
@@ -136,6 +173,7 @@ export default function RegisterStep2() {
       if (playsFc) {
         setFcTeam("");
         setFcFormation(null);
+        setSelectedFcLeagueId(null);
       }
     }
     if (key === "tekken8") {
@@ -150,19 +188,32 @@ export default function RegisterStep2() {
         return prev.filter((c) => c !== char);
       }
       if (prev.length >= 3) {
+        // quiet fail: UI helper already shows (x/3)
         return prev;
       }
       return [...prev, char];
     });
   };
 
+  const handleSelectLeague = (leagueId: FcLeagueId) => {
+    setSelectedFcLeagueId(leagueId);
+    // if user switches league, clear team so they rechoose
+    setFcTeam("");
+  };
+
+  const handleSelectTeam = (team: string) => {
+    setFcTeam(team);
+  };
+
   // ---- Submit (LOCAL ONLY) ----
   const handleContinue = () => {
     if (!isFormValid) {
-      Alert.alert(
-        "Check details",
-        "Please select your area(s), choose at least one game, and fill the required preferences."
-      );
+      showToast({
+        type: "info",
+        title: "Check details",
+        message:
+          "Please select your area(s), choose at least one game, and fill the required preferences.",
+      });
       return;
     }
 
@@ -347,29 +398,78 @@ export default function RegisterStep2() {
         {/* FC 26 section */}
         {playsFc && (
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>FC 26 · Favourite team</Text>
-            <View style={[styles.inputBox, styles.inputRow]}>
-              <MaterialIcons
-                name="sports-soccer"
-                size={20}
-                style={styles.prefixIcon}
-                color={fcTeam.trim().length > 0 ? COLORS.accent : COLORS.muted}
-              />
-              <TextInput
-                placeholder="e.g. Real Madrid, Liverpool"
-                placeholderTextColor={COLORS.muted}
-                style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="words"
-                autoCorrect
-                value={fcTeam}
-                onChangeText={setFcTeam}
-              />
+            <Text style={styles.label}>FC 26 · Favourite league</Text>
+            <View style={styles.chipRow}>
+              {FC_LEAGUES.map((league) => {
+                const active = selectedFcLeagueId === league.id;
+                return (
+                  <Pressable
+                    key={league.id}
+                    onPress={() => handleSelectLeague(league.id)}
+                    style={({ pressed }) => [
+                      styles.optionChip,
+                      active && styles.optionChipActive,
+                      pressed && { opacity: 0.9 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        active && styles.optionChipTextActive,
+                      ]}
+                    >
+                      {league.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
-            {!isFcValid && fcTeam.trim().length === 0 && (
+            {!selectedFcLeagueId && (
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperWarning]}>
-                  Add your favourite club. You can change it later.
+                  Choose a league you mostly follow or play with.
+                </Text>
+              </View>
+            )}
+
+            {currentFcLeague && (
+              <>
+                <Text style={[styles.label, { marginTop: 10 }]}>
+                  FC 26 · Favourite team in {currentFcLeague.name}
+                </Text>
+                <View style={styles.chipRow}>
+                  {(currentFcLeague.teams ?? []).map((team) => {
+                    const active = fcTeam === team;
+                    return (
+                      <Pressable
+                        key={team}
+                        onPress={() => handleSelectTeam(team)}
+                        style={({ pressed }) => [
+                          styles.optionChip,
+                          active && styles.optionChipActive,
+                          pressed && { opacity: 0.9 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            active && styles.optionChipTextActive,
+                          ]}
+                        >
+                          {team}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            {!isFcValid && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  Select a league and a favourite club. You can change this
+                  later.
                 </Text>
               </View>
             )}

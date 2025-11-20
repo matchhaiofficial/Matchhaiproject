@@ -143,13 +143,59 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.caption,
   },
   helperOk: {
-    color: "#8bc34a",
+    color: COLORS.success,
   },
   helperWarning: {
     color: "#ffb74d",
   },
   helperError: {
     color: COLORS.error,
+  },
+
+  // ---- Email suffix ----
+  emailSuffix: {
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.input,
+    marginLeft: SPACING.xs,
+  },
+
+  // ---- Password strength + requirements ----
+  passwordStrengthWrapper: {
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xs,
+  },
+  strengthMeterTrack: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "#3a3a3a",
+    overflow: "hidden",
+  },
+  strengthMeterFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  strengthLabel: {
+    marginTop: SPACING.xs,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+  },
+  passwordRequirementsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: SPACING.xs,
+  },
+  requirementColumn: {
+    flex: 1,
+  },
+  passwordRequirementText: {
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    color: COLORS.muted,
+    marginBottom: 2,
+  },
+  passwordRequirementTextDone: {
+    color: COLORS.success,
   },
 
   // ---- Chips / options (Step 2) ----
@@ -317,7 +363,6 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.caption - 1,
   },
 
-  // social-style platform buttons
   platformButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -390,7 +435,7 @@ export default StyleSheet.create({
     textAlign: "right",
   },
   reviewValueOk: {
-    color: "#9be7c4",
+    color: COLORS.success,
   },
   reviewValueMuted: {
     color: "#757575",
@@ -460,4 +505,3 @@ export default StyleSheet.create({
     textDecorationLine: "underline",
   },
 });
-

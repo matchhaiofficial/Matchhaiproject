@@ -7,7 +7,15 @@ import {
   updateProfile,
   User,
 } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
 
 import { auth, db } from "../config/firebaseConfig";
 import { normalizePhoneForSave } from "./userService";
@@ -133,15 +141,76 @@ export async function signUpWithEmail(
   }
 }
 
-/** Sign in with email/password */
+/**
+ * Sign in with email OR Pakistani phone + password.
+ *
+ * - If input contains "@": treated as email.
+ * - Otherwise: treated as phone, normalized using `normalizePhoneForSave`,
+ *   then we look up the user's email in Firestore and sign in with email+password.
+ */
 export async function signInWithEmail(
-  email: string,
+  emailOrPhone: string,
   password: string
 ): Promise<AuthResult> {
   try {
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    const trimmed = emailOrPhone.trim();
+
+    // 📧 If it looks like an email, behave exactly as before
+    if (trimmed.includes("@")) {
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        trimmed,
+        password
+      );
+      return { ok: true, user: cred.user };
+    }
+
+    // 📱 Otherwise, treat as phone login
+    const normalizedPhone = normalizePhoneForSave(trimmed);
+
+    if (!normalizedPhone) {
+      // We'll reuse Firebase-style code for consistency
+      return {
+        ok: false,
+        code: "auth/invalid-phone-number",
+        message: "Invalid phone number.",
+      };
+    }
+
+    // Look up user by normalized phone
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, where("phone", "==", normalizedPhone));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return {
+        ok: false,
+        code: "auth/user-not-found",
+        message: mapAuthError("auth/user-not-found"),
+      };
+    }
+
+    const userDoc = snapshot.docs[0];
+    const data = userDoc.data() as any;
+
+    if (!data.email) {
+      return {
+        ok: false,
+        code: "auth/invalid-email",
+        message: "This account does not have an email configured.",
+      };
+    }
+
+    const emailToUse = String(data.email).trim();
+
+    const cred = await signInWithEmailAndPassword(
+      auth,
+      emailToUse,
+      password
+    );
     return { ok: true, user: cred.user };
   } catch (e: any) {
+    console.error("[authService] signInWithEmail error", e);
     return { ok: false, message: mapAuthError(e?.code), code: e?.code };
   }
 }

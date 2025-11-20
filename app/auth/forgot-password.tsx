@@ -3,18 +3,18 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useToast } from "../../src/hooks/useToast";
 import { sendPasswordReset } from "../../src/services/authService";
 import { COLORS } from "../../src/theme";
 import styles from "./login.styles";
@@ -23,6 +23,7 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [emailFocused, setEmailFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   // simple email validation (no phone here — Firebase reset is email-only)
   const { isEmailValid, isFormValid } = useMemo(() => {
@@ -49,32 +50,38 @@ export default function ForgotPassword() {
 
   const handleSubmit = async () => {
     if (!isFormValid) {
-      Alert.alert(
-        "Check email",
-        "Please enter a valid email address to receive the reset link."
-      );
+      showToast({
+        type: "info",
+        title: "Check email",
+        message:
+          "Please enter a valid email address to receive the reset link.",
+      });
       return;
     }
 
+    const trimmedEmail = email.trim();
+
     setSubmitting(true);
-    const res = await sendPasswordReset(email);
+    const res = await sendPasswordReset(trimmedEmail);
     setSubmitting(false);
 
     if (!res.ok) {
-      Alert.alert("Reset failed", res.message);
+      showToast({
+        type: "error",
+        title: "Reset failed",
+        message: res.message || "Could not send reset email. Please try again.",
+      });
       return;
     }
 
-    Alert.alert(
-      "Email sent",
-      "If an account exists with this email, you'll receive a reset link shortly.",
-      [
-        {
-          text: "OK",
-          onPress: () => router.replace("/auth/login"),
-        },
-      ]
-    );
+    showToast({
+      type: "success",
+      title: "Email sent",
+      message:
+        "If an account exists with this email, you'll receive a reset link shortly.",
+    });
+
+    router.replace("/auth/login");
   };
 
   return (
@@ -101,7 +108,9 @@ export default function ForgotPassword() {
           <View
             style={[
               styles.inputBox,
-              isEmailValid && email.trim().length > 0 && styles.inputBoxValidShadow,
+              isEmailValid &&
+                email.trim().length > 0 &&
+                styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -141,7 +150,9 @@ export default function ForgotPassword() {
               )}
             </View>
 
-            <View style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]} />
+            <View
+              style={[styles.focusBar, { opacity: emailFocused ? 1 : 0 }]}
+            />
           </View>
 
           {!isEmailValid && email.trim().length > 0 && (

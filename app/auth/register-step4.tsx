@@ -4,7 +4,6 @@ import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useToast } from "../../src/hooks/useToast";
 import { signUpWithEmail } from "../../src/services/authService";
 import {
   saveOnboardingStep2,
@@ -26,6 +26,7 @@ import styles from "./register.styles";
 export default function RegisterStep4() {
   const { step1, step2, step3, step4, setStep4, resetAll } =
     useOnboardingStore();
+  const { showToast } = useToast();
 
   console.log("[Step4] mounted", { step1, step2, step3, step4 });
 
@@ -70,24 +71,31 @@ export default function RegisterStep4() {
         }
       : { style: styles.screen };
 
-  // ---- Final submit ----
+  // ---- Final submit (with parallel Firestore saves) ----
   const handleFinalSignUp = async () => {
     if (!allAgreementsChecked) {
-      Alert.alert(
-        "Almost there",
-        "Please agree to the Terms, Privacy Policy and match history usage to continue."
-      );
+      showToast({
+        type: "info",
+        title: "Almost there",
+        message:
+          "Please agree to the Terms, Privacy Policy and match history usage to continue.",
+      });
       return;
     }
 
     const { fullName, username, email, phone, password } = step1;
 
+    // Safety: if Step 1 is somehow incomplete, push them back
     if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
-      Alert.alert(
-        "Missing details",
-        "Some of your basic account details are missing. Please go back and complete Step 1."
+      showToast({
+        type: "error",
+        title: "Missing details",
+        message:
+          "Some of your basic account details are missing. Please go back and complete Step 1.",
+      });
+      console.log(
+        "[Step4] missing step1 data in submit → redirecting to /auth/register"
       );
-      console.log("[Step4] missing step1 data → redirecting to /auth/register");
       router.replace("/auth/register");
       return;
     }
@@ -114,65 +122,80 @@ export default function RegisterStep4() {
       console.log("[Step4] signUpWithEmail result", resSignUp);
 
       if (!resSignUp || !resSignUp.ok) {
-        Alert.alert(
-          "Sign Up Failed",
-          resSignUp?.message ??
-            "Something went wrong while creating your account."
-        );
+        showToast({
+          type: "error",
+          title: "Sign up failed",
+          message:
+            resSignUp?.message ??
+            "Something went wrong while creating your account.",
+        });
         return;
       }
 
-      console.log("[Step4] saving step2 in Firestore");
+      console.log(
+        "[Step4] saving step2 & step3 in Firestore (parallel with Promise.all)"
+      );
 
-      // 2) Save Step 2 (location & games)
-      const resStep2 = await saveOnboardingStep2({
-        areasPreferred: step2.selectedAreas,
-        playsCs2: step2.playsCs2,
-        cs2Role: step2.cs2Role,
-        playsFc: step2.playsFc,
-        fcTeam: step2.fcTeam.trim() || null,
-        fcFormation: step2.fcFormation,
-        playsTekken: step2.playsTekken,
-        tekkenFavorites: step2.tekkenFavorites,
-      });
+      // 2) Save Step 2 + Step 3 in PARALLEL
+      const [resStep2, resStep3] = await Promise.all([
+        saveOnboardingStep2({
+          areasPreferred: step2.selectedAreas,
+          playsCs2: step2.playsCs2,
+          cs2Role: step2.cs2Role,
+          playsFc: step2.playsFc,
+          fcTeam: step2.fcTeam.trim() || null,
+          fcFormation: step2.fcFormation,
+          playsTekken: step2.playsTekken,
+          tekkenFavorites: step2.tekkenFavorites,
+        }),
+        saveOnboardingStep3Platforms({
+          steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
+          faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
+          eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
+          xboxGamertag: (step3.xboxGamertag || "").trim() || null,
+          psnOnlineId: (step3.psnOnlineId || "").trim() || null,
+        }),
+      ]);
 
       console.log("[Step4] saveOnboardingStep2 result", resStep2);
-
-      if (!resStep2.ok) {
-        Alert.alert("Could not save preferences", resStep2.message);
-        return;
-      }
-
-      console.log("[Step4] saving step3 platforms in Firestore");
-
-      // 3) Save Step 3 (platforms)
-      const resStep3 = await saveOnboardingStep3Platforms({
-        steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
-        faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
-        eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
-        xboxGamertag: (step3.xboxGamertag || "").trim() || null,
-        psnOnlineId: (step3.psnOnlineId || "").trim() || null,
-      });
-
       console.log("[Step4] saveOnboardingStep3Platforms result", resStep3);
 
+      if (!resStep2.ok) {
+        showToast({
+          type: "error",
+          title: "Could not save preferences",
+          message: resStep2.message || "Please try again in a moment.",
+        });
+        return;
+      }
       if (!resStep3.ok) {
-        Alert.alert("Could not save platforms", resStep3.message);
+        showToast({
+          type: "error",
+          title: "Could not save platforms",
+          message: resStep3.message || "Please try again in a moment.",
+        });
         return;
       }
 
       console.log("[Step4] resetAll onboarding store");
 
-      // 4) Clear onboarding state & go home
+      // 3) Clear onboarding state & go home
       resetAll();
+      showToast({
+        type: "success",
+        title: "Welcome to MatchHai",
+        message: "Your account is ready. Let’s find your squad!",
+      });
       console.log("[Step4] redirecting to /home");
       router.replace("/home");
     } catch (err) {
       console.log("[Step4] unexpected error:", err);
-      Alert.alert(
-        "Sign Up Failed",
-        "Unexpected error while creating your account. Please try again."
-      );
+      showToast({
+        type: "error",
+        title: "Sign up failed",
+        message:
+          "Unexpected error while creating your account. Please try again.",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -410,7 +433,10 @@ export default function RegisterStep4() {
             </Text>
           </Pressable>
 
-          <Pressable onPress={toggleConsentMatchHistory} style={styles.termRow}>
+          <Pressable
+            onPress={toggleConsentMatchHistory}
+            style={styles.termRow}
+          >
             <View
               style={[
                 styles.termBox,

@@ -15,6 +15,9 @@ export const COLORS = {
   cardBackground: '#1f1f1f',
   divider: '#333333',
 
+  // success / status
+  success: '#4caf50', // ✅ system green for strength + checks
+
   // social brand accents (can reuse in other places later)
   steamBorder: '#66c0f4',
   faceitBorder: '#ff5500',
