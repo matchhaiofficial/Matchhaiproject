@@ -5,6 +5,7 @@ require("dotenv").config();
 const steamRoutes = require("./routes/steam");
 const faceitRoutes = require("./routes/faceit");
 const zonesRoutes = require("./routes/zones");
+const requestsRoutes = require("./routes/requests");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -19,6 +20,7 @@ app.get("/", (req, res) => {
 app.use("/steam", steamRoutes);
 app.use("/faceit", faceitRoutes);
 app.use("/zones", zonesRoutes); // 👈 new
+app.use("/requests", requestsRoutes);
 
 app.listen(PORT, () => {
   console.log(`MatchHai backend listening on port ${PORT}`);
