@@ -31,8 +31,10 @@ export type ZoneStep2Data = {
   googleMapsUrl?: string;
 };
 
-// STEP 3 – supported games / sports & basic inventory
-export type ZoneStep3Data = {
+// STEP 3 – supported games / sports & basic inventory per branch
+export type ZoneBranchSetup = {
+  branchDisplayName: string;
+
   // game / sport flags
   supportsCs2: boolean;
   supportsFc25: boolean;
@@ -46,15 +48,15 @@ export type ZoneStep3Data = {
   pcSeats: string; // approx. number of PC setups
 
   // Console setups (for FC / Tekken)
-  consoleSeats: string;        // approx. number of console pods
-  consolePlatform: string;     // e.g. "ps5", "ps4", "xbox-series", "mixed", "other"
+  consoleSeats: string; // approx. number of console pods
+  consolePlatform: string; // e.g. "ps5", "ps4", "xbox-series", "mixed", "other"
 
   // Futsal courts
-  futsalCourts: string;        // number of futsal courts
-  futsalCourtType: string;     // e.g. "belgian-turf", "rubber-turf", etc.
+  futsalCourts: string; // number of futsal courts
+  futsalCourtType: string; // e.g. "belgian-turf", "rubber-turf", etc.
 
   // Indoor cricket
-  indoorCricketNets: string;   // number of indoor cricket nets / lanes
+  indoorCricketNets: string; // number of indoor cricket nets / lanes
   indoorCricketSurface: string;
 
   // Padel
@@ -64,8 +66,11 @@ export type ZoneStep3Data = {
   // Pickleball
   pickleballCourts: string;
   pickleballSurface: string;
+};
 
-  // Optional notes
+export type ZoneStep3Data = {
+  branchSetups: ZoneBranchSetup[];
+  // Optional notes across the whole zone
   notes: string;
 };
 
@@ -139,31 +144,35 @@ const initialState: Omit<
     googleMapsUrl: "",
   },
   step3: {
-    supportsCs2: false,
-    supportsFc25: false,
-    supportsTekken8: false,
-    supportsFutsal: false,
-    supportsIndoorCricket: false,
-    supportsPadel: false,
-    supportsPickleball: false,
+    branchSetups: [
+      {
+        branchDisplayName: "",
+        supportsCs2: false,
+        supportsFc25: false,
+        supportsTekken8: false,
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
 
-    pcSeats: "",
+        pcSeats: "",
 
-    consoleSeats: "",
-    consolePlatform: "",
+        consoleSeats: "",
+        consolePlatform: "",
 
-    futsalCourts: "",
-    futsalCourtType: "",
+        futsalCourts: "",
+        futsalCourtType: "",
 
-    indoorCricketNets: "",
-    indoorCricketSurface: "",
+        indoorCricketNets: "",
+        indoorCricketSurface: "",
 
-    padelCourts: "",
-    padelCourtSurface: "",
+        padelCourts: "",
+        padelCourtSurface: "",
 
-    pickleballCourts: "",
-    pickleballSurface: "",
-
+        pickleballCourts: "",
+        pickleballSurface: "",
+      },
+    ],
     notes: "",
   },
   step4: {
