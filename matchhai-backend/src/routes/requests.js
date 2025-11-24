@@ -132,6 +132,13 @@ router.post("/", async (req, res) => {
       email: payload.email,
     };
 
+    if (!normalizedPayload.timePreference) {
+      return res.status(400).json({
+        ok: false,
+        message: "timePreference is required to create a booking request",
+      });
+    }
+
     const offers = buildOffers(normalizedPayload, requestId);
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
