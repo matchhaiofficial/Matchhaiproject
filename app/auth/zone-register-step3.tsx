@@ -70,8 +70,10 @@ const PICKLEBALL_SURFACES = [
 ];
 
 export default function ZoneRegisterStep3() {
-  const { step3, setStep3, setCurrentStep } = useZoneOnboardingStore();
+  const { step2, step3, setStep3, setCurrentStep } = useZoneOnboardingStore();
   const { showToast } = useToast();
+
+  const branchCount = step2.branches?.length || 1;
 
   // local UI state for toggles + capacities
   const [supportsCs2, setSupportsCs2] = useState(step3.supportsCs2);
@@ -524,6 +526,14 @@ export default function ZoneRegisterStep3() {
           Choose the games and rough number of setups. You can fine-tune this
           later in the zone dashboard.
         </Text>
+        {branchCount > 1 && (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, { color: COLORS.muted }]}>
+              These settings apply to all branches for now. You can customize
+              per-branch inventory after onboarding.
+            </Text>
+          </View>
+        )}
 
         {/* Game options (chips bound to flags) */}
         <View style={styles.fieldGroup}>
