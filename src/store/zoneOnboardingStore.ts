@@ -12,8 +12,8 @@ export type ZoneStep1Data = {
   password: string;
 };
 
-// STEP 2 – primary branch basics
-export type ZoneStep2Data = {
+// STEP 2 – branch basics (supports multiple branches)
+export type ZoneBranchLocation = {
   branchDisplayName: string; // e.g. "O2 – FB Area"
   city: string;              // "Karachi"
   areaLabel: string;         // "FB Area, Block 7"
@@ -21,8 +21,20 @@ export type ZoneStep2Data = {
   googleMapsUrl: string;     // optional
 };
 
-// STEP 3 – supported games / sports & basic inventory
-export type ZoneStep3Data = {
+export type ZoneStep2Data = {
+  branches: ZoneBranchLocation[]; // first entry is considered primary
+  // legacy single-branch fields kept for backward compatibility with summary screens
+  branchDisplayName?: string;
+  city?: string;
+  areaLabel?: string;
+  addressLine1?: string;
+  googleMapsUrl?: string;
+};
+
+// STEP 3 – supported games / sports & basic inventory per branch
+export type ZoneBranchSetup = {
+  branchDisplayName: string;
+
   // game / sport flags
   supportsCs2: boolean;
   supportsFc25: boolean;
@@ -36,15 +48,15 @@ export type ZoneStep3Data = {
   pcSeats: string; // approx. number of PC setups
 
   // Console setups (for FC / Tekken)
-  consoleSeats: string;        // approx. number of console pods
-  consolePlatform: string;     // e.g. "ps5", "ps4", "xbox-series", "mixed", "other"
+  consoleSeats: string; // approx. number of console pods
+  consolePlatform: string; // e.g. "ps5", "ps4", "xbox-series", "mixed", "other"
 
   // Futsal courts
-  futsalCourts: string;        // number of futsal courts
-  futsalCourtType: string;     // e.g. "belgian-turf", "rubber-turf", etc.
+  futsalCourts: string; // number of futsal courts
+  futsalCourtType: string; // e.g. "belgian-turf", "rubber-turf", etc.
 
   // Indoor cricket
-  indoorCricketNets: string;   // number of indoor cricket nets / lanes
+  indoorCricketNets: string; // number of indoor cricket nets / lanes
   indoorCricketSurface: string;
 
   // Padel
@@ -54,8 +66,11 @@ export type ZoneStep3Data = {
   // Pickleball
   pickleballCourts: string;
   pickleballSurface: string;
+};
 
-  // Optional notes
+export type ZoneStep3Data = {
+  branchSetups: ZoneBranchSetup[];
+  // Optional notes across the whole zone
   notes: string;
 };
 
@@ -113,6 +128,15 @@ const initialState: Omit<
     password: "",
   },
   step2: {
+    branches: [
+      {
+        branchDisplayName: "",
+        city: "",
+        areaLabel: "",
+        addressLine1: "",
+        googleMapsUrl: "",
+      },
+    ],
     branchDisplayName: "",
     city: "",
     areaLabel: "",
@@ -120,31 +144,35 @@ const initialState: Omit<
     googleMapsUrl: "",
   },
   step3: {
-    supportsCs2: false,
-    supportsFc25: false,
-    supportsTekken8: false,
-    supportsFutsal: false,
-    supportsIndoorCricket: false,
-    supportsPadel: false,
-    supportsPickleball: false,
+    branchSetups: [
+      {
+        branchDisplayName: "",
+        supportsCs2: false,
+        supportsFc25: false,
+        supportsTekken8: false,
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
 
-    pcSeats: "",
+        pcSeats: "",
 
-    consoleSeats: "",
-    consolePlatform: "",
+        consoleSeats: "",
+        consolePlatform: "",
 
-    futsalCourts: "",
-    futsalCourtType: "",
+        futsalCourts: "",
+        futsalCourtType: "",
 
-    indoorCricketNets: "",
-    indoorCricketSurface: "",
+        indoorCricketNets: "",
+        indoorCricketSurface: "",
 
-    padelCourts: "",
-    padelCourtSurface: "",
+        padelCourts: "",
+        padelCourtSurface: "",
 
-    pickleballCourts: "",
-    pickleballSurface: "",
-
+        pickleballCourts: "",
+        pickleballSurface: "",
+      },
+    ],
     notes: "",
   },
   step4: {

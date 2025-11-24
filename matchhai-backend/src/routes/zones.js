@@ -15,12 +15,17 @@ router.post("/register", async (req, res) => {
     // TODO: validation + DB persistence.
     // For now, just pretend we created a zone + branch and return IDs.
     const mockZoneId = "zone_" + Date.now();
-    const mockBranchId = "branch_" + Date.now();
+    const branches = Array.isArray(payload.branches) ? payload.branches : [];
+    const mockBranchIds =
+      branches.length > 0
+        ? branches.map((_, idx) => `branch_${Date.now()}_${idx}`)
+        : ["branch_" + Date.now()];
 
     return res.json({
       ok: true,
       zoneId: mockZoneId,
-      branchId: mockBranchId,
+      branchIds: mockBranchIds,
+      primaryBranchId: mockBranchIds[0],
     });
   } catch (err) {
     console.error("[zones] /register error:", err);
