@@ -11,6 +11,7 @@ import type {
   ZoneStep2Data,
   ZoneStep3Data,
   ZoneBranchLocation,
+  ZoneBranchSetup,
 } from "../store/zoneOnboardingStore";
 import { normalizePhoneForSave } from "./userService";
 
@@ -25,6 +26,32 @@ function toIntOrNull(value: string): number | null {
   if (!value) return null;
   const n = parseInt(value.trim(), 10);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeBranchSetup(
+  setup?: ZoneBranchSetup
+): ZoneBranchSetup {
+  return {
+    branchDisplayName: setup?.branchDisplayName?.trim() || "",
+    supportsCs2: !!setup?.supportsCs2,
+    supportsFc25: !!setup?.supportsFc25,
+    supportsTekken8: !!setup?.supportsTekken8,
+    supportsFutsal: !!setup?.supportsFutsal,
+    supportsIndoorCricket: !!setup?.supportsIndoorCricket,
+    supportsPadel: !!setup?.supportsPadel,
+    supportsPickleball: !!setup?.supportsPickleball,
+    pcSeats: setup?.pcSeats?.trim() || "",
+    consoleSeats: setup?.consoleSeats?.trim() || "",
+    consolePlatform: setup?.consolePlatform?.trim() || "",
+    futsalCourts: setup?.futsalCourts?.trim() || "",
+    futsalCourtType: setup?.futsalCourtType?.trim() || "",
+    indoorCricketNets: setup?.indoorCricketNets?.trim() || "",
+    indoorCricketSurface: setup?.indoorCricketSurface?.trim() || "",
+    padelCourts: setup?.padelCourts?.trim() || "",
+    padelCourtSurface: setup?.padelCourtSurface?.trim() || "",
+    pickleballCourts: setup?.pickleballCourts?.trim() || "",
+    pickleballSurface: setup?.pickleballSurface?.trim() || "",
+  };
 }
 
 /**
@@ -57,22 +84,99 @@ export async function saveZoneRegistration(
         ? step2.branches
         : [
             {
-              branchDisplayName: "",
-              city: "",
-              areaLabel: "",
-              addressLine1: "",
-              googleMapsUrl: "",
+              branchDisplayName: step2.branchDisplayName || "",
+              city: step2.city || "",
+              areaLabel: step2.areaLabel || "",
+              addressLine1: step2.addressLine1 || "",
+              googleMapsUrl: step2.googleMapsUrl || "",
             },
           ];
 
-    const primaryBranch = allBranches[0];
-    const additionalBranches = allBranches.slice(1).map((branch) => ({
-      branchDisplayName: branch.branchDisplayName.trim() || null,
-      city: branch.city.trim() || null,
-      areaLabel: branch.areaLabel.trim() || null,
-      addressLine1: branch.addressLine1.trim() || null,
-      googleMapsUrl: branch.googleMapsUrl.trim() || null,
-    }));
+    const allSetups: ZoneBranchSetup[] =
+      step3.branchSetups && step3.branchSetups.length > 0
+        ? step3.branchSetups
+        : [
+            {
+              branchDisplayName:
+                step2.branchDisplayName || allBranches[0]?.branchDisplayName || "",
+              supportsCs2: false,
+              supportsFc25: false,
+              supportsTekken8: false,
+              supportsFutsal: false,
+              supportsIndoorCricket: false,
+              supportsPadel: false,
+              supportsPickleball: false,
+              pcSeats: "",
+              consoleSeats: "",
+              consolePlatform: "",
+              futsalCourts: "",
+              futsalCourtType: "",
+              indoorCricketNets: "",
+              indoorCricketSurface: "",
+              padelCourts: "",
+              padelCourtSurface: "",
+              pickleballCourts: "",
+              pickleballSurface: "",
+            },
+          ];
+
+    const branchRecords = allBranches.map((branch, idx) => {
+      const setup = normalizeBranchSetup(allSetups[idx] || allSetups[0]);
+      return {
+        branchDisplayName: branch.branchDisplayName.trim() || null,
+        city: branch.city.trim() || null,
+        areaLabel: branch.areaLabel.trim() || null,
+        addressLine1: branch.addressLine1.trim() || null,
+        googleMapsUrl: branch.googleMapsUrl.trim() || null,
+        games: {
+          supportsCs2: setup.supportsCs2,
+          supportsFc25: setup.supportsFc25,
+          supportsTekken8: setup.supportsTekken8,
+          supportsFutsal: setup.supportsFutsal,
+          supportsIndoorCricket: setup.supportsIndoorCricket,
+          supportsPadel: setup.supportsPadel,
+          supportsPickleball: setup.supportsPickleball,
+        },
+        capacity: {
+          pcSeats: toIntOrNull(setup.pcSeats),
+          consoleSeats: toIntOrNull(setup.consoleSeats),
+          consolePlatform: setup.consolePlatform || null,
+          futsalCourts: toIntOrNull(setup.futsalCourts),
+          futsalCourtType: setup.futsalCourtType || null,
+          indoorCricketNets: toIntOrNull(setup.indoorCricketNets),
+          indoorCricketSurface: setup.indoorCricketSurface || null,
+          padelCourts: toIntOrNull(setup.padelCourts),
+          padelCourtSurface: setup.padelCourtSurface || null,
+          pickleballCourts: toIntOrNull(setup.pickleballCourts),
+          pickleballSurface: setup.pickleballSurface || null,
+        },
+      };
+    });
+
+    const primaryBranch = branchRecords[0];
+    const additionalBranches = branchRecords.slice(1);
+
+    const aggregatedGames = branchRecords.reduce(
+      (acc, branch) => ({
+        supportsCs2: acc.supportsCs2 || !!branch.games.supportsCs2,
+        supportsFc25: acc.supportsFc25 || !!branch.games.supportsFc25,
+        supportsTekken8: acc.supportsTekken8 || !!branch.games.supportsTekken8,
+        supportsFutsal: acc.supportsFutsal || !!branch.games.supportsFutsal,
+        supportsIndoorCricket:
+          acc.supportsIndoorCricket || !!branch.games.supportsIndoorCricket,
+        supportsPadel: acc.supportsPadel || !!branch.games.supportsPadel,
+        supportsPickleball: acc.supportsPickleball || !!branch.games.supportsPickleball,
+      }),
+      {
+        supportsCs2: false,
+        supportsFc25: false,
+        supportsTekken8: false,
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
+      }
+    );
 
     const docBody = {
       ownerUid: user.uid,
@@ -86,43 +190,15 @@ export async function saveZoneRegistration(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
 
-      primaryBranch: {
-        branchDisplayName: primaryBranch?.branchDisplayName.trim() || null,
-        city: primaryBranch?.city.trim() || null,
-        areaLabel: primaryBranch?.areaLabel.trim() || null,
-        addressLine1: primaryBranch?.addressLine1.trim() || null,
-        googleMapsUrl: primaryBranch?.googleMapsUrl.trim() || null,
-      },
+      primaryBranch,
 
       additionalBranches,
 
-      games: {
-        supportsCs2: !!step3.supportsCs2,
-        supportsFc25: !!step3.supportsFc25,
-        supportsTekken8: !!step3.supportsTekken8,
-        supportsFutsal: !!step3.supportsFutsal,
-        supportsIndoorCricket: !!step3.supportsIndoorCricket,
-        supportsPadel: !!step3.supportsPadel,
-        supportsPickleball: !!step3.supportsPickleball,
-      },
+      games: aggregatedGames,
 
-      capacity: {
-        pcSeats: toIntOrNull(step3.pcSeats),
-        consoleSeats: toIntOrNull(step3.consoleSeats),
-        consolePlatform: step3.consolePlatform || null,
+      capacity: primaryBranch?.capacity || null,
 
-        futsalCourts: toIntOrNull(step3.futsalCourts),
-        futsalCourtType: step3.futsalCourtType || null,
-
-        indoorCricketNets: toIntOrNull(step3.indoorCricketNets),
-        indoorCricketSurface: step3.indoorCricketSurface || null,
-
-        padelCourts: toIntOrNull(step3.padelCourts),
-        padelCourtSurface: step3.padelCourtSurface || null,
-
-        pickleballCourts: toIntOrNull(step3.pickleballCourts),
-        pickleballSurface: step3.pickleballSurface || null,
-      },
+      branches: branchRecords,
 
       notes: step3.notes?.trim() || null,
     };
