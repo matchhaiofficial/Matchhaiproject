@@ -463,6 +463,14 @@ export default function ZoneRegisterStep3() {
           Choose the games and rough number of setups for this location. You can fine-tune later in the
           dashboard.
         </Text>
+        {branchCount > 1 && (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, { color: COLORS.muted }]}>
+              These settings apply to all branches for now. You can customize
+              per-branch inventory after onboarding.
+            </Text>
+          </View>
+        )}
 
         <View style={[styles.fieldGroup, { marginTop: 12 }]}>
           <Text style={styles.label}>Supported games / sports</Text>
