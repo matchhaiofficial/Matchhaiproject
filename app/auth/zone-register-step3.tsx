@@ -2,7 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { Link, router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +16,7 @@ import {
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
+import type { ZoneBranchSetup } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
@@ -69,329 +70,294 @@ const PICKLEBALL_SURFACES = [
   { value: "other", label: "Other" },
 ];
 
+type BranchSetupState = ZoneBranchSetup & { id: string };
+
+type BranchValidation = {
+  id: string;
+  branchName: string;
+  hasAnyGame: boolean;
+  hasAnyCapacity: boolean;
+  pcSectionValid: boolean;
+  consoleSectionValid: boolean;
+  futsalSectionValid: boolean;
+  indoorCricketSectionValid: boolean;
+  padelSectionValid: boolean;
+  pickleballSectionValid: boolean;
+  pcError: string;
+  consoleError: string;
+  futsalError: string;
+  indoorCricketError: string;
+  padelError: string;
+  pickleballError: string;
+  isFormValid: boolean;
+};
+
+function normalizeBranchSetup(setup?: ZoneBranchSetup, id?: string): BranchSetupState {
+  return {
+    id: id || `branch-setup-${Date.now()}`,
+    branchDisplayName: setup?.branchDisplayName || "",
+    supportsCs2: !!setup?.supportsCs2,
+    supportsFc25: !!setup?.supportsFc25,
+    supportsTekken8: !!setup?.supportsTekken8,
+    supportsFutsal: !!setup?.supportsFutsal,
+    supportsIndoorCricket: !!setup?.supportsIndoorCricket,
+    supportsPadel: !!setup?.supportsPadel,
+    supportsPickleball: !!setup?.supportsPickleball,
+    pcSeats: setup?.pcSeats || "",
+    consoleSeats: setup?.consoleSeats || "",
+    consolePlatform: setup?.consolePlatform || "",
+    futsalCourts: setup?.futsalCourts || "",
+    futsalCourtType: setup?.futsalCourtType || "",
+    indoorCricketNets: setup?.indoorCricketNets || "",
+    indoorCricketSurface: setup?.indoorCricketSurface || "",
+    padelCourts: setup?.padelCourts || "",
+    padelCourtSurface: setup?.padelCourtSurface || "",
+    pickleballCourts: setup?.pickleballCourts || "",
+    pickleballSurface: setup?.pickleballSurface || "",
+  };
+}
+
 export default function ZoneRegisterStep3() {
-  const { step3, setStep3, setCurrentStep } = useZoneOnboardingStore();
+  const { step2, step3, setStep3, setCurrentStep } = useZoneOnboardingStore();
   const { showToast } = useToast();
 
-  // local UI state for toggles + capacities
-  const [supportsCs2, setSupportsCs2] = useState(step3.supportsCs2);
-  const [supportsFc25, setSupportsFc25] = useState(step3.supportsFc25);
-  const [supportsTekken8, setSupportsTekken8] = useState(step3.supportsTekken8);
-  const [supportsFutsal, setSupportsFutsal] = useState(step3.supportsFutsal);
-  const [supportsIndoorCricket, setSupportsIndoorCricket] = useState(
-    step3.supportsIndoorCricket
-  );
-  const [supportsPadel, setSupportsPadel] = useState(step3.supportsPadel);
-  const [supportsPickleball, setSupportsPickleball] = useState(
-    step3.supportsPickleball
-  );
+  const branchesFromStep2 = useMemo(() => {
+    if (step2.branches && step2.branches.length > 0) {
+      return step2.branches;
+    }
 
-  // PC + console
-  const [pcSeats, setPcSeats] = useState(step3.pcSeats || "");
-  const [consoleSeats, setConsoleSeats] = useState(step3.consoleSeats || "");
-  const [consolePlatform, setConsolePlatform] = useState(
-    step3.consolePlatform || ""
-  );
+    if (
+      step2.branchDisplayName ||
+      step2.city ||
+      step2.areaLabel ||
+      step2.addressLine1 ||
+      step2.googleMapsUrl
+    ) {
+      return [
+        {
+          branchDisplayName: step2.branchDisplayName || "",
+          city: step2.city || "",
+          areaLabel: step2.areaLabel || "",
+          addressLine1: step2.addressLine1 || "",
+          googleMapsUrl: step2.googleMapsUrl || "",
+        },
+      ];
+    }
 
-  // Courts / nets
-  const [futsalCourts, setFutsalCourts] = useState(step3.futsalCourts || "");
-  const [futsalCourtType, setFutsalCourtType] = useState(
-    step3.futsalCourtType || ""
-  );
+    return [
+      {
+        branchDisplayName: "",
+        city: "",
+        areaLabel: "",
+        addressLine1: "",
+        googleMapsUrl: "",
+      },
+    ];
+  }, [step2]);
 
-  const [indoorCricketNets, setIndoorCricketNets] = useState(
-    step3.indoorCricketNets || ""
-  );
-  const [indoorCricketSurface, setIndoorCricketSurface] = useState(
-    step3.indoorCricketSurface || ""
-  );
+  const [branchSetups, setBranchSetups] = useState<BranchSetupState[]>(() => {
+    const existing = step3.branchSetups || [];
+    return branchesFromStep2.map((branch, idx) =>
+      normalizeBranchSetup(
+        existing[idx] || existing[0] || { branchDisplayName: branch.branchDisplayName },
+        `branch-${idx}`
+      )
+    );
+  });
 
-  const [padelCourts, setPadelCourts] = useState(step3.padelCourts || "");
-  const [padelCourtSurface, setPadelCourtSurface] = useState(
-    step3.padelCourtSurface || ""
-  );
-
-  const [pickleballCourts, setPickleballCourts] = useState(
-    step3.pickleballCourts || ""
-  );
-  const [pickleballSurface, setPickleballSurface] = useState(
-    step3.pickleballSurface || ""
-  );
+  useEffect(() => {
+    setBranchSetups((prev) => {
+      if (branchesFromStep2.length === prev.length) return prev;
+      return branchesFromStep2.map((branch, idx) =>
+        normalizeBranchSetup(
+          prev[idx] || prev[0] || { branchDisplayName: branch.branchDisplayName },
+          `branch-${idx}`
+        )
+      );
+    });
+  }, [branchesFromStep2]);
 
   const [notes, setNotes] = useState(step3.notes || "");
-
-  // focus flags
-  const [pcFocused, setPcFocused] = useState(false);
-  const [consoleFocused, setConsoleFocused] = useState(false);
-  const [notesFocused, setNotesFocused] = useState(false);
-
-  const [futsalFocused, setFutsalFocused] = useState(false);
-  const [indoorCricketFocused, setIndoorCricketFocused] = useState(false);
-  const [padelFocused, setPadelFocused] = useState(false);
-  const [pickleballFocused, setPickleballFocused] = useState(false);
+  const [focused, setFocused] = useState<{ id: string; field: string } | null>(null);
 
   // ---- Validation ----
-  const {
-    hasAnyGame,
-    pcSectionValid,
-    consoleSectionValid,
-    futsalSectionValid,
-    indoorCricketSectionValid,
-    padelSectionValid,
-    pickleballSectionValid,
-    hasAnyCapacity,
-    pcError,
-    consoleError,
-    futsalError,
-    indoorCricketError,
-    padelError,
-    pickleballError,
-    isFormValid,
-  } = useMemo(() => {
-    const anyGame =
-      supportsCs2 ||
-      supportsFc25 ||
-      supportsTekken8 ||
-      supportsFutsal ||
-      supportsIndoorCricket ||
-      supportsPadel ||
-      supportsPickleball;
-
+  const branchValidations: BranchValidation[] = useMemo(() => {
     const toInt = (v: string) => {
       const n = Number(v.trim());
       return Number.isFinite(n) ? n : NaN;
     };
 
-    const supportsConsoleGames = supportsFc25 || supportsTekken8;
+    const computeValidation = (branch: BranchSetupState): BranchValidation => {
+      const supportsConsoleGames = branch.supportsFc25 || branch.supportsTekken8;
 
-    // PC capacity (only matters if CS2 is supported)
-    const pcTrim = pcSeats.trim();
-    const pcNum = toInt(pcSeats);
-    const pcValidBase =
-      !supportsCs2 ||
-      (pcTrim.length > 0 && !Number.isNaN(pcNum) && pcNum > 0 && pcNum <= 200);
-    const pcErrorText =
-      supportsCs2 && pcTrim.length > 0 && !pcValidBase
-        ? "Enter a number between 1 and 200."
-        : "";
+      const anyGame =
+        branch.supportsCs2 ||
+        branch.supportsFc25 ||
+        branch.supportsTekken8 ||
+        branch.supportsFutsal ||
+        branch.supportsIndoorCricket ||
+        branch.supportsPadel ||
+        branch.supportsPickleball;
 
-    // Console capacity (only if FC / Tekken supported)
-    const consoleTrim = consoleSeats.trim();
-    const consoleNum = toInt(consoleSeats);
-    const consoleSeatsValid =
-      !supportsConsoleGames ||
-      (consoleTrim.length > 0 &&
-        !Number.isNaN(consoleNum) &&
-        consoleNum > 0 &&
-        consoleNum <= 100);
-    const consolePlatformValid =
-      !supportsConsoleGames || !consoleTrim.length
-        ? true
-        : consolePlatform.trim().length > 0;
+      const pcTrim = branch.pcSeats.trim();
+      const pcNum = toInt(branch.pcSeats);
+      const pcValidBase =
+        !branch.supportsCs2 ||
+        (pcTrim.length > 0 && !Number.isNaN(pcNum) && pcNum > 0 && pcNum <= 200);
+      const pcErrorText =
+        branch.supportsCs2 && pcTrim.length > 0 && !pcValidBase
+          ? "Enter a number between 1 and 200."
+          : "";
 
-    const consoleSectionOk =
-      !supportsConsoleGames ||
-      (!consoleTrim.length && !consolePlatform.trim().length)
-        ? true // if they didn't fill anything at all, it's optional unless no other capacity is given
-        : consoleSeatsValid && consolePlatformValid;
+      const consoleTrim = branch.consoleSeats.trim();
+      const consoleNum = toInt(branch.consoleSeats);
+      const consoleSeatsValid =
+        !supportsConsoleGames ||
+        (consoleTrim.length > 0 && !Number.isNaN(consoleNum) && consoleNum > 0 && consoleNum <= 100);
+      const consolePlatformValid =
+        !supportsConsoleGames || !consoleTrim.length ? true : branch.consolePlatform.trim().length > 0;
+      const consoleSectionOk =
+        !supportsConsoleGames ||
+        (!consoleTrim.length && !branch.consolePlatform.trim().length)
+          ? true
+          : consoleSeatsValid && consolePlatformValid;
 
-    let consoleErrorText = "";
-    if (supportsConsoleGames && consoleTrim.length > 0 && !consoleSeatsValid) {
-      consoleErrorText = "Enter a number between 1 and 100.";
-    } else if (
-      supportsConsoleGames &&
-      consoleTrim.length > 0 &&
-      consoleSeatsValid &&
-      !consolePlatformValid
-    ) {
-      consoleErrorText = "Select the console type.";
-    }
+      let consoleErrorText = "";
+      if (supportsConsoleGames && consoleTrim.length > 0 && !consoleSeatsValid) {
+        consoleErrorText = "Enter a number between 1 and 100.";
+      } else if (supportsConsoleGames && consoleTrim.length > 0 && consoleSeatsValid && !consolePlatformValid) {
+        consoleErrorText = "Select the console type.";
+      }
 
-    // Futsal
-    const futsalTrim = futsalCourts.trim();
-    const futsalNum = toInt(futsalCourts);
-    const futsalCourtsValid =
-      !supportsFutsal ||
-      (futsalTrim.length > 0 &&
-        !Number.isNaN(futsalNum) &&
-        futsalNum > 0 &&
-        futsalNum <= 10);
-    const futsalTypeValid =
-      !supportsFutsal || !futsalTrim.length
-        ? true
-        : futsalCourtType.trim().length > 0;
+      const futsalTrim = branch.futsalCourts.trim();
+      const futsalNum = toInt(branch.futsalCourts);
+      const futsalCourtsValid =
+        !branch.supportsFutsal ||
+        (futsalTrim.length > 0 && !Number.isNaN(futsalNum) && futsalNum > 0 && futsalNum <= 10);
+      const futsalTypeValid =
+        !branch.supportsFutsal || !futsalTrim.length ? true : branch.futsalCourtType.trim().length > 0;
+      const futsalSectionOk =
+        !branch.supportsFutsal ||
+        (!futsalTrim.length && !branch.futsalCourtType.trim().length) ? true : futsalCourtsValid && futsalTypeValid;
 
-    const futsalSectionOk =
-      !supportsFutsal ||
-      (!futsalTrim.length && !futsalCourtType.trim().length)
-        ? true
-        : futsalCourtsValid && futsalTypeValid;
+      let futsalErrorText = "";
+      if (branch.supportsFutsal && futsalTrim.length > 0 && !futsalCourtsValid) {
+        futsalErrorText = "Enter a number between 1 and 10.";
+      } else if (branch.supportsFutsal && futsalTrim.length > 0 && futsalCourtsValid && !futsalTypeValid) {
+        futsalErrorText = "Select the futsal court type.";
+      }
 
-    let futsalErrorText = "";
-    if (supportsFutsal && futsalTrim.length > 0 && !futsalCourtsValid) {
-      futsalErrorText = "Enter a number between 1 and 10.";
-    } else if (
-      supportsFutsal &&
-      futsalTrim.length > 0 &&
-      futsalCourtsValid &&
-      !futsalTypeValid
-    ) {
-      futsalErrorText = "Select the futsal court type.";
-    }
+      const icTrim = branch.indoorCricketNets.trim();
+      const icNum = toInt(branch.indoorCricketNets);
+      const icNetsValid =
+        !branch.supportsIndoorCricket ||
+        (icTrim.length > 0 && !Number.isNaN(icNum) && icNum > 0 && icNum <= 10);
+      const icSurfaceValid =
+        !branch.supportsIndoorCricket || !icTrim.length
+          ? true
+          : branch.indoorCricketSurface.trim().length > 0;
+      const indoorCricketSectionOk =
+        !branch.supportsIndoorCricket ||
+        (!icTrim.length && !branch.indoorCricketSurface.trim().length)
+          ? true
+          : icNetsValid && icSurfaceValid;
 
-    // Indoor cricket
-    const icTrim = indoorCricketNets.trim();
-    const icNum = toInt(indoorCricketNets);
-    const icNetsValid =
-      !supportsIndoorCricket ||
-      (icTrim.length > 0 &&
-        !Number.isNaN(icNum) &&
-        icNum > 0 &&
-        icNum <= 10);
-    const icSurfaceValid =
-      !supportsIndoorCricket || !icTrim.length
-        ? true
-        : indoorCricketSurface.trim().length > 0;
+      let icErrorText = "";
+      if (branch.supportsIndoorCricket && icTrim.length > 0 && !icNetsValid) {
+        icErrorText = "Enter a number between 1 and 10.";
+      } else if (
+        branch.supportsIndoorCricket &&
+        icTrim.length > 0 &&
+        icNetsValid &&
+        !icSurfaceValid
+      ) {
+        icErrorText = "Select the indoor cricket surface.";
+      }
 
-    const indoorCricketSectionOk =
-      !supportsIndoorCricket ||
-      (!icTrim.length && !indoorCricketSurface.trim().length)
-        ? true
-        : icNetsValid && icSurfaceValid;
+      const padelTrim = branch.padelCourts.trim();
+      const padelNum = toInt(branch.padelCourts);
+      const padelCourtsValid =
+        !branch.supportsPadel ||
+        (padelTrim.length > 0 && !Number.isNaN(padelNum) && padelNum > 0 && padelNum <= 10);
+      const padelSurfaceValid =
+        !branch.supportsPadel || !padelTrim.length ? true : branch.padelCourtSurface.trim().length > 0;
+      const padelSectionOk =
+        !branch.supportsPadel ||
+        (!padelTrim.length && !branch.padelCourtSurface.trim().length) ? true : padelCourtsValid && padelSurfaceValid;
 
-    let icErrorText = "";
-    if (supportsIndoorCricket && icTrim.length > 0 && !icNetsValid) {
-      icErrorText = "Enter a number between 1 and 10.";
-    } else if (
-      supportsIndoorCricket &&
-      icTrim.length > 0 &&
-      icNetsValid &&
-      !icSurfaceValid
-    ) {
-      icErrorText = "Select the indoor cricket surface.";
-    }
+      let padelErrorText = "";
+      if (branch.supportsPadel && padelTrim.length > 0 && !padelCourtsValid) {
+        padelErrorText = "Enter a number between 1 and 10.";
+      } else if (branch.supportsPadel && padelTrim.length > 0 && padelCourtsValid && !padelSurfaceValid) {
+        padelErrorText = "Select the padel court surface.";
+      }
 
-    // Padel
-    const padelTrim = padelCourts.trim();
-    const padelNum = toInt(padelCourts);
-    const padelCourtsValid =
-      !supportsPadel ||
-      (padelTrim.length > 0 &&
-        !Number.isNaN(padelNum) &&
-        padelNum > 0 &&
-        padelNum <= 10);
-    const padelSurfaceValid =
-      !supportsPadel || !padelTrim.length
-        ? true
-        : padelCourtSurface.trim().length > 0;
+      const pickleTrim = branch.pickleballCourts.trim();
+      const pickleNum = toInt(branch.pickleballCourts);
+      const pickleCourtsValid =
+        !branch.supportsPickleball ||
+        (pickleTrim.length > 0 && !Number.isNaN(pickleNum) && pickleNum > 0 && pickleNum <= 10);
+      const pickleSurfaceValid =
+        !branch.supportsPickleball || !pickleTrim.length
+          ? true
+          : branch.pickleballSurface.trim().length > 0;
+      const pickleballSectionOk =
+        !branch.supportsPickleball ||
+        (!pickleTrim.length && !branch.pickleballSurface.trim().length)
+          ? true
+          : pickleCourtsValid && pickleSurfaceValid;
 
-    const padelSectionOk =
-      !supportsPadel ||
-      (!padelTrim.length && !padelCourtSurface.trim().length)
-        ? true
-        : padelCourtsValid && padelSurfaceValid;
+      let pickleballErrorText = "";
+      if (branch.supportsPickleball && pickleTrim.length > 0 && !pickleCourtsValid) {
+        pickleballErrorText = "Enter a number between 1 and 10.";
+      } else if (
+        branch.supportsPickleball &&
+        pickleTrim.length > 0 &&
+        pickleCourtsValid &&
+        !pickleSurfaceValid
+      ) {
+        pickleballErrorText = "Select the pickleball surface.";
+      }
 
-    let padelErrorText = "";
-    if (supportsPadel && padelTrim.length > 0 && !padelCourtsValid) {
-      padelErrorText = "Enter a number between 1 and 10.";
-    } else if (
-      supportsPadel &&
-      padelTrim.length > 0 &&
-      padelCourtsValid &&
-      !padelSurfaceValid
-    ) {
-      padelErrorText = "Select the padel court surface.";
-    }
+      const hasCap =
+        (branch.supportsCs2 && pcTrim.length > 0 && pcValidBase) ||
+        (supportsConsoleGames && consoleTrim.length > 0 && consoleSeatsValid && consolePlatformValid) ||
+        (branch.supportsFutsal && futsalTrim.length > 0 && futsalCourtsValid) ||
+        (branch.supportsIndoorCricket && icTrim.length > 0 && icNetsValid) ||
+        (branch.supportsPadel && padelTrim.length > 0 && padelCourtsValid) ||
+        (branch.supportsPickleball && pickleTrim.length > 0 && pickleCourtsValid);
 
-    // Pickleball
-    const pickleTrim = pickleballCourts.trim();
-    const pickleNum = toInt(pickleballCourts);
-    const pickleCourtsValid =
-      !supportsPickleball ||
-      (pickleTrim.length > 0 &&
-        !Number.isNaN(pickleNum) &&
-        pickleNum > 0 &&
-        pickleNum <= 10);
-    const pickleSurfaceValid =
-      !supportsPickleball || !pickleTrim.length
-        ? true
-        : pickleballSurface.trim().length > 0;
+      const allSectionsValid =
+        pcValidBase &&
+        consoleSectionOk &&
+        futsalSectionOk &&
+        indoorCricketSectionOk &&
+        padelSectionOk &&
+        pickleballSectionOk;
 
-    const pickleballSectionOk =
-      !supportsPickleball ||
-      (!pickleTrim.length && !pickleballSurface.trim().length)
-        ? true
-        : pickleCourtsValid && pickleSurfaceValid;
-
-    let pickleErrorText = "";
-    if (supportsPickleball && pickleTrim.length > 0 && !pickleCourtsValid) {
-      pickleErrorText = "Enter a number between 1 and 10.";
-    } else if (
-      supportsPickleball &&
-      pickleTrim.length > 0 &&
-      pickleCourtsValid &&
-      !pickleSurfaceValid
-    ) {
-      pickleErrorText = "Select the pickleball surface.";
-    }
-
-    // At least one capacity across all selected offerings
-    const hasCap =
-      (supportsCs2 && pcTrim.length > 0 && pcValidBase) ||
-      (supportsConsoleGames &&
-        consoleTrim.length > 0 &&
-        consoleSeatsValid &&
-        consolePlatformValid) ||
-      (supportsFutsal && futsalTrim.length > 0 && futsalCourtsValid) ||
-      (supportsIndoorCricket && icTrim.length > 0 && icNetsValid) ||
-      (supportsPadel && padelTrim.length > 0 && padelCourtsValid) ||
-      (supportsPickleball && pickleTrim.length > 0 && pickleCourtsValid);
-
-    const allSectionsValid =
-      pcValidBase &&
-      consoleSectionOk &&
-      futsalSectionOk &&
-      indoorCricketSectionOk &&
-      padelSectionOk &&
-      pickleballSectionOk;
-
-    return {
-      hasAnyGame: anyGame,
-      pcSectionValid: pcValidBase,
-      consoleSectionValid: consoleSectionOk,
-      futsalSectionValid: futsalSectionOk,
-      indoorCricketSectionValid: indoorCricketSectionOk,
-      padelSectionValid: padelSectionOk,
-      pickleballSectionValid: pickleballSectionOk,
-      hasAnyCapacity: hasCap,
-      pcError: pcErrorText,
-      consoleError: consoleErrorText,
-      futsalError: futsalErrorText,
-      indoorCricketError: icErrorText,
-      padelError: padelErrorText,
-      pickleballError: pickleErrorText,
-      isFormValid: anyGame && hasCap && allSectionsValid,
+      return {
+        id: branch.id,
+        branchName: branch.branchDisplayName || "Branch",
+        hasAnyGame: anyGame,
+        hasAnyCapacity: hasCap,
+        pcSectionValid: pcValidBase,
+        consoleSectionValid: consoleSectionOk,
+        futsalSectionValid: futsalSectionOk,
+        indoorCricketSectionValid: indoorCricketSectionOk,
+        padelSectionValid: padelSectionOk,
+        pickleballSectionValid: pickleballSectionOk,
+        pcError: pcErrorText,
+        consoleError: consoleErrorText,
+        futsalError: futsalErrorText,
+        indoorCricketError: icErrorText,
+        padelError: padelErrorText,
+        pickleballError: pickleballErrorText,
+        isFormValid: anyGame && hasCap && allSectionsValid,
+      };
     };
-  }, [
-    supportsCs2,
-    supportsFc25,
-    supportsTekken8,
-    supportsFutsal,
-    supportsIndoorCricket,
-    supportsPadel,
-    supportsPickleball,
-    pcSeats,
-    consoleSeats,
-    consolePlatform,
-    futsalCourts,
-    futsalCourtType,
-    indoorCricketNets,
-    indoorCricketSurface,
-    padelCourts,
-    padelCourtSurface,
-    pickleballCourts,
-    pickleballSurface,
-  ]);
+
+    return branchSetups.map((branch) => computeValidation(branch));
+  }, [branchSetups]);
 
   const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
   const containerProps =
@@ -404,54 +370,67 @@ export default function ZoneRegisterStep3() {
       : { style: styles.screen };
 
   // ---- Handlers ----
+  const updateBranchSetup = (
+    id: string,
+    updater: (prev: BranchSetupState) => BranchSetupState
+  ) => {
+    setBranchSetups((prev) => prev.map((branch) => (branch.id === id ? updater(branch) : branch)));
+  };
+
   const handleContinue = () => {
-    if (!hasAnyGame) {
+    const firstIssue = branchValidations.find((v) => !v.isFormValid);
+
+    if (firstIssue) {
+      if (!firstIssue.hasAnyGame) {
+        showToast({
+          type: "info",
+          title: "Pick games",
+          message: `Select at least one game or sport for ${firstIssue.branchName}.`,
+        });
+        return;
+      }
+
+      if (!firstIssue.hasAnyCapacity) {
+        showToast({
+          type: "info",
+          title: "Add setups",
+          message: `Add at least one setup or court for ${firstIssue.branchName} to continue.`,
+        });
+        return;
+      }
+
       showToast({
         type: "info",
-        title: "Pick at least one game",
-        message: "Select the games your zone supports for MatchHai bookings.",
+        title: "Check branch details",
+        message: `Please fix the highlighted fields for ${firstIssue.branchName}.`,
       });
       return;
     }
 
-    if (!hasAnyCapacity) {
-      showToast({
-        type: "info",
-        title: "Add capacity",
-        message:
-          "Add at least one PC, console setup, or court so we can build fair lobbies.",
-      });
-      return;
-    }
-
-    if (!isFormValid) {
-      showToast({
-        type: "info",
-        title: "Check details",
-        message: "Please fix the highlighted fields before continuing.",
-      });
-      return;
-    }
+    const trimmedSetups: ZoneBranchSetup[] = branchSetups.map((branch, idx) => ({
+      branchDisplayName: branchesFromStep2[idx]?.branchDisplayName || branch.branchDisplayName || "",
+      supportsCs2: branch.supportsCs2,
+      supportsFc25: branch.supportsFc25,
+      supportsTekken8: branch.supportsTekken8,
+      supportsFutsal: branch.supportsFutsal,
+      supportsIndoorCricket: branch.supportsIndoorCricket,
+      supportsPadel: branch.supportsPadel,
+      supportsPickleball: branch.supportsPickleball,
+      pcSeats: branch.pcSeats.trim(),
+      consoleSeats: branch.consoleSeats.trim(),
+      consolePlatform: branch.consolePlatform.trim(),
+      futsalCourts: branch.futsalCourts.trim(),
+      futsalCourtType: branch.futsalCourtType.trim(),
+      indoorCricketNets: branch.indoorCricketNets.trim(),
+      indoorCricketSurface: branch.indoorCricketSurface.trim(),
+      padelCourts: branch.padelCourts.trim(),
+      padelCourtSurface: branch.padelCourtSurface.trim(),
+      pickleballCourts: branch.pickleballCourts.trim(),
+      pickleballSurface: branch.pickleballSurface.trim(),
+    }));
 
     setStep3({
-      supportsCs2,
-      supportsFc25,
-      supportsTekken8,
-      supportsFutsal,
-      supportsIndoorCricket,
-      supportsPadel,
-      supportsPickleball,
-      pcSeats: pcSeats.trim(),
-      consoleSeats: consoleSeats.trim(),
-      consolePlatform: consolePlatform.trim(),
-      futsalCourts: futsalCourts.trim(),
-      futsalCourtType: futsalCourtType.trim(),
-      indoorCricketNets: indoorCricketNets.trim(),
-      indoorCricketSurface: indoorCricketSurface.trim(),
-      padelCourts: padelCourts.trim(),
-      padelCourtSurface: padelCourtSurface.trim(),
-      pickleballCourts: pickleballCourts.trim(),
-      pickleballSurface: pickleballSurface.trim(),
+      branchSetups: trimmedSetups,
       notes: notes.trim(),
     });
 
@@ -463,29 +442,520 @@ export default function ZoneRegisterStep3() {
     router.replace("/auth/zone-register-step2" as any);
   };
 
-  const isSubmitDisabled = !isFormValid;
-
-  // Helper to render a chip
   const renderGameChip = (
     label: string,
     active: boolean,
     onToggle: () => void
   ) => (
-    <Pressable
-      key={label}
-      onPress={onToggle}
-      style={[styles.optionChip, active && styles.optionChipActive]}
-    >
-      <Text
-        style={[
-          styles.optionChipText,
-          active && styles.optionChipTextActive,
-        ]}
-      >
-        {label}
-      </Text>
+    <Pressable key={label} onPress={onToggle} style={[styles.optionChip, active && styles.optionChipActive]}>
+      <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{label}</Text>
     </Pressable>
   );
+
+  const renderBranchCard = (branch: BranchSetupState, index: number, validation: BranchValidation) => {
+    const branchLabel = branch.branchDisplayName?.trim() || `Branch ${index + 1}`;
+    const focusFor = (field: string) => focused?.id === branch.id && focused.field === field;
+
+    return (
+      <View key={branch.id} style={[styles.reviewSectionCard, { marginTop: index === 0 ? 0 : 16 }]}>
+        <Text style={styles.heading}>{branchLabel}</Text>
+        <Text style={styles.sub}>
+          Choose the games and rough number of setups for this location. You can fine-tune later in the
+          dashboard.
+        </Text>
+
+        <View style={[styles.fieldGroup, { marginTop: 12 }]}>
+          <Text style={styles.label}>Supported games / sports</Text>
+          <View style={styles.chipRow}>
+            {renderGameChip("CS2 (PC)", branch.supportsCs2, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsCs2: !prev.supportsCs2 }))
+            )}
+            {renderGameChip("FC25 / FC26", branch.supportsFc25, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsFc25: !prev.supportsFc25 }))
+            )}
+            {renderGameChip("Tekken 8", branch.supportsTekken8, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsTekken8: !prev.supportsTekken8 }))
+            )}
+            {renderGameChip("Futsal", branch.supportsFutsal, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsFutsal: !prev.supportsFutsal }))
+            )}
+            {renderGameChip("Indoor Cricket", branch.supportsIndoorCricket, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsIndoorCricket: !prev.supportsIndoorCricket }))
+            )}
+            {renderGameChip("Padel", branch.supportsPadel, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsPadel: !prev.supportsPadel }))
+            )}
+            {renderGameChip("Pickleball", branch.supportsPickleball, () =>
+              updateBranchSetup(branch.id, (prev) => ({ ...prev, supportsPickleball: !prev.supportsPickleball }))
+            )}
+          </View>
+          {!validation.hasAnyGame && (
+            <View style={styles.helperTextRow}>
+              <Text style={[styles.helperText, styles.helperWarning]}>
+                Select at least one game or sport you host at this branch.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {branch.supportsCs2 && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Approx. CS2 / PC setups</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="computer"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.pcSectionValid && branch.pcSeats.trim().length > 0 ? COLORS.accent : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 10"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.pcSeats}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      pcSeats: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "pc" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("pc") ? 1 : 0 }]} />
+            </View>
+
+            {validation.pcError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.pcError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {(branch.supportsFc25 || branch.supportsTekken8) && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Approx. console pods</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="sports-esports"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.consoleSectionValid && branch.consoleSeats.trim().length > 0
+                      ? COLORS.accent
+                      : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 6"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.consoleSeats}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      consoleSeats: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "console" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("console") ? 1 : 0 }]} />
+            </View>
+
+            {branch.consoleSeats.trim().length > 0 && (
+              <View style={[styles.inputBox, { marginTop: 8 }]}> 
+                <View style={styles.inputRow}>
+                  <MaterialIcons
+                    name="videogame-asset"
+                    size={22}
+                    style={styles.prefixIcon}
+                    color={
+                      validation.consoleSectionValid && branch.consolePlatform.trim().length > 0
+                        ? COLORS.accent
+                        : COLORS.muted
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Picker
+                      selectedValue={branch.consolePlatform}
+                      onValueChange={(value) =>
+                        updateBranchSetup(branch.id, (prev) => ({
+                          ...prev,
+                          consolePlatform: String(value),
+                        }))
+                      }
+                      dropdownIconColor={COLORS.muted}
+                      style={{
+                        color: branch.consolePlatform.trim().length > 0 ? COLORS.text : COLORS.muted,
+                        width: "100%",
+                      }}
+                    >
+                      {CONSOLE_PLATFORM_OPTIONS.map((opt) => (
+                        <Picker.Item key={opt.value || opt.label} label={opt.label} value={opt.value} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {validation.consoleError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.consoleError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {branch.supportsFutsal && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Futsal courts</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="sports-soccer"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.futsalSectionValid && branch.futsalCourts.trim().length > 0
+                      ? COLORS.accent
+                      : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 2"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.futsalCourts}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      futsalCourts: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "futsal" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("futsal") ? 1 : 0 }]} />
+            </View>
+
+            {branch.futsalCourts.trim().length > 0 && (
+              <View style={[styles.inputBox, { marginTop: 8 }]}> 
+                <View style={styles.inputRow}>
+                  <MaterialIcons
+                    name="grass"
+                    size={22}
+                    style={styles.prefixIcon}
+                    color={
+                      validation.futsalSectionValid && branch.futsalCourtType.trim().length > 0
+                        ? COLORS.accent
+                        : COLORS.muted
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Picker
+                      selectedValue={branch.futsalCourtType}
+                      onValueChange={(value) =>
+                        updateBranchSetup(branch.id, (prev) => ({
+                          ...prev,
+                          futsalCourtType: String(value),
+                        }))
+                      }
+                      dropdownIconColor={COLORS.muted}
+                      style={{
+                        color: branch.futsalCourtType.trim().length > 0 ? COLORS.text : COLORS.muted,
+                        width: "100%",
+                      }}
+                    >
+                      {FUTSAL_COURT_TYPES.map((opt) => (
+                        <Picker.Item key={opt.value || opt.label} label={opt.label} value={opt.value} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {validation.futsalError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.futsalError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {branch.supportsIndoorCricket && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Indoor cricket nets</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="sports-cricket"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.indoorCricketSectionValid && branch.indoorCricketNets.trim().length > 0
+                      ? COLORS.accent
+                      : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 3"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.indoorCricketNets}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      indoorCricketNets: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "ic" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("ic") ? 1 : 0 }]} />
+            </View>
+
+            {branch.indoorCricketNets.trim().length > 0 && (
+              <View style={[styles.inputBox, { marginTop: 8 }]}> 
+                <View style={styles.inputRow}>
+                  <MaterialIcons
+                    name="layers"
+                    size={22}
+                    style={styles.prefixIcon}
+                    color={
+                      validation.indoorCricketSectionValid && branch.indoorCricketSurface.trim().length > 0
+                        ? COLORS.accent
+                        : COLORS.muted
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Picker
+                      selectedValue={branch.indoorCricketSurface}
+                      onValueChange={(value) =>
+                        updateBranchSetup(branch.id, (prev) => ({
+                          ...prev,
+                          indoorCricketSurface: String(value),
+                        }))
+                      }
+                      dropdownIconColor={COLORS.muted}
+                      style={{
+                        color: branch.indoorCricketSurface.trim().length > 0 ? COLORS.text : COLORS.muted,
+                        width: "100%",
+                      }}
+                    >
+                      {INDOOR_CRICKET_SURFACES.map((opt) => (
+                        <Picker.Item key={opt.value || opt.label} label={opt.label} value={opt.value} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {validation.indoorCricketError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.indoorCricketError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {branch.supportsPadel && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Padel courts</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="sports-tennis"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.padelSectionValid && branch.padelCourts.trim().length > 0
+                      ? COLORS.accent
+                      : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 2"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.padelCourts}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      padelCourts: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "padel" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("padel") ? 1 : 0 }]} />
+            </View>
+
+            {branch.padelCourts.trim().length > 0 && (
+              <View style={[styles.inputBox, { marginTop: 8 }]}> 
+                <View style={styles.inputRow}>
+                  <MaterialIcons
+                    name="layers"
+                    size={22}
+                    style={styles.prefixIcon}
+                    color={
+                      validation.padelSectionValid && branch.padelCourtSurface.trim().length > 0
+                        ? COLORS.accent
+                        : COLORS.muted
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Picker
+                      selectedValue={branch.padelCourtSurface}
+                      onValueChange={(value) =>
+                        updateBranchSetup(branch.id, (prev) => ({
+                          ...prev,
+                          padelCourtSurface: String(value),
+                        }))
+                      }
+                      dropdownIconColor={COLORS.muted}
+                      style={{
+                        color: branch.padelCourtSurface.trim().length > 0 ? COLORS.text : COLORS.muted,
+                        width: "100%",
+                      }}
+                    >
+                      {PADEL_SURFACES.map((opt) => (
+                        <Picker.Item key={opt.value || opt.label} label={opt.label} value={opt.value} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {validation.padelError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.padelError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {branch.supportsPickleball && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Pickleball courts</Text>
+            <View style={styles.inputBox}>
+              <View className="row" style={styles.inputRow}>
+                <MaterialIcons
+                  name="sports"
+                  size={22}
+                  style={styles.prefixIcon}
+                  color={
+                    validation.pickleballSectionValid && branch.pickleballCourts.trim().length > 0
+                      ? COLORS.accent
+                      : COLORS.muted
+                  }
+                />
+                <TextInput
+                  placeholder="e.g. 4"
+                  placeholderTextColor={COLORS.muted}
+                  style={styles.input}
+                  selectionColor={COLORS.accent}
+                  keyboardType="numeric"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={branch.pickleballCourts}
+                  onChangeText={(text) =>
+                    updateBranchSetup(branch.id, (prev) => ({
+                      ...prev,
+                      pickleballCourts: text,
+                    }))
+                  }
+                  onFocus={() => setFocused({ id: branch.id, field: "pickle" })}
+                  onBlur={() => setFocused(null)}
+                />
+              </View>
+              <View style={[styles.focusBar, { opacity: focusFor("pickle") ? 1 : 0 }]} />
+            </View>
+
+            {branch.pickleballCourts.trim().length > 0 && (
+              <View style={[styles.inputBox, { marginTop: 8 }]}> 
+                <View style={styles.inputRow}>
+                  <MaterialIcons
+                    name="layers"
+                    size={22}
+                    style={styles.prefixIcon}
+                    color={
+                      validation.pickleballSectionValid && branch.pickleballSurface.trim().length > 0
+                        ? COLORS.accent
+                        : COLORS.muted
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Picker
+                      selectedValue={branch.pickleballSurface}
+                      onValueChange={(value) =>
+                        updateBranchSetup(branch.id, (prev) => ({
+                          ...prev,
+                          pickleballSurface: String(value),
+                        }))
+                      }
+                      dropdownIconColor={COLORS.muted}
+                      style={{
+                        color: branch.pickleballSurface.trim().length > 0 ? COLORS.text : COLORS.muted,
+                        width: "100%",
+                      }}
+                    >
+                      {PICKLEBALL_SURFACES.map((opt) => (
+                        <Picker.Item key={opt.value || opt.label} label={opt.label} value={opt.value} />
+                      ))}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {validation.pickleballError ? (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>{validation.pickleballError}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const branchCount = branchSetups.length;
+  const isSubmitDisabled = branchValidations.some((v) => !v.isFormValid);
 
   return (
     <Container {...containerProps}>
@@ -502,596 +972,67 @@ export default function ZoneRegisterStep3() {
           <View style={styles.stepperTopRow}>
             <View>
               <Text style={styles.stepperTitle}>Games & setups</Text>
-              <Text style={styles.stepperSubtitle}>
-                Step 3 of 4 · What can players book here?
-              </Text>
+              <Text style={styles.stepperSubtitle}>Step 3 of 4 · What can players book at each branch?</Text>
             </View>
           </View>
           <View style={styles.stepperBar}>
             <View style={[styles.stepperBarFill, { width: "75%" }]} />
           </View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={styles.stepperDot} />
-          </View>
+        <View style={styles.stepperDotsRow}>
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={styles.stepperDot} />
         </View>
+      </View>
 
-        {/* Headings */}
-        <Text style={styles.heading}>What do you host at this branch?</Text>
-        <Text style={styles.sub}>
-          Choose the games and rough number of setups. You can fine-tune this
-          later in the zone dashboard.
-        </Text>
-
-        {/* Game options (chips bound to flags) */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Supported games / sports</Text>
-          <View style={styles.chipRow}>
-            {renderGameChip("CS2 (PC)", supportsCs2, () =>
-              setSupportsCs2((v) => !v)
-            )}
-            {renderGameChip("FC25 / FC26", supportsFc25, () =>
-              setSupportsFc25((v) => !v)
-            )}
-            {renderGameChip("Tekken 8", supportsTekken8, () =>
-              setSupportsTekken8((v) => !v)
-            )}
-            {renderGameChip("Futsal", supportsFutsal, () =>
-              setSupportsFutsal((v) => !v)
-            )}
-            {renderGameChip(
-              "Indoor Cricket",
-              supportsIndoorCricket,
-              () => setSupportsIndoorCricket((v) => !v)
-            )}
-            {renderGameChip("Padel", supportsPadel, () =>
-              setSupportsPadel((v) => !v)
-            )}
-            {renderGameChip("Pickleball", supportsPickleball, () =>
-              setSupportsPickleball((v) => !v)
-            )}
-          </View>
-          {!hasAnyGame && (
-            <View style={styles.helperTextRow}>
-              <Text style={[styles.helperText, styles.helperWarning]}>
-                Select at least one game or sport you host.
-              </Text>
-            </View>
-          )}
+      {branchCount > 1 && (
+        <View style={styles.helperTextRow}>
+          <Text style={[styles.helperText, { color: COLORS.muted }]}>
+            These settings apply to all branches for now. You can customize per-branch inventory after
+            onboarding.
+          </Text>
         </View>
+      )}
 
-        {/* PC setups – only if CS2 selected */}
-        {supportsCs2 && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Approx. CS2 / PC setups</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="computer"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    pcSectionValid && pcSeats.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 10"
-                  placeholderTextColor={COLORS.muted}
-                  style={styles.input}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={pcSeats}
-                  onChangeText={setPcSeats}
-                  onFocus={() => setPcFocused(true)}
-                  onBlur={() => setPcFocused(false)}
-                />
-              </View>
-              <View
-                style={[styles.focusBar, { opacity: pcFocused ? 1 : 0 }]}
-              />
-            </View>
-            {pcError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {pcError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
+      {branchSetups.map((branch, idx) => renderBranchCard(branch, idx, branchValidations[idx]))}
 
-        {/* Console setups – only if FC / Tekken selected */}
-        {(supportsFc25 || supportsTekken8) && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Approx. console setups</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="sports-esports"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    consoleSectionValid && consoleSeats.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 4 (Tekken / FC pods)"
-                  placeholderTextColor={COLORS.muted}
-                  style={[styles.input, { flex: 1 }]}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={consoleSeats}
-                  onChangeText={setConsoleSeats}
-                  onFocus={() => setConsoleFocused(true)}
-                  onBlur={() => setConsoleFocused(false)}
-                />
-              </View>
-              <View
-                style={[
-                  styles.focusBar,
-                  { opacity: consoleFocused ? 1 : 0 },
-                ]}
-              />
-            </View>
-
-            {/* Console platform picker */}
-            {consoleSeats.trim().length > 0 && (
-              <View style={[styles.inputBox, { marginTop: 8 }]}>
-                <View style={styles.inputRow}>
-                  <MaterialIcons
-                    name="videogame-asset"
-                    size={22}
-                    style={styles.prefixIcon}
-                    color={
-                      consoleSectionValid && consolePlatform.trim().length > 0
-                        ? COLORS.accent
-                        : COLORS.muted
-                    }
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Picker
-                      selectedValue={consolePlatform}
-                      onValueChange={(value) => setConsolePlatform(value)}
-                      dropdownIconColor={COLORS.muted}
-                      style={{
-                        color:
-                          consolePlatform.trim().length > 0
-                            ? COLORS.text
-                            : COLORS.muted,
-                        width: "100%",
-                      }}
-                    >
-                      {CONSOLE_PLATFORM_OPTIONS.map((opt) => (
-                        <Picker.Item
-                          key={opt.value || opt.label}
-                          label={opt.label}
-                          value={opt.value}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {consoleError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {consoleError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {/* Futsal courts */}
-        {supportsFutsal && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Futsal courts</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="sports-soccer"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    futsalSectionValid && futsalCourts.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 1"
-                  placeholderTextColor={COLORS.muted}
-                  style={styles.input}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={futsalCourts}
-                  onChangeText={setFutsalCourts}
-                  onFocus={() => setFutsalFocused(true)}
-                  onBlur={() => setFutsalFocused(false)}
-                />
-              </View>
-              <View
-                style={[styles.focusBar, { opacity: futsalFocused ? 1 : 0 }]}
-              />
-            </View>
-
-            {futsalCourts.trim().length > 0 && (
-              <View style={[styles.inputBox, { marginTop: 8 }]}>
-                <View style={styles.inputRow}>
-                  <MaterialIcons
-                    name="layers"
-                    size={22}
-                    style={styles.prefixIcon}
-                    color={
-                      futsalSectionValid && futsalCourtType.trim().length > 0
-                        ? COLORS.accent
-                        : COLORS.muted
-                    }
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Picker
-                      selectedValue={futsalCourtType}
-                      onValueChange={(value) => setFutsalCourtType(value)}
-                      dropdownIconColor={COLORS.muted}
-                      style={{
-                        color:
-                          futsalCourtType.trim().length > 0
-                            ? COLORS.text
-                            : COLORS.muted,
-                        width: "100%",
-                      }}
-                    >
-                      {FUTSAL_COURT_TYPES.map((opt) => (
-                        <Picker.Item
-                          key={opt.value || opt.label}
-                          label={opt.label}
-                          value={opt.value}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {futsalError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {futsalError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {/* Indoor cricket */}
-        {supportsIndoorCricket && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Indoor cricket nets</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="sports-cricket"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    indoorCricketSectionValid &&
-                    indoorCricketNets.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 2"
-                  placeholderTextColor={COLORS.muted}
-                  style={styles.input}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={indoorCricketNets}
-                  onChangeText={setIndoorCricketNets}
-                  onFocus={() => setIndoorCricketFocused(true)}
-                  onBlur={() => setIndoorCricketFocused(false)}
-                />
-              </View>
-              <View
-                style={[
-                  styles.focusBar,
-                  { opacity: indoorCricketFocused ? 1 : 0 },
-                ]}
-              />
-            </View>
-
-            {indoorCricketNets.trim().length > 0 && (
-              <View style={[styles.inputBox, { marginTop: 8 }]}>
-                <View style={styles.inputRow}>
-                  <MaterialIcons
-                    name="layers"
-                    size={22}
-                    style={styles.prefixIcon}
-                    color={
-                      indoorCricketSectionValid &&
-                      indoorCricketSurface.trim().length > 0
-                        ? COLORS.accent
-                        : COLORS.muted
-                    }
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Picker
-                      selectedValue={indoorCricketSurface}
-                      onValueChange={(value) => setIndoorCricketSurface(value)}
-                      dropdownIconColor={COLORS.muted}
-                      style={{
-                        color:
-                          indoorCricketSurface.trim().length > 0
-                            ? COLORS.text
-                            : COLORS.muted,
-                        width: "100%",
-                      }}
-                    >
-                      {INDOOR_CRICKET_SURFACES.map((opt) => (
-                        <Picker.Item
-                          key={opt.value || opt.label}
-                          label={opt.label}
-                          value={opt.value}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {indoorCricketError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {indoorCricketError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {/* Padel */}
-        {supportsPadel && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Padel courts</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="sports-tennis"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    padelSectionValid && padelCourts.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 2"
-                  placeholderTextColor={COLORS.muted}
-                  style={styles.input}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={padelCourts}
-                  onChangeText={setPadelCourts}
-                  onFocus={() => setPadelFocused(true)}
-                  onBlur={() => setPadelFocused(false)}
-                />
-              </View>
-              <View
-                style={[styles.focusBar, { opacity: padelFocused ? 1 : 0 }]}
-              />
-            </View>
-
-            {padelCourts.trim().length > 0 && (
-              <View style={[styles.inputBox, { marginTop: 8 }]}>
-                <View style={styles.inputRow}>
-                  <MaterialIcons
-                    name="layers"
-                    size={22}
-                    style={styles.prefixIcon}
-                    color={
-                      padelSectionValid &&
-                      padelCourtSurface.trim().length > 0
-                        ? COLORS.accent
-                        : COLORS.muted
-                    }
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Picker
-                      selectedValue={padelCourtSurface}
-                      onValueChange={(value) => setPadelCourtSurface(value)}
-                      dropdownIconColor={COLORS.muted}
-                      style={{
-                        color:
-                          padelCourtSurface.trim().length > 0
-                            ? COLORS.text
-                            : COLORS.muted,
-                        width: "100%",
-                      }}
-                    >
-                      {PADEL_SURFACES.map((opt) => (
-                        <Picker.Item
-                          key={opt.value || opt.label}
-                          label={opt.label}
-                          value={opt.value}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {padelError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {padelError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {/* Pickleball */}
-        {supportsPickleball && (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Pickleball courts</Text>
-            <View style={styles.inputBox}>
-              <View className="row" style={styles.inputRow}>
-                <MaterialIcons
-                  name="sports-tennis"
-                  size={22}
-                  style={styles.prefixIcon}
-                  color={
-                    pickleballSectionValid &&
-                    pickleballCourts.trim().length > 0
-                      ? COLORS.accent
-                      : COLORS.muted
-                  }
-                />
-                <TextInput
-                  placeholder="e.g. 2"
-                  placeholderTextColor={COLORS.muted}
-                  style={styles.input}
-                  selectionColor={COLORS.accent}
-                  keyboardType="numeric"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={pickleballCourts}
-                  onChangeText={setPickleballCourts}
-                  onFocus={() => setPickleballFocused(true)}
-                  onBlur={() => setPickleballFocused(false)}
-                />
-              </View>
-              <View
-                style={[
-                  styles.focusBar,
-                  { opacity: pickleballFocused ? 1 : 0 },
-                ]}
-              />
-            </View>
-
-            {pickleballCourts.trim().length > 0 && (
-              <View style={[styles.inputBox, { marginTop: 8 }]}>
-                <View style={styles.inputRow}>
-                  <MaterialIcons
-                    name="layers"
-                    size={22}
-                    style={styles.prefixIcon}
-                    color={
-                      pickleballSectionValid &&
-                      pickleballSurface.trim().length > 0
-                        ? COLORS.accent
-                        : COLORS.muted
-                    }
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Picker
-                      selectedValue={pickleballSurface}
-                      onValueChange={(value) => setPickleballSurface(value)}
-                      dropdownIconColor={COLORS.muted}
-                      style={{
-                        color:
-                          pickleballSurface.trim().length > 0
-                            ? COLORS.text
-                            : COLORS.muted,
-                        width: "100%",
-                      }}
-                    >
-                      {PICKLEBALL_SURFACES.map((opt) => (
-                        <Picker.Item
-                          key={opt.value || opt.label}
-                          label={opt.label}
-                          value={opt.value}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {pickleballError ? (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  {pickleballError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {/* Global capacity warning */}
-        {!hasAnyCapacity && hasAnyGame && (
-          <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>
-              Add at least one PC, console, or court so we know this branch
-              can host bookings.
-            </Text>
-          </View>
-        )}
-
-        {/* Extra notes */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Optional notes for players</Text>
+        <View style={[styles.fieldGroup, { marginTop: 16 }]}>
+          <Text style={styles.label}>Notes for the MatchHai team (optional)</Text>
           <View style={styles.inputBox}>
             <View style={styles.inputRow}>
               <MaterialIcons
-                name="info"
+                name="sticky-note-2"
                 size={22}
                 style={styles.prefixIcon}
                 color={notes.trim().length > 0 ? COLORS.accent : COLORS.muted}
               />
               <TextInput
-                placeholder="House rules, parking info, smoking area, etc."
+                placeholder="Any special setups, timings, or hosting notes for all branches"
                 placeholderTextColor={COLORS.muted}
-                style={[styles.input, { minHeight: 60 }]}
+                style={[styles.input, { height: 80, textAlignVertical: "top" }]}
                 selectionColor={COLORS.accent}
-                autoCapitalize="sentences"
-                autoCorrect={false}
+                multiline
                 value={notes}
                 onChangeText={setNotes}
-                onFocus={() => setNotesFocused(true)}
-                onBlur={() => setNotesFocused(false)}
-                multiline
+                onFocus={() => setFocused({ id: "notes", field: "notes" })}
+                onBlur={() => setFocused(null)}
               />
             </View>
-            <View
-              style={[styles.focusBar, { opacity: notesFocused ? 1 : 0 }]}
-            />
+            <View style={[styles.focusBar, { opacity: focused?.id === "notes" ? 1 : 0 }]} />
           </View>
         </View>
 
-        {/* Back to Step 2 */}
+        {/* Back to step 2 */}
         <Pressable onPress={handleBack} style={styles.backLinkWrapper}>
-          <Text style={styles.backLinkText}>← Back to branch & location</Text>
+          <Text style={styles.backLinkText}>← Back to branch details</Text>
         </Pressable>
 
         {/* Continue button */}
         <View
           style={[
             styles.buttonShadowWrapper,
-            isFormValid && styles.buttonShadowWrapperActive,
+            !isSubmitDisabled && styles.buttonShadowWrapperActive,
           ]}
         >
           <Pressable
@@ -1099,7 +1040,7 @@ export default function ZoneRegisterStep3() {
             disabled={isSubmitDisabled}
             style={({ pressed }) => [
               styles.primaryBtn,
-              isSubmitDisabled && styles.primaryBtnDisabled,
+              isSubmitDisabled ? styles.primaryBtnDisabled : null,
               pressed && !isSubmitDisabled && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.08)" }}
@@ -1108,13 +1049,15 @@ export default function ZoneRegisterStep3() {
           </Pressable>
         </View>
 
-        {/* Safety link to login */}
-        <Text style={styles.bottomText}>
-          Already manage a zone?{" "}
-          <Link href="/auth/login" style={{ color: COLORS.accent }}>
-            Sign in
+        {/* Footer / login link */}
+        <View style={{ alignItems: "center" }}>
+          <Text style={styles.bottomText}>Already onboarded?</Text>
+          <Link href="/auth/login" asChild>
+            <Pressable>
+              <Text style={styles.backLinkText}>Sign in instead</Text>
+            </Pressable>
           </Link>
-        </Text>
+        </View>
       </ScrollView>
     </Container>
   );
