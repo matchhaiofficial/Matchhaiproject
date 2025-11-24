@@ -66,7 +66,7 @@ export default function Home() {
         <Text style={styles.sub}>Welcome to MatchHai v0.</Text>
         <Text style={styles.sub}>Next: Matchrooms, zones, and court bookings.</Text>
         <Pressable
-          onPress={() => router.push('/matchrooms/request-slot')}
+          onPress={() => router.push('/matchrooms/create-flow')}
           style={({ pressed }) => [
             {
               backgroundColor: COLORS.accent,
@@ -80,7 +80,27 @@ export default function Home() {
           ]}
         >
           <Text style={{ color: COLORS.text, fontFamily: 'Montserrat_700Bold' }}>
-            Request a slot (beta)
+            Create a matchroom
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/matchrooms/request-slot')}
+          style={({ pressed }) => [
+            {
+              backgroundColor: COLORS.surface,
+              borderRadius: 12,
+              paddingVertical: 12,
+              paddingHorizontal: 14,
+              marginTop: 10,
+              alignItems: 'center',
+              borderWidth: 1,
+              borderColor: COLORS.inputBorder,
+            },
+            pressed && { opacity: 0.92 },
+          ]}
+        >
+          <Text style={{ color: COLORS.text, fontFamily: 'Montserrat_700Bold' }}>
+            Request a slot (broadcast)
           </Text>
         </Pressable>
       </View>
