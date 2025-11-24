@@ -17,6 +17,7 @@ import { useToast } from "../../src/hooks/useToast";
 import { signUpWithEmail } from "../../src/services/authService";
 import { saveZoneRegistration } from "../../src/services/zoneService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
+import type { ZoneBranchSetup } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
@@ -29,57 +30,112 @@ export default function ZoneRegisterStep4() {
 
   // ---- Derived helpers ----
 
-  const gamesSummary = useMemo(() => {
-    const games: string[] = [];
-    if (step3.supportsCs2) games.push("CS2 (PC)");
-    if (step3.supportsFc25) games.push("FC25 / FC26");
-    if (step3.supportsTekken8) games.push("Tekken 8");
-    if (step3.supportsFutsal) games.push("Futsal");
-    if (step3.supportsIndoorCricket) games.push("Indoor Cricket");
-    if (step3.supportsPadel) games.push("Padel");
-    if (step3.supportsPickleball) games.push("Pickleball");
-    return games;
-  }, [step3]);
-
-  const capacityLines = useMemo(() => {
-    const lines: string[] = [];
-
-    if (step3.pcSeats?.trim()) {
-      lines.push(`PC setups: ${step3.pcSeats.trim()}`);
-    }
-    if (step3.consoleSeats?.trim()) {
-      const label = step3.consolePlatform
-        ? `Console pods: ${step3.consoleSeats.trim()} (${step3.consolePlatform})`
-        : `Console pods: ${step3.consoleSeats.trim()}`;
-      lines.push(label);
-    }
-    if (step3.futsalCourts?.trim()) {
-      const label = step3.futsalCourtType
-        ? `Futsal courts: ${step3.futsalCourts.trim()} (${step3.futsalCourtType})`
-        : `Futsal courts: ${step3.futsalCourts.trim()}`;
-      lines.push(label);
-    }
-    if (step3.indoorCricketNets?.trim()) {
-      const label = step3.indoorCricketSurface
-        ? `Indoor cricket nets: ${step3.indoorCricketNets.trim()} (${step3.indoorCricketSurface})`
-        : `Indoor cricket nets: ${step3.indoorCricketNets.trim()}`;
-      lines.push(label);
-    }
-    if (step3.padelCourts?.trim()) {
-      const label = step3.padelCourtSurface
-        ? `Padel courts: ${step3.padelCourts.trim()} (${step3.padelCourtSurface})`
-        : `Padel courts: ${step3.padelCourts.trim()}`;
-      lines.push(label);
-    }
-    if (step3.pickleballCourts?.trim()) {
-      const label = step3.pickleballSurface
-        ? `Pickleball courts: ${step3.pickleballCourts.trim()} (${step3.pickleballSurface})`
-        : `Pickleball courts: ${step3.pickleballCourts.trim()}`;
-      lines.push(label);
+  const branchLocations = useMemo(() => {
+    if (step2.branches && step2.branches.length > 0) {
+      return step2.branches;
     }
 
-    return lines;
-  }, [step3]);
+    return [
+      {
+        branchDisplayName: step2.branchDisplayName || "",
+        city: step2.city || "",
+        areaLabel: step2.areaLabel || "",
+        addressLine1: step2.addressLine1 || "",
+        googleMapsUrl: step2.googleMapsUrl || "",
+      },
+    ];
+  }, [step2]);
+
+  const branchSummaries = useMemo(() => {
+    const defaultSetup: ZoneBranchSetup = {
+      branchDisplayName: "",
+      supportsCs2: false,
+      supportsFc25: false,
+      supportsTekken8: false,
+      supportsFutsal: false,
+      supportsIndoorCricket: false,
+      supportsPadel: false,
+      supportsPickleball: false,
+      pcSeats: "",
+      consoleSeats: "",
+      consolePlatform: "",
+      futsalCourts: "",
+      futsalCourtType: "",
+      indoorCricketNets: "",
+      indoorCricketSurface: "",
+      padelCourts: "",
+      padelCourtSurface: "",
+      pickleballCourts: "",
+      pickleballSurface: "",
+    };
+
+    const setupList =
+      step3.branchSetups && step3.branchSetups.length > 0
+        ? step3.branchSetups
+        : branchLocations.map(() => defaultSetup);
+
+    const gamesSummary = (setup: typeof defaultSetup) => {
+      const games: string[] = [];
+      if (setup.supportsCs2) games.push("CS2 (PC)");
+      if (setup.supportsFc25) games.push("FC25 / FC26");
+      if (setup.supportsTekken8) games.push("Tekken 8");
+      if (setup.supportsFutsal) games.push("Futsal");
+      if (setup.supportsIndoorCricket) games.push("Indoor Cricket");
+      if (setup.supportsPadel) games.push("Padel");
+      if (setup.supportsPickleball) games.push("Pickleball");
+      return games;
+    };
+
+    const capacityLines = (setup: typeof defaultSetup) => {
+      const lines: string[] = [];
+
+      if (setup.pcSeats?.trim()) {
+        lines.push(`PC setups: ${setup.pcSeats.trim()}`);
+      }
+      if (setup.consoleSeats?.trim()) {
+        const label = setup.consolePlatform
+          ? `Console pods: ${setup.consoleSeats.trim()} (${setup.consolePlatform})`
+          : `Console pods: ${setup.consoleSeats.trim()}`;
+        lines.push(label);
+      }
+      if (setup.futsalCourts?.trim()) {
+        const label = setup.futsalCourtType
+          ? `Futsal courts: ${setup.futsalCourts.trim()} (${setup.futsalCourtType})`
+          : `Futsal courts: ${setup.futsalCourts.trim()}`;
+        lines.push(label);
+      }
+      if (setup.indoorCricketNets?.trim()) {
+        const label = setup.indoorCricketSurface
+          ? `Indoor cricket nets: ${setup.indoorCricketNets.trim()} (${setup.indoorCricketSurface})`
+          : `Indoor cricket nets: ${setup.indoorCricketNets.trim()}`;
+        lines.push(label);
+      }
+      if (setup.padelCourts?.trim()) {
+        const label = setup.padelCourtSurface
+          ? `Padel courts: ${setup.padelCourts.trim()} (${setup.padelCourtSurface})`
+          : `Padel courts: ${setup.padelCourts.trim()}`;
+        lines.push(label);
+      }
+      if (setup.pickleballCourts?.trim()) {
+        const label = setup.pickleballSurface
+          ? `Pickleball courts: ${setup.pickleballCourts.trim()} (${setup.pickleballSurface})`
+          : `Pickleball courts: ${setup.pickleballCourts.trim()}`;
+        lines.push(label);
+      }
+
+      return lines;
+    };
+
+    return branchLocations.map((branch, idx) => {
+      const setup = setupList[idx] || setupList[0] || defaultSetup;
+      return {
+        branchName: branch.branchDisplayName || `Branch ${idx + 1}`,
+        location: branch,
+        games: gamesSummary(setup),
+        capacity: capacityLines(setup),
+      };
+    });
+  }, [branchLocations, step3]);
 
   const allAgreementsChecked = step4.agreeTerms && step4.agreeRevenueShare;
 
@@ -176,7 +232,7 @@ export default function ZoneRegisterStep4() {
         type: "success",
         title: "Zone submitted",
         message:
-          "Your zone and primary branch are submitted for review. We’ll get back to you soon.",
+          "Your zone and branches are submitted for review. We’ll get back to you soon.",
       });
 
       router.replace("/home");
@@ -302,7 +358,7 @@ export default function ZoneRegisterStep4() {
           </View>
         </View>
 
-        {/* Primary branch & location review */}
+        {/* Branches & location review */}
         <View style={styles.reviewSectionCard}>
           <View style={styles.reviewSectionHeaderRow}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -313,7 +369,7 @@ export default function ZoneRegisterStep4() {
                 style={{ marginRight: 6 }}
               />
               <Text style={styles.reviewSectionTitle}>
-                Primary branch & location
+                Branches & locations
               </Text>
             </View>
             <Pressable
@@ -323,70 +379,69 @@ export default function ZoneRegisterStep4() {
             </Pressable>
           </View>
 
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Branch name</Text>
-            <Text
+          {branchSummaries.map((branch, idx) => (
+            <View
+              key={`${branch.branchName}-${idx}`}
               style={[
-                styles.reviewValue,
-                !step2.branchDisplayName && styles.reviewValueMuted,
+                styles.reviewRow,
+                {
+                  alignItems: "flex-start",
+                  paddingVertical: 10,
+                  borderTopWidth: idx === 0 ? 0 : 1,
+                  borderTopColor: COLORS.divider,
+                },
               ]}
-              numberOfLines={1}
             >
-              {step2.branchDisplayName || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>City</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.city && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.city || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Area / neighbourhood</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.areaLabel && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.areaLabel || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Address</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.addressLine1 && styles.reviewValueMuted,
-              ]}
-              numberOfLines={2}
-            >
-              {step2.addressLine1 || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Google Maps link</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.googleMapsUrl && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.googleMapsUrl || "Not added"}
-            </Text>
-          </View>
+              <Text style={styles.reviewLabel}>{branch.branchName}</Text>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text
+                  style={[
+                    styles.reviewValue,
+                    !branch.location.branchDisplayName && styles.reviewValueMuted,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {branch.location.branchDisplayName || "Branch name not set"}
+                </Text>
+                <Text
+                  style={[
+                    styles.reviewValue,
+                    !branch.location.city && styles.reviewValueMuted,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {branch.location.city || "City not set"}
+                </Text>
+                <Text
+                  style={[
+                    styles.reviewValue,
+                    !branch.location.areaLabel && styles.reviewValueMuted,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {branch.location.areaLabel || "Area not set"}
+                </Text>
+                <Text
+                  style={[
+                    styles.reviewValue,
+                    !branch.location.addressLine1 && styles.reviewValueMuted,
+                  ]}
+                  numberOfLines={2}
+                >
+                  {branch.location.addressLine1 || "Address not set"}
+                </Text>
+                <Text
+                  style={[
+                    styles.reviewValue,
+                    !branch.location.googleMapsUrl && styles.reviewValueMuted,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {branch.location.googleMapsUrl || "Maps link not added"}
+                </Text>
+              </View>
+            </View>
+          ))}
         </View>
 
         {/* Games, courts & setups review */}
@@ -410,49 +465,57 @@ export default function ZoneRegisterStep4() {
             </Pressable>
           </View>
 
-          {/* Games / sports chips */}
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Games & sports</Text>
-            {gamesSummary.length ? (
+          {branchSummaries.map((branch, idx) => (
+            <View
+              key={`${branch.branchName}-games-${idx}`}
+              style={[
+                styles.reviewRow,
+                {
+                  alignItems: "flex-start",
+                  paddingVertical: 10,
+                  borderTopWidth: idx === 0 ? 0 : 1,
+                  borderTopColor: COLORS.divider,
+                },
+              ]}
+            >
+              <Text style={styles.reviewLabel}>{branch.branchName}</Text>
               <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <View style={styles.chipRow}>
-                  {gamesSummary.map((g) => (
-                    <View key={g} style={styles.summaryChip}>
-                      <Text style={styles.summaryChipText}>{g}</Text>
-                    </View>
-                  ))}
+                {branch.games.length ? (
+                  <View style={styles.chipRow}>
+                    {branch.games.map((g) => (
+                      <View key={g} style={styles.summaryChip}>
+                        <Text style={styles.summaryChipText}>{g}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
+                    No games added
+                  </Text>
+                )}
+
+                <View style={{ marginTop: branch.games.length ? 8 : 4 }}>
+                  {branch.capacity.length ? (
+                    branch.capacity.map((line) => (
+                      <Text
+                        key={line}
+                        style={[styles.reviewValue, { textAlign: "right" }]} // ✅ allow wrapping, right-aligned
+                      >
+                        {line}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
+                      No capacity details added yet
+                    </Text>
+                  )}
                 </View>
               </View>
-            ) : (
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                None selected
-              </Text>
-            )}
-          </View>
-
-          {/* Capacity details */}
-          <View style={[styles.reviewRow, { alignItems: "flex-start" }]}>
-            <Text style={styles.reviewLabel}>Setups & courts</Text>
-            {capacityLines.length ? (
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                {capacityLines.map((line) => (
-                  <Text
-                    key={line}
-                    style={[styles.reviewValue, { textAlign: "right" }]} // ✅ allow wrapping, right-aligned
-                  >
-                    {line}
-                  </Text>
-                ))}
-              </View>
-            ) : (
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                No capacity details added yet
-              </Text>
-            )}
-          </View>
+            </View>
+          ))}
 
           {/* Optional notes */}
-          <View style={[styles.reviewRow, { alignItems: "flex-start" }]}>
+          <View style={[styles.reviewRow, { alignItems: "flex-start" }]}> 
             <Text style={styles.reviewLabel}>Zone notes</Text>
             <Text
               style={[
