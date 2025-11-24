@@ -113,13 +113,27 @@ export default function Login() {
 
   const { showToast } = useToast();
 
+  // NEW: user type (player vs zone admin)
+  const [userType, setUserType] = useState<"player" | "zone">("player");
+
+  // DEBUG: log mount and userType changes
+  useEffect(() => {
+    console.log("[Login] screen mounted");
+  }, []);
+
+  useEffect(() => {
+    console.log("[Login] userType changed →", userType);
+  }, [userType]);
+
   // Lockout countdown (7)
   useEffect(() => {
     if (lockoutSecondsLeft <= 0) return;
+    console.log("[Login] lockout started, seconds left:", lockoutSecondsLeft);
     const timer = setInterval(() => {
       setLockoutSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
+          console.log("[Login] lockout finished");
           return 0;
         }
         return prev - 1;
@@ -169,7 +183,8 @@ export default function Login() {
     const emailValid = emailErr === "";
 
     // Email domain typo / unusual warning (4)
-    if (trimmed && emailValidFormat) {
+    // Only show for PLAYERS; Zone Admins can use custom business domains
+    if (trimmed && emailValidFormat && userType === "player") {
       const parts = trimmed.split("@");
       if (parts.length === 2) {
         const domain = parts[1].toLowerCase();
@@ -202,21 +217,9 @@ export default function Login() {
     let passErr = "";
     if (!password) {
       passErr = "Password is required.";
-    } else if (allSameChar) {
-      passErr = "Password should not be all the same character.";
-    } else if (isCommonWeak) {
-      passErr = "This password is too common. Please choose a stronger one.";
     }
 
-    const passwordValid =
-      !!password &&
-      hasMinLength &&
-      hasUppercase &&
-      hasLowercase &&
-      hasNumeric &&
-      hasSpecialChar &&
-      !allSameChar &&
-      !isCommonWeak;
+    const passwordValid = !!password; // just non-empty for login
 
     // (1) Strength meter
     const components = [
@@ -225,6 +228,7 @@ export default function Login() {
       hasLowercase,
       hasNumeric,
       hasSpecialChar,
+      !allSameChar && !isCommonWeak,
     ].filter(Boolean).length;
 
     let strengthLabelLocal = "";
@@ -232,7 +236,7 @@ export default function Login() {
     let strengthPercentLocal = 0;
 
     if (password) {
-      strengthPercentLocal = Math.min(100, components * 20);
+      strengthPercentLocal = Math.min(100, components * 16.6);
       if (components <= 2) {
         strengthLabelLocal = "Weak";
         strengthColorLocal = "#e57373";
@@ -278,7 +282,7 @@ export default function Login() {
       strengthColor: strengthColorLocal,
       capsLockLikely: capsLikely,
     };
-  }, [emailOrPhone, password]);
+  }, [emailOrPhone, password, userType]);
 
   const isLockedOut = lockoutSecondsLeft > 0;
   const emailErrorToShow =
@@ -296,7 +300,10 @@ export default function Login() {
       : { style: styles.screen };
 
   const handleLogin = async () => {
+    console.log("[Login] handleLogin called, userType=", userType);
+
     if (isLockedOut) {
+      console.log("[Login] blocked by lockout");
       showToast({
         type: "warning",
         title: "Too many attempts",
@@ -305,14 +312,18 @@ export default function Login() {
       return;
     }
 
-    if (!isFormValid) {
+    if (!isEmailValid || !password) {
+      console.log("[Login] invalid form", {
+        isEmailValid,
+        hasPassword: !!password,
+      });
       setEmailTouched(true);
       setPasswordTouched(true);
 
       showToast({
         type: "info",
         title: "Check details",
-        message: "Please enter a valid email/phone and a strong password.",
+        message: "Please enter a valid email/phone and your password.",
       });
       return;
     }
@@ -320,17 +331,17 @@ export default function Login() {
     try {
       setLoading(true);
       setEmailServerError("");
+      console.log("[Login] calling signInWithEmail", { emailOrPhone });
 
-      const res = await signInWithEmail(emailOrPhone, password);
+      const res = await signInWithEmail(emailOrPhone, password /*, userType */);
       setLoading(false);
 
       if (!res.ok) {
-        // increment and check if we've hit the 5th attempt
+        console.log("[Login] signInWithEmail FAILED", res);
         const nextAttempts = failedAttempts + 1;
         if (nextAttempts >= MAX_ATTEMPTS) {
-          // start lockout
           setLockoutSecondsLeft(LOCKOUT_SECONDS);
-          setFailedAttempts(0); // reset counter internally
+          setFailedAttempts(0);
 
           showToast({
             type: "warning",
@@ -357,6 +368,8 @@ export default function Login() {
           } else {
             setEmailServerError("Enter a valid email address.");
           }
+        } else if (res.code === "auth/wrong-password") {
+          setEmailServerError("Incorrect password. Please try again.");
         } else {
           setEmailServerError(res.message || "Sign in failed.");
         }
@@ -369,19 +382,24 @@ export default function Login() {
         return;
       }
 
-      // success → reset brute-force state
+      console.log("[Login] signInWithEmail OK, navigating, userType=", userType);
+
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
 
-      // Optional: subtle success toast
       showToast({
         type: "success",
         title: "Welcome back",
-        message: "You’re now signed in.",
+        message:
+          userType === "zone"
+            ? "Signed in as Zone Admin."
+            : "You’re now signed in.",
       });
 
+      // For now, both go to /home; later you can add /zone/home
       router.replace("/home");
     } catch (e) {
+      console.error("[Login] signInWithEmail threw error", e);
       setLoading(false);
       showToast({
         type: "error",
@@ -392,6 +410,7 @@ export default function Login() {
   };
 
   const handleForgotPassword = () => {
+    console.log("[Login] Forgot Password pressed");
     router.push("/auth/forgot-password");
   };
 
@@ -422,7 +441,18 @@ export default function Login() {
     </View>
   );
 
-  const isSubmitDisabled = loading || !isFormValid || isLockedOut;
+  const isSubmitDisabled = loading || !isEmailValid || !password || isLockedOut;
+
+  // Bottom CTA text + href based on role
+  const bottomLabel =
+    userType === "zone" ? "Sign up as Admin" : "Create an account";
+  const bottomPrefix = userType === "zone" ? "New zone? " : "New here? ";
+  const bottomHref =
+    userType === "zone" ? "/auth/zone-register" : "/auth/register";
+
+  useEffect(() => {
+    console.log("[Login] bottomHref changed →", bottomHref);
+  }, [bottomHref]);
 
   return (
     <Container {...containerProps}>
@@ -437,6 +467,43 @@ export default function Login() {
         {/* Headings */}
         <Text style={styles.heading}>Welcome back</Text>
         <Text style={styles.sub}>Sign in to MatchHai</Text>
+
+        {/* Role toggle (Player / Zone Admin) */}
+        <View style={styles.roleToggleRow}>
+          <Pressable
+            onPress={() => setUserType("player")}
+            style={[
+              styles.roleChip,
+              userType === "player" && styles.roleChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.roleChipText,
+                userType === "player" && styles.roleChipTextActive,
+              ]}
+            >
+              Player
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setUserType("zone")}
+            style={[
+              styles.roleChip,
+              userType === "zone" && styles.roleChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.roleChipText,
+                userType === "zone" && styles.roleChipTextActive,
+              ]}
+            >
+              Zone Admin
+            </Text>
+          </Pressable>
+        </View>
 
         {/* Email / Phone */}
         <View style={styles.fieldGroup}>
@@ -467,7 +534,6 @@ export default function Login() {
                 value={emailOrPhone}
                 onChangeText={(text) => {
                   let next = text;
-                  // (6) auto-format phone if looks numeric / Pakistani
                   if (/^[\d+\s-]*$/.test(text)) {
                     next = formatPakistaniPhone(text);
                   }
@@ -504,17 +570,16 @@ export default function Login() {
             <Text style={styles.errorText}>{emailErrorToShow}</Text>
           ) : null}
 
-          {/* Email domain typo suggestion (4) */}
           {!emailErrorToShow &&
-          emailTouched &&
-          !emailFocused &&
-          emailDomainWarning ? (
-            <View style={styles.helperTextRow}>
-              <Text style={[styles.helperText, styles.helperWarning]}>
-                {emailDomainWarning}
-              </Text>
-            </View>
-          ) : null}
+            emailTouched &&
+            !emailFocused &&
+            emailDomainWarning && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  {emailDomainWarning}
+                </Text>
+              </View>
+            )}
         </View>
 
         {/* Password */}
@@ -558,11 +623,10 @@ export default function Login() {
               />
 
               <Pressable
-                // (9) short press toggles, long press temporarily shows password
                 onPress={() => setPasswordVisible((v) => !v)}
                 onLongPress={() => setPasswordVisible(true)}
                 onPressOut={() => {
-                  // we won't force-hide here to respect manual toggle
+                  // don't force-hide, respect manual toggle
                 }}
                 hitSlop={10}
               >
@@ -582,7 +646,7 @@ export default function Login() {
             <Text style={styles.errorText}>{passwordError}</Text>
           ) : null}
 
-          {/* (1) Strength meter + (3)(2) indirectly included via strength calc */}
+          {/* Strength meter */}
           {showPasswordHints && (
             <View style={styles.strengthWrapper}>
               <View style={styles.strengthBar}>
@@ -600,7 +664,7 @@ export default function Login() {
                 <Text
                   style={[
                     styles.strengthLabel,
-                    { color: strengthColor || COLORS.muted }, // <-- match meter color
+                    { color: strengthColor || COLORS.muted },
                   ]}
                 >
                   Strength: {strengthLabel}
@@ -609,7 +673,7 @@ export default function Login() {
             </View>
           )}
 
-          {/* Live rules (1 uppercase, 1 lowercase, 1 number, 1 special) */}
+          {/* Live rules */}
           {showPasswordHints && (
             <View style={styles.passwordHintGrid}>
               <View style={styles.passwordHintRow}>
@@ -623,7 +687,7 @@ export default function Login() {
             </View>
           )}
 
-          {/* (8) Caps Lock heuristic warning */}
+          {/* Caps Lock heuristic warning */}
           {capsLockLikely && (
             <View style={styles.helperTextRow}>
               <Text style={[styles.helperText, styles.helperWarning]}>
@@ -641,12 +705,7 @@ export default function Login() {
         </View>
 
         {/* Primary Login button + brute-force UI */}
-        <View
-          style={[
-            styles.buttonShadowWrapper,
-            // we keep shadow constant now to avoid focus jumps
-          ]}
-        >
+        <View style={styles.buttonShadowWrapper}>
           <Pressable
             onPress={handleLogin}
             disabled={isSubmitDisabled}
@@ -664,7 +723,6 @@ export default function Login() {
             )}
           </Pressable>
 
-          {/* (7) error counter / lockout UI */}
           {isLockedOut && (
             <View style={styles.helperTextRow}>
               <Text style={[styles.helperText, styles.helperWarning]}>
@@ -675,13 +733,28 @@ export default function Login() {
           )}
         </View>
 
-        {/* Bottom link */}
-        <Text style={styles.bottomText}>
-          New here?{" "}
-          <Link href="/auth/register" style={{ color: COLORS.accent }}>
-            Create an account
+        {/* Bottom link (dynamic text + Link navigation) */}
+        <View style={{ flexDirection: "row", justifyContent: "center" }}>
+          <Text style={styles.bottomText}>{bottomPrefix}</Text>
+          <Link
+            href={bottomHref}
+            asChild
+            onPress={() =>
+              console.log(
+                "[Login] Link pressed → userType=",
+                userType,
+                "href=",
+                bottomHref
+              )
+            }
+          >
+            <Pressable>
+              <Text style={[styles.bottomText, { color: COLORS.accent }]}>
+                {bottomLabel}
+              </Text>
+            </Pressable>
           </Link>
-        </Text>
+        </View>
       </ScrollView>
     </Container>
   );

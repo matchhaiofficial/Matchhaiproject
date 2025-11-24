@@ -51,12 +51,57 @@ export default function RegisterStep3() {
     playsCs2: step2.playsCs2,
     playsFc: step2.playsFc,
     playsTekken: step2.playsTekken,
+    playsFutsal: (step2 as any).playsFutsal,
+    playsIndoorCricket: (step2 as any).playsIndoorCricket,
+    playsPadel: (step2 as any).playsPadel,
+    playsPickleball: (step2 as any).playsPickleball,
+    futsalPositions: (step2 as any).futsalPositions,
+    indoorCricketRole: (step2 as any).indoorCricketRole,
+    indoorCricketBowlingStyle: (step2 as any).indoorCricketBowlingStyle,
+    indoorCricketBattingStyle: (step2 as any).indoorCricketBattingStyle,
+    padelRole: (step2 as any).padelRole,
+    pickleballRole: (step2 as any).pickleballRole,
   });
 
   const [areasPreferred] = useState<string[]>(step2.selectedAreas);
-  const [playsCs2] = useState(step2.playsCs2);
-  const [playsFc] = useState(step2.playsFc);
-  const [playsTekken] = useState(step2.playsTekken);
+
+  // online games
+  const [playsCs2] = useState<boolean>(step2.playsCs2);
+  const [playsFc] = useState<boolean>(step2.playsFc);
+  const [playsTekken] = useState<boolean>(step2.playsTekken);
+
+  // offline sports + roles from step2
+  const [playsFutsal] = useState<boolean>(
+    (step2 as any).playsFutsal ?? false
+  );
+  const [playsIndoorCricket] = useState<boolean>(
+    (step2 as any).playsIndoorCricket ?? false
+  );
+  const [playsPadel] = useState<boolean>(
+    (step2 as any).playsPadel ?? false
+  );
+  const [playsPickleball] = useState<boolean>(
+    (step2 as any).playsPickleball ?? false
+  );
+
+  const [futsalPositions] = useState<string[]>(
+    (((step2 as any).futsalPositions ?? []) as string[])
+  );
+  const [indoorCricketRole] = useState<string | null>(
+    ((step2 as any).indoorCricketRole as string) ?? null
+  );
+  const [indoorCricketBowlingStyle] = useState<string | null>(
+    ((step2 as any).indoorCricketBowlingStyle as string) ?? null
+  );
+  const [indoorCricketBattingStyle] = useState<string | null>(
+    ((step2 as any).indoorCricketBattingStyle as string) ?? null
+  );
+  const [padelRole] = useState<string | null>(
+    ((step2 as any).padelRole as string) ?? null
+  );
+  const [pickleballRole] = useState<string | null>(
+    ((step2 as any).pickleballRole as string) ?? null
+  );
 
   // local editable fields for links / IDs
   const [steamProfileUrl, setSteamProfileUrl] = useState(
@@ -94,27 +139,78 @@ export default function RegisterStep3() {
       !step2.selectedAreas.length &&
       !step2.playsCs2 &&
       !step2.playsFc &&
-      !step2.playsTekken
+      !step2.playsTekken &&
+      !(step2 as any).playsFutsal &&
+      !(step2 as any).playsIndoorCricket &&
+      !(step2 as any).playsPadel &&
+      !(step2 as any).playsPickleball
     ) {
       console.log("[Step3] missing step2 data → redirecting to step2");
       router.replace("/auth/register-step2");
     }
   }, [isFocused, step2]);
 
-  // helper array for chips in summary
-  const selectedGames = useMemo(() => {
-    const games: string[] = [];
-    if (playsCs2) games.push("CS2");
-    if (playsFc) games.push("FC 26");
-    if (playsTekken) games.push("Tekken 8");
-    return games;
-  }, [playsCs2, playsFc, playsTekken]);
+  // helper for chips + sports summary in summary card
+  const { selectedActivities, sportsSummary } = useMemo(() => {
+    const items: string[] = [];
+    if (playsCs2) items.push("CS2");
+    if (playsFc) items.push("FC 26");
+    if (playsTekken) items.push("Tekken 8");
+    if (playsFutsal) items.push("Futsal");
+    if (playsIndoorCricket) items.push("Indoor Cricket");
+    if (playsPadel) items.push("Padel");
+    if (playsPickleball) items.push("Pickleball");
+
+    const details: string[] = [];
+
+    if (playsFutsal && futsalPositions.length) {
+      details.push(`Futsal: ${futsalPositions.join(" / ")}`);
+    }
+
+    if (playsIndoorCricket && indoorCricketRole) {
+      let roleLabel = indoorCricketRole;
+      if (indoorCricketRole === "Bowler" && indoorCricketBowlingStyle) {
+        roleLabel += ` (${indoorCricketBowlingStyle})`;
+      } else if (
+        indoorCricketRole === "Batsman" &&
+        indoorCricketBattingStyle
+      ) {
+        roleLabel += ` (${indoorCricketBattingStyle})`;
+      }
+      details.push(`Indoor Cricket: ${roleLabel}`);
+    }
+
+    if (playsPadel && padelRole) {
+      details.push(`Padel: ${padelRole}`);
+    }
+
+    if (playsPickleball && pickleballRole) {
+      details.push(`Pickleball: ${pickleballRole}`);
+    }
+
+    return {
+      selectedActivities: items,
+      sportsSummary: details.join(" · "),
+    };
+  }, [
+    playsCs2,
+    playsFc,
+    playsTekken,
+    playsFutsal,
+    playsIndoorCricket,
+    playsPadel,
+    playsPickleball,
+    futsalPositions,
+    indoorCricketRole,
+    indoorCricketBowlingStyle,
+    indoorCricketBattingStyle,
+    padelRole,
+    pickleballRole,
+  ]);
 
   // --- validation logic for links + soft "looks weird" hints ---
   const {
     cs2Ok,
-    fcOk,
-    tekkenOk,
     isFormValid,
     steamLooksWeird,
     faceitLooksWeird,
@@ -134,12 +230,13 @@ export default function RegisterStep3() {
     const xboxFilled = xbox.length > 0;
     const psnFilled = psn.length > 0;
 
-    // existing “does this game have at least one platform” logic
+    // ✅ Only CS2 is "verified"/required:
+    // CS2 must have at least Steam OR FACEIT if selected
     const cs2Valid = !playsCs2 || steamFilled || faceitFilled;
-    const fcValid =
-      !playsFc || steamFilled || eaFilled || xboxFilled || psnFilled;
-    const tekkenValid =
-      !playsTekken || steamFilled || xboxFilled || psnFilled;
+
+    // FC 26 + Tekken 8 → EA / Xbox / PS are OPTIONAL
+    const fcValid = true;
+    const tekkenValid = true;
 
     // --- soft format checks (warnings only) ---
 
@@ -163,8 +260,6 @@ export default function RegisterStep3() {
 
     return {
       cs2Ok: cs2Valid,
-      fcOk: fcValid,
-      tekkenOk: tekkenValid,
       isFormValid: cs2Valid && fcValid && tekkenValid,
 
       steamLooksWeird: steamWeird,
@@ -175,8 +270,6 @@ export default function RegisterStep3() {
     };
   }, [
     playsCs2,
-    playsFc,
-    playsTekken,
     steamProfileUrl,
     faceitProfileUrl,
     eaProfileUrl,
@@ -269,18 +362,9 @@ export default function RegisterStep3() {
     if (!isFormValid) {
       const messages: string[] = [];
 
+      // ✅ Only complain about CS2 now
       if (playsCs2 && !cs2Ok) {
         messages.push("CS2: add at least a Steam or FACEIT profile link.");
-      }
-      if (playsFc && !fcOk) {
-        messages.push(
-          "FC 26: add at least one link (Steam, EA, Xbox or PlayStation)."
-        );
-      }
-      if (playsTekken && !tekkenOk) {
-        messages.push(
-          "Tekken 8: add at least one link (Steam, Xbox or PlayStation)."
-        );
       }
 
       showToast({
@@ -289,7 +373,7 @@ export default function RegisterStep3() {
         message:
           messages.length > 0
             ? messages.join(" ")
-            : "Please add at least one platform link for each game you selected.",
+            : "Please add at least one Steam or FACEIT link for CS2.",
       });
 
       return;
@@ -312,7 +396,7 @@ export default function RegisterStep3() {
     router.push("/auth/register-step4");
   };
 
-  // Show only platforms that make sense
+  // Show only platforms that make sense (based on online games)
   const showSteam = playsCs2 || playsFc || playsTekken;
   const showFaceit = playsCs2;
   const showEa = playsFc;
@@ -402,15 +486,27 @@ export default function RegisterStep3() {
               </Text>
             </View>
             <View style={{ flex: 1, paddingLeft: 8 }}>
-              <Text style={styles.summaryLabel}>Selected games</Text>
-              {selectedGames.length ? (
-                <View style={styles.chipRow}>
-                  {selectedGames.map((g) => (
-                    <View key={g} style={styles.summaryChip}>
-                      <Text style={styles.summaryChipText}>{g}</Text>
-                    </View>
-                  ))}
-                </View>
+              <Text style={styles.summaryLabel}>Games & sports</Text>
+              {selectedActivities.length ? (
+                <>
+                  <View style={styles.chipRow}>
+                    {selectedActivities.map((g) => (
+                      <View key={g} style={styles.summaryChip}>
+                        <Text style={styles.summaryChipText}>{g}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  {sportsSummary ? (
+                    <Text
+                      style={[
+                        styles.summaryValue,
+                        { marginTop: 4, fontSize: 12 },
+                      ]}
+                    >
+                      {sportsSummary}
+                    </Text>
+                  ) : null}
+                </>
               ) : (
                 <Text style={styles.summaryValue}>None</Text>
               )}
@@ -652,7 +748,7 @@ export default function RegisterStep3() {
           </View>
         )}
 
-        {/* FC 26 platforms */}
+        {/* FC 26 platforms (optional now) */}
         {showEa && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
@@ -727,7 +823,7 @@ export default function RegisterStep3() {
                 }
               />
               <TextInput
-                placeholder="Your Xbox gamertag"
+                placeholder="Your Xbox gamertag (optional)"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
                 selectionColor={COLORS.accent}
@@ -773,7 +869,7 @@ export default function RegisterStep3() {
                 }
               />
               <TextInput
-                placeholder="Your PSN online ID"
+                placeholder="Your PSN online ID (optional)"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
                 selectionColor={COLORS.accent}
@@ -794,25 +890,11 @@ export default function RegisterStep3() {
           </View>
         )}
 
-        {/* Validation helpers per game */}
+        {/* Only CS2 helper now */}
         {playsCs2 && !cs2Ok && (
           <View style={styles.helperTextRow}>
             <Text style={[styles.helperText, styles.helperWarning]}>
               CS2: add at least a Steam or FACEIT link.
-            </Text>
-          </View>
-        )}
-        {playsFc && !fcOk && (
-          <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>
-              FC 26: add at least one link (Steam, EA, Xbox or PlayStation).
-            </Text>
-          </View>
-        )}
-        {playsTekken && !tekkenOk && (
-          <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>
-              Tekken 8: add at least one link (Steam, Xbox or PlayStation).
             </Text>
           </View>
         )}

@@ -14,8 +14,15 @@ import {
   CS2_ROLES,
   FC_FORMATIONS,
   FC_LEAGUES,
+  FUTSAL_POSITIONS,
   GAME_OPTIONS,
+  INDOOR_CRICKET_BATTING_STYLES,
+  INDOOR_CRICKET_BOWLING_STYLES,
+  INDOOR_CRICKET_ROLES,
   KARACHI_AREAS,
+  PADEL_ROLES,
+  PICKLEBALL_ROLES,
+  SPORT_OPTIONS,
   TEKKEN_CHARACTERS,
 } from "../../constants/profileOptions";
 import LogoHalo from "../../src/components/LogoHalo";
@@ -28,8 +35,15 @@ type Cs2Role = (typeof CS2_ROLES)[number];
 type FcFormation = (typeof FC_FORMATIONS)[number];
 type TekkenCharacter = (typeof TEKKEN_CHARACTERS)[number];
 
-// keep league id simple so TS doesn’t complain
 type FcLeagueId = string;
+
+// new sport types
+type FutsalPosition = (typeof FUTSAL_POSITIONS)[number];
+type IndoorCricketRole = (typeof INDOOR_CRICKET_ROLES)[number];
+type IndoorBowlingStyle = (typeof INDOOR_CRICKET_BOWLING_STYLES)[number];
+type IndoorBattingStyle = (typeof INDOOR_CRICKET_BATTING_STYLES)[number];
+type PadelRole = (typeof PADEL_ROLES)[number];
+type PickleballRole = (typeof PICKLEBALL_ROLES)[number];
 
 export default function RegisterStep2() {
   console.log("[Step2] mounted");
@@ -69,6 +83,46 @@ export default function RegisterStep2() {
     step2.tekkenFavorites as TekkenCharacter[]
   );
 
+  // --- New sports state (MVP) ---
+  const [playsFutsal, setPlaysFutsal] = useState<boolean>(
+    (step2 as any).playsFutsal ?? false
+  );
+  const [playsIndoorCricket, setPlaysIndoorCricket] = useState<boolean>(
+    (step2 as any).playsIndoorCricket ?? false
+  );
+  const [playsPadel, setPlaysPadel] = useState<boolean>(
+    (step2 as any).playsPadel ?? false
+  );
+  const [playsPickleball, setPlaysPickleball] = useState<boolean>(
+    (step2 as any).playsPickleball ?? false
+  );
+
+  const [futsalPositions, setFutsalPositions] = useState<FutsalPosition[]>(
+    ((step2 as any).futsalPositions ?? []) as FutsalPosition[]
+  );
+
+  const [indoorCricketRole, setIndoorCricketRole] =
+    useState<IndoorCricketRole | null>(
+      ((step2 as any).indoorCricketRole as IndoorCricketRole) ?? null
+    );
+
+  const [indoorCricketBowlingStyle, setIndoorCricketBowlingStyle] =
+    useState<IndoorBowlingStyle | null>(
+      ((step2 as any).indoorCricketBowlingStyle as IndoorBowlingStyle) ?? null
+    );
+
+  const [indoorCricketBattingStyle, setIndoorCricketBattingStyle] =
+    useState<IndoorBattingStyle | null>(
+      ((step2 as any).indoorCricketBattingStyle as IndoorBattingStyle) ?? null
+    );
+
+  const [padelRole, setPadelRole] = useState<PadelRole | null>(
+    ((step2 as any).padelRole as PadelRole) ?? null
+  );
+  const [pickleballRole, setPickleballRole] = useState<PickleballRole | null>(
+    ((step2 as any).pickleballRole as PickleballRole) ?? null
+  );
+
   const currentFcLeague = useMemo(
     () =>
       selectedFcLeagueId
@@ -80,16 +134,28 @@ export default function RegisterStep2() {
   // ---- Validation ----
   const {
     isLocationValid,
-    hasAnyGame,
+    hasAnyActivity,
     isCs2Valid,
     isFcValid,
     isTekkenValid,
+    isFutsalValid,
+    isIndoorCricketValid,
+    isPadelValid,
+    isPickleballValid,
     isFormValid,
   } = useMemo(() => {
-    const locationValid =
-      selectedAreas.length > 0 && selectedAreas.length <= 5;
+    const locationValid = selectedAreas.length > 0 && selectedAreas.length <= 5;
 
-    const anyGame = playsCs2 || playsFc || playsTekken;
+    // now "activity" = any game OR sport
+    const anyActivity =
+      playsCs2 ||
+      playsFc ||
+      playsTekken ||
+      playsFutsal ||
+      playsIndoorCricket ||
+      playsPadel ||
+      playsPickleball;
+
     const cs2Valid = !playsCs2 || !!cs2Role;
 
     const leagueTeams = currentFcLeague?.teams ?? [];
@@ -105,31 +171,74 @@ export default function RegisterStep2() {
       !playsTekken ||
       (tekkenFavorites.length > 0 && tekkenFavorites.length <= 3);
 
+    // sports validity
+    const futsalValid = !playsFutsal || futsalPositions.length > 0;
+
+    let indoorCricketValid = !playsIndoorCricket;
+    if (playsIndoorCricket) {
+      if (!indoorCricketRole) {
+        indoorCricketValid = false;
+      } else if (
+        indoorCricketRole === "Bowler" &&
+        !indoorCricketBowlingStyle
+      ) {
+        indoorCricketValid = false;
+      } else if (
+        indoorCricketRole === "Batsman" &&
+        !indoorCricketBattingStyle
+      ) {
+        indoorCricketValid = false;
+      } else {
+        indoorCricketValid = true;
+      }
+    }
+
+    const padelValid = !playsPadel || !!padelRole;
+    const pickleballValid = !playsPickleball || !!pickleballRole;
+
     return {
       isLocationValid: locationValid,
-      hasAnyGame: anyGame,
+      hasAnyActivity: anyActivity,
       isCs2Valid: cs2Valid,
       isFcValid: fcTeamValid && fcFormationValid,
       isTekkenValid: tekkenValid,
+      isFutsalValid: futsalValid,
+      isIndoorCricketValid: indoorCricketValid,
+      isPadelValid: padelValid,
+      isPickleballValid: pickleballValid,
       isFormValid:
         locationValid &&
-        anyGame &&
+        anyActivity &&
         cs2Valid &&
         fcTeamValid &&
         fcFormationValid &&
-        tekkenValid,
+        tekkenValid &&
+        futsalValid &&
+        indoorCricketValid &&
+        padelValid &&
+        pickleballValid,
     };
   }, [
     selectedAreas,
     playsCs2,
     playsFc,
     playsTekken,
+    playsFutsal,
+    playsIndoorCricket,
+    playsPadel,
+    playsPickleball,
     cs2Role,
     fcTeam,
     fcFormation,
     tekkenFavorites,
     selectedFcLeagueId,
     currentFcLeague,
+    futsalPositions,
+    indoorCricketRole,
+    indoorCricketBowlingStyle,
+    indoorCricketBattingStyle,
+    padelRole,
+    pickleballRole,
   ]);
 
   // ---- Keyboard handling ----
@@ -154,8 +263,7 @@ export default function RegisterStep2() {
         showToast({
           type: "warning",
           title: "Limit reached",
-          message:
-            "You can select up to 5 areas where you want to play.",
+          message: "You can select up to 5 areas where you want to play.",
         });
         return prev;
       }
@@ -188,7 +296,6 @@ export default function RegisterStep2() {
         return prev.filter((c) => c !== char);
       }
       if (prev.length >= 3) {
-        // quiet fail: UI helper already shows (x/3)
         return prev;
       }
       return [...prev, char];
@@ -197,12 +304,46 @@ export default function RegisterStep2() {
 
   const handleSelectLeague = (leagueId: FcLeagueId) => {
     setSelectedFcLeagueId(leagueId);
-    // if user switches league, clear team so they rechoose
     setFcTeam("");
   };
 
   const handleSelectTeam = (team: string) => {
     setFcTeam(team);
+  };
+
+  // --- sport toggles ---
+  const toggleSport = (
+    key: "futsal" | "indoor_cricket" | "padel" | "pickleball"
+  ) => {
+    if (key === "futsal") {
+      setPlaysFutsal((prev) => !prev);
+      if (playsFutsal) setFutsalPositions([]);
+    }
+    if (key === "indoor_cricket") {
+      setPlaysIndoorCricket((prev) => !prev);
+      if (playsIndoorCricket) {
+        setIndoorCricketRole(null);
+        setIndoorCricketBowlingStyle(null);
+        setIndoorCricketBattingStyle(null);
+      }
+    }
+    if (key === "padel") {
+      setPlaysPadel((prev) => !prev);
+      if (playsPadel) setPadelRole(null);
+    }
+    if (key === "pickleball") {
+      setPlaysPickleball((prev) => !prev);
+      if (playsPickleball) setPickleballRole(null);
+    }
+  };
+
+  const toggleFutsalPosition = (pos: FutsalPosition) => {
+    setFutsalPositions((prev) => {
+      if (prev.includes(pos)) {
+        return prev.filter((p) => p !== pos);
+      }
+      return [...prev, pos];
+    });
   };
 
   // ---- Submit (LOCAL ONLY) ----
@@ -212,7 +353,7 @@ export default function RegisterStep2() {
         type: "info",
         title: "Check details",
         message:
-          "Please select your area(s), choose at least one game, and fill the required preferences.",
+          "Please select your area(s), choose at least one game or sport, and fill the required preferences.",
       });
       return;
     }
@@ -228,7 +369,19 @@ export default function RegisterStep2() {
       fcTeam: fcTeam.trim(),
       fcFormation: fcFormation ?? null,
       tekkenFavorites,
-    });
+
+      // new sports fields
+      playsFutsal,
+      playsIndoorCricket,
+      playsPadel,
+      playsPickleball,
+      futsalPositions,
+      indoorCricketRole: indoorCricketRole ?? null,
+      indoorCricketBowlingStyle: indoorCricketBowlingStyle ?? null,
+      indoorCricketBattingStyle: indoorCricketBattingStyle ?? null,
+      padelRole: padelRole ?? null,
+      pickleballRole: pickleballRole ?? null,
+    } as any);
 
     router.push("/auth/register-step3");
   };
@@ -267,8 +420,8 @@ export default function RegisterStep2() {
         {/* Headings */}
         <Text style={styles.heading}>Where do you queue from?</Text>
         <Text style={styles.sub}>
-          Tell us your areas and favourite games so we can match you with the
-          right squad.
+          Tell us your areas and favourite games/sports so we can match you
+          with the right squad.
         </Text>
 
         {/* Location */}
@@ -347,14 +500,15 @@ export default function RegisterStep2() {
               );
             })}
           </View>
-          {!hasAnyGame && (
-            <View style={styles.helperTextRow}>
-              <Text style={[styles.helperText, styles.helperWarning]}>
-                Select at least one game. You can add more later.
-              </Text>
-            </View>
-          )}
         </View>
+
+        {!hasAnyActivity && (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>
+              Select at least one game or sport. You can add more later.
+            </Text>
+          </View>
+        )}
 
         {/* CS2 section */}
         {playsCs2 && (
@@ -465,15 +619,6 @@ export default function RegisterStep2() {
               </>
             )}
 
-            {!isFcValid && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  Select a league and a favourite club. You can change this
-                  later.
-                </Text>
-              </View>
-            )}
-
             <Text style={[styles.label, { marginTop: 10 }]}>
               FC 26 · Preferred formation
             </Text>
@@ -502,10 +647,12 @@ export default function RegisterStep2() {
                 );
               })}
             </View>
+
             {!isFcValid && (
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperWarning]}>
-                  Choose at least one formation you like.
+                  Select a league, team and formation. You can change this
+                  later.
                 </Text>
               </View>
             )}
@@ -550,6 +697,280 @@ export default function RegisterStep2() {
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperError]}>
                   Pick at least one favourite character.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Sports section */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Which sports do you play offline?</Text>
+          <View style={styles.chipRow}>
+            {SPORT_OPTIONS.map((sport) => {
+              const active =
+                (sport.key === "futsal" && playsFutsal) ||
+                (sport.key === "indoor_cricket" && playsIndoorCricket) ||
+                (sport.key === "padel" && playsPadel) ||
+                (sport.key === "pickleball" && playsPickleball);
+
+              return (
+                <Pressable
+                  key={sport.key}
+                  onPress={() =>
+                    toggleSport(
+                      sport.key as
+                        | "futsal"
+                        | "indoor_cricket"
+                        | "padel"
+                        | "pickleball"
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.optionChip,
+                    active && styles.optionChipActive,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.optionChipText,
+                      active && styles.optionChipTextActive,
+                    ]}
+                  >
+                    {sport.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Futsal roles */}
+        {playsFutsal && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Futsal · Preferred positions</Text>
+            <View style={styles.chipRow}>
+              {FUTSAL_POSITIONS.map((pos) => {
+                const active = futsalPositions.includes(pos);
+                return (
+                  <Pressable
+                    key={pos}
+                    onPress={() => toggleFutsalPosition(pos)}
+                    style={({ pressed }) => [
+                      styles.optionChip,
+                      active && styles.optionChipActive,
+                      pressed && { opacity: 0.9 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        active && styles.optionChipTextActive,
+                      ]}
+                    >
+                      {pos}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!isFutsalValid && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  Pick at least one position you’re happy to play.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Indoor Cricket */}
+        {playsIndoorCricket && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Indoor Cricket · Main role</Text>
+            <View style={styles.chipRow}>
+              {INDOOR_CRICKET_ROLES.map((role) => {
+                const active = indoorCricketRole === role;
+                return (
+                  <Pressable
+                    key={role}
+                    onPress={() => {
+                      setIndoorCricketRole(role);
+                      // reset sub-styles when switching
+                      if (role !== "Bowler") {
+                        setIndoorCricketBowlingStyle(null);
+                      }
+                      if (role !== "Batsman") {
+                        setIndoorCricketBattingStyle(null);
+                      }
+                    }}
+                    style={({ pressed }) => [
+                      styles.optionChip,
+                      active && styles.optionChipActive,
+                      pressed && { opacity: 0.9 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        active && styles.optionChipTextActive,
+                      ]}
+                    >
+                      {role}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* If Bowler → ask bowling style */}
+            {indoorCricketRole === "Bowler" && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.label}>Indoor Cricket · Bowler type</Text>
+                <View style={styles.chipRow}>
+                  {INDOOR_CRICKET_BOWLING_STYLES.map((style) => {
+                    const active = indoorCricketBowlingStyle === style;
+                    return (
+                      <Pressable
+                        key={style}
+                        onPress={() => setIndoorCricketBowlingStyle(style)}
+                        style={({ pressed }) => [
+                          styles.optionChip,
+                          active && styles.optionChipActive,
+                          pressed && { opacity: 0.9 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            active && styles.optionChipTextActive,
+                          ]}
+                        >
+                          {style}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* If Batsman → ask batting style */}
+            {indoorCricketRole === "Batsman" && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.label}>Indoor Cricket · Batting style</Text>
+                <View style={styles.chipRow}>
+                  {INDOOR_CRICKET_BATTING_STYLES.map((style) => {
+                    const active = indoorCricketBattingStyle === style;
+                    return (
+                      <Pressable
+                        key={style}
+                        onPress={() => setIndoorCricketBattingStyle(style)}
+                        style={({ pressed }) => [
+                          styles.optionChip,
+                          active && styles.optionChipActive,
+                          pressed && { opacity: 0.9 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            active && styles.optionChipTextActive,
+                          ]}
+                        >
+                          {style}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {!isIndoorCricketValid && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  Choose your main role and, if you&apos;re a batsman or
+                  bowler, pick your style so we can rotate you fairly.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Padel */}
+        {playsPadel && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Padel · Style</Text>
+            <View style={styles.chipRow}>
+              {PADEL_ROLES.map((role) => {
+                const active = padelRole === role;
+                return (
+                  <Pressable
+                    key={role}
+                    onPress={() => setPadelRole(role)}
+                    style={({ pressed }) => [
+                      styles.optionChip,
+                      active && styles.optionChipActive,
+                      pressed && { opacity: 0.9 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        active && styles.optionChipTextActive,
+                      ]}
+                    >
+                      {role}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!isPadelValid && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  Tell us how you like to play so we can pair you correctly.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Pickleball */}
+        {playsPickleball && (
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Pickleball · Preferred mode</Text>
+            <View style={styles.chipRow}>
+              {PICKLEBALL_ROLES.map((role) => {
+                const active = pickleballRole === role;
+                return (
+                  <Pressable
+                    key={role}
+                    onPress={() => setPickleballRole(role)}
+                    style={({ pressed }) => [
+                      styles.optionChip,
+                      active && styles.optionChipActive,
+                      pressed && { opacity: 0.9 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionChipText,
+                        active && styles.optionChipTextActive,
+                      ]}
+                    >
+                      {role}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!isPickleballValid && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperWarning]}>
+                  Choose how you usually play (singles or doubles side).
                 </Text>
               </View>
             )}
