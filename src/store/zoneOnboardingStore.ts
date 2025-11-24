@@ -12,13 +12,23 @@ export type ZoneStep1Data = {
   password: string;
 };
 
-// STEP 2 – primary branch basics
-export type ZoneStep2Data = {
+// STEP 2 – branch basics (supports multiple branches)
+export type ZoneBranchLocation = {
   branchDisplayName: string; // e.g. "O2 – FB Area"
   city: string;              // "Karachi"
   areaLabel: string;         // "FB Area, Block 7"
   addressLine1: string;      // street / building
   googleMapsUrl: string;     // optional
+};
+
+export type ZoneStep2Data = {
+  branches: ZoneBranchLocation[]; // first entry is considered primary
+  // legacy single-branch fields kept for backward compatibility with summary screens
+  branchDisplayName?: string;
+  city?: string;
+  areaLabel?: string;
+  addressLine1?: string;
+  googleMapsUrl?: string;
 };
 
 // STEP 3 – supported games / sports & basic inventory
@@ -113,6 +123,15 @@ const initialState: Omit<
     password: "",
   },
   step2: {
+    branches: [
+      {
+        branchDisplayName: "",
+        city: "",
+        areaLabel: "",
+        addressLine1: "",
+        googleMapsUrl: "",
+      },
+    ],
     branchDisplayName: "",
     city: "",
     areaLabel: "",
