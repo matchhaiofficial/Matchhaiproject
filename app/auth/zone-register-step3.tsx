@@ -1031,16 +1031,28 @@ export default function ZoneRegisterStep3() {
           </View>
         </View>
 
-        {/* CTA buttons */}
-        <View style={styles.ctaRow}>
-          <Pressable style={[styles.secondaryCta]} onPress={handleBack}>
-            <Text style={styles.secondaryCtaText}>Back</Text>
-          </Pressable>
+        {/* Back to step 2 */}
+        <Pressable onPress={handleBack} style={styles.backLinkWrapper}>
+          <Text style={styles.backLinkText}>← Back to branch details</Text>
+        </Pressable>
 
+        {/* Continue button */}
+        <View
+          style={[
+            styles.buttonShadowWrapper,
+            !isSubmitDisabled && styles.buttonShadowWrapperActive,
+          ]}
+        >
           <Pressable
             style={[styles.primaryCta, isSubmitDisabled && styles.primaryCtaDisabled]}
             onPress={handleContinue}
             disabled={isSubmitDisabled}
+            style={({ pressed }) => [
+              styles.primaryBtn,
+              isSubmitDisabled ? styles.primaryBtnDisabled : null,
+              pressed && !isSubmitDisabled && { opacity: 0.92 },
+            ]}
+            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
             <Text style={styles.primaryCtaText}>Continue</Text>
           </Pressable>
