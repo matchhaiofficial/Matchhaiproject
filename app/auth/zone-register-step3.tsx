@@ -463,6 +463,14 @@ export default function ZoneRegisterStep3() {
           Choose the games and rough number of setups for this location. You can fine-tune later in the
           dashboard.
         </Text>
+        {branchCount > 1 && (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, { color: COLORS.muted }]}>
+              These settings apply to all branches for now. You can customize
+              per-branch inventory after onboarding.
+            </Text>
+          </View>
+        )}
 
         <View style={[styles.fieldGroup, { marginTop: 12 }]}>
           <Text style={styles.label}>Supported games / sports</Text>
@@ -1036,6 +1044,7 @@ export default function ZoneRegisterStep3() {
           ]}
         >
           <Pressable
+            style={[styles.primaryCta, isSubmitDisabled && styles.primaryCtaDisabled]}
             onPress={handleContinue}
             disabled={isSubmitDisabled}
             style={({ pressed }) => [
@@ -1045,7 +1054,7 @@ export default function ZoneRegisterStep3() {
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
-            <Text style={styles.primaryBtnText}>Continue</Text>
+            <Text style={styles.primaryCtaText}>Continue</Text>
           </Pressable>
         </View>
 
