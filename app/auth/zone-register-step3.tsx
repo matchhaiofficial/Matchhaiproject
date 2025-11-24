@@ -188,7 +188,7 @@ export default function ZoneRegisterStep3() {
   );
 
   // ---- Validation ----
-  const branchValidations = useMemo(() => {
+  const branchValidations: BranchValidation[] = useMemo(() => {
     const toInt = (v: string) => {
       const n = Number(v.trim());
       return Number.isFinite(n) ? n : NaN;
