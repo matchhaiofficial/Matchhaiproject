@@ -457,10 +457,10 @@ export default function ZoneRegisterStep2() {
           onPress={handleAddBranch}
           style={{
             borderWidth: 1,
-            borderColor: COLORS.inputBorder,
+            borderColor: COLORS.border,
             borderRadius: 12,
             padding: 12,
-            backgroundColor: COLORS.cardBackground,
+            backgroundColor: COLORS.card,
             marginBottom: 12,
           }}
         >
