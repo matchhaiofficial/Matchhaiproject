@@ -1,15 +1,16 @@
 // src/services/zoneService.ts
 import {
-    addDoc,
-    collection,
-    serverTimestamp,
+  addDoc,
+  collection,
+  serverTimestamp,
 } from "firebase/firestore";
 
 import { auth, db } from "../config/firebaseConfig";
 import type {
-    ZoneStep1Data,
-    ZoneStep2Data,
-    ZoneStep3Data,
+  ZoneStep1Data,
+  ZoneStep2Data,
+  ZoneStep3Data,
+  ZoneBranchLocation,
 } from "../store/zoneOnboardingStore";
 import { normalizePhoneForSave } from "./userService";
 
@@ -51,6 +52,28 @@ export async function saveZoneRegistration(
       ? normalizePhoneForSave(step1.contactPhone)
       : null;
 
+    const allBranches: ZoneBranchLocation[] =
+      step2.branches && step2.branches.length > 0
+        ? step2.branches
+        : [
+            {
+              branchDisplayName: "",
+              city: "",
+              areaLabel: "",
+              addressLine1: "",
+              googleMapsUrl: "",
+            },
+          ];
+
+    const primaryBranch = allBranches[0];
+    const additionalBranches = allBranches.slice(1).map((branch) => ({
+      branchDisplayName: branch.branchDisplayName.trim() || null,
+      city: branch.city.trim() || null,
+      areaLabel: branch.areaLabel.trim() || null,
+      addressLine1: branch.addressLine1.trim() || null,
+      googleMapsUrl: branch.googleMapsUrl.trim() || null,
+    }));
+
     const docBody = {
       ownerUid: user.uid,
       ownerFullName: step1.ownerFullName.trim(),
@@ -64,12 +87,14 @@ export async function saveZoneRegistration(
       updatedAt: serverTimestamp(),
 
       primaryBranch: {
-        branchDisplayName: step2.branchDisplayName.trim() || null,
-        city: step2.city.trim() || null,
-        areaLabel: step2.areaLabel.trim() || null,
-        addressLine1: step2.addressLine1.trim() || null,
-        googleMapsUrl: step2.googleMapsUrl.trim() || null,
+        branchDisplayName: primaryBranch?.branchDisplayName.trim() || null,
+        city: primaryBranch?.city.trim() || null,
+        areaLabel: primaryBranch?.areaLabel.trim() || null,
+        addressLine1: primaryBranch?.addressLine1.trim() || null,
+        googleMapsUrl: primaryBranch?.googleMapsUrl.trim() || null,
       },
+
+      additionalBranches,
 
       games: {
         supportsCs2: !!step3.supportsCs2,
