@@ -68,6 +68,48 @@ export default function Home() {
       </View>
 
       <Pressable
+        onPress={() => router.push('/home/request-slot')}
+        style={({ pressed }) => [
+          {
+            backgroundColor: COLORS.card,
+            borderRadius: 14,
+            paddingVertical: 14,
+            paddingHorizontal: 12,
+            marginTop: 14,
+          },
+          pressed && { opacity: 0.9 },
+        ]}
+      >
+        <Text style={{ color: COLORS.text, fontFamily: 'Montserrat_700Bold', fontSize: 16 }}>
+          Request a slot
+        </Text>
+        <Text style={{ color: COLORS.muted }}>
+          Send a matchroom request with sport, time, and preferred zones.
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() => router.push('/home/offers')}
+        style={({ pressed }) => [
+          {
+            backgroundColor: COLORS.card,
+            borderRadius: 14,
+            paddingVertical: 14,
+            paddingHorizontal: 12,
+            marginTop: 10,
+          },
+          pressed && { opacity: 0.9 },
+        ]}
+      >
+        <Text style={{ color: COLORS.text, fontFamily: 'Montserrat_700Bold', fontSize: 16 }}>
+          View pending offers
+        </Text>
+        <Text style={{ color: COLORS.muted }}>
+          Track responses from zone admins and accept a slot.
+        </Text>
+      </Pressable>
+
+      <Pressable
         onPress={handleLogout}
         disabled={signingOut}
         style={({ pressed }) => [
