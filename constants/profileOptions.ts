@@ -1,5 +1,18 @@
 // src/constants/profileOptions.ts
 
+export const CITY_OPTIONS = [
+  "Karachi",
+  "Lahore",
+  "Islamabad",
+  "Rawalpindi",
+  "Faisalabad",
+  "Multan",
+  "Peshawar",
+  "Quetta",
+  "Hyderabad",
+  "Other",
+] as const;
+
 // --- Karachi Areas ---
 // You can keep adding more here later.
 export const KARACHI_AREAS = [
@@ -292,4 +305,54 @@ export const TEKKEN_CHARACTERS = [
   "Reina",
   "Eddy Gordo",
   "Lidia Sobieska",
+] as const;
+
+// --- Offline sports options (futsal, indoor cricket, padel, pickleball) ---
+
+export const SPORT_OPTIONS = [
+  { key: "futsal", label: "Futsal" },
+  { key: "indoor_cricket", label: "Indoor Cricket" },
+  { key: "padel", label: "Padel" },
+  { key: "pickleball", label: "Pickleball" },
+] as const;
+
+export const FUTSAL_POSITIONS = [
+  "Goalkeeper",
+  "Defender",
+  "Midfielder",
+  "Winger",
+  "Striker",
+] as const;
+
+export const INDOOR_CRICKET_ROLES = [
+  "Batsman",
+  "Bowler",
+  "All-rounder",
+  "Wicket-keeper",
+] as const;
+
+// NEW: sub-roles for indoor cricket
+export const INDOOR_CRICKET_BOWLING_STYLES = [
+  "Fast bowler",
+  "Medium pace",
+  "Spinner",
+] as const;
+
+export const INDOOR_CRICKET_BATTING_STYLES = [
+  "Aggressive",
+  "Anchor",
+] as const;
+
+
+export const PADEL_ROLES = [
+  "Aggressive net player",
+  "Defensive back player",
+  "Balanced / either side",
+] as const;
+
+export const PICKLEBALL_ROLES = [
+  "Singles",
+  "Doubles – left side",
+  "Doubles – right side",
+  "Doubles – either side",
 ] as const;

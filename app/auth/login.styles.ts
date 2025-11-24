@@ -37,6 +37,34 @@ export default StyleSheet.create({
     textAlign: 'center',
   },
 
+  // NEW: role toggle row
+  roleToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: SPACING.lg,
+  },
+  roleChip: {
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.lg,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+    marginHorizontal: SPACING.xs,
+    backgroundColor: COLORS.cardBackground,
+  },
+  roleChipActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accent + '22', // subtle tint
+  },
+  roleChipText: {
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.label,
+    color: COLORS.muted,
+  },
+  roleChipTextActive: {
+    color: COLORS.text,
+  },
+
   fieldGroup: {
     marginBottom: SPACING.md,
   },

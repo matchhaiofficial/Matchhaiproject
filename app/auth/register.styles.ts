@@ -151,6 +151,12 @@ export default StyleSheet.create({
   helperError: {
     color: COLORS.error,
   },
+  errorText: {
+    color: COLORS.error,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    marginTop: SPACING.xs,
+  },
 
   // ---- Email suffix ----
   emailSuffix: {

@@ -33,12 +33,62 @@ export default function RegisterStep4() {
   const [submitting, setSubmitting] = useState(false);
 
   // ---- Derived helpers ----
-  const selectedGames = useMemo(() => {
-    const games: string[] = [];
-    if (step2.playsCs2) games.push("CS2");
-    if (step2.playsFc) games.push("FC 26");
-    if (step2.playsTekken) games.push("Tekken 8");
-    return games;
+  // Games + offline sports summary (same idea as Step 3)
+  const { selectedActivities, sportsSummary } = useMemo(() => {
+    const items: string[] = [];
+    if (step2.playsCs2) items.push("CS2");
+    if (step2.playsFc) items.push("FC 26");
+    if (step2.playsTekken) items.push("Tekken 8");
+
+    const playsFutsal = (step2 as any).playsFutsal ?? false;
+    const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
+    const playsPadel = (step2 as any).playsPadel ?? false;
+    const playsPickleball = (step2 as any).playsPickleball ?? false;
+
+    if (playsFutsal) items.push("Futsal");
+    if (playsIndoorCricket) items.push("Indoor Cricket");
+    if (playsPadel) items.push("Padel");
+    if (playsPickleball) items.push("Pickleball");
+
+    const futsalPositions =
+      (((step2 as any).futsalPositions ?? []) as string[]) || [];
+    const indoorCricketRole =
+      ((step2 as any).indoorCricketRole as string) ?? null;
+    const indoorCricketBowlingStyle =
+      ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
+    const indoorCricketBattingStyle =
+      ((step2 as any).indoorCricketBattingStyle as string) ?? null;
+    const padelRole = ((step2 as any).padelRole as string) ?? null;
+    const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
+
+    const details: string[] = [];
+
+    if (playsFutsal && futsalPositions.length) {
+      details.push(`Futsal: ${futsalPositions.join(" / ")}`);
+    }
+
+    if (playsIndoorCricket && indoorCricketRole) {
+      let roleLabel = indoorCricketRole;
+      if (indoorCricketRole === "Bowler" && indoorCricketBowlingStyle) {
+        roleLabel += ` (${indoorCricketBowlingStyle})`;
+      } else if (indoorCricketRole === "Batsman" && indoorCricketBattingStyle) {
+        roleLabel += ` (${indoorCricketBattingStyle})`;
+      }
+      details.push(`Indoor Cricket: ${roleLabel}`);
+    }
+
+    if (playsPadel && padelRole) {
+      details.push(`Padel: ${padelRole}`);
+    }
+
+    if (playsPickleball && pickleballRole) {
+      details.push(`Pickleball: ${pickleballRole}`);
+    }
+
+    return {
+      selectedActivities: items,
+      sportsSummary: details.join(" · "),
+    };
   }, [step2]);
 
   const connectedPlatforms = useMemo(() => {
@@ -136,25 +186,58 @@ export default function RegisterStep4() {
         "[Step4] saving step2 & step3 in Firestore (parallel with Promise.all)"
       );
 
+      // new sports-related fields from step2
+      const playsFutsal = (step2 as any).playsFutsal ?? false;
+      const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
+      const playsPadel = (step2 as any).playsPadel ?? false;
+      const playsPickleball = (step2 as any).playsPickleball ?? false;
+
+      const futsalPositions =
+        (((step2 as any).futsalPositions ?? []) as string[]) || [];
+      const indoorCricketRole =
+        ((step2 as any).indoorCricketRole as string) ?? null;
+      const indoorCricketBowlingStyle =
+        ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
+      const indoorCricketBattingStyle =
+        ((step2 as any).indoorCricketBattingStyle as string) ?? null;
+      const padelRole = ((step2 as any).padelRole as string) ?? null;
+      const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
+
       // 2) Save Step 2 + Step 3 in PARALLEL
+      const step2Payload: any = {
+        areasPreferred: step2.selectedAreas,
+        playsCs2: step2.playsCs2,
+        cs2Role: step2.cs2Role,
+        playsFc: step2.playsFc,
+        fcTeam: step2.fcTeam.trim() || null,
+        fcFormation: step2.fcFormation,
+        playsTekken: step2.playsTekken,
+        tekkenFavorites: step2.tekkenFavorites,
+
+        // new offline sports fields
+        playsFutsal,
+        playsIndoorCricket,
+        playsPadel,
+        playsPickleball,
+        futsalPositions,
+        indoorCricketRole,
+        indoorCricketBowlingStyle,
+        indoorCricketBattingStyle,
+        padelRole,
+        pickleballRole,
+      };
+
+      const step3Payload: any = {
+        steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
+        faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
+        eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
+        xboxGamertag: (step3.xboxGamertag || "").trim() || null,
+        psnOnlineId: (step3.psnOnlineId || "").trim() || null,
+      };
+
       const [resStep2, resStep3] = await Promise.all([
-        saveOnboardingStep2({
-          areasPreferred: step2.selectedAreas,
-          playsCs2: step2.playsCs2,
-          cs2Role: step2.cs2Role,
-          playsFc: step2.playsFc,
-          fcTeam: step2.fcTeam.trim() || null,
-          fcFormation: step2.fcFormation,
-          playsTekken: step2.playsTekken,
-          tekkenFavorites: step2.tekkenFavorites,
-        }),
-        saveOnboardingStep3Platforms({
-          steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
-          faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
-          eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
-          xboxGamertag: (step3.xboxGamertag || "").trim() || null,
-          psnOnlineId: (step3.psnOnlineId || "").trim() || null,
-        }),
+        saveOnboardingStep2(step2Payload),
+        saveOnboardingStep3Platforms(step3Payload),
       ]);
 
       console.log("[Step4] saveOnboardingStep2 result", resStep2);
@@ -308,7 +391,7 @@ export default function RegisterStep4() {
           </View>
         </View>
 
-        {/* Location & games review */}
+        {/* Location & games/sports review */}
         <View style={styles.reviewSectionCard}>
           <View style={styles.reviewSectionHeaderRow}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -318,7 +401,9 @@ export default function RegisterStep4() {
                 color={COLORS.accent}
                 style={{ marginRight: 6 }}
               />
-              <Text style={styles.reviewSectionTitle}>Location & games</Text>
+              <Text style={styles.reviewSectionTitle}>
+                Location & games/sports
+              </Text>
             </View>
             <Pressable onPress={() => router.replace("/auth/register-step2")}>
               <Text style={styles.reviewEditLink}>Edit</Text>
@@ -339,17 +424,24 @@ export default function RegisterStep4() {
             </Text>
           </View>
 
-          <View style={[styles.reviewRow, { marginBottom: 0 }]}>
-            <Text style={styles.reviewLabel}>Games selected</Text>
-            {selectedGames.length ? (
+          <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Games & sports</Text>
+            {selectedActivities.length ? (
               <View style={{ flex: 1, alignItems: "flex-end" }}>
                 <View style={styles.chipRow}>
-                  {selectedGames.map((g) => (
+                  {selectedActivities.map((g) => (
                     <View key={g} style={styles.summaryChip}>
                       <Text style={styles.summaryChipText}>{g}</Text>
                     </View>
                   ))}
                 </View>
+                {sportsSummary ? (
+                  <Text
+                    style={[styles.reviewValue, { marginTop: 4, fontSize: 12 }]}
+                  >
+                    {sportsSummary}
+                  </Text>
+                ) : null}
               </View>
             ) : (
               <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
@@ -433,10 +525,7 @@ export default function RegisterStep4() {
             </Text>
           </Pressable>
 
-          <Pressable
-            onPress={toggleConsentMatchHistory}
-            style={styles.termRow}
-          >
+          <Pressable onPress={toggleConsentMatchHistory} style={styles.termRow}>
             <View
               style={[
                 styles.termBox,
@@ -448,7 +537,7 @@ export default function RegisterStep4() {
               )}
             </View>
             <Text style={styles.termText}>
-              I consent to MatchHai using my match history for matchmaking &
+              I consent to MatchHai using my match history for matchmaking &amp;
               stats.
             </Text>
           </Pressable>

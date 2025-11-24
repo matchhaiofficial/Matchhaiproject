@@ -3,7 +3,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-// ✅ NEW: import the summary types used in Step 3
 import type { FaceitProfileSummary } from "../services/faceitApi";
 import type { SteamProfileSummary } from "../services/steamApi";
 
@@ -17,6 +16,8 @@ type Step1Data = {
 
 type Step2Data = {
   selectedAreas: string[];
+
+  // esports
   playsCs2: boolean;
   playsFc: boolean;
   playsTekken: boolean;
@@ -24,9 +25,24 @@ type Step2Data = {
   fcTeam: string;
   fcFormation: string | null;
   tekkenFavorites: string[];
+
+  // 🏟️ offline sports (MVP)
+  playsFutsal: boolean;
+  playsIndoorCricket: boolean;
+  playsPadel: boolean;
+  playsPickleball: boolean;
+
+  futsalPositions: string[];          // multi-select
+  indoorCricketRole: string | null;   // one role
+  padelRole: string | null;           // one style
+  pickleballRole: string | null;      // one mode
+
+  // NEW: indoor cricket styles
+  indoorCricketBowlingStyle: string | null;
+  indoorCricketBattingStyle: string | null;
 };
 
-// ✅ UPDATED: extend Step3Data to include steamProfile + faceitProfile
+// Step 3 data
 type Step3Data = {
   steamProfileUrl: string;
   faceitProfileUrl: string;
@@ -95,6 +111,8 @@ const initialState: Omit<
   },
   step2: {
     selectedAreas: [],
+
+    // esports
     playsCs2: false,
     playsFc: false,
     playsTekken: false,
@@ -102,8 +120,22 @@ const initialState: Omit<
     fcTeam: "",
     fcFormation: null,
     tekkenFavorites: [],
+
+    // offline sports
+    playsFutsal: false,
+    playsIndoorCricket: false,
+    playsPadel: false,
+    playsPickleball: false,
+
+    futsalPositions: [],
+    indoorCricketRole: null,
+    padelRole: null,
+    pickleballRole: null,
+
+    // NEW defaults
+    indoorCricketBowlingStyle: null,
+    indoorCricketBattingStyle: null,
   },
-  // ✅ UPDATED: add steamProfile + faceitProfile in the initial state
   step3: {
     steamProfileUrl: "",
     faceitProfileUrl: "",
