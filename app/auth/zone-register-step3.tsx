@@ -963,7 +963,8 @@ export default function ZoneRegisterStep3() {
   };
 
   const branchCount = branchSetups.length;
-  const isSubmitDisabled = branchValidations.some((v) => !v.isFormValid);
+  const isFormValid = branchValidations.every((v) => v.isFormValid);
+  const isSubmitDisabled = !isFormValid;
 
   return (
     <Container {...containerProps}>
