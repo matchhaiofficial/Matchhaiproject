@@ -2,181 +2,224 @@
 const express = require("express");
 const router = express.Router();
 
-// Extremely lightweight in-memory store for demo purposes
-const requests = new Map();
-const offers = new Map(); // key: requestId -> array of offers
+const zoneCatalog = [
+  {
+    id: "zone_o2",
+    name: "O2",
+    area: "Federal B Area",
+    sports: ["cs2", "fc25", "tekken8"],
+    basePrice: 450,
+    amenities: ["PC pods", "Fast internet"],
+  },
+  {
+    id: "zone_nuketown",
+    name: "Nuke Town",
+    area: "Tariq Road",
+    sports: ["cs2", "fc25"],
+    basePrice: 500,
+    amenities: ["PC pods", "Snacks"],
+  },
+  {
+    id: "zone_velocity",
+    name: "Velocity",
+    area: "Defence",
+    sports: ["cs2", "tekken8"],
+    basePrice: 520,
+    amenities: ["Bootcamps", "Cafe"],
+  },
+  {
+    id: "zone_blazearena",
+    name: "BlazeArena",
+    area: "Defence",
+    sports: ["padel", "pickleball"],
+    basePrice: 900,
+    amenities: ["Locker rooms", "Racquet rentals"],
+  },
+  {
+    id: "zone_maidan",
+    name: "Maidan",
+    area: "Gulshan",
+    sports: ["futsal"],
+    basePrice: 700,
+    amenities: ["LED lighting", "Changing rooms"],
+  },
+];
 
-function nowTs() {
-  return Date.now();
-}
+const activeRequests = new Map();
 
-function ensureRequest(id) {
-  const req = requests.get(id);
-  if (!req) return null;
-
-  if (req.expiresAt && nowTs() > req.expiresAt && req.status !== "expired") {
-    req.status = "expired";
+function normalizeList(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => (v || "").toString().trim()).filter(Boolean);
   }
-  return req;
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  return [];
 }
 
-router.post("/", (req, res) => {
+function toPartyLabel(partyType) {
+  switch (partyType) {
+    case "duo":
+      return "Duo booking";
+    case "trio":
+      return "Trio booking";
+    case "quad":
+      return "Quad booking";
+    case "team":
+      return "Team booking";
+    default:
+      return "Solo booking";
+  }
+}
+
+function buildOffers(payload, requestId) {
+  const preferredAreas = normalizeList(payload.preferredAreas);
+  const preferredZones = normalizeList(payload.preferredZones);
+
+  const filteredZones = zoneCatalog.filter((zone) => {
+    const areaMatch =
+      preferredAreas.length === 0 || preferredAreas.includes(zone.area);
+    const zoneMatch =
+      preferredZones.length === 0 || preferredZones.includes(zone.name);
+    const sportMatch = zone.sports.includes(payload.sport);
+    return areaMatch && zoneMatch && sportMatch;
+  });
+
+  const source = filteredZones.length > 0 ? filteredZones : zoneCatalog;
+
+  return source.map((zone, idx) => {
+    const price = zone.basePrice + idx * 25;
+    return {
+      id: `offer_${requestId}_${idx}`,
+      requestId,
+      zoneId: zone.id,
+      zoneName: zone.name,
+      areaLabel: zone.area,
+      sport: payload.sport,
+      time: payload.timePreference,
+      pricePerPlayer: price,
+      currency: "PKR",
+      slotsSummary: toPartyLabel(payload.partyType),
+      responseEtaMinutes: 4 + idx * 3,
+      message:
+        payload.notes && payload.notes.trim().length > 0
+          ? `${zone.name} can host. ${payload.notes.trim()}`
+          : `${zone.name} can host this slot.`,
+      status: "pending",
+      amenities: zone.amenities,
+    };
+  });
+}
+
+// POST /requests – create a broadcast request and fan out to eligible zones
+router.post("/", async (req, res) => {
   try {
     const payload = req.body || {};
-    const id = "req_" + nowTs();
-    const expiresInMs = payload.expiresInMs || 30 * 60 * 1000; // default 30m
+    const requestId = `req_${Date.now()}`;
 
-    const record = {
-      id,
-      sport: payload.sport || "unknown",
-      timeWindow: payload.timeWindow || "ASAP",
+    const normalizedPayload = {
+      sport: payload.sport || "cs2",
+      timePreference: payload.timePreference || payload.time || "", // allow legacy "time"
       partyType: payload.partyType || "solo",
-      preferredAreas: Array.isArray(payload.preferredAreas)
-        ? payload.preferredAreas
-        : payload.preferredAreas
-        ? [payload.preferredAreas]
-        : [],
-      preferredZones: Array.isArray(payload.preferredZones)
-        ? payload.preferredZones
-        : payload.preferredZones
-        ? [payload.preferredZones]
-        : [],
-      requester: payload.requester || {},
-      status: "pending",
-      createdAt: nowTs(),
-      expiresAt: nowTs() + expiresInMs,
-      offerState: "offers-pending",
+      preferredAreas: normalizeList(payload.preferredAreas),
+      preferredZones: normalizeList(payload.preferredZones),
+      notes: payload.notes || "",
+      userId: payload.userId,
+      userName: payload.userName,
+      email: payload.email,
     };
 
-    requests.set(id, record);
-    offers.set(id, []);
+    const offers = buildOffers(normalizedPayload, requestId);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    const notifiedZones = [
-      ...record.preferredZones,
-      ...record.preferredAreas.map((area) => `${area}-any-zone`),
-    ];
+    activeRequests.set(requestId, {
+      requestId,
+      payload: normalizedPayload,
+      offers,
+      expiresAt,
+      status: "pending",
+      selectedOfferId: null,
+    });
 
-    return res.json({ ok: true, request: record, notifiedZones });
+    return res.json({ ok: true, requestId, offers, expiresAt });
   } catch (err) {
     console.error("[requests] create error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to create booking request" });
-  }
-});
-
-router.get("/:id", (req, res) => {
-  try {
-    const record = ensureRequest(req.params.id);
-    if (!record) {
-      return res.status(404).json({ ok: false, message: "Request not found" });
-    }
-
-    return res.json({
-      ok: true,
-      request: record,
-      offers: offers.get(record.id) || [],
+    return res.status(500).json({
+      ok: false,
+      message: "Internal error while creating booking request",
     });
-  } catch (err) {
-    console.error("[requests] fetch error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to load request" });
   }
 });
 
-router.post("/:id/offers", (req, res) => {
+// GET /requests/:id/offers – return current offers (or regenerate if missing)
+router.get("/:id/offers", async (req, res) => {
   try {
-    const record = ensureRequest(req.params.id);
-    if (!record) {
+    const { id } = req.params;
+    const existing = activeRequests.get(id);
+
+    if (!existing) {
       return res.status(404).json({ ok: false, message: "Request not found" });
     }
 
-    if (record.status === "expired") {
-      return res
-        .status(400)
-        .json({ ok: false, message: "Request has expired" });
-    }
+    // If offers somehow empty, rebuild from payload
+    const offers =
+      existing.offers && existing.offers.length > 0
+        ? existing.offers
+        : buildOffers(existing.payload, id);
 
-    const list = offers.get(record.id) || [];
-    const offerId = `offer_${nowTs()}_${list.length}`;
-    const offer = {
-      id: offerId,
-      requestId: record.id,
-      zoneId: req.body.zoneId || "unknown-zone",
-      zoneName: req.body.zoneName || req.body.zoneId || "Unknown Zone",
-      adminContact: req.body.adminContact || "n/a",
-      slotTime: req.body.slotTime || record.timeWindow,
-      price: req.body.price || 0,
-      notes: req.body.notes || "",
-      status: "pending",
-      createdAt: nowTs(),
-    };
+    activeRequests.set(id, { ...existing, offers });
 
-    list.push(offer);
-    offers.set(record.id, list);
-    record.status = "offers-pending";
-
-    return res.json({ ok: true, offer, offers: list });
+    return res.json({ ok: true, offers, expiresAt: existing.expiresAt });
   } catch (err) {
-    console.error("[requests] offer error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to submit offer" });
+    console.error("[requests] offers fetch error", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Internal error while fetching offers",
+    });
   }
 });
 
-router.post("/:id/accept", (req, res) => {
+// POST /requests/:id/offers/:offerId/accept – mark an offer as accepted
+router.post("/:id/offers/:offerId/accept", async (req, res) => {
   try {
-    const record = ensureRequest(req.params.id);
-    if (!record) {
+    const { id, offerId } = req.params;
+    const existing = activeRequests.get(id);
+
+    if (!existing) {
       return res.status(404).json({ ok: false, message: "Request not found" });
     }
 
-    const offerId = req.body.offerId;
-    const list = offers.get(record.id) || [];
+    const offers = existing.offers || [];
+    const offerIndex = offers.findIndex((o) => o.id === offerId);
 
-    let found = false;
-    list.forEach((offer) => {
-      if (offer.id === offerId) {
-        offer.status = "accepted";
-        found = true;
-      } else if (offer.status === "pending") {
-        offer.status = "rejected";
-      }
+    if (offerIndex === -1) {
+      return res.status(404).json({ ok: false, message: "Offer not found" });
+    }
+
+    const updatedOffers = offers.map((offer, idx) => ({
+      ...offer,
+      status: idx === offerIndex ? "accepted" : "declined",
+    }));
+
+    const selected = updatedOffers[offerIndex];
+
+    activeRequests.set(id, {
+      ...existing,
+      offers: updatedOffers,
+      status: "accepted",
+      selectedOfferId: selected.id,
     });
 
-    if (!found) {
-      return res
-        .status(404)
-        .json({ ok: false, message: "Offer not found for request" });
-    }
-
-    record.status = "offer-accepted";
-
-    return res.json({ ok: true, request: record, offers: list });
+    return res.json({ ok: true, offer: selected });
   } catch (err) {
     console.error("[requests] accept error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to accept offer" });
-  }
-});
-
-router.post("/:id/reject", (req, res) => {
-  try {
-    const record = ensureRequest(req.params.id);
-    if (!record) {
-      return res.status(404).json({ ok: false, message: "Request not found" });
-    }
-
-    record.status = "offer-rejected";
-    return res.json({ ok: true, request: record });
-  } catch (err) {
-    console.error("[requests] reject error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to reject offers" });
+    return res.status(500).json({
+      ok: false,
+      message: "Internal error while accepting offer",
+    });
   }
 });
 
