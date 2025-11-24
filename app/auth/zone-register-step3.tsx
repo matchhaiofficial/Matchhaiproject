@@ -962,6 +962,7 @@ export default function ZoneRegisterStep3() {
     );
   };
 
+  const branchCount = branchSetups.length;
   const isSubmitDisabled = branchValidations.some((v) => !v.isFormValid);
 
   return (
@@ -985,15 +986,24 @@ export default function ZoneRegisterStep3() {
           <View style={styles.stepperBar}>
             <View style={[styles.stepperBarFill, { width: "75%" }]} />
           </View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={styles.stepperDot} />
-          </View>
+        <View style={styles.stepperDotsRow}>
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={[styles.stepperDot, styles.stepperDotActive]} />
+          <View style={styles.stepperDot} />
         </View>
+      </View>
 
-        {branchSetups.map((branch, idx) => renderBranchCard(branch, idx, branchValidations[idx]))}
+      {branchCount > 1 && (
+        <View style={styles.helperTextRow}>
+          <Text style={[styles.helperText, { color: COLORS.muted }]}>
+            These settings apply to all branches for now. You can customize per-branch inventory after
+            onboarding.
+          </Text>
+        </View>
+      )}
+
+      {branchSetups.map((branch, idx) => renderBranchCard(branch, idx, branchValidations[idx]))}
 
         <View style={[styles.fieldGroup, { marginTop: 16 }]}>
           <Text style={styles.label}>Notes for the MatchHai team (optional)</Text>
@@ -1038,10 +1048,10 @@ export default function ZoneRegisterStep3() {
 
         {/* Footer / login link */}
         <View style={{ alignItems: "center" }}>
-          <Text style={styles.footerText}>Already onboarded?</Text>
+          <Text style={styles.bottomText}>Already onboarded?</Text>
           <Link href="/auth/login" asChild>
             <Pressable>
-              <Text style={styles.footerLink}>Sign in instead</Text>
+              <Text style={styles.backLinkText}>Sign in instead</Text>
             </Pressable>
           </Link>
         </View>
