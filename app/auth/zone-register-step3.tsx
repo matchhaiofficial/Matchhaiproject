@@ -181,7 +181,7 @@ export default function ZoneRegisterStep3() {
   const [focused, setFocused] = useState<{ id: string; field: string } | null>(null);
 
   // ---- Validation ----
-  const branchValidations = useMemo(() => {
+  const branchValidations: BranchValidation[] = useMemo(() => {
     const toInt = (v: string) => {
       const n = Number(v.trim());
       return Number.isFinite(n) ? n : NaN;
