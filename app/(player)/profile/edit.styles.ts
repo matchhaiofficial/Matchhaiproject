@@ -1,0 +1,264 @@
+import { StyleSheet } from 'react-native';
+import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
+
+export default StyleSheet.create({
+    screen: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: SPACING.screenPadding,
+        paddingBottom: SPACING.lg,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+    },
+    backButton: {
+        marginRight: SPACING.md,
+        padding: SPACING.xs,
+    },
+    headerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.subheading,
+    },
+    saveButton: {
+        marginLeft: 'auto',
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.xs,
+        backgroundColor: COLORS.accent,
+        borderRadius: RADII.sm,
+    },
+    saveButtonText: {
+        color: '#FFF',
+        fontSize: TEXT_SIZES.label,
+        fontWeight: '600',
+    },
+    saveButtonDisabled: {
+        backgroundColor: COLORS.cardBorder,
+        opacity: 0.5,
+    },
+
+    scrollContent: {
+        padding: SPACING.screenPadding,
+        paddingBottom: 100,
+    },
+
+    sectionTitle: {
+        color: COLORS.accent,
+        fontSize: TEXT_SIZES.label,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        marginBottom: SPACING.md,
+        marginTop: SPACING.lg,
+    },
+
+    // Form Fields
+    fieldGroup: {
+        marginBottom: SPACING.lg,
+    },
+    label: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.label,
+        marginBottom: SPACING.xs,
+        marginLeft: 4,
+    },
+    inputBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.inputBackground,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        borderRadius: RADII.md,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.xs,
+    },
+    input: {
+        flex: 1,
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.input,
+        fontFamily: FONTS.body,
+        paddingVertical: SPACING.sm + 2,
+    },
+    helperText: {
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 4,
+        marginLeft: 4,
+    },
+    helperWarning: {
+        color: COLORS.warning,
+    },
+    helperError: {
+        color: COLORS.error,
+    },
+    helperOk: {
+        color: COLORS.success,
+    },
+
+    // Platform Input
+    platformInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: SPACING.md,
+    },
+    platformIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: RADII.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: SPACING.sm,
+    },
+    steamIcon: {
+        backgroundColor: 'rgba(102, 192, 244, 0.1)',
+        borderWidth: 1,
+        borderColor: COLORS.steamBorder,
+    },
+    faceitIcon: {
+        backgroundColor: 'rgba(255, 85, 0, 0.1)',
+        borderWidth: 1,
+        borderColor: COLORS.faceitBorder,
+    },
+    platformField: {
+        flex: 1,
+    },
+
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+    },
+
+    // Verification Button Styles
+    platformButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingVertical: SPACING.md,
+        marginTop: SPACING.sm,
+    },
+    platformButtonActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: "#1e2a38",
+    },
+    platformButtonText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+    },
+
+    // Verified Summary Styles
+    summaryLabel: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        marginBottom: 2,
+    },
+    summaryValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+    },
+
+    // Password Strength
+    passwordStrengthWrapper: {
+        marginTop: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    strengthMeterTrack: {
+        height: 4,
+        borderRadius: 999,
+        backgroundColor: "#3a3a3a",
+        overflow: "hidden",
+    },
+    strengthMeterFill: {
+        height: "100%",
+        borderRadius: 999,
+    },
+    strengthLabel: {
+        marginTop: SPACING.xs,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    passwordRequirementsRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginTop: SPACING.xs,
+    },
+    requirementColumn: {
+        flex: 1,
+    },
+    passwordRequirementText: {
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        color: COLORS.muted,
+        marginBottom: 2,
+    },
+    passwordRequirementTextDone: {
+        color: COLORS.success,
+    },
+
+    // Password Action Buttons
+    passwordUpdateButton: {
+        flex: 1,
+        backgroundColor: COLORS.accent,
+        borderRadius: RADII.md,
+        paddingVertical: SPACING.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    passwordUpdateButtonDisabled: {
+        backgroundColor: COLORS.inputBorder,
+        opacity: 0.6,
+    },
+    passwordCancelButton: {
+        flex: 1,
+        backgroundColor: 'transparent',
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        paddingVertical: SPACING.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    passwordButtonText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '600',
+    },
+
+    // Area Chips
+    areaChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        marginRight: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    areaChipActive: {
+        backgroundColor: '#1e2a38',
+        borderColor: COLORS.accent,
+    },
+    areaChipText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+    },
+    areaChipTextActive: {
+        color: COLORS.text,
+    },
+});

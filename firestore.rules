@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is signed in
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper to check if user is accessing their own document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection:
+    // - Authenticated users can read any profile (for matchmaking/social)
+    // - Users can only write/update their own profile
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // Friends Subcollection
+    match /users/{userId}/friends/{friendId} {
+      allow read: if isOwner(userId);
+      // Allow write if you're the owner OR if you're the friend being added (reciprocal write)
+      allow write: if isOwner(userId) || request.auth.uid == friendId;
+    }
+
+    // Blocks Subcollection
+    match /users/{userId}/blocks/{blockId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Notifications (Inbox)
+    match /notifications/{notificationId} {
+      // Read: Own inbox (received) AND Outgoing (sent)
+      // FIX: Also allow read if the ID *ends* with the user's UID (for deterministic join requests)
+      // This handles the case where the doc doesn't exist yet (so resource.data is null)
+      allow read, list: if isAuthenticated() && (
+        (resource != null && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid)) ||
+        notificationId.matches('.*_' + request.auth.uid)
+      );
+      
+      // Create: Sending a request/invite to someone else
+      allow create: if isAuthenticated() && request.resource.data.fromUid == request.auth.uid;
+      
+      // Update: 
+      // 1. Recipient accepting/declining (updating status via toUid)
+      // 2. Sender re-requesting (updating via fromUid) - e.g. overwriting expired/declined
+      allow update: if isAuthenticated() && (
+        resource.data.toUid == request.auth.uid || 
+        resource.data.fromUid == request.auth.uid
+      );
+    }
+
+    // Teams
+    match /teams/{teamId} {
+        allow read: if isAuthenticated();
+        // Allow creating a new team
+        allow create: if isAuthenticated();
+        
+        // Update logic:
+        // 1. Captain can update anything.
+        // 2. Joining member can increment memberCount/memberUids if they have a valid invite.
+        // We verify the invite deterministically.
+        allow update: if isAuthenticated() && (
+            resource.data.captainUid == request.auth.uid || 
+            (
+                request.resource.data.memberCount == resource.data.memberCount + 1 && 
+                request.resource.data.memberUids.hasAny([request.auth.uid]) &&
+                exists(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )) &&
+                get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )).data.status == "pending" &&
+                get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )).data.expiresAt > request.time
+            )
+        );
+    }
+    
+    // Team Members Subcollection
+    match /teams/{teamId}/members/{memberId} {
+        allow read: if isAuthenticated();
+        // Allow write if:
+        // 1. You are the captain.
+        // 2. You are the member joining AND you have a valid invite.
+        allow create: if isAuthenticated() && (
+            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
+            (
+                memberId == request.auth.uid &&
+                exists(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + memberId )) &&
+                get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + memberId )).data.status == "pending" &&
+                get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + memberId )).data.expiresAt > request.time
+            )
+        );
+        allow update, delete: if isAuthenticated() && (
+            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
+            memberId == request.auth.uid
+        );
+    }
+
+    // Matchrooms:
+    // - Authenticated users can read and create matchrooms
+    match /matchrooms/{matchId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Only host, captain, or a player claiming their reserved slot can update.
+      // For MVP, we'll keep it relatively open but ensure only reservedForUid can claim a reserved slot
+      allow update: if isAuthenticated() && (
+        resource.data.hostUid == request.auth.uid ||
+        resource.data.captainUidA == request.auth.uid ||
+        resource.data.captainUidB == request.auth.uid ||
+        // Slot claim logic helper
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slotsA', 'slotsB', 'players', 'playerUids', 'currentPlayers', 'updatedAt']))
+      ); 
+      allow delete: if isAuthenticated() && resource.data.hostUid == request.auth.uid;
+    }
+
+    // Booking Intents
+    match /booking_intents/{intentId} {
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && 
+        request.resource.data.createdByUid == request.auth.uid &&
+        (request.resource.data.status in ["pending_approvals", "approved_pending_payment", "draft"]);
+
+      allow update: if isAuthenticated() && (
+        // Creator can update status, paymentStatus, etc. 
+        // We allow creator to overwrite if status is not confirmed yet
+        (resource.data.createdByUid == request.auth.uid && 
+         resource.data.status != "confirmed") ||
+        // Approvers can only update their specific approval status
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approvals', 'status', 'updatedAt']))
+      );
+    }
+    
+    // Booking Requests (Broadcast mode)
+    match /booking_requests/{requestId} {
+      allow read, create: if isAuthenticated();
+      allow update: if isAuthenticated();
+    }
+
+    // Zones - Publicly readable for finding venues
+    match /zones/{zoneId} {
+        allow read: if true; 
+        allow write: if isAuthenticated(); // Only admins in reality, but for dev auth is fine
+    }
+
+    // Zone Registrations (Onboarding)
+    match /zone_registrations/{regId} {
+        allow create: if true; // Any prospective owner can start
+        allow read, update: if isAuthenticated(); 
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

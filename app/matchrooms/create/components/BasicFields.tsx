@@ -1,0 +1,151 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
+import React, { useState } from 'react';
+import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import styles from '../create.styles';
+
+interface BasicFieldsProps {
+    formData: Record<string, any>;
+    onChange: (field: string, value: any) => void;
+    selectedGame?: string;
+}
+
+export default function BasicFields({ formData, onChange, selectedGame }: BasicFieldsProps) {
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+
+    // Helper to parse date string DD/MM/YYYY to Date object
+    const parseDate = (dateStr: string) => {
+        if (!dateStr) return new Date();
+        const [day, month, year] = dateStr.split('/').map(Number);
+        return new Date(year, month - 1, day);
+    };
+
+    // Helper to parse time string HH:MM to Date object
+    const parseTime = (timeStr: string) => {
+        if (!timeStr) return new Date();
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        const date = new Date();
+        date.setHours(hours);
+        date.setMinutes(minutes);
+        return date;
+    };
+
+    const handleDateChange = (event: any, selectedDate?: Date) => {
+        setShowDatePicker(false);
+        if (selectedDate) {
+            const day = String(selectedDate.getDate()).padStart(2, '0');
+            const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+            const year = selectedDate.getFullYear();
+            onChange('date', `${day}/${month}/${year}`);
+        }
+    };
+
+    const handleTimeChange = (event: any, selectedTime?: Date) => {
+        setShowTimePicker(false);
+        if (selectedTime) {
+            const hours = String(selectedTime.getHours()).padStart(2, '0');
+            const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+            onChange('time', `${hours}:${minutes}`);
+        }
+    };
+
+    return (
+        <>
+            {/* Title */}
+            <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Match Title</Text>
+                <View style={styles.inputBox}>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="e.g., Competitive 5v5"
+                        placeholderTextColor="#757575"
+                        value={formData.title || ''}
+                        onChangeText={(text) => onChange('title', text)}
+                    />
+                </View>
+            </View>
+
+            {/* Description */}
+            <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Description (Optional)</Text>
+                <View style={styles.inputBox}>
+                    <TextInput
+                        style={[styles.input, { minHeight: 60 }]}
+                        placeholder="Add any special rules or requirements..."
+                        placeholderTextColor="#757575"
+                        value={formData.description || ''}
+                        onChangeText={(text) => onChange('description', text)}
+                        multiline
+                        numberOfLines={3}
+                    />
+                </View>
+            </View>
+
+            {/* Date and Time (CS2 & Others) */}
+            <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Date & Time</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={[styles.inputBox, { flex: 1 }]}>
+                        <Pressable
+                            onPress={() => setShowDatePicker(true)}
+                            style={{ flex: 1, justifyContent: 'center' }}
+                        >
+                            <Text style={[styles.input, !formData.date && { color: '#757575' }]}>
+                                {formData.date || 'DD/MM/YYYY'}
+                            </Text>
+                        </Pressable>
+                    </View>
+                    <View style={[styles.inputBox, { flex: 1 }]}>
+                        <Pressable
+                            onPress={() => setShowTimePicker(true)}
+                            style={{ flex: 1, justifyContent: 'center' }}
+                        >
+                            <Text style={[styles.input, !formData.time && { color: '#757575' }]}>
+                                {formData.time || 'HH:MM'}
+                            </Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </View>
+
+            {showDatePicker && (
+                <DateTimePicker
+                    value={parseDate(formData.date)}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={handleDateChange}
+                    minimumDate={new Date()}
+                />
+            )}
+
+            {showTimePicker && (
+                <DateTimePicker
+                    value={parseTime(formData.time)}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={handleTimeChange}
+                    is24Hour={true}
+                />
+            )}
+
+            {/* Max Players - Hidden for CS2 & FC26 */}
+            {selectedGame !== 'cs2' && selectedGame !== 'fc26' && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Max Players</Text>
+                    <View style={styles.inputBox}>
+                        <TextInput
+                            style={styles.input}
+                            placeholder="e.g., 10"
+                            placeholderTextColor="#757575"
+                            value={formData.maxPlayers ? String(formData.maxPlayers) : ''}
+                            onChangeText={(text) => onChange('maxPlayers', text ? parseInt(text, 10) : '')}
+                            keyboardType="number-pad"
+                        />
+                    </View>
+                </View>
+            )}
+
+
+        </>
+    );
+}

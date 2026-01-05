@@ -1,0 +1,20 @@
+{
+    "name": "matchhai-psn-service",
+    "version": "1.0.0",
+    "description": "Vercel serverless function for MatchHai PSN verification",
+    "main": "api/psn-verify.ts",
+    "scripts": {
+        "dev": "vercel dev",
+        "local-dev": "tsc && node dist/src/local-server.js",
+        "build": "tsc"
+    },
+    "dependencies": {
+        "psn-api": "^2.17.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@vercel/node": "^3.0.0",
+        "typescript": "^5.0.0",
+        "vercel": "^32.0.0"
+    }
+}

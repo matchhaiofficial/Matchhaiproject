@@ -1,15 +1,16 @@
 // src/config/firebaseConfig.ts
-import { Platform } from "react-native";
-import { initializeApp, getApps, getApp } from "firebase/app";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import {
+  Auth,
   getAuth,
   initializeAuth,
-  getReactNativePersistence,
-  Auth,
 } from "firebase/auth";
+// @ts-ignore
+import { getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB57bgQdpSOk91_HjL-AJq94_n23OXvgnY",
@@ -21,7 +22,7 @@ const firebaseConfig = {
 };
 
 // Initialize (avoid duplicates in Fast Refresh)
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // Use RN persistence on native; standard getAuth on web
 let auth: Auth;
@@ -42,3 +43,11 @@ if (Platform.OS === "web") {
 export { auth };
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+
+// Connection to Emulators (Commented out for production focus)
+/*
+if (__DEV__) {
+  // ... (Emulators disabled for Spark plan compatibility)
+}
+*/

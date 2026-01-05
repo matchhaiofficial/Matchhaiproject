@@ -42,6 +42,20 @@ export const KARACHI_AREAS = [
   "Other (Karachi)",
 ] as const;
 
+// --- User Demographics ---
+export const AGE_RANGES = [
+  "13-17",
+  "18-24",
+  "25-34",
+  "35+"
+] as const;
+
+export const PLAY_TIME_OPTIONS = [
+  "Weekday evenings (7-11 PM)",
+  "Weekend daytime",
+  "Late night (11 PM-3 AM)"
+] as const;
+
 // --- Game options ---
 export const GAME_OPTIONS = [
   { key: "cs2", label: "Counter-Strike 2" },
@@ -53,7 +67,7 @@ export const GAME_OPTIONS = [
 export const CS2_ROLES = [
   "Entry Fragger",
   "Support",
-  "AWPer",
+  "AW Per",
   "In-Game Leader (IGL)",
   "Lurker",
 ] as const;
@@ -328,10 +342,8 @@ export const INDOOR_CRICKET_ROLES = [
   "Batsman",
   "Bowler",
   "All-rounder",
-  "Wicket-keeper",
 ] as const;
 
-// NEW: sub-roles for indoor cricket
 export const INDOOR_CRICKET_BOWLING_STYLES = [
   "Fast bowler",
   "Medium pace",
@@ -343,16 +355,105 @@ export const INDOOR_CRICKET_BATTING_STYLES = [
   "Anchor",
 ] as const;
 
+export const INDOOR_CRICKET_BATTING_ORDER = [
+  "Opener",
+  "1st - 3rd Down",
+  "4th - 6th Down",
+  "7th - 8th Down",
+] as const;
+
+export const INDOOR_CRICKET_BOWLING_ORDER = [
+  "1st Over",
+  "2nd - 3rd Over",
+  "4th - 5th Over",
+] as const;
+
+export const INDOOR_CRICKET_COMPOSITIONS = [
+  {
+    name: 'Balanced',
+    description: 'Standard balanced team',
+    positions: { 'Batsman': 3, 'Bowler': 3, 'All-rounder': 2 }
+  },
+  {
+    name: 'Batting Heavy',
+    description: 'Extra batting power',
+    positions: { 'Batsman': 4, 'Bowler': 2, 'All-rounder': 2 }
+  },
+  {
+    name: 'Bowling Heavy',
+    description: 'Strong bowling attack',
+    positions: { 'Batsman': 2, 'Bowler': 4, 'All-rounder': 2 }
+  },
+] as const;
+
 
 export const PADEL_ROLES = [
-  "Aggressive net player",
-  "Defensive back player",
-  "Balanced / either side",
+  "Aggressive / Front",
+  "Defensive / Back",
+  "Both",
 ] as const;
 
 export const PICKLEBALL_ROLES = [
-  "Singles",
-  "Doubles – left side",
-  "Doubles – right side",
-  "Doubles – either side",
+  "Aggressive / Front",
+  "Defensive / Back",
+  "Both",
+] as const;
+
+// --- Zone registration constants ---
+
+// Console platforms
+export const CONSOLE_PLATFORMS = [
+  { value: "", label: "Select console type" },
+  { value: "ps5", label: "PS5" },
+  { value: "ps4", label: "PS4" },
+  { value: "xbox-series", label: "Xbox Series X|S" },
+  { value: "xbox-one", label: "Xbox One" },
+  { value: "mixed", label: "Mixed (PS + Xbox)" },
+  { value: "other", label: "Other / arcade" },
+] as const;
+
+// Futsal court types
+export const FUTSAL_COURT_TYPES = [
+  { value: "", label: "Select court type" },
+  { value: "belgian-turf", label: "Belgian turf" },
+  { value: "rubber-turf", label: "Rubber / PVC turf" },
+  { value: "hard-court", label: "Hard court (indoor)" },
+  { value: "other", label: "Other" },
+] as const;
+
+// Indoor cricket surfaces
+export const INDOOR_CRICKET_SURFACES = [
+  { value: "", label: "Select surface" },
+  { value: "belgian-turf", label: "Belgian turf" },
+  { value: "blue-multipurpose", label: "Blue multipurpose turf" },
+  { value: "cement-matting", label: "Cement wicket + matting" },
+  { value: "other", label: "Other" },
+] as const;
+
+// Padel court surfaces
+export const PADEL_SURFACES = [
+  { value: "", label: "Select surface" },
+  { value: "blue-turf", label: "Blue padel turf" },
+  { value: "red-turf", label: "Red padel turf" },
+  { value: "green-turf", label: "Green turf" },
+  { value: "indoor", label: "Indoor padel court" },
+  { value: "other", label: "Other" },
+] as const;
+
+// Pickleball surfaces
+export const PICKLEBALL_SURFACES = [
+  { value: "", label: "Select surface" },
+  { value: "acrylic-hard", label: "Acrylic hard court" },
+  { value: "concrete-acrylic", label: "Concrete + acrylic" },
+  { value: "asphalt-acrylic", label: "Asphalt + acrylic" },
+  { value: "indoor-wood", label: "Indoor wooden court" },
+  { value: "multi-sport", label: "Multi-sport court" },
+  { value: "other", label: "Other" },
+] as const;
+
+// PC Types
+export const PC_TYPES = [
+  { value: "regular", label: "Regular" },
+  { value: "premium", label: "Premium" },
+  { value: "elite", label: "Elite" },
 ] as const;

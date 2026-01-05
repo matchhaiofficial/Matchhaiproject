@@ -5,7 +5,10 @@ import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { View } from "react-native";
+import { LogBox, View } from "react-native";
+
+// Suppress the keep-awake error in development (Expo internal issue)
+LogBox.ignoreLogs(['Unable to activate keep awake']);
 
 // Fonts
 import { Lora_400Regular, useFonts as useLora } from "@expo-google-fonts/lora";
@@ -16,10 +19,11 @@ import {
 } from "@expo-google-fonts/montserrat";
 
 // Theme + Auth provider + Toast
-import ToastHost from "../components/ToastHost";
+import Toast from "react-native-toast-message";
 import AuthProvider from "../src/context/AuthContext";
 import { useToast } from "../src/hooks/useToast";
 import { COLORS } from "../src/theme";
+import { toastConfig } from "../src/ui/toastConfig";
 
 export default function RootLayout() {
   const [montLoaded] = useMontserrat({ Montserrat_700Bold });
@@ -97,7 +101,7 @@ export default function RootLayout() {
           }}
         />
         {/* Global toast host */}
-        <ToastHost />
+        <Toast config={toastConfig} />
       </View>
     </AuthProvider>
   );

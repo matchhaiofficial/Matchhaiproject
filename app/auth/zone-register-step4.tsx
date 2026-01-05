@@ -1,7 +1,7 @@
 // app/auth/zone-register-step4.tsx
 import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,71 +20,17 @@ import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
-export default function ZoneRegisterStep4() {
-  const { step1, step2, step3, step4, setStep4, setCurrentStep, resetAll } =
+export default function AdminRegisterStep4() {
+  const { step1, branches, step4, setStep4, setCurrentStep, resetAll } =
     useZoneOnboardingStore();
   const { showToast } = useToast();
 
   const [submitting, setSubmitting] = useState(false);
 
   // ---- Derived helpers ----
-
-  const gamesSummary = useMemo(() => {
-    const games: string[] = [];
-    if (step3.supportsCs2) games.push("CS2 (PC)");
-    if (step3.supportsFc25) games.push("FC25 / FC26");
-    if (step3.supportsTekken8) games.push("Tekken 8");
-    if (step3.supportsFutsal) games.push("Futsal");
-    if (step3.supportsIndoorCricket) games.push("Indoor Cricket");
-    if (step3.supportsPadel) games.push("Padel");
-    if (step3.supportsPickleball) games.push("Pickleball");
-    return games;
-  }, [step3]);
-
-  const capacityLines = useMemo(() => {
-    const lines: string[] = [];
-
-    if (step3.pcSeats?.trim()) {
-      lines.push(`PC setups: ${step3.pcSeats.trim()}`);
-    }
-    if (step3.consoleSeats?.trim()) {
-      const label = step3.consolePlatform
-        ? `Console pods: ${step3.consoleSeats.trim()} (${step3.consolePlatform})`
-        : `Console pods: ${step3.consoleSeats.trim()}`;
-      lines.push(label);
-    }
-    if (step3.futsalCourts?.trim()) {
-      const label = step3.futsalCourtType
-        ? `Futsal courts: ${step3.futsalCourts.trim()} (${step3.futsalCourtType})`
-        : `Futsal courts: ${step3.futsalCourts.trim()}`;
-      lines.push(label);
-    }
-    if (step3.indoorCricketNets?.trim()) {
-      const label = step3.indoorCricketSurface
-        ? `Indoor cricket nets: ${step3.indoorCricketNets.trim()} (${step3.indoorCricketSurface})`
-        : `Indoor cricket nets: ${step3.indoorCricketNets.trim()}`;
-      lines.push(label);
-    }
-    if (step3.padelCourts?.trim()) {
-      const label = step3.padelCourtSurface
-        ? `Padel courts: ${step3.padelCourts.trim()} (${step3.padelCourtSurface})`
-        : `Padel courts: ${step3.padelCourts.trim()}`;
-      lines.push(label);
-    }
-    if (step3.pickleballCourts?.trim()) {
-      const label = step3.pickleballSurface
-        ? `Pickleball courts: ${step3.pickleballCourts.trim()} (${step3.pickleballSurface})`
-        : `Pickleball courts: ${step3.pickleballCourts.trim()}`;
-      lines.push(label);
-    }
-
-    return lines;
-  }, [step3]);
-
   const allAgreementsChecked = step4.agreeTerms && step4.agreeRevenueShare;
 
   const toggleAgreeTerms = () => setStep4({ agreeTerms: !step4.agreeTerms });
-
   const toggleAgreeRevenueShare = () =>
     setStep4({ agreeRevenueShare: !step4.agreeRevenueShare });
 
@@ -93,10 +39,10 @@ export default function ZoneRegisterStep4() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   // ---- Final submit: create auth user + Firestore zone ----
@@ -106,23 +52,24 @@ export default function ZoneRegisterStep4() {
         type: "info",
         title: "Almost there",
         message:
-          "Please confirm you’re authorised and agree to the zone policies to continue.",
+          "Please confirm you're authorised and agree to the zone policies to continue.",
       });
       return;
     }
 
-    // Safety: ensure basic fields exist – if missing, send them back.
+    // Safety: ensure basic fields exist
     if (
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
       !step1.contactEmail.trim() ||
-      !step1.password
+      !step1.password ||
+      branches.length === 0
     ) {
       showToast({
         type: "error",
         title: "Missing details",
         message:
-          "Some of your zone account details are missing. Please go back and complete Step 1.",
+          "Some of your zone account details are missing. Please go back and complete all steps.",
       });
       router.replace("/auth/zone-register");
       return;
@@ -131,12 +78,12 @@ export default function ZoneRegisterStep4() {
     setSubmitting(true);
 
     try {
-      // 1) Create auth user for this zone owner (same as player sign-up)
+      // 1) Create auth user for this zone owner
       const resSignUp = await signUpWithEmail(
         step1.contactEmail.trim(),
         step1.password,
         step1.ownerFullName.trim(),
-        undefined, // no username for zone account (for now)
+        undefined,
         step1.contactPhone.trim()
       );
 
@@ -151,8 +98,8 @@ export default function ZoneRegisterStep4() {
         return;
       }
 
-      // 2) Save zone + primary branch in Firestore under /zones
-      const resZone = await saveZoneRegistration({ step1, step2, step3 });
+      // 2) Save zone + all branches in Firestore
+      const resZone = await saveZoneRegistration({ step1, branches });
 
       if (!resZone.ok) {
         showToast({
@@ -176,7 +123,7 @@ export default function ZoneRegisterStep4() {
         type: "success",
         title: "Zone submitted",
         message:
-          "Your zone and primary branch are submitted for review. We’ll get back to you soon.",
+          "Your zone and all branches are submitted for review. We'll get back to you soon.",
       });
 
       router.replace("/home");
@@ -226,8 +173,7 @@ export default function ZoneRegisterStep4() {
         {/* Headings */}
         <Text style={styles.heading}>Almost ready</Text>
         <Text style={styles.sub}>
-          Confirm your zone account, branch location, and games/courts before
-          sending your zone for approval.
+          Confirm your zone account and branches before sending your zone for approval.
         </Text>
 
         {/* Zone account & brand review */}
@@ -276,6 +222,13 @@ export default function ZoneRegisterStep4() {
           </View>
 
           <View style={styles.reviewRow}>
+            <Text style={styles.reviewLabel}>Business Type</Text>
+            <Text style={styles.reviewValue}>
+              {step1.type === 'gaming' ? 'Zone (Gaming)' : step1.type === 'sports' ? 'Court (Sports)' : 'Both (Hybrid)'}
+            </Text>
+          </View>
+
+          <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Contact email</Text>
             <Text
               style={[
@@ -302,7 +255,7 @@ export default function ZoneRegisterStep4() {
           </View>
         </View>
 
-        {/* Primary branch & location review */}
+        {/* Branches Review */}
         <View style={styles.reviewSectionCard}>
           <View style={styles.reviewSectionHeaderRow}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -313,7 +266,7 @@ export default function ZoneRegisterStep4() {
                 style={{ marginRight: 6 }}
               />
               <Text style={styles.reviewSectionTitle}>
-                Primary branch & location
+                Branches ({branches.length})
               </Text>
             </View>
             <Pressable
@@ -323,150 +276,57 @@ export default function ZoneRegisterStep4() {
             </Pressable>
           </View>
 
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Branch name</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.branchDisplayName && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.branchDisplayName || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>City</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.city && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.city || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Area / neighbourhood</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.areaLabel && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.areaLabel || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Address</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.addressLine1 && styles.reviewValueMuted,
-              ]}
-              numberOfLines={2}
-            >
-              {step2.addressLine1 || "Not set"}
-            </Text>
-          </View>
-
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Google Maps link</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step2.googleMapsUrl && styles.reviewValueMuted,
-              ]}
-              numberOfLines={1}
-            >
-              {step2.googleMapsUrl || "Not added"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Games, courts & setups review */}
-        <View style={styles.reviewSectionCard}>
-          <View style={styles.reviewSectionHeaderRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <MaterialIcons
-                name="sports-esports"
-                size={16}
-                color={COLORS.accent}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.reviewSectionTitle}>
-                Games, courts & setups
+          {branches.map((branch, index) => (
+            <View key={branch.id} style={{ marginTop: index > 0 ? 16 : 0, paddingTop: index > 0 ? 16 : 0, borderTopWidth: index > 0 ? 1 : 0, borderTopColor: '#333' }}>
+              <Text style={{ color: COLORS.accent, fontWeight: 'bold', marginBottom: 8 }}>
+                {branch.branchDisplayName}
               </Text>
-            </View>
-            <Pressable
-              onPress={() => router.replace("/auth/zone-register-step3")}
-            >
-              <Text style={styles.reviewEditLink}>Edit</Text>
-            </Pressable>
-          </View>
-
-          {/* Games / sports chips */}
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Games & sports</Text>
-            {gamesSummary.length ? (
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <View style={styles.chipRow}>
-                  {gamesSummary.map((g) => (
-                    <View key={g} style={styles.summaryChip}>
-                      <Text style={styles.summaryChipText}>{g}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : (
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                None selected
+              <Text style={{ color: COLORS.muted, fontSize: 12 }}>
+                {branch.addressLine1}, {branch.areaLabel}, {branch.city}
               </Text>
-            )}
-          </View>
 
-          {/* Capacity details */}
-          <View style={[styles.reviewRow, { alignItems: "flex-start" }]}>
-            <Text style={styles.reviewLabel}>Setups & courts</Text>
-            {capacityLines.length ? (
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                {capacityLines.map((line) => (
-                  <Text
-                    key={line}
-                    style={[styles.reviewValue, { textAlign: "right" }]} // ✅ allow wrapping, right-aligned
-                  >
-                    {line}
+              {/* Inventory Summary */}
+              <View style={{ marginTop: 8 }}>
+                {branch.supportsCs2 && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • PC Setups: {[
+                      branch.pricing.pc?.regular?.count ? `Regular (${branch.pricing.pc.regular.count})` : null,
+                      branch.pricing.pc?.premium?.count ? `Premium (${branch.pricing.pc.premium.count})` : null,
+                      branch.pricing.pc?.elite?.count ? `Elite (${branch.pricing.pc.elite.count})` : null,
+                    ].filter(Boolean).join(', ') || 'N/A'}
                   </Text>
-                ))}
+                )}
+                {branch.supportsFc25 && branch.pricing.console?.ps5 && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • PS5 Consoles: {branch.pricing.console.ps5.count}
+                  </Text>
+                )}
+                {branch.supportsFutsal && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • Futsal Courts: {Object.values(branch.pricing.futsal || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                  </Text>
+                )}
+                {branch.supportsIndoorCricket && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • Cricket Nets: {Object.values(branch.pricing.indoorCricket || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                  </Text>
+                )}
+                {branch.supportsPadel && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • Padel Courts: {Object.values(branch.pricing.padel || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                  </Text>
+                )}
+                {branch.supportsPickleball && (
+                  <Text style={{ color: COLORS.text, fontSize: 12 }}>
+                    • Pickleball Courts: {Object.values(branch.pricing.pickleball || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                  </Text>
+                )}
               </View>
-            ) : (
-              <Text style={[styles.reviewValue, styles.reviewValueMuted]}>
-                No capacity details added yet
-              </Text>
-            )}
-          </View>
-
-          {/* Optional notes */}
-          <View style={[styles.reviewRow, { alignItems: "flex-start" }]}>
-            <Text style={styles.reviewLabel}>Zone notes</Text>
-            <Text
-              style={[
-                styles.reviewValue,
-                !step3.notes && styles.reviewValueMuted,
-              ]}
-              numberOfLines={2}
-            >
-              {step3.notes || "No extra notes"}
-            </Text>
-          </View>
+            </View>
+          ))}
         </View>
 
-        {/* Agreements (zone-specific) */}
+        {/* Agreements */}
         <View style={styles.termsWrapper}>
           <Text style={styles.termsHeading}>Agreements</Text>
 
@@ -480,8 +340,7 @@ export default function ZoneRegisterStep4() {
               {step4.agreeTerms && <View style={styles.termBoxInner} />}
             </View>
             <Text style={styles.termText}>
-              I confirm that I own or am authorised to manage this zone and
-              branch on MatchHai.
+              I confirm that I own or am authorised to manage this zone and all branches on MatchHai.
             </Text>
           </Pressable>
 
@@ -495,7 +354,7 @@ export default function ZoneRegisterStep4() {
               {step4.agreeRevenueShare && <View style={styles.termBoxInner} />}
             </View>
             <Text style={styles.termText}>
-              I agree to MatchHai’s{" "}
+              I agree to MatchHai's{" "}
               <Text style={styles.termLink}>zone policies & revenue model</Text>
               . (You can set payout method later.)
             </Text>
@@ -510,12 +369,12 @@ export default function ZoneRegisterStep4() {
           )}
         </View>
 
-        {/* Back to Step 3 (safety link) */}
+        {/* Back to Step 3 */}
         <Pressable
           onPress={() => router.replace("/auth/zone-register-step3")}
           style={{ alignSelf: "center", marginBottom: 12 }}
         >
-          <Text style={{ color: COLORS.accent }}>← Back to games & setups</Text>
+          <Text style={{ color: COLORS.accent }}>← Back to branch inventory</Text>
         </Pressable>
 
         {/* Final Submit button */}
@@ -523,8 +382,8 @@ export default function ZoneRegisterStep4() {
           style={[
             styles.buttonShadowWrapper,
             allAgreementsChecked &&
-              !submitting &&
-              styles.buttonShadowWrapperActive,
+            !submitting &&
+            styles.buttonShadowWrapperActive,
           ]}
         >
           <Pressable
@@ -533,10 +392,10 @@ export default function ZoneRegisterStep4() {
             style={({ pressed }) => [
               styles.primaryBtn,
               (!allAgreementsChecked || submitting) &&
-                styles.primaryBtnDisabled,
+              styles.primaryBtnDisabled,
               pressed &&
-                !submitting &&
-                allAgreementsChecked && { opacity: 0.92 },
+              !submitting &&
+              allAgreementsChecked && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >

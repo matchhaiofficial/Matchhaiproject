@@ -16,7 +16,7 @@ import {
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import { sendPasswordReset } from "../../src/services/authService";
-import { COLORS } from "../../src/theme";
+import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 
 export default function ForgotPassword() {
@@ -42,10 +42,10 @@ export default function ForgotPassword() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   const handleSubmit = async () => {
@@ -109,8 +109,8 @@ export default function ForgotPassword() {
             style={[
               styles.inputBox,
               isEmailValid &&
-                email.trim().length > 0 &&
-                styles.inputBoxValidShadow,
+              email.trim().length > 0 &&
+              styles.inputBoxValidShadow,
             ]}
           >
             <View style={styles.inputRow}>
@@ -128,7 +128,7 @@ export default function ForgotPassword() {
               <TextInput
                 placeholder="your@email.com"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
                 keyboardType="email-address"
                 autoCapitalize="none"

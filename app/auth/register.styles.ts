@@ -217,10 +217,10 @@ export default StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
     backgroundColor: COLORS.cardBackground,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm - 1,
-    marginRight: SPACING.sm,
-    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.md, // 12
+    paddingVertical: SPACING.sm,   // 8
+    marginRight: SPACING.sm,       // 8
+    marginBottom: SPACING.xs,      // 4 (small margin to prevent clipping in wrap views, safe for horizontal)
   },
   optionChipActive: {
     backgroundColor: "#1e2a38",
@@ -509,5 +509,39 @@ export default StyleSheet.create({
   termLink: {
     color: COLORS.accent,
     textDecorationLine: "underline",
+  },
+  // ... existing styles ...
+
+  // Card Style for Branches/Inventory
+  card: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    marginBottom: 12,
+  },
+  cardTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+
+  // Secondary Button (Outline)
+  secondaryBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    color: COLORS.accent,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

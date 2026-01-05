@@ -20,6 +20,7 @@ import {
   FaceitProfileSummary,
   fetchFaceitProfileFromUrl,
 } from "../../src/services/faceitApi";
+import { PsnVerificationResult, verifyPsnProfile } from "../../src/services/psnApi";
 import {
   fetchSteamProfileFromUrl,
   SteamProfileSummary,
@@ -120,9 +121,13 @@ export default function RegisterStep3() {
   );
   const [faceitProfile, setFaceitProfile] =
     useState<FaceitProfileSummary | null>(step3.faceitProfile ?? null);
+  const [psnStats, setPsnStats] = useState<PsnVerificationResult | null>(
+    (step3 as any).psnStats ?? null
+  );
 
   const [steamLoading, setSteamLoading] = useState(false);
   const [faceitLoading, setFaceitLoading] = useState(false);
+  const [psnLoading, setPsnLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const isFocused = useIsFocused();
@@ -130,6 +135,7 @@ export default function RegisterStep3() {
   // derived flags
   const steamVerified = !!steamProfile;
   const faceitVerified = !!faceitProfile;
+  const psnVerified = !!psnStats;
 
   // If user somehow comes here without step2 filled, send them back
   useEffect(() => {
@@ -282,10 +288,10 @@ export default function RegisterStep3() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   const handleSteamLookup = async () => {
@@ -358,6 +364,27 @@ export default function RegisterStep3() {
     });
   };
 
+  const handlePsnLookup = async () => {
+    const value = psnOnlineId.trim();
+    if (!value) {
+      showToast({ type: "info", title: "PSN ID", message: "Enter your PSN Online ID first." });
+      return;
+    }
+
+    setPsnLoading(true);
+    const res = await verifyPsnProfile(value, playsTekken, playsFc);
+    setPsnLoading(false);
+
+    if (!res.ok) {
+      showToast({ type: "error", title: "PSN Verification Failed", message: res.message });
+      setPsnStats(null);
+      return;
+    }
+
+    setPsnStats(res.data);
+    showToast({ type: "success", title: "PSN Linked", message: "PlayStation profile verified." });
+  };
+
   const handleContinue = () => {
     if (!isFormValid) {
       const messages: string[] = [];
@@ -390,7 +417,8 @@ export default function RegisterStep3() {
       psnOnlineId: psnOnlineId.trim(),
       steamProfile,
       faceitProfile,
-    });
+      psnStats,
+    } as any);
 
     setSaving(false);
     router.push("/auth/register-step4");
@@ -583,8 +611,8 @@ export default function RegisterStep3() {
                 {steamLoading
                   ? "Checking..."
                   : steamVerified
-                  ? "Steam verified"
-                  : "Verify Steam profile"}
+                    ? "Steam verified"
+                    : "Verify Steam profile"}
               </Text>
             </Pressable>
 
@@ -682,8 +710,8 @@ export default function RegisterStep3() {
                 {faceitLoading
                   ? "Checking..."
                   : faceitVerified
-                  ? "FACEIT verified"
-                  : "Verify FACEIT profile"}
+                    ? "FACEIT verified"
+                    : "Verify FACEIT profile"}
               </Text>
             </Pressable>
 
@@ -859,7 +887,13 @@ export default function RegisterStep3() {
                 <Text style={styles.platformSubtitle}>{psnSubtitle}</Text>
               </View>
             </View>
-            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
+            <View
+              style={[
+                styles.inputBox,
+                styles.inputRow,
+                { marginTop: 10, marginBottom: 8 },
+              ]}
+            >
               <MaterialIcons
                 name="person"
                 size={18}
@@ -869,21 +903,68 @@ export default function RegisterStep3() {
                 }
               />
               <TextInput
-                placeholder="Your PSN online ID (optional)"
+                placeholder="MyPsnId_123"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
                 selectionColor={COLORS.accent}
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={psnOnlineId}
-                onChangeText={setPsnOnlineId}
+                onChangeText={(text) => {
+                  setPsnOnlineId(text);
+                  if (psnStats) setPsnStats(null);
+                }}
               />
             </View>
+
+            <Pressable
+              onPress={handlePsnLookup}
+              disabled={psnLoading || !psnOnlineId.trim()}
+              style={({ pressed }) => [
+                styles.platformButton,
+                psnVerified && { backgroundColor: "#1DB954" },
+                pressed && !psnLoading && { opacity: 0.9 },
+              ]}
+            >
+              <Text style={styles.platformButtonText}>
+                {psnLoading
+                  ? "Checking..."
+                  : psnVerified
+                    ? "PSN verified"
+                    : "Verify PSN ID"}
+              </Text>
+            </Pressable>
+
+            {psnStats && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={styles.summaryLabel}>Verified: {psnStats.psnOnlineId}</Text>
+                <Text style={[styles.summaryValue, { color: COLORS.accent }]}>
+                  Level {psnStats.trophyLevel} · {psnStats.totalTrophies?.platinum ?? 0} Platinums
+                </Text>
+
+                {/* Tekken Check */}
+                {playsTekken && (
+                  <Text style={[styles.summaryValue, { marginTop: 4, fontSize: 13 }]}>
+                    Tekken 8: {psnStats.tekken8.present
+                      ? `${psnStats.tekken8.progress}% Trophies` + (psnStats.tekken8.formatPlayDuration ? ` · ${psnStats.tekken8.formatPlayDuration} played` : "")
+                      : "Not found on profile"}
+                  </Text>
+                )}
+                {/* FC Check */}
+                {playsFc && (
+                  <Text style={[styles.summaryValue, { marginTop: 2, fontSize: 13 }]}>
+                    FC 25/26: {psnStats.fc.present
+                      ? `${psnStats.fc.progress}% Trophies` + (psnStats.fc.formatPlayDuration ? ` · ${psnStats.fc.formatPlayDuration} played` : "")
+                      : "Not found on profile"}
+                  </Text>
+                )}
+              </View>
+            )}
 
             {psnLooksWeird && (
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperWarning]}>
-                  That PSN ID looks very short. Please double-check it.
+                  That looks very short. Please double-check your PSN Online ID.
                 </Text>
               </View>
             )}

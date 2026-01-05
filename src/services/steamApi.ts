@@ -7,6 +7,13 @@ export interface SteamProfileSummary {
   avatarUrl?: string;
   countryCode?: string;
   cs2Hours?: number;
+  stats?: {
+    totalKills: number;
+    totalDeaths: number;
+    totalWins: number;
+    totalDamage: number;
+    kdRatio: string | number;
+  };
 }
 
 type SteamApiResult =
@@ -35,6 +42,13 @@ export async function fetchSteamProfileFromUrl(
           avatarUrl: undefined,
           countryCode: "PK",
           cs2Hours: 1234,
+          stats: {
+            totalKills: 15000,
+            totalDeaths: 12000,
+            totalWins: 500,
+            totalDamage: 2000000,
+            kdRatio: 1.25,
+          },
         },
       };
     }

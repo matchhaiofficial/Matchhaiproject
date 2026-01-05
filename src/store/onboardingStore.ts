@@ -12,10 +12,13 @@ type Step1Data = {
   email: string;
   phone: string;
   password: string;
+  city: string;
+  ageRange: string;
 };
 
 type Step2Data = {
   selectedAreas: string[];
+  playTimes: string[]; // multi-select
 
   // esports
   playsCs2: boolean;
@@ -40,6 +43,13 @@ type Step2Data = {
   // NEW: indoor cricket styles
   indoorCricketBowlingStyle: string | null;
   indoorCricketBattingStyle: string | null;
+
+  // NEW Tekken fields
+  tekkenExperienceDuration?: string | null;
+  tekkenPlayEnvironment?: string | null;
+  tekkenSelfAssessment?: string | null;
+  tekkenSkillScore?: number;
+  tekkenSkillBracket?: "A" | "B" | "C" | "D";
 };
 
 // Step 3 data
@@ -108,9 +118,12 @@ const initialState: Omit<
     email: "",
     phone: "",
     password: "",
+    city: "Karachi",
+    ageRange: "",
   },
   step2: {
     selectedAreas: [],
+    playTimes: [],
 
     // esports
     playsCs2: false,
@@ -135,6 +148,13 @@ const initialState: Omit<
     // NEW defaults
     indoorCricketBowlingStyle: null,
     indoorCricketBattingStyle: null,
+
+    // Tekken defaults
+    tekkenExperienceDuration: null,
+    tekkenPlayEnvironment: null,
+    tekkenSelfAssessment: null,
+    tekkenSkillScore: 0,
+    tekkenSkillBracket: undefined,
   },
   step3: {
     steamProfileUrl: "",

@@ -16,7 +16,7 @@ import {
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import { signInWithEmail } from "../../src/services/authService";
-import { COLORS } from "../../src/theme";
+import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -293,10 +293,10 @@ export default function Login() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   const handleLogin = async () => {
@@ -396,8 +396,12 @@ export default function Login() {
             : "You’re now signed in.",
       });
 
-      // For now, both go to /home; later you can add /zone/home
-      router.replace("/home");
+      // Redirect based on user type
+      if (userType === "zone") {
+        router.replace("/zone");
+      } else {
+        router.replace("/home");
+      }
     } catch (e) {
       console.error("[Login] signInWithEmail threw error", e);
       setLoading(false);
@@ -413,6 +417,8 @@ export default function Login() {
     console.log("[Login] Forgot Password pressed");
     router.push("/auth/forgot-password");
   };
+
+
 
   const showPasswordHints = password.length > 0 || passFocused;
 
@@ -526,7 +532,7 @@ export default function Login() {
                 ref={emailRef}
                 placeholder="Email or phone"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -603,7 +609,7 @@ export default function Login() {
                 ref={passwordRef}
                 placeholder="Password"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
                 selectionColor={COLORS.accent}
                 secureTextEntry={!passwordVisible}
                 autoCapitalize="none"
@@ -732,6 +738,12 @@ export default function Login() {
             </View>
           )}
         </View>
+
+
+
+
+
+
 
         {/* Bottom link (dynamic text + Link navigation) */}
         <View style={{ flexDirection: "row", justifyContent: "center" }}>

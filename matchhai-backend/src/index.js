@@ -9,7 +9,18 @@ const zonesRoutes = require("./routes/zones");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors());
+// Enable CORS for all origins (for development)
+app.use(cors({
+  origin: '*',
+  credentials: true
+}));
+
+// Middleware to add ngrok skip-browser-warning header
+app.use((req, res, next) => {
+  res.setHeader('ngrok-skip-browser-warning', 'true');
+  next();
+});
+
 app.use(express.json());
 
 app.get("/", (req, res) => {
@@ -18,7 +29,9 @@ app.get("/", (req, res) => {
 
 app.use("/steam", steamRoutes);
 app.use("/faceit", faceitRoutes);
-app.use("/zones", zonesRoutes); // 👈 new
+app.use("/zones", zonesRoutes);
+const psnRoutes = require("./routes/psn");
+app.use("/psn", psnRoutes);
 
 app.listen(PORT, () => {
   console.log(`MatchHai backend listening on port ${PORT}`);

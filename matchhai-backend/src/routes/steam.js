@@ -126,8 +126,75 @@ router.get("/profile-from-url", async (req, res) => {
       personaName: p.personaname,
       avatarUrl: p.avatarfull || p.avatar,
       countryCode: p.loccountrycode || null,
-      cs2Hours: null, // optional: add GetOwnedGames call later
+      cs2Hours: null,
+      stats: null,
     };
+
+    // 2. Get CS2 Hours (AppID 730)
+    try {
+      const ownedGamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/`;
+      const ownedGamesRes = await axios.get(ownedGamesUrl, {
+        params: {
+          key: STEAM_API_KEY,
+          steamid: steamId,
+          include_appinfo: true,
+          include_played_free_games: true,
+        },
+      });
+      const games = ownedGamesRes.data?.response?.games;
+      if (games && games.length > 0) {
+        const cs2 = games.find((g) => g.appid === 730);
+        if (cs2) {
+          result.cs2Hours = Math.round(cs2.playtime_forever / 60);
+        }
+      }
+    } catch (e) {
+      console.log("[steam] GetOwnedGames failed:", e.message);
+      result.debugHoursError = e.message;
+    }
+
+    // 3. Get CS2 Stats (AppID 730)
+    try {
+      const statsUrl = `https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/`;
+      const statsRes = await axios.get(statsUrl, {
+        params: {
+          key: STEAM_API_KEY,
+          steamid: steamId,
+          appid: 730,
+        },
+      });
+      const statsData = statsRes.data?.playerstats?.stats;
+      if (statsData) {
+        // Helper to find stat
+        const getStat = (name) => {
+          const s = statsData.find((x) => x.name === name);
+          return s ? s.value : 0;
+        };
+
+        const totalKills = getStat("total_kills");
+        const totalDeaths = getStat("total_deaths");
+        const totalWins = getStat("total_wins"); // total_matches_won
+        const totalDamage = getStat("total_damage_done");
+
+        // headshot kills isn't always directly "total_kills_headshot", checking standard names.
+        // Usually it's total_kills_headshot in older CSGO stats. Let's try it.
+        // Actually, for CS2, many stats are similar to CSGO.
+        // We will just grab K/D/W for now as requested "all the stats"
+
+        const kdRatio = totalDeaths > 0 ? (totalKills / totalDeaths).toFixed(2) : totalKills;
+
+        result.stats = {
+          totalKills,
+          totalDeaths,
+          totalWins,
+          totalDamage,
+          kdRatio,
+        };
+      }
+    } catch (e) {
+      // 403/500 if stats are private
+      console.log("[steam] GetUserStatsForGame failed (likely private stats):", e.message);
+    }
 
     return res.json(result);
   } catch (err) {

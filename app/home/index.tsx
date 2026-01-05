@@ -1,5 +1,5 @@
 // app/home/index.tsx
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
@@ -19,7 +19,7 @@ export default function Home() {
     }
   }, [loading, user]);
 
-    // ✅ Redirect away when user becomes null (after logout)
+  // ✅ Redirect away when user becomes null (after logout)
   useEffect(() => {
     if (!loading && !user) {
       console.log("[Home] no user → redirecting to /auth/login");
@@ -63,9 +63,10 @@ export default function Home() {
       <Text style={styles.sub}>Signed in as {email}</Text>
 
       <View style={styles.card}>
-        <Text style={styles.sub}>Welcome to MatchHai v0.</Text>
-        <Text style={styles.sub}>Next: Matchrooms, zones, and court bookings.</Text>
+        <Text style={styles.sub}>Redirecting to Dashboard...</Text>
       </View>
+      {/* Fallback redirect if they land here */}
+      <Redirect href="/(player)/(tabs)" />
 
       <Pressable
         onPress={handleLogout}
