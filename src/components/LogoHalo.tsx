@@ -1,6 +1,7 @@
 // src/components/LogoHalo.tsx
 import React from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image, View } from "react-native";
+import styles from "./LogoHalo.styles";
 
 export default function LogoHalo() {
   return (
@@ -13,18 +14,3 @@ export default function LogoHalo() {
   );
 }
 
-const LOGO_SIZE = 110; // layout size (keeps spacing the same)
-
-const styles = StyleSheet.create({
-  wrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20, // fields stay where they are
-  },
-  logo: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
-    resizeMode: "contain",
-    transform: [{ scale: 2 }], // visually larger (~25% bigger)
-  },
-});

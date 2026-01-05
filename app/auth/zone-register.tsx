@@ -3,14 +3,14 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
@@ -60,7 +60,7 @@ const formatPakistaniPhone = (value: string) => {
   return formatted.trim();
 };
 
-export default function ZoneRegisterStep1() {
+export default function AdminRegisterStep1() {
   const { step1, setStep1, setCurrentStep } = useZoneOnboardingStore();
   const { showToast } = useToast();
 
@@ -190,10 +190,10 @@ export default function ZoneRegisterStep1() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   // ---------- Handlers ----------
@@ -224,6 +224,7 @@ export default function ZoneRegisterStep1() {
       contactEmail: contactEmail.trim(),
       contactPhone: contactPhone.trim(),
       password,
+      // type is already in step1 from store or default
     });
 
     setCurrentStep(1); // mark we finished step 1
@@ -247,9 +248,9 @@ export default function ZoneRegisterStep1() {
         <View style={styles.stepperWrapper}>
           <View style={styles.stepperTopRow}>
             <View>
-              <Text style={styles.stepperTitle}>Create Zone Account</Text>
+              <Text style={styles.stepperTitle}>Create Admin Account</Text>
               <Text style={styles.stepperSubtitle}>
-                Step 1 of 4 · Zone owner details
+                Step 1 of 4 · Admin details
               </Text>
             </View>
           </View>
@@ -265,11 +266,41 @@ export default function ZoneRegisterStep1() {
         </View>
 
         {/* Headings */}
-        <Text style={styles.heading}>Zone owner basics</Text>
+        <Text style={styles.heading}>Admin basics</Text>
         <Text style={styles.sub}>
           Tell us who runs this zone and how we can contact you. We’ll use this
           for payouts and support.
         </Text>
+
+        {/* Business Type Selection */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Business Type</Text>
+          <View style={styles.chipRow}>
+            {[
+              { label: 'Zone', value: 'gaming' },
+              { label: 'Court', value: 'sports' },
+              { label: 'Both', value: 'hybrid' }
+            ].map((option) => (
+              <Pressable
+                key={option.value}
+                onPress={() => setStep1({ ...step1, type: option.value as any })}
+                style={({ pressed }) => [
+                  styles.optionChip,
+                  step1.type === option.value && styles.optionChipActive,
+                  pressed && { opacity: 0.9 },
+                  { flex: 1, alignItems: 'center', justifyContent: 'center' }
+                ]}
+              >
+                <Text style={[
+                  styles.optionChipText,
+                  step1.type === option.value && styles.optionChipTextActive,
+                ]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
 
         {/* Owner full name */}
         <View style={styles.fieldGroup}>

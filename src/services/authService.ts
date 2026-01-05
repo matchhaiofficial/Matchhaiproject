@@ -112,6 +112,8 @@ export async function signUpWithEmail(
         username: usernameTrimmed,
         usernameLower,
         phone: normalizedPhone,
+        accountType: 'player', // CRITICAL: Required for Find Players query
+        isOnline: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })

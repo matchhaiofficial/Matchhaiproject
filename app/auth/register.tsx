@@ -9,9 +9,11 @@ import {
   ScrollView,
   Text,
   TextInput,
-  View,
+  View
 } from "react-native";
 
+import { AGE_RANGES, CITY_OPTIONS } from "../../constants/profileOptions";
+import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import {
@@ -19,7 +21,7 @@ import {
   isUsernameAvailable,
 } from "../../src/services/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
-import { COLORS } from "../../src/theme";
+import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./register.styles";
 
 type FocusField =
@@ -64,12 +66,17 @@ const formatPakistaniPhone = (value: string) => {
   return formatted.trim();
 };
 
+
+
 export default function Register() {
   const { step1, setStep1 } = useOnboardingStore();
   const { showToast } = useToast();
 
   const [fullName, setFullName] = useState(step1.fullName);
   const [username, setUsername] = useState(step1.username);
+  const [city, setCity] = useState(step1.city || "Karachi");
+  const [ageRange, setAgeRange] = useState(step1.ageRange || AGE_RANGES[1]); // Default 18-24
+
 
   // store only the local part in state, derive from existing email
   const [email, setEmail] = useState(() => {
@@ -118,6 +125,8 @@ export default function Register() {
     strengthWidth,
   } = useMemo(() => {
     const nameValid = fullName.trim().length >= 3;
+    const cityValid = city.length > 0;
+    const ageValid = ageRange.length > 0;
 
     const usernameTrimmed = username.trim();
     const usernameFormatValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameTrimmed);
@@ -195,7 +204,7 @@ export default function Register() {
       isPhoneFormatValid: phoneFormatValid,
       isPasswordValid: passwordValid,
       isFormValid:
-        nameValid && usernameOk && emailValid && phoneOk && passwordValid,
+        nameValid && usernameOk && emailValid && phoneOk && passwordValid && cityValid && ageValid,
 
       // password rule flags for UI
       hasUpper: hasUpperRule,
@@ -229,10 +238,10 @@ export default function Register() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
   // ---------- Availability checks ----------
@@ -313,6 +322,8 @@ export default function Register() {
       email: fullEmail,
       phone,
       password,
+      city,
+      ageRange,
     });
 
     router.push("/auth/register-step2");
@@ -410,7 +421,7 @@ export default function Register() {
               <TextInput
                 placeholder="Enter your full name"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
                 value={fullName}
                 onChangeText={setFullName}
@@ -423,6 +434,29 @@ export default function Register() {
                 styles.focusBar,
                 { opacity: focused === "fullName" ? 1 : 0 },
               ]}
+            />
+          </View>
+        </View>
+
+        {/* City & Age Row */}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <CustomSingleSelect
+              label="City"
+              value={city}
+              options={CITY_OPTIONS}
+              onChange={setCity}
+              icon="location-city"
+            />
+          </View>
+
+          <View style={{ flex: 0.8 }}>
+            <CustomSingleSelect
+              label="Age"
+              value={ageRange}
+              options={AGE_RANGES}
+              onChange={setAgeRange}
+              icon="cake"
             />
           </View>
         </View>
@@ -463,12 +497,12 @@ export default function Register() {
                     usernameStatus === "checking"
                       ? "hourglass-top"
                       : usernameStatus === "available"
-                      ? "check-circle"
-                      : usernameStatus === "taken"
-                      ? "error-outline"
-                      : isUsernameFormatValid
-                      ? "check-circle"
-                      : "error-outline"
+                        ? "check-circle"
+                        : usernameStatus === "taken"
+                          ? "error-outline"
+                          : isUsernameFormatValid
+                            ? "check-circle"
+                            : "error-outline"
                   }
                   size={18}
                   style={styles.suffixIcon}
@@ -476,8 +510,8 @@ export default function Register() {
                     usernameStatus === "taken"
                       ? COLORS.error
                       : usernameStatus === "available" || isUsernameFormatValid
-                      ? COLORS.success
-                      : COLORS.muted
+                        ? COLORS.success
+                        : COLORS.muted
                   }
                 />
               )}
@@ -510,7 +544,7 @@ export default function Register() {
               <TextInput
                 placeholder="yourname"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withSuffix }]}
                 selectionColor={COLORS.accent}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -549,7 +583,7 @@ export default function Register() {
               <TextInput
                 placeholder="03XX XXX XXXX"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
                 keyboardType="phone-pad"
                 autoCapitalize="none"
@@ -568,12 +602,12 @@ export default function Register() {
                     phoneStatus === "checking"
                       ? "hourglass-top"
                       : phoneStatus === "available"
-                      ? "check-circle"
-                      : phoneStatus === "taken"
-                      ? "error-outline"
-                      : isPhoneFormatValid
-                      ? "check-circle"
-                      : "error-outline"
+                        ? "check-circle"
+                        : phoneStatus === "taken"
+                          ? "error-outline"
+                          : isPhoneFormatValid
+                            ? "check-circle"
+                            : "error-outline"
                   }
                   size={18}
                   style={styles.suffixIcon}
@@ -581,8 +615,8 @@ export default function Register() {
                     phoneStatus === "taken"
                       ? COLORS.error
                       : phoneStatus === "available" || isPhoneFormatValid
-                      ? COLORS.success
-                      : COLORS.muted
+                        ? COLORS.success
+                        : COLORS.muted
                   }
                 />
               )}
@@ -615,7 +649,7 @@ export default function Register() {
               <TextInput
                 placeholder="Create a strong password"
                 placeholderTextColor={COLORS.muted}
-                style={styles.input}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
                 selectionColor={COLORS.accent}
                 secureTextEntry={!passwordVisible}
                 autoCapitalize="none"

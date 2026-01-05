@@ -1,0 +1,183 @@
+import { MaterialIcons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+    ActivityIndicator,
+    FlatList,
+    Pressable,
+    RefreshControl,
+    Text,
+    View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { getMatchrooms, Matchroom } from "../../src/services/matchService";
+import { COLORS } from "../../src/theme";
+import Logger from "../../src/utils/logger";
+import MatchroomCard from "./components/MatchroomCard";
+import styles from "./matchrooms.styles";
+
+export default function MatchroomsIndex() {
+    const router = useRouter();
+    const [rooms, setRooms] = useState<Matchroom[]>([]);
+    const [filteredRooms, setFilteredRooms] = useState<Matchroom[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // Filters
+    const [activeFilter, setActiveFilter] = useState<'All' | 'CS2' | 'FC26' | 'Tekken' | 'Cricket'>('All');
+    const [skillFilter, setSkillFilter] = useState<string | null>(null);
+
+    const fetchRooms = async () => {
+        try {
+            // Fetch all open rooms first, then filter client-side for smoother UX
+            const res = await getMatchrooms();
+            if (res.ok && res.data) {
+                setRooms(res.data);
+            }
+        } catch (e) {
+            Logger.error("MatchroomsIndex", "Failed to fetch rooms", e);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    useEffect(() => {
+        setLoading(true);
+        fetchRooms();
+    }, []);
+
+    // Apply filters whenever rooms or filter state changes
+    useEffect(() => {
+        let result = rooms;
+
+        // 1. Game Filter
+        if (activeFilter !== 'All') {
+            if (activeFilter === 'Cricket') {
+                result = result.filter(r => r.game === 'indoorCricket');
+            } else if (activeFilter === 'Tekken') {
+                result = result.filter(r => r.game === 'tekken8');
+            } else {
+                result = result.filter(r => r.game.toLowerCase().includes(activeFilter.toLowerCase()));
+            }
+        }
+
+        // 2. Skill Filter
+        if (skillFilter) {
+            result = result.filter(r =>
+                r.hostSkillTier === skillFilter ||
+                r.skillLevel === skillFilter ||
+                r.hostSkillTier === 'Any' // Always show 'Any' skill matches? Or strict filter? Let's check logic.
+                // Strict filter logic: User wants "Pro" matches only.
+                // Use strict matching for now.
+            );
+        }
+
+        setFilteredRooms(result);
+    }, [rooms, activeFilter, skillFilter]);
+
+    const onRefresh = () => {
+        setRefreshing(true);
+        fetchRooms();
+    };
+
+    const renderItem = ({ item }: { item: Matchroom }) => (
+        <MatchroomCard room={item} />
+    );
+
+    return (
+        <SafeAreaView style={styles.screen}>
+            {/* Header */}
+            <View style={styles.header}>
+                <View>
+                    <Text style={styles.headerTitle}>Matchrooms</Text>
+                    <Text style={styles.headerSubtitle}>Find your squad</Text>
+                </View>
+                {/* Create Button */}
+                <Pressable
+                    onPress={() => router.push("/matchrooms/create")}
+                    style={{
+                        backgroundColor: COLORS.accent,
+                        paddingHorizontal: 16,
+                        paddingVertical: 8,
+                        borderRadius: 20,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4
+                    }}
+                >
+                    <MaterialIcons name="add" size={20} color="#fff" />
+                    <Text style={{ color: "#fff", fontWeight: "bold" }}>Create</Text>
+                </Pressable>
+            </View>
+
+            {/* Game Filters */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 12, flexDirection: "row", gap: 8 }}>
+                {['All', 'CS2', 'FC26', 'Tekken', 'Cricket'].map((f) => (
+                    <Pressable
+                        key={f}
+                        onPress={() => setActiveFilter(f as any)}
+                        style={[
+                            styles.filterChip,
+                            activeFilter === f && styles.filterChipActive
+                        ]}
+                    >
+                        <Text style={[
+                            styles.filterText,
+                            activeFilter === f && styles.filterTextActive
+                        ]}>
+                            {f}
+                        </Text>
+                    </Pressable>
+                ))}
+            </View>
+
+            {/* Skill Filters */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 16, flexDirection: "row", gap: 8 }}>
+                <Text style={{ color: COLORS.textSecondary, fontSize: 12, alignSelf: 'center', marginRight: 4 }}>Skill:</Text>
+                {['Beginner', 'Intermediate', 'Advanced', 'Pro'].map((s) => (
+                    <Pressable
+                        key={s}
+                        onPress={() => setSkillFilter(skillFilter === s ? null : s)}
+                        style={[
+                            styles.filterChip,
+                            { paddingVertical: 4, paddingHorizontal: 12 }, // Smaller chips for skill
+                            skillFilter === s && styles.filterChipActive
+                        ]}
+                    >
+                        <Text style={[
+                            styles.filterText,
+                            { fontSize: 10 },
+                            skillFilter === s && styles.filterTextActive
+                        ]}>
+                            {s}
+                        </Text>
+                    </Pressable>
+                ))}
+            </View>
+
+            {loading ? (
+                <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                    <ActivityIndicator color={COLORS.accent} />
+                </View>
+            ) : (
+                <FlatList
+                    data={filteredRooms}
+                    renderItem={renderItem}
+                    keyExtractor={(item) => item.id!}
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
+                    }
+                    ListEmptyComponent={
+                        <View style={{ alignItems: "center", marginTop: 40 }}>
+                            <Text style={{ color: COLORS.muted }}>No active matchrooms found.</Text>
+                            <Text style={{ color: COLORS.muted }}>Be the first to create one!</Text>
+                        </View>
+                    }
+                />
+            )}
+        </SafeAreaView>
+    );
+}

@@ -302,4 +302,11 @@ export default StyleSheet.create({
     marginTop: SPACING.sm,
     fontFamily: FONTS.body,
   },
+  bottomLink: {
+    color: COLORS.accent,
+    fontFamily: FONTS.body,
+    marginTop: SPACING.sm,
+    marginLeft: SPACING.xs,
+    fontWeight: 'bold',
+  },
 });
