@@ -18,7 +18,7 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.heading,
         marginBottom: SPACING.lg,
     },
-    searchBox: {
+    searchBar: {
         backgroundColor: COLORS.inputBackground,
         borderRadius: RADII.md,
         borderWidth: 1,
@@ -26,7 +26,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: SPACING.md,
-        marginBottom: SPACING.lg,
+        marginVertical: SPACING.sm,
         height: 48,
     },
     searchInput: {
@@ -39,10 +39,9 @@ export default StyleSheet.create({
     },
     filterContainer: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: SPACING.sm,
+        flexWrap: 'nowrap',
     },
-    // Chip styles matching matchroom creation
+    // Chip styles matching Teams/Matchrooms
     optionChip: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -53,7 +52,7 @@ export default StyleSheet.create({
         paddingHorizontal: SPACING.md,
         paddingVertical: SPACING.sm - 1,
         marginRight: SPACING.sm,
-        marginBottom: SPACING.sm,
+        marginBottom: 5,
     },
     optionChipActive: {
         backgroundColor: '#1e2a38',
@@ -69,19 +68,29 @@ export default StyleSheet.create({
     },
 
     listContent: {
-        padding: SPACING.screenPadding,
+        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: 100,
     },
+    resultsCount: {
+        paddingHorizontal: SPACING.screenPadding,
+        paddingTop: SPACING.md,
+        paddingBottom: SPACING.sm,
+    },
+    resultsCountText: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
+    },
     playerCard: {
-        backgroundColor: COLORS.surface,
-        borderRadius: RADII.md,
-        padding: SPACING.lg,
+        backgroundColor: COLORS.cardDark,
+        borderRadius: 20,
+        padding: SPACING.md,
         marginBottom: SPACING.md,
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         ...SHADOWS.cardElevated,
+        minHeight: 90,
     },
     playerAvatar: {
         width: 50,
@@ -90,7 +99,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.background,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: SPACING.lg,
+        marginRight: SPACING.md,
         position: 'relative',
         borderWidth: 1,
         borderColor: COLORS.divider,
@@ -109,7 +118,7 @@ export default StyleSheet.create({
         borderRadius: 6,
         backgroundColor: COLORS.success,
         borderWidth: 2,
-        borderColor: COLORS.surface,
+        borderColor: COLORS.cardDark,
     },
     playerInfo: {
         flex: 1,
@@ -117,32 +126,79 @@ export default StyleSheet.create({
     playerName: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.subheading,
+        fontSize: 18,
         marginBottom: 4,
     },
     gameTags: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 4,
+        gap: 6,
     },
     gameTag: {
-        backgroundColor: COLORS.accent + '20',
-        paddingHorizontal: SPACING.sm,
-        paddingVertical: 2,
-        borderRadius: RADII.sm,
+        backgroundColor: 'rgba(66, 165, 245, 0.1)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
         borderWidth: 1,
-        borderColor: COLORS.accent + '40',
+        borderColor: 'rgba(66, 165, 245, 0.3)',
     },
     gameTagText: {
         color: COLORS.accent,
         fontFamily: FONTS.heading,
         fontSize: 10,
+        fontWeight: '700',
+        textTransform: 'uppercase',
     },
-    skillText: {
-        color: COLORS.muted,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-        marginTop: 4,
+    skillTag: {
+        backgroundColor: 'rgba(0, 230, 118, 0.05)',
+        borderColor: 'rgba(0, 230, 118, 0.2)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    skillTagText: {
+        color: COLORS.successBright,
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+    },
+    faceitIcon: {
+        width: 25,
+        height: 25,
+        marginLeft: 4,
+    },
+    actionBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: COLORS.accent,
+        backgroundColor: 'rgba(66, 165, 245, 0.1)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    actionBtnText: {
+        color: COLORS.accent,
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+    },
+    pendingBtn: {
+        borderColor: COLORS.warning,
+        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+    },
+    pendingBtnText: {
+        color: COLORS.warning,
+    },
+    friendBtn: {
+        borderColor: COLORS.success,
+        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    },
+    friendBtnText: {
+        color: COLORS.success,
     },
     emptyState: {
         alignItems: 'center',
@@ -170,5 +226,6 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: COLORS.background,
     },
 });

@@ -233,7 +233,7 @@ export default function MatchroomsIndex() {
         <SafeAreaView style={styles.screen}>
             {/* Header Section (matching Find Players layout) */}
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Find Match</Text>
+                <Text style={styles.headerTitle}>Matchrooms</Text>
 
                 {/* Search Bar */}
                 <View style={styles.searchBar}>

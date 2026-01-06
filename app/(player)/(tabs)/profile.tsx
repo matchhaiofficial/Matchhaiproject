@@ -324,7 +324,7 @@ export default function Profile() {
         <SafeAreaView style={styles.screen}>
             {/* Header with Settings Icon */}
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>My Profile</Text>
+                <Text style={styles.headerTitle}>Profile</Text>
                 <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
                     <MaterialIcons name="settings" size={24} color={COLORS.text} />
                 </TouchableOpacity>

@@ -1,5 +1,5 @@
-import { Dimensions, Platform, StyleSheet } from 'react-native';
-import { COLORS, SHADOWS, SPACING } from '../../../src/theme';
+import { Dimensions, StyleSheet } from 'react-native';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -16,56 +16,38 @@ export default StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    header: {
-        paddingHorizontal: 20,
-        paddingTop: Platform.OS === 'ios' ? 20 : 10,
-        paddingBottom: 15,
         backgroundColor: COLORS.background,
     },
-    headerTop: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    title: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: COLORS.text,
+    header: {
+        padding: SPACING.screenPadding,
+        paddingBottom: SPACING.lg,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
     },
     headerTitle: {
-        fontSize: 28,
-        fontWeight: 'bold',
         color: COLORS.text,
-        marginBottom: 20,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.heading,
+        marginBottom: SPACING.lg,
     },
     searchBar: {
+        backgroundColor: COLORS.inputBackground,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.surface,
-        borderRadius: 12,
-        paddingHorizontal: 15,
-        height: 50,
-        ...SHADOWS.cardSoft,
-    },
-    searchContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.surface,
-        borderRadius: 12,
-        paddingHorizontal: 15,
-        height: 50,
-        ...SHADOWS.cardSoft,
+        paddingHorizontal: SPACING.md,
+        marginVertical: SPACING.sm,
+        height: 48,
     },
     searchInput: {
         flex: 1,
-        marginLeft: 10,
         color: COLORS.text,
-        fontSize: 16,
-    },
-    filterIcon: {
-        padding: 5,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingVertical: 0,
+        paddingHorizontal: SPACING.sm,
     },
     filterToggle: {
         marginLeft: 10,
@@ -74,8 +56,8 @@ export default StyleSheet.create({
         flexGrow: 0,
     },
     filtersPanel: {
-        paddingHorizontal: 20,
-        paddingBottom: 10,
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.md,
         backgroundColor: COLORS.background,
     },
     filterSection: {
@@ -88,26 +70,28 @@ export default StyleSheet.create({
         marginBottom: 8,
     },
     optionChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: COLORS.overlayLight,
-        marginRight: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 999,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm - 1,
+        marginRight: SPACING.sm,
         marginBottom: 5,
     },
     optionChipActive: {
-        backgroundColor: COLORS.accent,
+        backgroundColor: '#1e2a38',
         borderColor: COLORS.accent,
     },
     optionChipText: {
-        color: COLORS.textSecondary,
-        fontSize: 13,
-        fontWeight: '600',
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
     },
     optionChipTextActive: {
-        color: '#FFFFFF',
+        color: COLORS.text,
     },
     locationDropdown: {
         flexDirection: 'row',
@@ -133,15 +117,16 @@ export default StyleSheet.create({
         fontWeight: '600',
     },
     resultsCount: {
-        paddingHorizontal: 20,
-        paddingBottom: 10,
+        paddingHorizontal: SPACING.screenPadding,
+        paddingTop: SPACING.md,
+        paddingBottom: SPACING.sm,
     },
     resultsCountText: {
-        fontSize: 13,
         color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
     },
     listContent: {
-        padding: 12,
+        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: 100,
     },
     emptyState: {

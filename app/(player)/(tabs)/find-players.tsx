@@ -2,11 +2,11 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./find-players.styles";
 
@@ -213,17 +213,17 @@ export default function FindPlayers() {
         const isPending = pendingUids.has(item.uid);
         const isLoading = actionLoading === item.uid;
 
+        const handlePress = () => {
+            router.push({
+                pathname: '/(player)/profile/[uid]',
+                params: { uid: item.uid }
+            });
+        };
+
         // Condition 1: Default View (All) - Show Name + Games
         if (!selectedGame) {
             return (
-                <TouchableOpacity
-                    key={item.uid}
-                    activeOpacity={0.7}
-                    onPress={() => router.push({
-                        pathname: '/(player)/profile/[uid]',
-                        params: { uid: item.uid }
-                    })}
-                >
+                <TouchableOpacity key={item.uid} activeOpacity={0.8} onPress={handlePress}>
                     <View style={styles.playerCard}>
                         <View style={styles.playerAvatar}>
                             <Text style={styles.playerAvatarText}>
@@ -235,7 +235,6 @@ export default function FindPlayers() {
                             <Text style={styles.playerName}>{item.username}</Text>
                             <View style={styles.gameTags}>
                                 {item.primaryGames.slice(0, 2).map((game, index) => {
-                                    // Normalize keys to match (indoor_cricket -> indoorcricket)
                                     const normalizeKey = (key: string) => key.toLowerCase().replace(/_/g, '');
                                     const gameObj = GAMES.find(g => normalizeKey(g.key) === normalizeKey(game));
                                     const gameLabel = gameObj?.label || game;
@@ -248,7 +247,7 @@ export default function FindPlayers() {
                                     );
                                 })}
                                 {item.primaryGames.length > 2 && (
-                                    <View style={[styles.gameTag, { backgroundColor: COLORS.surface, paddingHorizontal: 8 }]}>
+                                    <View style={[styles.gameTag, { backgroundColor: 'transparent' }]}>
                                         <Text style={[styles.gameTagText, { color: COLORS.textSecondary }]}>
                                             +{item.primaryGames.length - 2}
                                         </Text>
@@ -257,63 +256,25 @@ export default function FindPlayers() {
                             </View>
                         </View>
 
-                        {/* Action Button */}
+                        {/* Action Buttons */}
                         {isFriend ? (
-                            <View style={{
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 20,
-                                backgroundColor: COLORS.success + '15',
-                                borderWidth: 1,
-                                borderColor: COLORS.success + '40',
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4
-                            }}>
+                            <View style={[styles.actionBtn, styles.friendBtn]}>
                                 <MaterialIcons name="check-circle" size={14} color={COLORS.success} />
-                                <Text style={{ color: COLORS.success, fontSize: 12, fontWeight: '600' }}>Friends</Text>
+                                <Text style={[styles.actionBtnText, styles.friendBtnText]}>Friends</Text>
                             </View>
                         ) : isPending ? (
-                            <View style={{
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 20,
-                                backgroundColor: COLORS.warning + '15',
-                                borderWidth: 1,
-                                borderColor: COLORS.warning + '40',
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4
-                            }}>
+                            <View style={[styles.actionBtn, styles.pendingBtn]}>
                                 <MaterialIcons name="schedule" size={14} color={COLORS.warning} />
-                                <Text style={{ color: COLORS.warning, fontSize: 12, fontWeight: '600' }}>Pending</Text>
+                                <Text style={[styles.actionBtnText, styles.pendingBtnText]}>Pending</Text>
                             </View>
                         ) : (
                             <TouchableOpacity
                                 onPress={() => handleAddFriend(item.uid)}
                                 disabled={isLoading}
-                                style={{
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 6,
-                                    borderRadius: 20,
-                                    backgroundColor: isLoading ? COLORS.accent + '20' : COLORS.accent,
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    opacity: isLoading ? 0.7 : 1
-                                }}
+                                style={[styles.actionBtn, isLoading && { opacity: 0.7 }]}
                             >
-                                {isLoading ? (
-                                    <>
-                                        <MaterialIcons name="person-add" size={14} color="#FFF" />
-                                        <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Adding...</Text>
-                                    </>
-                                ) : (
-                                    <>
-                                        <MaterialIcons name="person-add" size={14} color="#FFF" />
-                                        <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Add</Text>
-                                    </>
-                                )}
+                                <MaterialIcons name="person-add" size={14} color={COLORS.accent} />
+                                <Text style={styles.actionBtnText}>{isLoading ? 'Adding...' : 'Add'}</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -321,32 +282,19 @@ export default function FindPlayers() {
             );
         }
 
-        // Condition 2: Filtered View - Show game-specific info + MatchHai skill rating
-        const skillData = item.skillScores?.[selectedGame];
-
-        // Determine what to display based on game type
+        // Condition 2: Filtered View - Show game-specific info + Faceit (for CS2)
         let gameSpecificInfo = null;
 
         if (selectedGame === 'fc26' || selectedGame === 'fc25') {
-            // FC26: Show favorite team
             gameSpecificInfo = item.fcTeam;
         } else if (selectedGame === 'tekken8') {
-            // Tekken 8: Show first favorite character
             gameSpecificInfo = item.tekkenFavorites?.[0];
         } else {
-            // CS2, Sports: Show role
             gameSpecificInfo = item.roles?.[`${selectedGame}Role`];
         }
 
         return (
-            <TouchableOpacity
-                key={item.uid}
-                activeOpacity={0.7}
-                onPress={() => router.push({
-                    pathname: '/(player)/profile/[uid]',
-                    params: { uid: item.uid }
-                })}
-            >
+            <TouchableOpacity key={item.uid} activeOpacity={0.8} onPress={handlePress}>
                 <View style={styles.playerCard}>
                     <View style={styles.playerAvatar}>
                         <Text style={styles.playerAvatarText}>
@@ -357,7 +305,7 @@ export default function FindPlayers() {
                     <View style={styles.playerInfo}>
                         <Text style={styles.playerName}>{item.username}</Text>
 
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
                             {/* Game Tag */}
                             <View style={styles.gameTag}>
                                 <Text style={styles.gameTagText}>
@@ -367,80 +315,43 @@ export default function FindPlayers() {
 
                             {/* Game-Specific Info (Role/Team/Character) */}
                             {gameSpecificInfo && (
-                                <View style={[styles.gameTag, { backgroundColor: COLORS.surface }]}>
-                                    <Text style={[styles.gameTagText, { color: COLORS.text }]}>
+                                <View style={[styles.gameTag, { backgroundColor: 'transparent', borderColor: COLORS.divider }]}>
+                                    <Text style={[styles.gameTagText, { color: COLORS.textSecondary }]}>
                                         {abbreviateRole(gameSpecificInfo)}
                                     </Text>
                                 </View>
                             )}
 
-                            {/* MatchHai Skill Tier Badge */}
-                            {skillData && (
-                                <View style={[styles.gameTag, { backgroundColor: '#e0f2fe' }]}>
-                                    <Text style={[styles.gameTagText, { color: '#0369a1', fontWeight: 'bold' }]}>
-                                        {skillData.tier} ({skillData.rating})
-                                    </Text>
-                                </View>
+                            {/* Faceit Level Icon (CS2 only, if verified) */}
+                            {selectedGame === 'cs2' && item.faceitElo !== undefined && (
+                                <Image
+                                    source={faceitLevelIcons[getFaceitLevel(item.faceitElo)]}
+                                    style={styles.faceitIcon}
+                                    resizeMode="contain"
+                                />
                             )}
                         </View>
                     </View>
-                    {/* Action Button */}
+
+                    {/* Action Buttons */}
                     {isFriend ? (
-                        <View style={{
-                            paddingHorizontal: 12,
-                            paddingVertical: 6,
-                            borderRadius: 20,
-                            backgroundColor: COLORS.success + '15',
-                            borderWidth: 1,
-                            borderColor: COLORS.success + '40',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 4
-                        }}>
+                        <View style={[styles.actionBtn, styles.friendBtn]}>
                             <MaterialIcons name="check-circle" size={14} color={COLORS.success} />
-                            <Text style={{ color: COLORS.success, fontSize: 12, fontWeight: '600' }}>Friends</Text>
+                            <Text style={[styles.actionBtnText, styles.friendBtnText]}>Friends</Text>
                         </View>
                     ) : isPending ? (
-                        <View style={{
-                            paddingHorizontal: 12,
-                            paddingVertical: 6,
-                            borderRadius: 20,
-                            backgroundColor: COLORS.warning + '15',
-                            borderWidth: 1,
-                            borderColor: COLORS.warning + '40',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 4
-                        }}>
+                        <View style={[styles.actionBtn, styles.pendingBtn]}>
                             <MaterialIcons name="schedule" size={14} color={COLORS.warning} />
-                            <Text style={{ color: COLORS.warning, fontSize: 12, fontWeight: '600' }}>Pending</Text>
+                            <Text style={[styles.actionBtnText, styles.pendingBtnText]}>Pending</Text>
                         </View>
                     ) : (
                         <TouchableOpacity
                             onPress={() => handleAddFriend(item.uid)}
                             disabled={isLoading}
-                            style={{
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 20,
-                                backgroundColor: isLoading ? COLORS.accent + '20' : COLORS.accent,
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4,
-                                opacity: isLoading ? 0.7 : 1
-                            }}
+                            style={[styles.actionBtn, isLoading && { opacity: 0.7 }]}
                         >
-                            {isLoading ? (
-                                <>
-                                    <MaterialIcons name="person-add" size={14} color="#FFF" />
-                                    <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Adding...</Text>
-                                </>
-                            ) : (
-                                <>
-                                    <MaterialIcons name="person-add" size={14} color="#FFF" />
-                                    <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '600' }}>Add</Text>
-                                </>
-                            )}
+                            <MaterialIcons name="person-add" size={14} color={COLORS.accent} />
+                            <Text style={styles.actionBtnText}>{isLoading ? 'Adding...' : 'Add'}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -461,15 +372,10 @@ export default function FindPlayers() {
     return (
         <SafeAreaView style={styles.screen}>
             <View style={styles.header}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={styles.headerTitle}>Find Players</Text>
-                    <TouchableOpacity onPress={() => router.push("/(player)/inbox")}>
-                        <MaterialIcons name="notifications" size={24} color={COLORS.text} style={{ marginRight: 8 }} />
-                    </TouchableOpacity>
-                </View>
+                <Text style={styles.headerTitle}>Players</Text>
 
                 {/* Search Bar */}
-                <View style={styles.searchBox}>
+                <View style={styles.searchBar}>
                     <MaterialIcons name="search" size={20} color={COLORS.muted} />
                     <TextInput
                         style={styles.searchInput}
@@ -485,8 +391,13 @@ export default function FindPlayers() {
                     )}
                 </View>
 
-                {/* Game Filters */}
-                <View style={styles.filterContainer}>
+                {/* Game Filters - Horizontal Scroll */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={{ marginTop: SPACING.sm }}
+                    contentContainerStyle={{ paddingRight: SPACING.md }}
+                >
                     <TouchableOpacity
                         onPress={() => setSelectedGame(null)}
                         style={[
@@ -516,7 +427,14 @@ export default function FindPlayers() {
                             </Text>
                         </TouchableOpacity>
                     ))}
-                </View>
+                </ScrollView>
+            </View>
+
+            {/* Results Count Section */}
+            <View style={styles.resultsCount}>
+                <Text style={styles.resultsCountText}>
+                    {filteredPlayers.length} player{filteredPlayers.length !== 1 ? 's' : ''} found
+                </Text>
             </View>
 
             <FlatList
@@ -524,6 +442,7 @@ export default function FindPlayers() {
                 renderItem={renderPlayerItem}
                 keyExtractor={item => item.uid}
                 contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
                 }

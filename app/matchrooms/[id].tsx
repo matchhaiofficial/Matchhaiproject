@@ -325,6 +325,25 @@ export default function MatchroomDetails() {
             return;
         }
 
+        // Conditional Deletion Thresholds
+        const playerCount = room.players?.length || 0;
+        const game = room.game?.toLowerCase();
+        let threshold = 2; // Default for FC26, Tekken 8, Padel, Pickleball (Host + 1)
+
+        if (game === 'cs2') {
+            threshold = 3;
+        } else if (game === 'futsal' || game === 'cricket' || game === 'indoorcricket') {
+            threshold = 6;
+        }
+
+        if (playerCount >= threshold) {
+            Alert.alert(
+                "Deletion Blocked",
+                `This lobby cannot be deleted because it has ${playerCount} players joined. Minimum required to lock deletion for ${room.game.toUpperCase()} is ${threshold}.`
+            );
+            return;
+        }
+
         Alert.alert(
             "Delete Lobby",
             "Are you sure you want to delete this lobby? This cannot be undone.",

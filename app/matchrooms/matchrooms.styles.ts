@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     screen: {
@@ -174,6 +174,7 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
+        ...SHADOWS.cardElevated,
     },
     nearbyGame: {
         color: COLORS.accent,
@@ -192,7 +193,7 @@ export default StyleSheet.create({
     nearbyTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: 16,
+        fontSize: 18,
         flex: 1,
         marginRight: 8,
     },
