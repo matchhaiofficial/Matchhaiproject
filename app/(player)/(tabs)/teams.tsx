@@ -119,14 +119,17 @@ export default function Teams() {
             });
 
             if (result.ok && result.data) {
+                // Filter out teams where current user is already a member/captain
+                const filteredData = result.data.filter(t => !t.memberUids?.includes(user.uid));
+
                 if (isLoadMore) {
                     setPublicTeams(prev => {
                         const existingIds = new Set(prev.map(t => t.id));
-                        const newUniqueTeams = result.data!.filter(t => !existingIds.has(t.id));
+                        const newUniqueTeams = filteredData.filter(t => !existingIds.has(t.id));
                         return [...prev, ...newUniqueTeams];
                     });
                 } else {
-                    setPublicTeams(result.data);
+                    setPublicTeams(filteredData);
                 }
                 setLastVisible(result.lastVisible);
                 setHasMore(result.data.length === 10);
@@ -303,14 +306,7 @@ export default function Teams() {
         <SafeAreaView style={styles.screen}>
             {/* Header Area */}
             <View style={styles.header}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md }}>
-                    <Text style={styles.headerTitle}>{mode === 'my' ? 'My Teams' : 'Discover Teams'}</Text>
-                    {mode === 'my' && (
-                        <TouchableOpacity onPress={repairTeams} style={{ padding: 8 }}>
-                            <MaterialIcons name="build" size={18} color={COLORS.muted} />
-                        </TouchableOpacity>
-                    )}
-                </View>
+                <Text style={styles.headerTitle}>{mode === 'my' ? 'My Teams' : 'Discover Teams'}</Text>
 
                 {/* Mode Toggle */}
                 <View style={styles.segmentToggle}>
