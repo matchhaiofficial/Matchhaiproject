@@ -1,0 +1,55 @@
+#!/bin/sh
+# scripts/hooks/pre-push
+# This script must have LF line endings to work in Git Bash/Mac/Linux.
+
+# 1. Safe Default
+MODE="JUNIOR"
+
+# 2. Locate .gitguard.mode in repo root
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$REPO_ROOT" ]; then
+    exit 0 # Not in a git repo? Silent pass.
+fi
+
+MODE_FILE="$REPO_ROOT/.gitguard.mode"
+
+# 3. Read and Validate Mode
+if [ -f "$MODE_FILE" ]; then
+    CONTENT=$(head -n 1 "$MODE_FILE" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    if [ "$CONTENT" = "OWNER" ]; then
+        MODE="OWNER"
+    else
+        # Invalid content -> safe default
+        MODE="JUNIOR"
+    fi
+else
+    # Missing file -> safe default
+    MODE="JUNIOR"
+fi
+
+# 4. Enforce Branch Protection
+# stdin receives: <local ref> <local sha1> <remote ref> <remote sha1>
+while read local_ref local_sha remote_ref remote_sha
+do
+    # Check if target is 'main'
+    if [ "$remote_ref" = "refs/heads/main" ] || [ "$remote_ref" = "main" ]; then
+        if [ "$MODE" != "OWNER" ]; then
+            echo "********************************************************"
+            echo "🛑 GUARD BLOCK: Push to 'main' is BLOCKED in JUNIOR mode."
+            echo "Current Mode: $MODE"
+            echo ""
+            echo "Instructions for Junaid/Ehteshan:"
+            echo "1. Create a feature branch: git checkout -b junaid/<task-name>"
+            echo "2. Push feature branch: git push -u origin junaid/<task-name>"
+            echo "3. Open a Pull Request for the Owner to review and merge."
+            echo ""
+            echo "Instructions for Owner (Shared Laptop):"
+            echo "1. Switch to OWNER mode: Run ./scripts/set-mode-owner"
+            echo "2. Try the push again."
+            echo "********************************************************"
+            exit 1
+        fi
+    fi
+done
+
+exit 0

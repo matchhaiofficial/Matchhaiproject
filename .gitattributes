@@ -1,0 +1,2 @@
+scripts/hooks/pre-push text eol=lf
+scripts/*.sh text eol=lf
