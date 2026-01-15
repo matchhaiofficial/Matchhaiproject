@@ -15,6 +15,10 @@ import {
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
+import {
+  isEmailAvailable,
+  isPhoneAvailable,
+} from "../../src/services/userService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -26,6 +30,8 @@ type FocusField =
   | "phone"
   | "password"
   | null;
+
+type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 
 // 📱 Pakistani phone formatter (same as login / user register)
 const formatPakistaniPhone = (value: string) => {
@@ -74,6 +80,9 @@ export default function AdminRegisterStep1() {
   const [focused, setFocused] = useState<FocusField>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>("idle");
+  const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
+
   const ownerRef = useRef<TextInput | null>(null);
   const brandRef = useRef<TextInput | null>(null);
   const emailRef = useRef<TextInput | null>(null);
@@ -87,7 +96,6 @@ export default function AdminRegisterStep1() {
     isEmailValid,
     isPhoneFormatValid,
     isPasswordValid,
-    isFormValid,
     hasUpper,
     hasLower,
     hasNumber,
@@ -164,8 +172,6 @@ export default function AdminRegisterStep1() {
       isEmailValid: emailValid,
       isPhoneFormatValid: phoneFormatValid,
       isPasswordValid: passwordValid,
-      isFormValid:
-        nameValid && brandValid && emailValid && phoneFormatValid && passwordValid,
 
       hasUpper: hasUpperRule,
       hasLower: hasLowerRule,
@@ -178,6 +184,30 @@ export default function AdminRegisterStep1() {
       strengthWidth: strengthPct,
     };
   }, [ownerFullName, venueBrandName, contactEmail, contactPhone, password]);
+
+  const isFormValid = useMemo(() => {
+    const emailOk =
+      isEmailValid && (emailStatus === "idle" || emailStatus === "available");
+    const phoneOk =
+      isPhoneFormatValid &&
+      (phoneStatus === "idle" || phoneStatus === "available");
+
+    return (
+      isNameValid &&
+      isBrandValid &&
+      emailOk &&
+      phoneOk &&
+      isPasswordValid
+    );
+  }, [
+    isNameValid,
+    isBrandValid,
+    isEmailValid,
+    emailStatus,
+    isPhoneFormatValid,
+    phoneStatus,
+    isPasswordValid,
+  ]);
 
   // Same logic as player: show requirements until all 4 char rules are met
   const allCharRequirementsMet =
@@ -203,6 +233,76 @@ export default function AdminRegisterStep1() {
       next = formatPakistaniPhone(value);
     }
     setContactPhone(next);
+    if (phoneStatus !== "idle") setPhoneStatus("idle");
+  };
+
+  const handleEmailBlur = async () => {
+    const trimmed = contactEmail.trim();
+    if (!trimmed || !isEmailValid) {
+      setEmailStatus("idle");
+      return;
+    }
+
+    try {
+      setEmailStatus("checking");
+      const available = await isEmailAvailable(trimmed);
+      setEmailStatus(available ? "available" : "taken");
+    } catch {
+      setEmailStatus("error");
+    }
+  };
+
+  const handlePhoneBlur = async () => {
+    const phoneTrimmed = contactPhone.trim();
+    const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
+    if (!normalizedPhone || !isPhoneFormatValid) {
+      setPhoneStatus("idle");
+      return;
+    }
+
+    try {
+      setPhoneStatus("checking");
+      const available = await isPhoneAvailable(normalizedPhone);
+      setPhoneStatus(available ? "available" : "taken");
+    } catch {
+      setPhoneStatus("error");
+    }
+  };
+
+  const renderAvailabilityHelper = (
+    status: AvailabilityStatus,
+    type: "email" | "phone"
+  ) => {
+    if (status === "idle") return null;
+
+    let text = "";
+    const style: any[] = [styles.helperText];
+
+    if (status === "checking") {
+      text = type === "email" ? "Checking email…" : "Checking number…";
+      style.push(styles.helperWarning);
+    } else if (status === "available") {
+      text =
+        type === "email"
+          ? "Looks good! Email is available."
+          : "Looks good! Number is available.";
+      style.push(styles.helperOk);
+    } else if (status === "taken") {
+      text =
+        type === "email"
+          ? "This email is already in use."
+          : "This phone number is already in use.";
+      style.push(styles.helperError);
+    } else {
+      text = "Could not verify right now. Please try again.";
+      style.push(styles.helperWarning);
+    }
+
+    return (
+      <View style={styles.helperTextRow}>
+        <Text style={style as any}>{text}</Text>
+      </View>
+    );
   };
 
   const handleContinue = () => {
@@ -407,12 +507,42 @@ export default function AdminRegisterStep1() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={contactEmail}
-                onChangeText={setContactEmail}
+                onChangeText={(val) => {
+                  setContactEmail(val);
+                  if (emailStatus !== "idle") setEmailStatus("idle");
+                }}
                 onFocus={() => setFocused("email")}
-                onBlur={() => setFocused(null)}
+                onBlur={() => {
+                  setFocused(null);
+                  handleEmailBlur();
+                }}
                 returnKeyType="next"
                 onSubmitEditing={() => phoneRef.current?.focus()}
               />
+              {contactEmail.trim().length > 0 && (
+                <MaterialIcons
+                  name={
+                    emailStatus === "checking"
+                      ? "hourglass-top"
+                      : emailStatus === "available"
+                        ? "check-circle"
+                        : emailStatus === "taken"
+                          ? "error-outline"
+                          : isEmailValid
+                            ? "check-circle"
+                            : "error-outline"
+                  }
+                  size={18}
+                  style={styles.suffixIcon}
+                  color={
+                    emailStatus === "taken"
+                      ? COLORS.error
+                      : emailStatus === "available" || isEmailValid
+                        ? COLORS.success
+                        : COLORS.muted
+                  }
+                />
+              )}
             </View>
             <View
               style={[
@@ -421,7 +551,8 @@ export default function AdminRegisterStep1() {
               ]}
             />
           </View>
-          {!!contactEmail && !isEmailValid && (
+          {renderAvailabilityHelper(emailStatus, "email")}
+          {!!contactEmail && !isEmailValid && emailStatus === "idle" && (
             <Text style={styles.errorText}>
               Enter a valid email address.
             </Text>
@@ -455,10 +586,37 @@ export default function AdminRegisterStep1() {
                 value={contactPhone}
                 onChangeText={handlePhoneChange}
                 onFocus={() => setFocused("phone")}
-                onBlur={() => setFocused(null)}
+                onBlur={() => {
+                  setFocused(null);
+                  handlePhoneBlur();
+                }}
                 returnKeyType="next"
                 onSubmitEditing={() => passRef.current?.focus()}
               />
+              {contactPhone.trim().length > 0 && (
+                <MaterialIcons
+                  name={
+                    phoneStatus === "checking"
+                      ? "hourglass-top"
+                      : phoneStatus === "available"
+                        ? "check-circle"
+                        : phoneStatus === "taken"
+                          ? "error-outline"
+                          : isPhoneFormatValid
+                            ? "check-circle"
+                            : "error-outline"
+                  }
+                  size={18}
+                  style={styles.suffixIcon}
+                  color={
+                    phoneStatus === "taken"
+                      ? COLORS.error
+                      : phoneStatus === "available" || isPhoneFormatValid
+                        ? COLORS.success
+                        : COLORS.muted
+                  }
+                />
+              )}
             </View>
             <View
               style={[
@@ -467,9 +625,10 @@ export default function AdminRegisterStep1() {
               ]}
             />
           </View>
-          {!!contactPhone && !isPhoneFormatValid && (
+          {renderAvailabilityHelper(phoneStatus, "phone")}
+          {!!contactPhone && !isPhoneFormatValid && phoneStatus === "idle" && (
             <Text style={styles.errorText}>
-              Enter a valid Pakistani mobile number.
+              Enter a valid Pakistani phone number.
             </Text>
           )}
         </View>
