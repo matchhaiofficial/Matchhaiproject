@@ -56,6 +56,137 @@ export async function isPhoneAvailable(phone: string): Promise<boolean> {
   return snap.empty;
 }
 
+/**
+ * Check if an email is free.
+ */
+export async function isEmailAvailable(email: string): Promise<boolean> {
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) return false;
+
+  const q = query(
+    collection(db, "users"),
+    where("email", "==", trimmed),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  return snap.empty;
+}
+
+/**
+ * Check if a Steam ID is already linked to an account.
+ * If excludeUserId is provided, we ignore that specific user (useful for profile edits).
+ */
+export async function isSteamIdAvailable(steamId: string, excludeUserId?: string): Promise<boolean> {
+  if (!steamId) return false;
+
+  let q = query(
+    collection(db, "users"),
+    where("steamId", "==", steamId),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return true;
+
+  // If we found a match, check if it's the user we want to exclude
+  if (excludeUserId && snap.docs[0].id === excludeUserId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a FACEIT ID is already linked to an account.
+ * If excludeUserId is provided, we ignore that specific user (useful for profile edits).
+ */
+export async function isFaceitIdAvailable(faceitId: string, excludeUserId?: string): Promise<boolean> {
+  if (!faceitId) return false;
+
+  let q = query(
+    collection(db, "users"),
+    where("faceitId", "==", faceitId),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return true;
+
+  // If we found a match, check if it's the user we want to exclude
+  if (excludeUserId && snap.docs[0].id === excludeUserId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a PSN Account ID is already linked to an account.
+ */
+export async function isPsnIdAvailable(psnAccountId: string, excludeUserId?: string): Promise<boolean> {
+  if (!psnAccountId) return false;
+
+  let q = query(
+    collection(db, "users"),
+    where("psnAccountId", "==", psnAccountId),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return true;
+
+  if (excludeUserId && snap.docs[0].id === excludeUserId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if an EA Profile URL is already linked to an account.
+ */
+export async function isEaIdAvailable(eaProfileUrl: string, excludeUserId?: string): Promise<boolean> {
+  if (!eaProfileUrl) return false;
+
+  let q = query(
+    collection(db, "users"),
+    where("eaProfileUrl", "==", eaProfileUrl),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return true;
+
+  if (excludeUserId && snap.docs[0].id === excludeUserId) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if an Xbox Gamertag is already linked to an account.
+ */
+export async function isXboxIdAvailable(xboxGamertag: string, excludeUserId?: string): Promise<boolean> {
+  if (!xboxGamertag) return false;
+
+  let q = query(
+    collection(db, "users"),
+    where("xboxGamertag", "==", xboxGamertag),
+    limit(1)
+  );
+
+  const snap = await getDocs(q);
+  if (snap.empty) return true;
+
+  if (excludeUserId && snap.docs[0].id === excludeUserId) {
+    return true;
+  }
+
+  return false;
+}
+
 /** Helper you can reuse inside signUp to normalize phone before saving */
 export function normalizePhoneForSave(phone: string) {
   return normalizePhone(phone);
@@ -318,7 +449,7 @@ export async function getUserProfile(
       displayName: data.displayName ?? undefined,
       fullName: data.fullName ?? undefined,
       username: data.username ?? undefined,
-      role: data.role ?? 'player',
+      role: data.accountType === 'zone' ? 'zone-admin' : (data.accountType || data.role || 'player'),
       trustScore: typeof data.trustScore === 'number' ? data.trustScore : 0.5, // Default trust
       isOnline: data.isOnline ?? false,
 

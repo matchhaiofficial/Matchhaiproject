@@ -1,5 +1,15 @@
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from "firebase/auth";
-import { auth } from "../config/firebaseConfig";
+import {
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    query,
+    serverTimestamp,
+    setDoc,
+    where,
+} from "firebase/firestore";
+import { auth, db } from "../config/firebaseConfig";
 import { saveZoneRegistration, ZoneRegistrationSteps } from "../services/zoneService";
 import { BranchData } from "../store/zoneOnboardingStore";
 
@@ -37,6 +47,7 @@ const createBranch = (
             padel: undefined,
             pickleball: undefined,
         },
+        specs: "",
         notes: "Seeded branch",
         ...details
     };
@@ -54,6 +65,7 @@ const ZONES_TO_SEED = [
         branches: [
             createBranch("b1", "O2 Clifton", "Karachi", "Clifton", "gaming", {
                 supportsCs2: true, supportsFc25: true, supportsTekken8: true,
+                specs: "RTX 3080, Core i7 12th Gen, 16GB RAM, 240Hz Monitors",
                 pricing: {
                     pc: {
                         premium: { count: "20", price: "300" },
@@ -81,6 +93,7 @@ const ZONES_TO_SEED = [
         branches: [
             createBranch("b3", "Portal DHA", "Karachi", "DHA Phase 6", "gaming", {
                 supportsCs2: true, supportsFc25: true,
+                specs: "RTX 3090, Core i9 13th Gen, 32GB RAM, 240Hz Monitors",
                 pricing: {
                     pc: { elite: { count: "40", price: "400" } },
                     console: { ps5: { count: "10", price1v1: "500", price2v2: "800" } }
@@ -132,6 +145,7 @@ const ZONES_TO_SEED = [
         branches: [
             createBranch("b7", "Titan Bahria", "Karachi", "Bahria Town", "gaming", {
                 supportsCs2: true, supportsTekken8: true,
+                specs: "RTX 4090, Core i9 14th Gen, 32GB RAM, 360Hz Monitors",
                 pricing: {
                     pc: { elite: { count: "50", price: "600" } },
                     console: { ps5: { count: "8", price1v1: "600", price2v2: "900" } }
@@ -150,6 +164,7 @@ const ZONES_TO_SEED = [
         branches: [
             createBranch("b8", "TF Ayub Park", "Islamabad", "Ayub Park", "sports", {
                 supportsFutsal: true,
+                specs: "FIFA Approved Artificial Turf, Floodlights, Changing Rooms",
                 pricing: { futsal: { "Standard": { count: "3", price: "4000" } } }
             }),
             createBranch("b9", "TF DHA", "Islamabad", "DHA Phase 2", "sports", {
@@ -167,6 +182,7 @@ const ZONES_TO_SEED = [
         branches: [
             createBranch("b10", "Smash Zamzama", "Karachi", "Zamzama", "sports", {
                 supportsPadel: true,
+                specs: "Panoramic Glass Courts, Premium Rackets available, Pro Shop",
                 pricing: { padel: { "Blue Court": { count: "2", price: "6000" } } }
             })
         ]
@@ -241,8 +257,39 @@ export const seedZones = async () => {
                 }
             }
 
+            const uid = userCredential.user.uid;
+
+            // 1.5 Cleanup existing zones for THIS user (Authenticated)
+            try {
+                const zonesRef = collection(db, "zones");
+                const q = query(zonesRef, where("ownerUid", "==", uid));
+                const snap = await getDocs(q);
+                for (const d of snap.docs) {
+                    await deleteDoc(d.ref);
+                    console.log(`  Deleted old zone doc: ${d.id}`);
+                }
+            } catch (err) {
+                console.warn(`  ⚠️ Could not cleanup old zones for ${zone.email}:`, err);
+            }
+
             // 2. Update Profile
             await updateProfile(userCredential.user, { displayName: zone.ownerName });
+
+            // 2.5 Create/Update User Doc (Required for role validation)
+            // We use setDoc WITHOUT merge to ensure a clean reset of the profile
+            const userDocRef = doc(db, "users", uid);
+            await setDoc(userDocRef, {
+                uid,
+                email: zone.email.toLowerCase(),
+                fullName: zone.ownerName,
+                phone: zone.phone,
+                accountType: 'zone',
+                role: 'zone-admin',
+                isOnline: false,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+            console.log(`  Reset user profile for ${zone.email}`);
 
             // 3. Construct Data Packet
             const registrationData: ZoneRegistrationSteps = {

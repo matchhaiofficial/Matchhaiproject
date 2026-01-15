@@ -57,6 +57,7 @@ export type BranchData = {
     };
   };
 
+  specs?: string;
   notes: string;
 };
 

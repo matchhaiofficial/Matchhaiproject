@@ -84,7 +84,8 @@ export default function AdminRegisterStep4() {
         step1.password,
         step1.ownerFullName.trim(),
         undefined,
-        step1.contactPhone.trim()
+        step1.contactPhone.trim(),
+        'zone'
       );
 
       if (!resSignUp || !resSignUp.ok) {
@@ -303,22 +304,22 @@ export default function AdminRegisterStep4() {
                 )}
                 {branch.supportsFutsal && (
                   <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                    • Futsal Courts: {Object.values(branch.pricing.futsal || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                    • Futsal Courts: {Object.values(branch.pricing.futsal || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
                   </Text>
                 )}
                 {branch.supportsIndoorCricket && (
                   <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                    • Cricket Nets: {Object.values(branch.pricing.indoorCricket || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                    • Cricket Nets: {Object.values(branch.pricing.indoor_cricket || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
                   </Text>
                 )}
                 {branch.supportsPadel && (
                   <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                    • Padel Courts: {Object.values(branch.pricing.padel || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                    • Padel Courts: {Object.values(branch.pricing.padel || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
                   </Text>
                 )}
                 {branch.supportsPickleball && (
                   <Text style={{ color: COLORS.text, fontSize: 12 }}>
-                    • Pickleball Courts: {Object.values(branch.pricing.pickleball || {}).reduce((sum, v) => sum + parseInt(v.count || '0'), 0)}
+                    • Pickleball Courts: {Object.values(branch.pricing.pickleball || {}).reduce((sum: number, v: any) => sum + parseInt(v.count || '0'), 0)}
                   </Text>
                 )}
               </View>
