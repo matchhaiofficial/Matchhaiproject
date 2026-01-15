@@ -15,8 +15,10 @@ import {
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
-import { signInWithEmail } from "../../src/services/authService";
+import { signInWithEmail, signOutUser } from "../../src/services/authService";
+import { getUserProfile } from "../../src/services/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
+import { seedZones } from "../../src/utils/seedZones";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -334,9 +336,9 @@ export default function Login() {
       console.log("[Login] calling signInWithEmail", { emailOrPhone });
 
       const res = await signInWithEmail(emailOrPhone, password /*, userType */);
-      setLoading(false);
 
       if (!res.ok) {
+        setLoading(false);
         console.log("[Login] signInWithEmail FAILED", res);
         const nextAttempts = failedAttempts + 1;
         if (nextAttempts >= MAX_ATTEMPTS) {
@@ -382,6 +384,56 @@ export default function Login() {
         return;
       }
 
+      // ✅ Role Validation
+      console.log("[Login] Validating role for user:", res.user.uid);
+      const profileRes = await getUserProfile(res.user.uid);
+
+      if (!profileRes.ok) {
+        console.error("[Login] Failed to fetch user profile for role check:", profileRes.message);
+        await signOutUser();
+        setLoading(false);
+
+        const isMissing = profileRes.message === "User profile not found.";
+        showToast({
+          type: "error",
+          title: isMissing ? "Profile Missing" : "Login Error",
+          message: isMissing
+            ? "Your account profile was not found. Please contact support."
+            : "Could not verify your account type. Please try again.",
+        });
+        return;
+      }
+
+      const accountType = profileRes.data.role; // In UserProfile it's called 'role'
+      console.log("[Login] User accountType:", accountType, "Selected userType:", userType);
+
+      if (userType === "zone" && accountType !== "zone-admin") {
+        console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
+        await signOutUser();
+        setLoading(false);
+        setEmailServerError("Please sign in as user.");
+        showToast({
+          type: "error",
+          title: "Access Denied",
+          message: "Please sign in as user.",
+        });
+        return;
+      }
+
+      if (userType === "player" && accountType === "zone-admin") {
+        console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
+        await signOutUser();
+        setLoading(false);
+        setEmailServerError("Please sign in as zone admin.");
+        showToast({
+          type: "error",
+          title: "Access Denied",
+          message: "Please sign in as zone admin.",
+        });
+        return;
+      }
+
+      setLoading(false);
       console.log("[Login] signInWithEmail OK, navigating, userType=", userType);
 
       setFailedAttempts(0);
@@ -416,6 +468,28 @@ export default function Login() {
   const handleForgotPassword = () => {
     console.log("[Login] Forgot Password pressed");
     router.push("/auth/forgot-password");
+  };
+
+  const handleSeed = async () => {
+    console.log("[Login] Seed Data pressed");
+    setLoading(true);
+    try {
+      const result = await seedZones();
+      showToast({
+        type: "success",
+        title: "Seeding Complete",
+        message: `Successfully re-seeded ${result.successCount} zones.`,
+      });
+    } catch (error) {
+      console.error("[Login] Seed failed", error);
+      showToast({
+        type: "error",
+        title: "Seeding Failed",
+        message: "Check console for details.",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -644,54 +718,12 @@ export default function Login() {
                 />
               </Pressable>
             </View>
-
-            <View style={[styles.focusBar, { opacity: passFocused ? 1 : 0 }]} />
           </View>
 
           {passwordTouched && passwordError ? (
             <Text style={styles.errorText}>{passwordError}</Text>
           ) : null}
 
-          {/* Strength meter */}
-          {showPasswordHints && (
-            <View style={styles.strengthWrapper}>
-              <View style={styles.strengthBar}>
-                <View
-                  style={[
-                    styles.strengthBarFill,
-                    {
-                      width: `${strengthPercent}%`,
-                      backgroundColor: strengthColor || "#444",
-                    },
-                  ]}
-                />
-              </View>
-              {strengthLabel ? (
-                <Text
-                  style={[
-                    styles.strengthLabel,
-                    { color: strengthColor || COLORS.muted },
-                  ]}
-                >
-                  Strength: {strengthLabel}
-                </Text>
-              ) : null}
-            </View>
-          )}
-
-          {/* Live rules */}
-          {showPasswordHints && (
-            <View style={styles.passwordHintGrid}>
-              <View style={styles.passwordHintRow}>
-                {renderPasswordHintItem(hasUpper, "1 uppercase character")}
-                {renderPasswordHintItem(hasLower, "1 lowercase character")}
-              </View>
-              <View style={styles.passwordHintRow}>
-                {renderPasswordHintItem(hasDigit, "1 numeric character")}
-                {renderPasswordHintItem(hasSpecial, "1 special character")}
-              </View>
-            </View>
-          )}
 
           {/* Caps Lock heuristic warning */}
           {capsLockLikely && (
@@ -767,6 +799,16 @@ export default function Login() {
             </Pressable>
           </Link>
         </View>
+
+        {/* Developer Seed Button */}
+        <Pressable
+          onPress={handleSeed}
+          style={{ marginTop: 40, opacity: 0.5, alignSelf: "center" }}
+        >
+          <Text style={[styles.bottomText, { fontSize: 12, textDecorationLine: "underline" }]}>
+            [DEV] Reset & Re-seed Zones
+          </Text>
+        </Pressable>
       </ScrollView>
     </Container>
   );

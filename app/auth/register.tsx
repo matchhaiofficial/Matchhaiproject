@@ -17,6 +17,7 @@ import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import {
+  isEmailAvailable,
   isPhoneAvailable,
   isUsernameAvailable,
 } from "../../src/services/userService";
@@ -78,18 +79,7 @@ export default function Register() {
   const [ageRange, setAgeRange] = useState(step1.ageRange || AGE_RANGES[1]); // Default 18-24
 
 
-  // store only the local part in state, derive from existing email
-  const [email, setEmail] = useState(() => {
-    const e = (step1.email || "").trim();
-    if (!e) return "";
-    const gmailSuffix = "@gmail.com";
-    if (e.toLowerCase().endsWith(gmailSuffix)) {
-      return e.slice(0, -gmailSuffix.length);
-    }
-    const atIndex = e.indexOf("@");
-    if (atIndex > 0) return e.slice(0, atIndex);
-    return e;
-  });
+  const [email, setEmail] = useState(step1.email || "");
 
   const [phone, setPhone] = useState(step1.phone);
   const [password, setPassword] = useState(step1.password);
@@ -100,12 +90,14 @@ export default function Register() {
   const [usernameStatus, setUsernameStatus] =
     useState<AvailabilityStatus>("idle");
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
+  const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>("idle");
 
   // when we hydrate, if fields already have values, show "available" by default
   useEffect(() => {
     if (step1.username) setUsernameStatus("available");
     if (step1.phone) setPhoneStatus("available");
-  }, [step1.username, step1.phone]);
+    if (step1.email) setEmailStatus("available");
+  }, [step1.username, step1.phone, step1.email]);
 
   // ---------- Validation + password rules ----------
   const {
@@ -131,11 +123,10 @@ export default function Register() {
     const usernameTrimmed = username.trim();
     const usernameFormatValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameTrimmed);
 
-    // email: local part + @gmail.com
+    // email: full email
+    const emailTrimmed = email.trim();
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
-    const localPart = email.trim();
-    const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
-    const emailValid = emailRegex.test(fullEmail);
+    const emailValid = emailRegex.test(emailTrimmed);
 
     // ---- Phone validation (same as Login) ----
     const phoneTrimmed = phone.trim();
@@ -197,6 +188,9 @@ export default function Register() {
       phoneFormatValid &&
       (phoneStatus === "idle" || phoneStatus === "available");
 
+    const emailOk =
+      emailValid && (emailStatus === "idle" || emailStatus === "available");
+
     return {
       isFullNameValid: nameValid,
       isUsernameFormatValid: usernameFormatValid,
@@ -204,7 +198,7 @@ export default function Register() {
       isPhoneFormatValid: phoneFormatValid,
       isPasswordValid: passwordValid,
       isFormValid:
-        nameValid && usernameOk && emailValid && phoneOk && passwordValid && cityValid && ageValid,
+        nameValid && usernameOk && emailOk && phoneOk && passwordValid && cityValid && ageValid,
 
       // password rule flags for UI
       hasUpper: hasUpperRule,
@@ -225,6 +219,7 @@ export default function Register() {
     password,
     usernameStatus,
     phoneStatus,
+    emailStatus,
   ]);
 
   // Derived flag: all 4 visible requirements satisfied?
@@ -280,16 +275,32 @@ export default function Register() {
     }
   };
 
+  const handleEmailBlur = async () => {
+    const trimmed = email.trim();
+    if (!trimmed || !isEmailValid) {
+      setEmailStatus("idle");
+      return;
+    }
+
+    try {
+      setEmailStatus("checking");
+      const available = await isEmailAvailable(trimmed);
+      setEmailStatus(available ? "available" : "taken");
+    } catch {
+      setEmailStatus("error");
+    }
+  };
+
   // reset availability when typing
   const handleUsernameChange = (value: string) => {
     setUsername(value);
     if (usernameStatus !== "idle") setUsernameStatus("idle");
   };
 
-  // Email local-part change: only allow letters, numbers, and simple symbols
+  // Email change: allow standard email characters
   const handleEmailChange = (value: string) => {
-    const cleaned = value.replace(/[^a-zA-Z0-9._%+-]/g, "");
-    setEmail(cleaned);
+    setEmail(value);
+    if (emailStatus !== "idle") setEmailStatus("idle");
   };
 
   // Phone: mimic Login’s format logic
@@ -313,13 +324,10 @@ export default function Register() {
       return;
     }
 
-    const localPart = email.trim();
-    const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
-
     setStep1({
       fullName: fullName.trim(),
       username: username.trim(),
-      email: fullEmail,
+      email: email.trim(),
       phone,
       password,
       city,
@@ -332,7 +340,7 @@ export default function Register() {
   // ---------- Helper: availability helper text ----------
   const renderAvailabilityHelper = (
     status: AvailabilityStatus,
-    type: "username" | "phone"
+    type: "username" | "phone" | "email"
   ) => {
     if (status === "idle") return null;
 
@@ -340,19 +348,28 @@ export default function Register() {
     const style: any[] = [styles.helperText];
 
     if (status === "checking") {
-      text = type === "username" ? "Checking username…" : "Checking number…";
+      text =
+        type === "username"
+          ? "Checking username…"
+          : type === "phone"
+            ? "Checking number…"
+            : "Checking email…";
       style.push(styles.helperWarning);
     } else if (status === "available") {
       text =
         type === "username"
           ? "Looks good! Username is available."
-          : "Looks good! Number is available.";
+          : type === "phone"
+            ? "Looks good! Number is available."
+            : "Looks good! Email is available.";
       style.push(styles.helperOk);
     } else if (status === "taken") {
       text =
         type === "username"
-          ? "This username is already taken."
-          : "This phone number is already in use.";
+          ? "This username is already in use."
+          : type === "phone"
+            ? "This phone number is already in use."
+            : "This email is already in use.";
       style.push(styles.helperError);
     } else {
       text = "Could not verify right now. Please try again.";
@@ -524,6 +541,11 @@ export default function Register() {
             />
           </View>
           {renderAvailabilityHelper(usernameStatus, "username")}
+          {!!username && !isUsernameFormatValid && usernameStatus === "idle" && (
+            <Text style={styles.errorText}>
+              Username must be 3-20 characters (letters, numbers, underscores).
+            </Text>
+          )}
         </View>
 
         {/* Email Address */}
@@ -542,9 +564,9 @@ export default function Register() {
                 }
               />
               <TextInput
-                placeholder="yourname"
+                placeholder="Enter your email address"
                 placeholderTextColor={COLORS.muted}
-                style={[styles.input, { paddingRight: INPUT_PADDING.withSuffix }]}
+                style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -552,9 +574,35 @@ export default function Register() {
                 value={email}
                 onChangeText={handleEmailChange}
                 onFocus={() => setFocused("email")}
-                onBlur={() => setFocused(null)}
+                onBlur={() => {
+                  setFocused(null);
+                  handleEmailBlur();
+                }}
               />
-              <Text style={styles.emailSuffix}>@gmail.com</Text>
+              {email.trim().length > 0 && (
+                <MaterialIcons
+                  name={
+                    emailStatus === "checking"
+                      ? "hourglass-top"
+                      : emailStatus === "available"
+                        ? "check-circle"
+                        : emailStatus === "taken"
+                          ? "error-outline"
+                          : isEmailValid
+                            ? "check-circle"
+                            : "error-outline"
+                  }
+                  size={18}
+                  style={styles.suffixIcon}
+                  color={
+                    emailStatus === "taken"
+                      ? COLORS.error
+                      : emailStatus === "available" || isEmailValid
+                        ? COLORS.success
+                        : COLORS.muted
+                  }
+                />
+              )}
             </View>
             <View
               style={[
@@ -563,6 +611,12 @@ export default function Register() {
               ]}
             />
           </View>
+          {renderAvailabilityHelper(emailStatus, "email")}
+          {!!email && !isEmailValid && emailStatus === "idle" && (
+            <Text style={styles.errorText}>
+              Enter a valid email address.
+            </Text>
+          )}
         </View>
 
         {/* Phone Number */}
@@ -629,6 +683,11 @@ export default function Register() {
             />
           </View>
           {renderAvailabilityHelper(phoneStatus, "phone")}
+          {!!phone && !isPhoneFormatValid && phoneStatus === "idle" && (
+            <Text style={styles.errorText}>
+              Enter a valid Pakistani phone number.
+            </Text>
+          )}
         </View>
 
         {/* Password */}
