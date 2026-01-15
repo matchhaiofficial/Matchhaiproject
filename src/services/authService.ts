@@ -61,7 +61,8 @@ export async function signUpWithEmail(
   password: string,
   displayName?: string,
   username?: string,
-  phone?: string
+  phone?: string,
+  accountType: 'player' | 'zone' = 'player'
 ): Promise<AuthResult> {
   console.log("[authService] signUpWithEmail start", {
     email,
@@ -69,6 +70,7 @@ export async function signUpWithEmail(
     displayName,
     username,
     phone,
+    accountType,
   });
 
   try {
@@ -112,7 +114,7 @@ export async function signUpWithEmail(
         username: usernameTrimmed,
         usernameLower,
         phone: normalizedPhone,
-        accountType: 'player', // CRITICAL: Required for Find Players query
+        accountType, // Use the passed accountType
         isOnline: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

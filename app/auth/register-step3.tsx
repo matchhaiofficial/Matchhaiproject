@@ -25,6 +25,11 @@ import {
   fetchSteamProfileFromUrl,
   SteamProfileSummary,
 } from "../../src/services/steamApi";
+import {
+  isFaceitIdAvailable,
+  isPsnIdAvailable,
+  isSteamIdAvailable
+} from "../../src/services/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -129,6 +134,13 @@ export default function RegisterStep3() {
   const [faceitLoading, setFaceitLoading] = useState(false);
   const [psnLoading, setPsnLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // availability status
+  const [steamStatus, setSteamStatus] = useState<"idle" | "available" | "taken">("idle");
+  const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
+  const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
+  const [eaStatus, setEaStatus] = useState<"idle" | "available" | "taken">("idle");
+  const [xboxStatus, setXboxStatus] = useState<"idle" | "available" | "taken">("idle");
 
   const isFocused = useIsFocused();
 
@@ -316,9 +328,24 @@ export default function RegisterStep3() {
         message: res.message || "We couldn’t verify this Steam profile.",
       });
       setSteamProfile(null);
+      setSteamStatus("idle");
       return;
     }
 
+    // Check uniqueness
+    const available = await isSteamIdAvailable(res.data.steamId);
+    if (!available) {
+      setSteamStatus("taken");
+      setSteamProfile(null);
+      showToast({
+        type: "error",
+        title: "Link in use",
+        message: "This link is already in use.",
+      });
+      return;
+    }
+
+    setSteamStatus("available");
     setSteamProfile(res.data);
     showToast({
       type: "success",
@@ -351,9 +378,24 @@ export default function RegisterStep3() {
         message: res.message || "We couldn’t verify this FACEIT profile.",
       });
       setFaceitProfile(null);
+      setFaceitStatus("idle");
       return;
     }
 
+    // Check uniqueness
+    const available = await isFaceitIdAvailable(res.data.faceitId);
+    if (!available) {
+      setFaceitStatus("taken");
+      setFaceitProfile(null);
+      showToast({
+        type: "error",
+        title: "Link in use",
+        message: "This link is already in use.",
+      });
+      return;
+    }
+
+    setFaceitStatus("available");
     setFaceitProfile(res.data);
     showToast({
       type: "success",
@@ -382,16 +424,54 @@ export default function RegisterStep3() {
     }
 
     setPsnStats(res.data);
+
+    // Check uniqueness
+    const available = await isPsnIdAvailable(res.data.psnAccountId);
+    if (!available) {
+      setPsnStatus("taken");
+      setPsnStats(null);
+      showToast({
+        type: "error",
+        title: "Link in use",
+        message: "This link is already in use.",
+      });
+      return;
+    }
+
+    setPsnStatus("available");
     showToast({ type: "success", title: "PSN Linked", message: "PlayStation profile verified." });
   };
 
   const handleContinue = () => {
-    if (!isFormValid) {
+    if (
+      !isFormValid ||
+      steamStatus === "taken" ||
+      faceitStatus === "taken" ||
+      psnStatus === "taken" ||
+      eaStatus === "taken" ||
+      xboxStatus === "taken"
+    ) {
       const messages: string[] = [];
 
       // ✅ Only complain about CS2 now
       if (playsCs2 && !cs2Ok) {
         messages.push("CS2: add at least a Steam or FACEIT profile link.");
+      }
+
+      if (steamStatus === "taken") {
+        messages.push("This link is already in use.");
+      }
+      if (faceitStatus === "taken") {
+        messages.push("This link is already in use.");
+      }
+      if (psnStatus === "taken") {
+        messages.push("This link is already in use.");
+      }
+      if (eaStatus === "taken") {
+        messages.push("This link is already in use.");
+      }
+      if (xboxStatus === "taken") {
+        messages.push("This link is already in use.");
       }
 
       showToast({
@@ -641,6 +721,13 @@ export default function RegisterStep3() {
                 </Text>
               </View>
             )}
+            {steamStatus === "taken" && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>
+                  This link is already in use.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -773,6 +860,13 @@ export default function RegisterStep3() {
                 </Text>
               </View>
             )}
+            {faceitStatus === "taken" && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>
+                  This link is already in use.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -821,6 +915,13 @@ export default function RegisterStep3() {
                 </Text>
               </View>
             )}
+            {eaStatus === "taken" && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>
+                  This link is already in use.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -866,6 +967,13 @@ export default function RegisterStep3() {
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperWarning]}>
                   That gamertag looks very short. Please double-check it.
+                </Text>
+              </View>
+            )}
+            {xboxStatus === "taken" && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>
+                  This link is already in use.
                 </Text>
               </View>
             )}
@@ -965,6 +1073,13 @@ export default function RegisterStep3() {
               <View style={styles.helperTextRow}>
                 <Text style={[styles.helperText, styles.helperWarning]}>
                   That looks very short. Please double-check your PSN Online ID.
+                </Text>
+              </View>
+            )}
+            {psnStatus === "taken" && (
+              <View style={styles.helperTextRow}>
+                <Text style={[styles.helperText, styles.helperError]}>
+                  This link is already in use.
                 </Text>
               </View>
             )}

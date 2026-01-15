@@ -1,5 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -16,7 +17,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
 import { auth, db } from "../../../src/config/firebaseConfig";
@@ -25,7 +25,15 @@ import { useToast } from "../../../src/hooks/useToast";
 import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
 import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
 import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
-import { isPhoneAvailable, isUsernameAvailable } from "../../../src/services/userService";
+import {
+    isEaIdAvailable,
+    isFaceitIdAvailable,
+    isPhoneAvailable,
+    isPsnIdAvailable,
+    isSteamIdAvailable,
+    isUsernameAvailable,
+    isXboxIdAvailable,
+} from "../../../src/services/userService";
 import { COLORS, INPUT_PADDING } from "../../../src/theme";
 import styles from "./edit.styles";
 
@@ -108,6 +116,8 @@ export default function EditProfile() {
     const [steamProfileUrl, setSteamProfileUrl] = useState("");
     const [faceitProfileUrl, setFaceitProfileUrl] = useState("");
     const [psnOnlineId, setPsnOnlineId] = useState("");
+    const [eaProfileUrl, setEaProfileUrl] = useState("");
+    const [xboxGamertag, setXboxGamertag] = useState("");
 
     // Verification State
     const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(null);
@@ -116,6 +126,15 @@ export default function EditProfile() {
     const [steamLoading, setSteamLoading] = useState(false);
     const [faceitLoading, setFaceitLoading] = useState(false);
     const [psnLoading, setPsnLoading] = useState(false);
+    const [eaLoading, setEaLoading] = useState(false);
+    const [xboxLoading, setXboxLoading] = useState(false);
+
+    // availability status
+    const [steamStatus, setSteamStatus] = useState<"idle" | "available" | "taken">("idle");
+    const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
+    const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
+    const [eaStatus, setEaStatus] = useState<"idle" | "available" | "taken">("idle");
+    const [xboxStatus, setXboxStatus] = useState<"idle" | "available" | "taken">("idle");
 
     // Validation
     const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -214,6 +233,8 @@ export default function EditProfile() {
                     setSteamProfileUrl(data.steamProfileUrl || "");
                     setFaceitProfileUrl(data.faceitProfileUrl || "");
                     setPsnOnlineId(data.psnOnlineId || "");
+                    setEaProfileUrl(data.eaProfileUrl || "");
+                    setXboxGamertag(data.xboxGamertag || "");
 
                     // Hydrate verified profiles if available
                     if (data.steamId) {
@@ -222,6 +243,7 @@ export default function EditProfile() {
                             personaName: data.steamPersonaName,
                             cs2Hours: data.steamCs2Hours,
                         } as SteamProfileSummary);
+                        setSteamStatus("available");
                     }
 
                     if (data.faceitId) {
@@ -232,10 +254,19 @@ export default function EditProfile() {
                             elo: data.faceitElo,
                             skillLevel: data.faceitSkillLevel,
                         } as FaceitProfileSummary);
+                        setFaceitStatus("available");
                     }
 
                     if (data.psnStats) {
                         setPsnStats(data.psnStats);
+                        setPsnStatus("available");
+                    }
+
+                    if (data.eaId) {
+                        setEaStatus("available");
+                    }
+                    if (data.xboxId) {
+                        setXboxStatus("available");
                     }
                 }
             } catch (e) {
@@ -388,9 +419,24 @@ export default function EditProfile() {
         if (!res.ok) {
             showToast({ type: "error", title: "Steam lookup failed", message: res.message || "Verification failed." });
             setSteamProfile(null);
+            setSteamStatus("idle");
             return;
         }
 
+        // Check uniqueness
+        const available = await isSteamIdAvailable(res.data.steamId, user?.uid);
+        if (!available) {
+            setSteamStatus("taken");
+            setSteamProfile(null);
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "This link is already in use.",
+            });
+            return;
+        }
+
+        setSteamStatus("available");
         setSteamProfile(res.data);
         showToast({ type: "success", title: "Verified", message: `Steam profile found: ${res.data.personaName}` });
     };
@@ -408,9 +454,24 @@ export default function EditProfile() {
         if (!res.ok) {
             showToast({ type: "error", title: "FACEIT lookup failed", message: res.message || "Verification failed." });
             setFaceitProfile(null);
+            setFaceitStatus("idle");
             return;
         }
 
+        // Check uniqueness
+        const available = await isFaceitIdAvailable(res.data.faceitId, user?.uid);
+        if (!available) {
+            setFaceitStatus("taken");
+            setFaceitProfile(null);
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "This link is already in use.",
+            });
+            return;
+        }
+
+        setFaceitStatus("available");
         setFaceitProfile(res.data);
         showToast({ type: "success", title: "Verified", message: `FACEIT profile found: ${res.data.nickname}` });
     };
@@ -429,11 +490,72 @@ export default function EditProfile() {
         if (!res.ok) {
             showToast({ type: "error", title: "PSN lookup failed", message: res.message || "Verification failed." });
             setPsnStats(null);
+            setPsnStatus("idle");
             return;
         }
 
+        // Check uniqueness
+        const available = await isPsnIdAvailable(res.data.psnAccountId, user?.uid);
+        if (!available) {
+            setPsnStatus("taken");
+            setPsnStats(null);
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "This link is already in use.",
+            });
+            return;
+        }
+
+        setPsnStatus("available");
         setPsnStats(res.data);
         showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
+    };
+
+    const handleEaLookup = async () => {
+        const value = eaProfileUrl.trim();
+        if (!value) {
+            showToast({ type: "info", title: "EA ID", message: "Enter your EA ID first." });
+            return;
+        }
+        setEaLoading(true);
+        const available = await isEaIdAvailable(value, user?.uid);
+        setEaLoading(false);
+
+        if (!available) {
+            setEaStatus("taken");
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "This link is already in use.",
+            });
+        } else {
+            setEaStatus("available");
+            showToast({ type: "success", title: "Verified", message: "EA ID is available and linked." });
+        }
+    };
+
+    const handleXboxLookup = async () => {
+        const value = xboxGamertag.trim();
+        if (!value) {
+            showToast({ type: "info", title: "Xbox Gamertag", message: "Enter your Xbox Gamertag first." });
+            return;
+        }
+        setXboxLoading(true);
+        const available = await isXboxIdAvailable(value, user?.uid);
+        setXboxLoading(false);
+
+        if (!available) {
+            setXboxStatus("taken");
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "This link is already in use.",
+            });
+        } else {
+            setXboxStatus("available");
+            showToast({ type: "success", title: "Verified", message: "Xbox Gamertag is available and linked." });
+        }
     };
 
     const handleUpdatePassword = async () => {
@@ -534,6 +656,22 @@ export default function EditProfile() {
             return;
         }
 
+        // Platform uniqueness check
+        if (
+            steamStatus === "taken" ||
+            faceitStatus === "taken" ||
+            psnStatus === "taken" ||
+            eaStatus === "taken" ||
+            xboxStatus === "taken"
+        ) {
+            showToast({
+                type: "error",
+                title: "Link in use",
+                message: "One or more of your profile links are already in use by another account.",
+            });
+            return;
+        }
+
         // Email validation if changed
         const localPart = email.trim();
         const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
@@ -562,6 +700,8 @@ export default function EditProfile() {
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
                 psnOnlineId: psnOnlineId.trim() || null,
+                eaProfileUrl: eaProfileUrl.trim() || null,
+                xboxGamertag: xboxGamertag.trim() || null,
                 updatedAt: new Date(),
             };
 
@@ -609,6 +749,19 @@ export default function EditProfile() {
             } else if (!psnOnlineId.trim()) {
                 // Clear ALL PSN data if ID is cleared
                 updates.psnStats = null;
+            }
+
+            // EA / Xbox IDs
+            if (eaStatus === "available" && eaProfileUrl.trim()) {
+                updates.eaId = eaProfileUrl.trim();
+            } else if (!eaProfileUrl.trim()) {
+                updates.eaId = null;
+            }
+
+            if (xboxStatus === "available" && xboxGamertag.trim()) {
+                updates.xboxId = xboxGamertag.trim();
+            } else if (!xboxGamertag.trim()) {
+                updates.xboxId = null;
             }
 
             // Auth Updates - Email is read-only, no updates needed
@@ -1043,6 +1196,7 @@ export default function EditProfile() {
                                             setSteamProfileUrl(t);
                                             // Reset verified state if changed significantly (optional, but safer)
                                             if (steamProfile && t !== '') setSteamProfile(null);
+                                            setSteamStatus("idle");
                                         }}
                                         style={[styles.input, { fontSize: 13 }]}
                                         placeholder="https://steamcommunity.com/id/..."
@@ -1077,6 +1231,9 @@ export default function EditProfile() {
                                 </Text>
                             </View>
                         )}
+                        {steamStatus === "taken" && (
+                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
+                        )}
                     </View>
 
                     {/* Faceit */}
@@ -1093,6 +1250,7 @@ export default function EditProfile() {
                                         onChangeText={(t) => {
                                             setFaceitProfileUrl(t);
                                             if (faceitProfile && t !== '') setFaceitProfile(null);
+                                            setFaceitStatus("idle");
                                         }}
                                         style={[styles.input, { fontSize: 13 }]}
                                         placeholder="https://www.faceit.com/en/players/..."
@@ -1141,6 +1299,9 @@ export default function EditProfile() {
                                 </View>
                             </View>
                         )}
+                        {faceitStatus === "taken" && (
+                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
+                        )}
                     </View>
 
                     {/* PSN */}
@@ -1157,6 +1318,7 @@ export default function EditProfile() {
                                         onChangeText={(t) => {
                                             setPsnOnlineId(t);
                                             if (psnStats && t !== psnStats.psnOnlineId) setPsnStats(null);
+                                            setPsnStatus("idle");
                                         }}
                                         style={[styles.input, { fontSize: 13 }]}
                                         placeholder="MyPsnId_123"
@@ -1194,6 +1356,95 @@ export default function EditProfile() {
                                     </Text>
                                 </View>
                             </View>
+                        )}
+                        {psnStatus === "taken" && (
+                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
+                        )}
+                    </View>
+
+                    {/* EA */}
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.label}>EA Account / Club</Text>
+                        <View style={styles.platformInputRow}>
+                            <View style={[styles.platformIcon, { borderColor: COLORS.accent, backgroundColor: COLORS.accent + '10' }]}>
+                                <MaterialIcons name="sports-soccer" size={24} color={COLORS.accent} />
+                            </View>
+                            <View style={styles.platformField}>
+                                <View style={styles.inputBox}>
+                                    <TextInput
+                                        value={eaProfileUrl}
+                                        onChangeText={(t) => {
+                                            setEaProfileUrl(t);
+                                            setEaStatus("idle");
+                                        }}
+                                        style={[styles.input, { fontSize: 13 }]}
+                                        placeholder="Club link or EA ID"
+                                        placeholderTextColor={COLORS.muted}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                    />
+                                </View>
+                            </View>
+                        </View>
+
+                        <Pressable
+                            onPress={handleEaLookup}
+                            disabled={eaLoading || !eaProfileUrl.trim()}
+                            style={({ pressed }) => [
+                                styles.platformButton,
+                                eaStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
+                                pressed && !eaLoading && { opacity: 0.9 },
+                            ]}
+                        >
+                            <Text style={styles.platformButtonText}>
+                                {eaLoading ? "Checking..." : eaStatus === "available" ? "EA Linked" : "Verify EA Account"}
+                            </Text>
+                        </Pressable>
+                        {eaStatus === "taken" && (
+                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
+                        )}
+                    </View>
+
+                    {/* Xbox */}
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.label}>Xbox Gamertag</Text>
+                        <View style={styles.platformInputRow}>
+                            <View style={[styles.platformIcon, { borderColor: '#107C10', backgroundColor: '#e6f2e6' }]}>
+                                <MaterialIcons name="sports-esports" size={24} color="#107C10" />
+                            </View>
+                            <View style={styles.platformField}>
+                                <View style={styles.inputBox}>
+                                    <TextInput
+                                        value={xboxGamertag}
+                                        onChangeText={(t) => {
+                                            setXboxGamertag(t);
+                                            setXboxStatus("idle");
+                                        }}
+                                        style={[styles.input, { fontSize: 13 }]}
+                                        placeholder="Your Xbox gamertag"
+                                        placeholderTextColor={COLORS.muted}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                    />
+                                </View>
+                            </View>
+                        </View>
+
+                        <Pressable
+                            onPress={handleXboxLookup}
+                            disabled={xboxLoading || !xboxGamertag.trim()}
+                            style={({ pressed }) => [
+                                styles.platformButton,
+                                xboxStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
+                                pressed && !xboxLoading && { opacity: 0.9 },
+                            ]}
+                        >
+                            <Text style={styles.platformButtonText}>
+                                {xboxLoading ? "Checking..." : xboxStatus === "available" ? "Xbox Linked" : "Verify Xbox Gamertag"}
+                            </Text>
+                        </Pressable>
+                        {xboxStatus === "taken" && (
+                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
                         )}
                     </View>
 

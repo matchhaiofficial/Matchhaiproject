@@ -153,7 +153,8 @@ export async function saveZoneRegistration(
         padel: b.pricing.padel ? Object.entries(b.pricing.padel).reduce((acc, [k, v]: [string, any]) => ({ ...acc, [k]: { count: toIntOrNull(v.count) || 0, price: toIntOrNull(v.price) || 0 } }), {}) : null,
         pickleball: b.pricing.pickleball ? Object.entries(b.pricing.pickleball).reduce((acc, [k, v]: [string, any]) => ({ ...acc, [k]: { count: toIntOrNull(v.count) || 0, price: toIntOrNull(v.price) || 0 } }), {}) : null,
       },
-      notes: b.notes?.trim() || null
+      notes: b.notes?.trim() || null,
+      specs: b.specs?.trim() || null
     }));
 
     const docBody = {
