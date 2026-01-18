@@ -39,6 +39,7 @@ export interface BookingRequest {
     answers: Record<string, any>;
   };
   teamMode: 'solo' | 'team';
+  role?: 'player' | 'zone-admin' | 'super-admin';
   teamId: string | null;
   reservedSlots: number;
 
@@ -47,6 +48,12 @@ export interface BookingRequest {
   currency: string;
   status: 'pending' | 'fulfilled';
   createdAt: any;
+}
+
+export interface EffectiveRateResult {
+  rate: number | null;
+  label: string | null;
+  source: "root_pricing" | "branch_pricing" | "none";
 }
 
 /** Shape we’ll save for a new zone + primary branch */
@@ -165,7 +172,7 @@ export async function saveZoneRegistration(
       contactPhone: normalizedPhone,
       type: step1.type,
 
-      status: "active" as const,
+      status: "pending-review" as const,
       onboardingStep: 4,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -297,6 +304,7 @@ export async function sendBookingOffer(offer: {
 export interface Zone {
   id: string;
   ownerUid: string;
+  ownerFullName: string;
   venueBrandName: string;
   contactEmail: string;
   contactPhone: string | null;
@@ -340,14 +348,11 @@ export interface Zone {
       };
     };
 
-    // Sports
-    futsal?: { count: number; price: number };
-    indoorCricket?: { count: number; price: number };
-    padel?: {
-      red?: { count: number; price: number };
-      blue?: { count: number; price: number };
-    };
-    pickleball?: { count: number; price: number };
+    // Sports (Maps of category -> { count, price })
+    futsal?: Record<string, { count: number; price: number }>;
+    indoorCricket?: Record<string, { count: number; price: number }>;
+    padel?: Record<string, { count: number; price: number }>;
+    pickleball?: Record<string, { count: number; price: number }>;
   };
 
   // Legacy fields (kept optional for backward compat if needed, or remove if strict)
@@ -359,10 +364,15 @@ export interface Zone {
   hourlyRate?: number;
   ps5HourlyRate?: number;
 
-  status: 'active' | 'pending-review' | 'suspended';
+  status: 'active' | 'pending-review' | 'suspended' | 'rejected';
+  rejectionReason?: string;
   createdAt: any;
   updatedAt: any;
   onboardingStep: number;
+
+  // Computed fields (for UI)
+  effectiveRate?: number | null;
+  effectiveRateLabel?: string | null;
 }
 
 /**
@@ -379,10 +389,24 @@ export async function getActiveZones(
     );
 
     const snapshot = await getDocs(q);
-    let zones = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Zone[];
+    let zones = snapshot.docs.map(doc => {
+      const zoneData = { id: doc.id, ...doc.data() } as Zone;
+      if (gameKey) {
+        const derivation = deriveZoneRate(zoneData, gameKey);
+        zoneData.effectiveRate = derivation.rate;
+        zoneData.effectiveRateLabel = derivation.label;
+
+        // Legacy compatibility
+        if (gameKey === 'fc26' || gameKey === 'fc25' || gameKey === 'tekken8') {
+          zoneData.ps5HourlyRate = derivation.rate || undefined;
+          zoneData.hourlyRate = undefined;
+        } else {
+          zoneData.hourlyRate = derivation.rate || undefined;
+          zoneData.ps5HourlyRate = undefined;
+        }
+      }
+      return zoneData;
+    });
 
     // Filter by game if specified
     if (gameKey) {
@@ -409,7 +433,7 @@ export async function getActiveZones(
       else if (gameKey === 'fc25' || gameKey === 'fc26' || gameKey === 'tekken8') {
         zones = zones.filter(zone => {
           const consoleSeats = zone.capacity?.consoleSeats ?? 0;
-          return consoleSeats > 0 && (zone.ps5HourlyRate || 0) > 0;
+          return consoleSeats > 0; // Removed hourly rate check as we now derive it
         });
       }
     }
@@ -420,6 +444,80 @@ export async function getActiveZones(
     Logger.error('zoneService', 'Error fetching active zones', error);
     return { ok: false, message: 'Failed to fetch zones' };
   }
+}
+
+/**
+ * Derives an effective rate for a specific game within a zone.
+ * Prefers branch pricing over root pricing.
+ */
+export function deriveZoneRate(zone: Zone, gameKey: string): EffectiveRateResult {
+  const branchPricing = zone.branches?.[0]?.pricing;
+  const rootPricing = zone.pricing;
+
+  const p = branchPricing || rootPricing;
+  const source: EffectiveRateResult['source'] = branchPricing ? "branch_pricing" : (rootPricing ? "root_pricing" : "none");
+
+  if (!p) return { rate: null, label: null, source: "none" };
+
+  let rate: number | null = null;
+  let label: string | null = null;
+
+  switch (gameKey) {
+    case 'cs2':
+      rate = p.pc?.regular?.price || p.pc?.premium?.price || p.pc?.elite?.price || null;
+      if (rate) label = `${rate} PKR/hr (Regular)`;
+      break;
+
+    case 'fc26':
+    case 'fc25':
+    case 'tekken8':
+      // Prefer price1v1, fallback to price2v2 or any other field starting with 'price'
+      const consolePs5 = p.console?.ps5 as any;
+      rate = consolePs5?.price1v1 || consolePs5?.price || consolePs5?.price2v2 || null;
+      if (rate) label = `${rate} PKR/hr (PS5)`;
+      break;
+
+    case 'futsal':
+      const futsal = p.futsal;
+      if (futsal) {
+        const keys = Object.keys(futsal);
+        if (keys.length > 0) {
+          const key = futsal["5v5"] ? "5v5" : keys[0]; // Prefer 5v5
+          rate = futsal[key]?.price || null;
+          if (rate) label = `${rate} PKR/hr (${key})`;
+        }
+      }
+      break;
+
+    case 'indoor_cricket':
+      const ic = (p as any).indoorCricket || p.indoor_cricket;
+      if (ic) {
+        const firstKey = Object.keys(ic)[0];
+        rate = ic[firstKey]?.price || null;
+        if (rate) label = `${rate} PKR/hr (${firstKey})`;
+      }
+      break;
+
+    case 'padel':
+      const padel = p.padel;
+      if (padel) {
+        const firstKey = Object.keys(padel)[0];
+        rate = padel[firstKey]?.price || null;
+        if (rate) label = `${rate} PKR/hr (${firstKey})`;
+      }
+      break;
+
+    case 'pickleball':
+      const pickle = p.pickleball;
+      if (pickle) {
+        const firstKey = Object.keys(pickle)[0];
+        rate = pickle[firstKey]?.price || null;
+        if (rate) label = `${rate} PKR/hr (${firstKey})`;
+      }
+      break;
+  }
+
+  return { rate, label, source };
 }
 
 /**

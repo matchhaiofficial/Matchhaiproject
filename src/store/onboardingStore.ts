@@ -63,6 +63,7 @@ type Step3Data = {
   // hydrated from API lookups (optional)
   steamProfile: SteamProfileSummary | null;
   faceitProfile: FaceitProfileSummary | null;
+  psnProfile: any | null;
 };
 
 type Step4Data = {
@@ -164,6 +165,7 @@ const initialState: Omit<
     psnOnlineId: "",
     steamProfile: null,
     faceitProfile: null,
+    psnProfile: null,
   },
   step4: {
     agreeTerms: false,

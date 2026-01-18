@@ -201,7 +201,7 @@ export default function RegisterStep2() {
 
         <Text style={styles.heading}>Where do you queue?</Text>
         <Text style={styles.sub}>
-          Select your area and the activities you're interested in.
+          Karachi only (beta). Select up to 5 preferred areas and the activities you're interested in.
           We'll ask for skill levels later when you create a match.
         </Text>
 

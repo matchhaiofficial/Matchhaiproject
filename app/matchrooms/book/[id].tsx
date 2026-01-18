@@ -321,7 +321,7 @@ export default function BookSlotsScreen() {
                             // Find teammate if already occupied
                             const occupantUid = slot.uid || slot.reservedFor?.uid || slot.reservedForUid;
                             const occupantName = slot.user?.username || slot.reservedFor?.username;
-                            const occupant = occupantName ? { username: occupantName, role: slot.role } : room.players.find(p => p.uid === occupantUid);
+                            const occupant = occupantName ? { username: occupantName, role: slot.role } : (room.players || []).find(p => p.uid === occupantUid);
 
                             return (
                                 <TouchableOpacity
