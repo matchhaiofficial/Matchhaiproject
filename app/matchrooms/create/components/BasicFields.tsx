@@ -30,6 +30,15 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
         return date;
     };
 
+    // Helper to format 24h HH:mm to 12h HH:mm AM/PM
+    const formatTimeForDisplay = (time24: string) => {
+        if (!time24) return '';
+        const [hours, minutes] = time24.split(':').map(Number);
+        const period = hours >= 12 ? 'PM' : 'AM';
+        const hours12 = hours % 12 || 12;
+        return `${hours12}:${String(minutes).padStart(2, '0')} ${period}`;
+    };
+
     const handleDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(false);
         if (selectedDate) {
@@ -45,6 +54,7 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
         if (selectedTime) {
             const hours = String(selectedTime.getHours()).padStart(2, '0');
             const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+            // Store as 24h for backend consistency
             onChange('time', `${hours}:${minutes}`);
         }
     };
@@ -101,7 +111,7 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
                             style={{ flex: 1, justifyContent: 'center' }}
                         >
                             <Text style={[styles.input, !formData.time && { color: '#757575' }]}>
-                                {formData.time || 'HH:MM'}
+                                {formData.time ? formatTimeForDisplay(formData.time) : 'HH:MM'}
                             </Text>
                         </Pressable>
                     </View>
@@ -124,7 +134,7 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
                     mode="time"
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                     onChange={handleTimeChange}
-                    is24Hour={true}
+                    is24Hour={false}
                 />
             )}
 

@@ -1,12 +1,22 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS } from "../../../src/theme";
 
 export default function PlayerTabsLayout() {
     const insets = useSafeAreaInsets();
+    const { user, loading } = useAuth();
+
+    // ✅ If super-admin, force redirect to their dashboard
+    const isSuperAdmin = (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
+        user?.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+
+    if (!loading && isSuperAdmin) {
+        return <Redirect href="/super-admin/(tabs)" />;
+    }
 
     return (
         <Tabs
@@ -62,42 +72,34 @@ export default function PlayerTabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name="matchrooms"
+                name="discover"
                 options={{
-                    title: "Rooms",
+                    title: "Discover",
                     tabBarIcon: ({ color }) => (
                         <MaterialIcons
-                            name="sports-esports"
+                            name="explore"
                             size={24}
                             color={color}
                         />
                     ),
+                }}
+            />
+            <Tabs.Screen
+                name="matchrooms"
+                options={{
+                    href: null,
                 }}
             />
             <Tabs.Screen
                 name="find-players"
                 options={{
-                    title: "Find Players",
-                    tabBarIcon: ({ color }) => (
-                        <MaterialIcons
-                            name="people"
-                            size={24}
-                            color={color}
-                        />
-                    ),
+                    href: null,
                 }}
             />
             <Tabs.Screen
                 name="teams"
                 options={{
-                    title: "Teams",
-                    tabBarIcon: ({ color }) => (
-                        <MaterialIcons
-                            name="groups"
-                            size={24}
-                            color={color}
-                        />
-                    ),
+                    href: null,
                 }}
             />
             <Tabs.Screen
@@ -146,6 +148,12 @@ export default function PlayerTabsLayout() {
             />
             <Tabs.Screen
                 name="live.styles"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="discover.styles"
                 options={{
                     href: null,
                 }}

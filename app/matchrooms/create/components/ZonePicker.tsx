@@ -115,13 +115,9 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                     </Text>
                                 </View>
                                 <View style={{ alignItems: 'flex-end', minWidth: 80 }}>
-                                    {(gameKey === 'fc26') && zone.ps5HourlyRate ? (
+                                    {zone.effectiveRateLabel ? (
                                         <Text style={styles.zonePrice}>
-                                            {zone.ps5HourlyRate} PKR/hr (PS5)
-                                        </Text>
-                                    ) : zone.hourlyRate ? (
-                                        <Text style={styles.zonePrice}>
-                                            {zone.hourlyRate} PKR/hr
+                                            {zone.effectiveRateLabel}
                                         </Text>
                                     ) : (
                                         <Text style={styles.zoneDetail}>Rate TBD</Text>

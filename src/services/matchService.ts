@@ -67,6 +67,7 @@ export interface Matchroom {
     startTime?: any;
     scheduledDate?: string;
     scheduledTime?: string;
+    durationMinutes?: number; // Explicit duration
     pricing: {
         perPlayer: number;
         currency: string;
@@ -129,10 +130,19 @@ const COLLECTION_NAME = "matchrooms";
 
 export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     try {
+        const players = roomData.players || [{
+            uid: roomData.hostUid,
+            username: roomData.hostName,
+            joinedAt: new Date(),
+            role: 'Host'
+        }];
+
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...roomData,
+            players,
+            currentPlayers: players.length,
+            playerUids: roomData.playerUids || [roomData.hostUid],
             createdAt: serverTimestamp(),
-            playerUids: [roomData.hostUid], // Host is first player
         });
         Logger.info("matchService", "Matchroom created", { id: docRef.id });
         return { ok: true, id: docRef.id };

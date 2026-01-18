@@ -90,7 +90,8 @@ export default function MatchroomDetails() {
 
         const fetchRatings = async () => {
             const ratings: Record<string, GameSkillScore | null> = {};
-            await Promise.all(room.players.map(async (p) => {
+            const players = room?.players || [];
+            await Promise.all(players.map(async (p) => {
                 // Optimization: Don't refetch if already have it (though simple MVP re-fetch is safer for updates)
                 try {
                     const uDoc = await getDoc(doc(db, "users", p.uid));
@@ -204,7 +205,7 @@ export default function MatchroomDetails() {
                 Alert.alert("Success", "Joined squad!");
                 fetchRoom(); // Refresh to see self in list
             } else {
-                Alert.alert("Error", res.message || "Failed to join");
+                Alert.alert("Error", (res as any).message || "Failed to join");
             }
         } catch (e) {
             Logger.error("MatchroomDetails", "Error joining", e);
@@ -230,9 +231,10 @@ export default function MatchroomDetails() {
         try {
             // Snapshot ratings
             const ratingsSnapshot: Record<string, number> = {};
+            const playersArr = room.players || [];
 
             // Parallel fetch of profiles to get skill scores
-            await Promise.all(room.players.map(async (p) => {
+            await Promise.all(playersArr.map(async (p) => {
                 try {
                     const uDoc = await getDoc(doc(db, "users", p.uid));
                     if (uDoc.exists()) {
@@ -250,7 +252,7 @@ export default function MatchroomDetails() {
             }));
 
             // Assign Captains (MVP: Host vs First Opponent)
-            const team2Player = room.players.find(p => p.uid !== room.hostUid);
+            const team2Player = playersArr.find(p => p.uid !== room.hostUid);
             const team2Captain = team2Player ? team2Player.uid : undefined;
 
             const res = await startMatch(id as string, ratingsSnapshot, room.hostUid, team2Captain);
@@ -384,8 +386,9 @@ export default function MatchroomDetails() {
     if (!room) return null;
 
     const isHost = user?.uid === room.hostUid;
-    const isJoined = room.players.some(p => p.uid === user?.uid);
-    const isFull = room.players.length >= room.maxPlayers;
+    const playersArr = room.players || [];
+    const isJoined = playersArr.some(p => p.uid === user?.uid);
+    const isFull = playersArr.length >= (room.maxPlayers || 0);
 
     // Calculate available roles
     const availableRoles: any[] = []; // room.requiredRoles removed from schema
@@ -422,7 +425,7 @@ export default function MatchroomDetails() {
                             <Text style={styles.gameText}>{room.game}</Text>
                         </View>
                         <Text style={styles.dateText}>
-                            {room.startTime ? new Date(room.startTime.seconds * 1000).toLocaleDateString() : 'Flexible Date'}
+                            {room.startTime ? new Date(room.startTime.seconds * 1000).toLocaleDateString() : (room.scheduledDate || 'Flexible Date')}
                         </Text>
                     </View>
                     <Text style={styles.title}>{room.title}</Text>
@@ -436,7 +439,57 @@ export default function MatchroomDetails() {
                         <View>
                             <Text style={styles.infoLabel}>TIME</Text>
                             <Text style={styles.infoValue}>
-                                {room.startTime ? new Date(room.startTime.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Flexible'}
+                                {(() => {
+                                    // Start Time Logic
+                                    const dateStr = room.scheduledDate || '';
+                                    const timeStr = room.scheduledTime || '00:00';
+
+                                    // Parse Scheduled Date (DD/MM/YYYY or YYYY-MM-DD or empty)
+                                    let start = new Date();
+                                    if (dateStr.includes('/')) {
+                                        const [day, month, year] = dateStr.split('/').map(Number);
+                                        start = new Date(year, month - 1, day);
+                                    } else if (dateStr) {
+                                        const parsed = new Date(dateStr);
+                                        if (!isNaN(parsed.getTime())) start = parsed;
+                                    }
+
+                                    // Parse Scheduled Time (e.g. "14:30")
+                                    const [hours, mins] = timeStr.split(':').map(Number);
+                                    if (!isNaN(hours)) {
+                                        start.setHours(hours, mins || 0);
+                                    }
+
+                                    // Helper for 12h format
+                                    const format12h = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+
+                                    // Display Start
+                                    const startDisplay = room.startTime
+                                        ? format12h(new Date(room.startTime.seconds * 1000))
+                                        : (room.scheduledTime ? format12h(start) : 'Flexible');
+
+                                    // Calculate End Time
+                                    let duration = room.durationMinutes;
+
+                                    // Legacy Fallback for Duration
+                                    if (!duration) {
+                                        if (room.format?.includes('BO1')) duration = 60;
+                                        else if (room.format?.includes('BO3')) duration = (room.game === 'fc26') ? 60 : 180;
+                                        else if (room.format?.includes('BO5')) duration = (room.game === 'fc26') ? 120 : 300;
+                                        else if (room.format?.includes('BO7')) duration = 60; // Tekken
+                                        // Simple default fallback
+                                        else duration = 60;
+                                    }
+
+                                    // Compute End Time
+                                    if (room.scheduledTime && duration) {
+                                        const end = new Date(start.getTime() + duration * 60000);
+                                        const endDisplay = end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                        return `${startDisplay} - ${endDisplay}`;
+                                    }
+
+                                    return startDisplay;
+                                })()}
                             </Text>
                         </View>
                     </View>
@@ -447,16 +500,16 @@ export default function MatchroomDetails() {
                             <Text style={styles.infoValue}>{room.location || 'Online'}</Text>
                         </View>
                     </View>
-                    <View style={[styles.infoItem, { marginTop: 16 }]}>
+                    <View style={styles.infoItem}>
                         <MaterialIcons name="attach-money" size={20} color={COLORS.successBright} style={styles.infoIcon} />
                         <View>
                             <Text style={styles.infoLabel}>PRICE</Text>
                             <Text style={[styles.infoValue, { color: COLORS.successBright }]}>
-                                {room.pricing?.perPlayer ? `₨${room.pricing.perPlayer}` : 'Free'}
+                                {(room.pricing?.perPlayer || (room as any).pricePerPlayer) ? `₨${room.pricing?.perPlayer || (room as any).pricePerPlayer}` : 'Free'}
                             </Text>
                         </View>
                     </View>
-                    <View style={[styles.infoItem, { marginTop: 16 }]}>
+                    <View style={styles.infoItem}>
                         <MaterialIcons name="bar-chart" size={20} color={COLORS.accent} style={styles.infoIcon} />
                         <View>
                             <Text style={styles.infoLabel}>SKILL LEVEL</Text>
@@ -467,11 +520,11 @@ export default function MatchroomDetails() {
 
                 {/* Squad Section */}
                 <Text style={styles.sectionTitle}>
-                    Squad ({room.players.length}/{room.maxPlayers})
+                    Squad ({room.players?.length || 0}/{room.maxPlayers})
                 </Text>
 
                 <View style={styles.playersContainer}>
-                    {room.players.map((player) => (
+                    {(room.players || []).map((player) => (
                         <View key={player.uid} style={styles.playerRow}>
                             <View style={styles.avatar}>
                                 <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>

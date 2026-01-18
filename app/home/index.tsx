@@ -3,29 +3,43 @@ import { Redirect, router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
+import { useZoneData } from '../../src/hooks/useZoneData';
 import { signOutUser } from '../../src/services/authService';
 import { COLORS } from '../../src/theme';
 import styles from './home.styles';
 
 export default function Home() {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { zone, loading: zoneLoading } = useZoneData();
   const [signingOut, setSigningOut] = useState(false);
 
-  // ✅ Redirect away when user becomes null (after logout)
-  useEffect(() => {
-    if (!loading && !user) {
-      console.log("[Home] mounted / updated", { loading, hasUser: !!user });
-      router.replace('/auth/login');
-    }
-  }, [loading, user]);
+  const loading = authLoading || (!!user && zoneLoading);
 
   // ✅ Redirect away when user becomes null (after logout)
   useEffect(() => {
-    if (!loading && !user) {
+    if (!authLoading && !user) {
       console.log("[Home] no user → redirecting to /auth/login");
       router.replace("/auth/login");
     }
-  }, [loading, user]);
+  }, [authLoading, user]);
+
+  // ✅ Role-aware redirect: If user has a zone, they belong in /zone. If super-admin, /super-admin
+  useEffect(() => {
+    if (!loading && user) {
+      const isSuperAdmin = (user.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
+        user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+
+      if (isSuperAdmin) {
+        console.log("[Home] super-admin detected via email/uid → redirecting");
+        router.replace("/super-admin/(tabs)");
+        return;
+      }
+      if (zone) {
+        console.log("[Home] admin detected → redirecting to /zone");
+        router.replace("/zone");
+      }
+    }
+  }, [loading, user, zone]);
 
   if (loading) {
     return (
@@ -66,7 +80,7 @@ export default function Home() {
         <Text style={styles.sub}>Redirecting to Dashboard...</Text>
       </View>
       {/* Fallback redirect if they land here */}
-      <Redirect href="/(player)/(tabs)" />
+      <Redirect href={((user.email && user.email.toLowerCase() === "superadmin@matchhai.com") || user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1") ? "/super-admin/(tabs)" : "/(player)/(tabs)"} />
 
       <Pressable
         onPress={handleLogout}

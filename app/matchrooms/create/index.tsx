@@ -566,10 +566,42 @@ export default function CreateMatchroom() {
                 title: formData.title.trim(),
                 description: formData.description?.trim() || '',
                 maxPlayers: formData.maxPlayers,
-                pricePerPlayer: formData.pricePerPlayer || 0,
-                currency: 'PKR',
+                pricing: {
+                    perPlayer: formData.pricePerPlayer || 0,
+                    currency: 'PKR',
+                },
                 scheduledDate: formData.date,
                 scheduledTime: formData.time,
+                durationMinutes: (() => {
+                    if (selectedGame === 'futsal') return duration * 60;
+                    if (selectedGame === 'indoor_cricket') {
+                        if (formData.overs === '6') return 2.5 * 60; // 6 overs = 2.5h
+                        return 2 * 60; // 5 overs = 2h
+                    }
+                    if (selectedGame === 'cs2') {
+                        if (seriesType === 'BO1') return 60;
+                        if (seriesType === 'BO3') return 180;
+                        if (seriesType === 'BO5') return 300;
+                        if (seriesType === 'BO10') return 600;
+                    }
+                    if (selectedGame === 'fc26') {
+                        if (seriesType === 'BO1') return 30;
+                        if (seriesType === 'BO3') return 60;
+                        if (seriesType === 'BO5') return 120;
+                        if (seriesType === 'BO10') return 180;
+                    }
+                    if (selectedGame === 'tekken8') {
+                        if (seriesType === 'BO7') return 60;
+                        if (seriesType === 'BO20') return 120;
+                        if (seriesType === 'BO40') return 180;
+                    }
+                    if (selectedGame === 'padel' || selectedGame === 'pickleball') {
+                        if (formData.seriesType === 'BO5') return 120;
+                        if (formData.seriesType === 'BO10') return 180;
+                        return 60; // Default BO3 = 1h
+                    }
+                    return 60; // Fallback default
+                })(),
 
                 // Tekken characters
                 tekkenCharacters: selectedGame === 'tekken8' ? formData.tekkenCharacters : undefined,
