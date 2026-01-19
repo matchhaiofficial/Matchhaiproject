@@ -26,7 +26,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { calculateInitialRating, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
-import { GAME_RULES } from "./constants";
+import { GAME_RULES, GameRule } from "./constants";
 import styles from "./game-details.styles";
 
 // FACEIT Level Icons
@@ -93,7 +93,7 @@ export default function GameDetails() {
     // Indoor cricket extended vars
     const [indoorCricketBowlingStyle, setIndoorCricketBowlingStyle] = useState<string | null>(null); // Todo: Add support if needed, but sticking to basics
 
-    const gameRule = GAME_RULES[gameId];
+    const gameRule: GameRule = GAME_RULES[gameId];
     const gameName = gameRule?.label || 'Game Details';
 
     useEffect(() => {
