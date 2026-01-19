@@ -4,6 +4,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -48,684 +49,285 @@ const faceitLevelIcons: Record<number, any> = {
   10: require("../../assets/images/faceit-levels/Level 10.png"),
 };
 
+type VerificationStatus = "unverified" | "verifying" | "verified" | "failed";
+
+const STEAM_ID_REGEX = /^(?:https?:\/\/)?steamcommunity\.com\/(?:profiles|id)\/([a-zA-Z0-9_-]+)/i;
+const FACEIT_URL_REGEX = /^(?:https?:\/\/)?(?:www\.)?faceit\.com\/[a-z]{2}\/players\/([a-zA-Z0-9_-]+)/i;
+
 export default function RegisterStep3() {
   const { step2, step3, setStep3 } = useOnboardingStore();
   const { showToast } = useToast();
 
-  console.log("[Step3] mounted with step2:", {
-    selectedAreas: step2.selectedAreas,
-    playsCs2: step2.playsCs2,
-    playsFc: step2.playsFc,
-    playsTekken: step2.playsTekken,
-    playsFutsal: (step2 as any).playsFutsal,
-    playsIndoorCricket: (step2 as any).playsIndoorCricket,
-    playsPadel: (step2 as any).playsPadel,
-    playsPickleball: (step2 as any).playsPickleball,
-    futsalPositions: (step2 as any).futsalPositions,
-    indoorCricketRole: (step2 as any).indoorCricketRole,
-    indoorCricketBowlingStyle: (step2 as any).indoorCricketBowlingStyle,
-    indoorCricketBattingStyle: (step2 as any).indoorCricketBattingStyle,
-    padelRole: (step2 as any).padelRole,
-    pickleballRole: (step2 as any).pickleballRole,
-  });
-
-  const [areasPreferred] = useState<string[]>(step2.selectedAreas);
-
-  // online games
+  // Initial values from step2
   const [playsCs2] = useState<boolean>(step2.playsCs2);
   const [playsFc] = useState<boolean>(step2.playsFc);
   const [playsTekken] = useState<boolean>(step2.playsTekken);
 
-  // offline sports + roles from step2
-  const [playsFutsal] = useState<boolean>(
-    (step2 as any).playsFutsal ?? false
-  );
-  const [playsIndoorCricket] = useState<boolean>(
-    (step2 as any).playsIndoorCricket ?? false
-  );
-  const [playsPadel] = useState<boolean>(
-    (step2 as any).playsPadel ?? false
-  );
-  const [playsPickleball] = useState<boolean>(
-    (step2 as any).playsPickleball ?? false
-  );
-
-  const [futsalPositions] = useState<string[]>(
-    (((step2 as any).futsalPositions ?? []) as string[])
-  );
-  const [indoorCricketRole] = useState<string | null>(
-    ((step2 as any).indoorCricketRole as string) ?? null
-  );
-  const [indoorCricketBowlingStyle] = useState<string | null>(
-    ((step2 as any).indoorCricketBowlingStyle as string) ?? null
-  );
-  const [indoorCricketBattingStyle] = useState<string | null>(
-    ((step2 as any).indoorCricketBattingStyle as string) ?? null
-  );
-  const [padelRole] = useState<string | null>(
-    ((step2 as any).padelRole as string) ?? null
-  );
-  const [pickleballRole] = useState<string | null>(
-    ((step2 as any).pickleballRole as string) ?? null
-  );
-
   // local editable fields for links / IDs
-  const [steamProfileUrl, setSteamProfileUrl] = useState(
-    step3.steamProfileUrl ?? ""
-  );
-  const [faceitProfileUrl, setFaceitProfileUrl] = useState(
-    step3.faceitProfileUrl ?? ""
-  );
-  const [eaProfileUrl, setEaProfileUrl] = useState(step3.eaProfileUrl ?? "");
-  const [xboxGamertag, setXboxGamertag] = useState(step3.xboxGamertag ?? "");
+  const [steamProfileUrl, setSteamProfileUrl] = useState(step3.steamProfileUrl ?? "");
+  const [faceitProfileUrl, setFaceitProfileUrl] = useState(step3.faceitProfileUrl ?? "");
   const [psnOnlineId, setPsnOnlineId] = useState(step3.psnOnlineId ?? "");
 
   // fetched summaries
-  const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(
-    step3.steamProfile ?? null
-  );
-  const [faceitProfile, setFaceitProfile] =
-    useState<FaceitProfileSummary | null>(step3.faceitProfile ?? null);
-  const [psnStats, setPsnStats] = useState<PsnVerificationResult | null>(
-    (step3 as any).psnStats ?? null
-  );
+  const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(step3.steamProfile ?? null);
+  const [faceitProfile, setFaceitProfile] = useState<FaceitProfileSummary | null>(step3.faceitProfile ?? null);
+  const [psnProfile, setPsnProfile] = useState<PsnVerificationResult | null>((step3 as any).psnStats ?? null);
 
-  const [steamLoading, setSteamLoading] = useState(false);
-  const [faceitLoading, setFaceitLoading] = useState(false);
-  const [psnLoading, setPsnLoading] = useState(false);
+  // Verification Status Machine
+  const [steamStatus, setSteamStatus] = useState<VerificationStatus>(steamProfile ? "verified" : "unverified");
+  const [faceitStatus, setFaceitStatus] = useState<VerificationStatus>(faceitProfile ? "verified" : "unverified");
+  const [psnStatus, setPsnStatus] = useState<VerificationStatus>(psnProfile ? "verified" : "unverified");
+
+  // Cooldown logic (10s)
+  const [steamCooldown, setSteamCooldown] = useState(0);
+  const [faceitCooldown, setFaceitCooldown] = useState(0);
+  const [psnCooldown, setPsnCooldown] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSteamCooldown((c) => Math.max(0, c - 1));
+      setFaceitCooldown((c) => Math.max(0, c - 1));
+      setPsnCooldown((c) => Math.max(0, c - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const [saving, setSaving] = useState(false);
-
-  // availability status
-  const [steamStatus, setSteamStatus] = useState<"idle" | "available" | "taken">("idle");
-  const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
-  const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
-  const [eaStatus, setEaStatus] = useState<"idle" | "available" | "taken">("idle");
-  const [xboxStatus, setXboxStatus] = useState<"idle" | "available" | "taken">("idle");
-
   const isFocused = useIsFocused();
 
-  // derived flags
-  const steamVerified = !!steamProfile;
-  const faceitVerified = !!faceitProfile;
-  const psnVerified = !!psnStats;
-
-  // If user somehow comes here without step2 filled, send them back
+  // Redirect if missing step2
   useEffect(() => {
     if (!isFocused) return;
-
-    if (
-      !step2.selectedAreas.length &&
-      !step2.playsCs2 &&
-      !step2.playsFc &&
-      !step2.playsTekken &&
-      !(step2 as any).playsFutsal &&
-      !(step2 as any).playsIndoorCricket &&
-      !(step2 as any).playsPadel &&
-      !(step2 as any).playsPickleball
-    ) {
-      console.log("[Step3] missing step2 data → redirecting to step2");
+    if (!step2.selectedAreas.length && !playsCs2 && !playsFc && !playsTekken) {
       router.replace("/auth/register-step2");
     }
-  }, [isFocused, step2]);
+  }, [isFocused, step2, playsCs2, playsFc, playsTekken]);
 
-  // helper for chips + sports summary in summary card
-  const { selectedActivities, sportsSummary } = useMemo(() => {
-    const items: string[] = [];
-    if (playsCs2) items.push("CS2");
-    if (playsFc) items.push("FC 26");
-    if (playsTekken) items.push("Tekken 8");
-    if (playsFutsal) items.push("Futsal");
-    if (playsIndoorCricket) items.push("Indoor Cricket");
-    if (playsPadel) items.push("Padel");
-    if (playsPickleball) items.push("Pickleball");
+  // --- Combined Gating Logic ---
+  const { isFormValid, gate1Met, gate2Met } = useMemo(() => {
+    const steamV = steamStatus === "verified";
+    const faceitV = faceitStatus === "verified";
+    const psnV = psnStatus === "verified";
 
-    const details: string[] = [];
-
-    if (playsFutsal && futsalPositions.length) {
-      details.push(`Futsal: ${futsalPositions.join(" / ")}`);
-    }
-
-    if (playsIndoorCricket && indoorCricketRole) {
-      let roleLabel = indoorCricketRole;
-      if (indoorCricketRole === "Bowler" && indoorCricketBowlingStyle) {
-        roleLabel += ` (${indoorCricketBowlingStyle})`;
-      } else if (
-        indoorCricketRole === "Batsman" &&
-        indoorCricketBattingStyle
-      ) {
-        roleLabel += ` (${indoorCricketBattingStyle})`;
-      }
-      details.push(`Indoor Cricket: ${roleLabel}`);
-    }
-
-    if (playsPadel && padelRole) {
-      details.push(`Padel: ${padelRole}`);
-    }
-
-    if (playsPickleball && pickleballRole) {
-      details.push(`Pickleball: ${pickleballRole}`);
-    }
+    // Gate 1: CS2 -> steam OR faceit
+    const g1 = playsCs2 ? (steamV || faceitV) : true;
+    // Gate 2: Fighting/FC -> steam OR psn
+    const g2 = (playsFc || playsTekken) ? (steamV || psnV) : true;
 
     return {
-      selectedActivities: items,
-      sportsSummary: details.join(" · "),
+      gate1Met: g1,
+      gate2Met: g2,
+      isFormValid: g1 && g2,
     };
-  }, [
-    playsCs2,
-    playsFc,
-    playsTekken,
-    playsFutsal,
-    playsIndoorCricket,
-    playsPadel,
-    playsPickleball,
-    futsalPositions,
-    indoorCricketRole,
-    indoorCricketBowlingStyle,
-    indoorCricketBattingStyle,
-    padelRole,
-    pickleballRole,
-  ]);
+  }, [playsCs2, playsFc, playsTekken, steamStatus, faceitStatus, psnStatus]);
 
-  // --- validation logic for links + soft "looks weird" hints ---
-  const {
-    cs2Ok,
-    isFormValid,
-    steamLooksWeird,
-    faceitLooksWeird,
-    eaLooksWeird,
-    xboxLooksWeird,
-    psnLooksWeird,
-  } = useMemo(() => {
-    const steam = (steamProfileUrl ?? "").trim();
-    const faceit = (faceitProfileUrl ?? "").trim();
-    const ea = (eaProfileUrl ?? "").trim();
-    const xbox = (xboxGamertag ?? "").trim();
-    const psn = (psnOnlineId ?? "").trim();
+  // --- Verification Parsing & Logic ---
+  const extractSteamId = (input: string) => {
+    const match = input.match(STEAM_ID_REGEX);
+    return match ? match[1] : input.trim();
+  };
 
-    const steamFilled = steam.length > 0;
-    const faceitFilled = faceit.length > 0;
-    const eaFilled = ea.length > 0;
-    const xboxFilled = xbox.length > 0;
-    const psnFilled = psn.length > 0;
-
-    // ✅ Only CS2 is "verified"/required:
-    // CS2 must have at least Steam OR FACEIT if selected
-    const cs2Valid = !playsCs2 || steamFilled || faceitFilled;
-
-    // FC 26 + Tekken 8 → EA / Xbox / PS are OPTIONAL
-    const fcValid = true;
-    const tekkenValid = true;
-
-    // --- soft format checks (warnings only) ---
-
-    // generic URL check: http(s) + non-space
-    const urlRegex = /^https?:\/\/\S+$/;
-
-    // Steam: prefer a proper URL
-    const steamWeird = steamFilled && !urlRegex.test(steam);
-
-    // FACEIT: either URL or simple nickname
-    const faceitNicknameRegex = /^[A-Za-z0-9_]{3,30}$/;
-    const faceitWeird =
-      faceitFilled &&
-      !urlRegex.test(faceit) &&
-      !faceitNicknameRegex.test(faceit);
-
-    // Very short IDs → likely typo
-    const eaWeird = eaFilled && ea.length < 3;
-    const xboxWeird = xboxFilled && xbox.length < 3;
-    const psnWeird = psnFilled && psn.length < 3;
-
-    return {
-      cs2Ok: cs2Valid,
-      isFormValid: cs2Valid && fcValid && tekkenValid,
-
-      steamLooksWeird: steamWeird,
-      faceitLooksWeird: faceitWeird,
-      eaLooksWeird: eaWeird,
-      xboxLooksWeird: xboxWeird,
-      psnLooksWeird: psnWeird,
-    };
-  }, [
-    playsCs2,
-    steamProfileUrl,
-    faceitProfileUrl,
-    eaProfileUrl,
-    xboxGamertag,
-    psnOnlineId,
-  ]);
-
-  // --- keyboard container ---
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps =
-    Platform.OS === "ios"
-      ? {
-        style: styles.screen,
-        behavior: "padding" as const,
-        keyboardVerticalOffset: 0,
-      }
-      : { style: styles.screen };
+  const extractFaceitNick = (input: string) => {
+    const match = input.match(FACEIT_URL_REGEX);
+    return match ? match[1] : input.trim();
+  };
 
   const handleSteamLookup = async () => {
-    const url = steamProfileUrl.trim();
-    if (!url) {
-      showToast({
-        type: "info",
-        title: "Steam profile",
-        message: "Please paste your Steam profile link first.",
-      });
-      return;
-    }
+    const query = extractSteamId(steamProfileUrl);
+    if (!query) return;
 
-    setSteamLoading(true);
-    const res = await fetchSteamProfileFromUrl(url);
-    setSteamLoading(false);
+    setSteamStatus("verifying");
+    const res = await fetchSteamProfileFromUrl(query);
 
     if (!res.ok) {
-      showToast({
-        type: "error",
-        title: "Steam lookup failed",
-        message: res.message || "We couldn’t verify this Steam profile.",
-      });
-      setSteamProfile(null);
-      setSteamStatus("idle");
+      setSteamStatus("failed");
+      setSteamCooldown(10);
+      showToast({ type: "error", title: "Steam lookup failed", message: res.message });
       return;
     }
 
-    // Check uniqueness
     const available = await isSteamIdAvailable(res.data.steamId);
     if (!available) {
-      setSteamStatus("taken");
-      setSteamProfile(null);
-      showToast({
-        type: "error",
-        title: "Link in use",
-        message: "This link is already in use.",
-      });
+      setSteamStatus("failed");
+      setSteamCooldown(10);
+      showToast({ type: "warning", title: "Steam taken", message: "This Steam account is already linked to another user." });
       return;
     }
 
-    setSteamStatus("available");
+    setSteamStatus("verified");
     setSteamProfile(res.data);
-    showToast({
-      type: "success",
-      title: "Steam linked",
-      message: res.data.personaName
-        ? `Found profile: ${res.data.personaName}.`
-        : "Steam profile verified.",
-    });
+    showToast({ type: "success", title: "Steam linked", message: `Found ${res.data.personaName}` });
   };
 
   const handleFaceitLookup = async () => {
-    const value = faceitProfileUrl.trim();
-    if (!value) {
-      showToast({
-        type: "info",
-        title: "FACEIT profile",
-        message: "Paste your FACEIT profile link or nickname first.",
-      });
-      return;
-    }
+    const query = extractFaceitNick(faceitProfileUrl);
+    if (!query) return;
 
-    setFaceitLoading(true);
-    const res = await fetchFaceitProfileFromUrl(value);
-    setFaceitLoading(false);
+    setFaceitStatus("verifying");
+    const res = await fetchFaceitProfileFromUrl(query);
 
     if (!res.ok) {
-      showToast({
-        type: "error",
-        title: "FACEIT lookup failed",
-        message: res.message || "We couldn’t verify this FACEIT profile.",
-      });
-      setFaceitProfile(null);
-      setFaceitStatus("idle");
+      setFaceitStatus("failed");
+      setFaceitCooldown(10);
+      showToast({ type: "error", title: "FACEIT lookup failed", message: res.message });
       return;
     }
 
-    // Check uniqueness
     const available = await isFaceitIdAvailable(res.data.faceitId);
     if (!available) {
-      setFaceitStatus("taken");
-      setFaceitProfile(null);
-      showToast({
-        type: "error",
-        title: "Link in use",
-        message: "This link is already in use.",
-      });
+      setFaceitStatus("failed");
+      setFaceitCooldown(10);
+      showToast({ type: "warning", title: "FACEIT taken", message: "This FACEIT account is already linked to another user." });
       return;
     }
 
-    setFaceitStatus("available");
+    setFaceitStatus("verified");
     setFaceitProfile(res.data);
-    showToast({
-      type: "success",
-      title: "FACEIT linked",
-      message: res.data.nickname
-        ? `Found profile: ${res.data.nickname}.`
-        : "FACEIT profile verified.",
-    });
+    showToast({ type: "success", title: "FACEIT linked", message: `Found ${res.data.nickname}` });
   };
 
   const handlePsnLookup = async () => {
-    const value = psnOnlineId.trim();
-    if (!value) {
-      showToast({ type: "info", title: "PSN ID", message: "Enter your PSN Online ID first." });
-      return;
-    }
+    const query = psnOnlineId.trim();
+    if (!query) return;
 
-    setPsnLoading(true);
-    const res = await verifyPsnProfile(value, playsTekken, playsFc);
-    setPsnLoading(false);
+    setPsnStatus("verifying");
+    const res = await verifyPsnProfile(query, playsTekken, playsFc);
 
     if (!res.ok) {
-      showToast({ type: "error", title: "PSN Verification Failed", message: res.message });
-      setPsnStats(null);
+      setPsnStatus("failed");
+      setPsnCooldown(10);
+      showToast({ type: "error", title: "PSN verification failed", message: res.message });
       return;
     }
 
-    setPsnStats(res.data);
-
-    // Check uniqueness
     const available = await isPsnIdAvailable(res.data.psnAccountId);
     if (!available) {
-      setPsnStatus("taken");
-      setPsnStats(null);
-      showToast({
-        type: "error",
-        title: "Link in use",
-        message: "This link is already in use.",
-      });
+      setPsnStatus("failed");
+      setPsnCooldown(10);
+      showToast({ type: "warning", title: "PSN taken", message: "This PSN account is already linked to another user." });
       return;
     }
 
-    setPsnStatus("available");
-    showToast({ type: "success", title: "PSN Linked", message: "PlayStation profile verified." });
+    setPsnStatus("verified");
+    setPsnProfile(res.data);
+    showToast({ type: "success", title: "PSN linked", message: "PSN profile verified successfully." });
   };
 
   const handleContinue = () => {
-    if (
-      !isFormValid ||
-      steamStatus === "taken" ||
-      faceitStatus === "taken" ||
-      psnStatus === "taken" ||
-      eaStatus === "taken" ||
-      xboxStatus === "taken"
-    ) {
+    if (!isFormValid) {
       const messages: string[] = [];
+      if (playsCs2 && !gate1Met) messages.push("CS2 requires Steam or FACEIT.");
+      if ((playsFc || playsTekken) && !gate2Met) messages.push("Fighting/FC require Steam or PSN.");
 
-      // ✅ Only complain about CS2 now
-      if (playsCs2 && !cs2Ok) {
-        messages.push("CS2: add at least a Steam or FACEIT profile link.");
-      }
-
-      if (steamStatus === "taken") {
-        messages.push("This link is already in use.");
-      }
-      if (faceitStatus === "taken") {
-        messages.push("This link is already in use.");
-      }
-      if (psnStatus === "taken") {
-        messages.push("This link is already in use.");
-      }
-      if (eaStatus === "taken") {
-        messages.push("This link is already in use.");
-      }
-      if (xboxStatus === "taken") {
-        messages.push("This link is already in use.");
-      }
-
-      showToast({
-        type: "info",
-        title: "Add your profile links",
-        message:
-          messages.length > 0
-            ? messages.join(" ")
-            : "Please add at least one Steam or FACEIT link for CS2.",
-      });
-
+      showToast({ type: "info", title: "Requirements missing", message: messages.join(" ") });
       return;
     }
 
     setSaving(true);
-    console.log("[Step3] saving platform links and going to step 4");
-
     setStep3({
       steamProfileUrl: steamProfileUrl.trim(),
       faceitProfileUrl: faceitProfileUrl.trim(),
-      eaProfileUrl: eaProfileUrl.trim(),
-      xboxGamertag: xboxGamertag.trim(),
       psnOnlineId: psnOnlineId.trim(),
       steamProfile,
       faceitProfile,
-      psnStats,
-    } as any);
+      psnProfile,
+    });
 
     setSaving(false);
     router.push("/auth/register-step4");
   };
 
-  // Show only platforms that make sense (based on online games)
+  // Visibility flags
   const showSteam = playsCs2 || playsFc || playsTekken;
   const showFaceit = playsCs2;
-  const showEa = playsFc;
-  const showXbox = playsFc || playsTekken;
   const showPsn = playsFc || playsTekken;
 
-  // Dynamic helper subtitles
-  const steamGames: string[] = [];
-  if (playsCs2) steamGames.push("CS2");
-  if (playsFc) steamGames.push("FC 26");
-  if (playsTekken) steamGames.push("Tekken 8");
-  const steamSubtitle = steamGames.length
-    ? `Paste your Steam profile link for ${steamGames.join(" · ")}.`
-    : "Paste your Steam profile link.";
+  // Subtitles
+  const steamSubtitle = "Link your Steam profile for automated skill verification.";
+  const faceitSubtitle = "Link your FACEIT profile to verify your CS2 rank/ELO.";
+  const psnSubtitle = "Enter your PSN Online ID for Tekken/FC verification.";
 
-  const eaSubtitle = playsFc
-    ? "FC 26: paste a link we can use (club page or EA ID)."
-    : "Paste your EA account / club link.";
+  const faceitLevelIcon = faceitProfile?.skillLevel && faceitLevelIcons[faceitProfile.skillLevel];
 
-  const xboxSubtitleParts: string[] = [];
-  if (playsFc) xboxSubtitleParts.push("FC 26");
-  if (playsTekken) xboxSubtitleParts.push("Tekken 8");
-  const xboxSubtitle = xboxSubtitleParts.length
-    ? `Enter your Xbox gamertag for ${xboxSubtitleParts.join(" & ")}.`
-    : "Enter your Xbox gamertag.";
-
-  const psnSubtitleParts: string[] = [];
-  if (playsFc) psnSubtitleParts.push("FC 26");
-  if (playsTekken) psnSubtitleParts.push("Tekken 8");
-  const psnSubtitle = psnSubtitleParts.length
-    ? `Enter your PSN ID for ${psnSubtitleParts.join(" & ")}.`
-    : "Enter your PlayStation Network ID.";
-
-  // helper for FACEIT icon
-  const faceitLevelIcon =
-    faceitProfile?.skillLevel && faceitLevelIcons[faceitProfile.skillLevel];
+  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
+  const containerProps = Platform.OS === "ios" ? { style: styles.screen, behavior: "padding" as const } : { style: styles.screen };
 
   return (
     <Container {...containerProps}>
-      <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: 32 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={[styles.container, { paddingBottom: 32 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <LogoHalo />
 
-        {/* Stepper: Step 3 of 4 */}
         <View style={styles.stepperWrapper}>
           <View style={styles.stepperTopRow}>
             <View>
               <Text style={styles.stepperTitle}>Account links</Text>
-              <Text style={styles.stepperSubtitle}>
-                Step 3 of 4 · Add your profile links
-              </Text>
+              <Text style={styles.stepperSubtitle}>Step 3 of 4 · Add your profile links</Text>
             </View>
           </View>
           <View style={styles.stepperBar}>
             <View style={[styles.stepperBarFill, { width: "75%" }]} />
           </View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={styles.stepperDot} />
-          </View>
         </View>
 
-        {/* Previous selections card */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeaderRow}>
-            <MaterialIcons
-              name="folder"
-              size={16}
-              color={COLORS.accent}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.summaryTitle}>Previous selections</Text>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.summaryLabel}>Locations</Text>
-              <Text style={styles.summaryValue}>
-                {areasPreferred.length
-                  ? areasPreferred.join(", ")
-                  : "Not selected"}
-              </Text>
-            </View>
-            <View style={{ flex: 1, paddingLeft: 8 }}>
-              <Text style={styles.summaryLabel}>Games & sports</Text>
-              {selectedActivities.length ? (
-                <>
-                  <View style={styles.chipRow}>
-                    {selectedActivities.map((g) => (
-                      <View key={g} style={styles.summaryChip}>
-                        <Text style={styles.summaryChipText}>{g}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  {sportsSummary ? (
-                    <Text
-                      style={[
-                        styles.summaryValue,
-                        { marginTop: 4, fontSize: 12 },
-                      ]}
-                    >
-                      {sportsSummary}
-                    </Text>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.summaryValue}>None</Text>
-              )}
-            </View>
-          </View>
+        {/* Requirements Banner */}
+        <View style={[styles.requirementBanner, isFormValid && styles.requirementMet]}>
+          <Text style={[styles.requirementTitle, isFormValid && styles.requirementMetTitle]}>
+            {isFormValid ? "Verification requirements satisfied ✓" : "Verification requirements"}
+          </Text>
+          <Text style={styles.requirementText}>
+            {playsCs2 && (gate1Met ? "• CS2 verified ✓\n" : "• CS2 requires Steam or FACEIT verification.\n")}
+            {(playsFc || playsTekken) && (gate2Met ? "• Tekken/FC verified ✓\n" : "• Tekken/FC require Steam or PSN verification.\n")}
+            {isFormValid && "You're all set to continue."}
+          </Text>
         </View>
 
-        {/* Platforms section */}
-        <Text style={[styles.heading, { marginTop: 18 }]}>
-          Add your account links
-        </Text>
-        <Text style={styles.sub}>
-          Paste the profile links or IDs you use for ranked play. We&apos;ll use
-          these for verification and matchmaking.
-        </Text>
+        <Text style={[styles.heading, { marginTop: 18 }]}>Add your account links</Text>
+        <Text style={styles.sub}>Paste the profile links or IDs you use for ranked play. We'll use these for verification.</Text>
 
         {/* Steam */}
         {showSteam && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
-              <View style={styles.platformIconCircle}>
-                <MaterialIcons name="computer" size={18} color={COLORS.text} />
-              </View>
+              <View style={styles.platformIconCircle}><MaterialIcons name="link" size={18} color={COLORS.text} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.platformTitle}>Steam</Text>
                 <Text style={styles.platformSubtitle}>{steamSubtitle}</Text>
               </View>
             </View>
-
-            <View
-              style={[
-                styles.inputBox,
-                styles.inputRow,
-                { marginTop: 10, marginBottom: 8 },
-              ]}
-            >
-              <MaterialIcons
-                name="link"
-                size={18}
-                style={styles.prefixIcon}
-                color={
-                  steamProfileUrl.trim().length > 0
-                    ? COLORS.accent
-                    : COLORS.muted
-                }
-              />
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10, marginBottom: 8 }]}>
+              <MaterialIcons name="link" size={18} style={styles.prefixIcon} color={steamProfileUrl.trim() ? COLORS.accent : COLORS.muted} />
               <TextInput
-                placeholder="https://steamcommunity.com/id/yourprofile"
+                placeholder="Steam link or ID"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="none"
-                autoCorrect={false}
                 value={steamProfileUrl}
                 onChangeText={(text) => {
                   setSteamProfileUrl(text);
-                  if (steamProfile) {
-                    setSteamProfile(null);
-                  }
+                  if (steamStatus !== "unverified") setSteamStatus("unverified");
                 }}
+                editable={steamStatus !== "verifying" && steamCooldown === 0}
               />
+              <Pressable
+                onPress={handleSteamLookup}
+                disabled={steamStatus === "verifying" || steamStatus === "verified" || steamCooldown > 0}
+                style={({ pressed }) => [
+                  styles.platformButton,
+                  { marginTop: 0, paddingVertical: 8, paddingHorizontal: 12, minWidth: 80 },
+                  steamStatus === "verified" && styles.platformButtonActive,
+                  (steamStatus === "verifying" || steamCooldown > 0) && { opacity: 0.5 },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                {steamStatus === "verifying" ? <ActivityIndicator size="small" color={COLORS.text} /> : (
+                  <Text style={styles.platformButtonText}>{steamStatus === "verified" ? "Verified" : "Verify"}</Text>
+                )}
+              </Pressable>
             </View>
-
-            <Pressable
-              onPress={handleSteamLookup}
-              disabled={steamLoading || !steamProfileUrl.trim()}
-              style={({ pressed }) => [
-                styles.platformButton,
-                steamVerified && { backgroundColor: "#1DB954" },
-                pressed && !steamLoading && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {steamLoading
-                  ? "Checking..."
-                  : steamVerified
-                    ? "Steam verified"
-                    : "Verify Steam profile"}
-              </Text>
-            </Pressable>
-
+            {steamCooldown > 0 && <Text style={styles.cooldownText}>Try again in {steamCooldown}s</Text>}
             {steamProfile && (
               <View style={{ marginTop: 8 }}>
-                <Text style={styles.summaryLabel}>Verified profile</Text>
-                <Text
-                  style={[
-                    styles.summaryValue,
-                    { color: COLORS.accent, fontWeight: "600" },
-                  ]}
-                >
-                  {steamProfile.personaName}{" "}
-                  {steamProfile.cs2Hours != null
-                    ? `· CS2: ~${Math.round(steamProfile.cs2Hours)} hours`
-                    : ""}
-                </Text>
-              </View>
-            )}
-
-            {steamLooksWeird && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  This doesn&apos;t look like a full Steam profile link. Make
-                  sure it starts with https://steamcommunity.com/...
-                </Text>
-              </View>
-            )}
-            {steamStatus === "taken" && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  This link is already in use.
-                </Text>
+                <Text style={styles.summaryLabel}>Found: {steamProfile.personaName}</Text>
+                {steamProfile.cs2Hours != null && <Text style={styles.summaryValue}>~{Math.round(steamProfile.cs2Hours)}h in CS2</Text>}
               </View>
             )}
           </View>
@@ -735,381 +337,105 @@ export default function RegisterStep3() {
         {showFaceit && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
-              <View style={styles.platformIconCircle}>
-                <MaterialIcons
-                  name="sports-esports"
-                  size={18}
-                  color={COLORS.text}
-                />
-              </View>
+              <View style={styles.platformIconCircle}><MaterialIcons name="sports-esports" size={18} color={COLORS.text} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.platformTitle}>FACEIT</Text>
-                <Text style={styles.platformSubtitle}>
-                  CS2 only: paste your FACEIT profile link or nickname.
-                </Text>
+                <Text style={styles.platformSubtitle}>{faceitSubtitle}</Text>
               </View>
             </View>
-
-            <View
-              style={[
-                styles.inputBox,
-                styles.inputRow,
-                { marginTop: 10, marginBottom: 8 },
-              ]}
-            >
-              <MaterialIcons
-                name="link"
-                size={18}
-                style={styles.prefixIcon}
-                color={
-                  faceitProfileUrl.trim().length > 0
-                    ? COLORS.accent
-                    : COLORS.muted
-                }
-              />
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10, marginBottom: 8 }]}>
+              <MaterialIcons name="link" size={18} style={styles.prefixIcon} color={faceitProfileUrl.trim() ? COLORS.accent : COLORS.muted} />
               <TextInput
-                placeholder="https://www.faceit.com/en/players/yourname"
+                placeholder="FACEIT nickname or link"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="none"
-                autoCorrect={false}
                 value={faceitProfileUrl}
                 onChangeText={(text) => {
                   setFaceitProfileUrl(text);
-                  if (faceitProfile) {
-                    setFaceitProfile(null);
-                  }
+                  if (faceitStatus !== "unverified") setFaceitStatus("unverified");
                 }}
+                editable={faceitStatus !== "verifying" && faceitCooldown === 0}
               />
+              <Pressable
+                onPress={handleFaceitLookup}
+                disabled={faceitStatus === "verifying" || faceitStatus === "verified" || faceitCooldown > 0}
+                style={({ pressed }) => [
+                  styles.platformButton,
+                  { marginTop: 0, paddingVertical: 8, paddingHorizontal: 12, minWidth: 80 },
+                  faceitStatus === "verified" && styles.platformButtonActive,
+                  (faceitStatus === "verifying" || faceitCooldown > 0) && { opacity: 0.5 },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                {faceitStatus === "verifying" ? <ActivityIndicator size="small" color={COLORS.text} /> : (
+                  <Text style={styles.platformButtonText}>{faceitStatus === "verified" ? "Verified" : "Verify"}</Text>
+                )}
+              </Pressable>
             </View>
-
-            <Pressable
-              onPress={handleFaceitLookup}
-              disabled={faceitLoading || !faceitProfileUrl.trim()}
-              style={({ pressed }) => [
-                styles.platformButton,
-                faceitVerified && { backgroundColor: "#1DB954" },
-                pressed && !faceitLoading && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {faceitLoading
-                  ? "Checking..."
-                  : faceitVerified
-                    ? "FACEIT verified"
-                    : "Verify FACEIT profile"}
-              </Text>
-            </Pressable>
-
+            {faceitCooldown > 0 && <Text style={styles.cooldownText}>Try again in {faceitCooldown}s</Text>}
             {faceitProfile && (
-              <View style={{ marginTop: 8 }}>
-                <Text style={styles.summaryLabel}>Verified profile</Text>
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <Text
-                    style={[
-                      styles.summaryValue,
-                      { color: COLORS.accent, fontWeight: "600" },
-                    ]}
-                  >
-                    {faceitProfile.nickname}
-                  </Text>
-
-                  {/* spacer */}
-                  <View style={{ width: 8 }} />
-
-                  {/* ELO */}
-                  {faceitProfile.elo != null && (
-                    <Text style={styles.summaryValue}>
-                      ELO {faceitProfile.elo}
-                    </Text>
-                  )}
-
-                  {/* Level icon / fallback text */}
-                  {faceitProfile.skillLevel != null && (
-                    <View
-                      style={{
-                        marginLeft: 8,
-                        flexDirection: "row",
-                        alignItems: "center",
-                      }}
-                    >
-                      {faceitLevelIcon ? (
-                        <Image
-                          source={faceitLevelIcon}
-                          style={{ width: 24, height: 24 }}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <Text style={styles.summaryValue}>
-                          Level {faceitProfile.skillLevel}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </View>
-              </View>
-            )}
-
-            {faceitLooksWeird && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  This doesn&apos;t look like a FACEIT link or nickname. Use
-                  your profile URL or a simple nickname (letters, numbers,
-                  underscore).
-                </Text>
-              </View>
-            )}
-            {faceitStatus === "taken" && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  This link is already in use.
-                </Text>
+              <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.summaryLabel}>Found: {faceitProfile.nickname} (Level {faceitProfile.skillLevel})</Text>
+                {faceitLevelIcon && <Image source={faceitLevelIcon} style={{ width: 24, height: 24, marginLeft: 8 }} resizeMode="contain" />}
               </View>
             )}
           </View>
         )}
 
-        {/* FC 26 platforms (optional now) */}
-        {showEa && (
-          <View style={styles.platformCard}>
-            <View style={styles.platformHeaderRow}>
-              <View style={styles.platformIconCircle}>
-                <MaterialIcons
-                  name="sports-soccer"
-                  size={18}
-                  color={COLORS.text}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.platformTitle}>EA Account / Club</Text>
-                <Text style={styles.platformSubtitle}>{eaSubtitle}</Text>
-              </View>
-            </View>
-            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
-              <MaterialIcons
-                name="link"
-                size={18}
-                style={styles.prefixIcon}
-                color={
-                  eaProfileUrl.trim().length > 0 ? COLORS.accent : COLORS.muted
-                }
-              />
-              <TextInput
-                placeholder="Club link or EA ID (optional)"
-                placeholderTextColor={COLORS.muted}
-                style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="none"
-                autoCorrect={false}
-                value={eaProfileUrl}
-                onChangeText={setEaProfileUrl}
-              />
-            </View>
-
-            {eaLooksWeird && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  That looks very short. Please double-check your EA ID or club
-                  link.
-                </Text>
-              </View>
-            )}
-            {eaStatus === "taken" && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  This link is already in use.
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {showXbox && (
-          <View style={styles.platformCard}>
-            <View style={styles.platformHeaderRow}>
-              <View style={styles.platformIconCircle}>
-                <MaterialIcons
-                  name="sports-esports"
-                  size={18}
-                  color={COLORS.text}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.platformTitle}>Xbox</Text>
-                <Text style={styles.platformSubtitle}>{xboxSubtitle}</Text>
-              </View>
-            </View>
-            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10 }]}>
-              <MaterialIcons
-                name="person"
-                size={18}
-                style={styles.prefixIcon}
-                color={
-                  xboxGamertag.trim().length > 0
-                    ? COLORS.accent
-                    : COLORS.muted
-                }
-              />
-              <TextInput
-                placeholder="Your Xbox gamertag (optional)"
-                placeholderTextColor={COLORS.muted}
-                style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="none"
-                autoCorrect={false}
-                value={xboxGamertag}
-                onChangeText={setXboxGamertag}
-              />
-            </View>
-
-            {xboxLooksWeird && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  That gamertag looks very short. Please double-check it.
-                </Text>
-              </View>
-            )}
-            {xboxStatus === "taken" && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  This link is already in use.
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
+        {/* PSN */}
         {showPsn && (
           <View style={styles.platformCard}>
             <View style={styles.platformHeaderRow}>
-              <View style={styles.platformIconCircle}>
-                <MaterialIcons
-                  name="sports-esports"
-                  size={18}
-                  color={COLORS.text}
-                />
-              </View>
+              <View style={styles.platformIconCircle}><MaterialIcons name="sports-esports" size={18} color={COLORS.text} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.platformTitle}>PlayStation Network</Text>
                 <Text style={styles.platformSubtitle}>{psnSubtitle}</Text>
               </View>
             </View>
-            <View
-              style={[
-                styles.inputBox,
-                styles.inputRow,
-                { marginTop: 10, marginBottom: 8 },
-              ]}
-            >
-              <MaterialIcons
-                name="person"
-                size={18}
-                style={styles.prefixIcon}
-                color={
-                  psnOnlineId.trim().length > 0 ? COLORS.accent : COLORS.muted
-                }
-              />
+            <View style={[styles.inputBox, styles.inputRow, { marginTop: 10, marginBottom: 8 }]}>
+              <MaterialIcons name="person" size={18} style={styles.prefixIcon} color={psnOnlineId.trim() ? COLORS.accent : COLORS.muted} />
               <TextInput
                 placeholder="MyPsnId_123"
                 placeholderTextColor={COLORS.muted}
                 style={styles.input}
-                selectionColor={COLORS.accent}
-                autoCapitalize="none"
-                autoCorrect={false}
                 value={psnOnlineId}
                 onChangeText={(text) => {
                   setPsnOnlineId(text);
-                  if (psnStats) setPsnStats(null);
+                  if (psnStatus !== "unverified") setPsnStatus("unverified");
                 }}
+                editable={psnStatus !== "verifying" && psnCooldown === 0}
               />
+              <Pressable
+                onPress={handlePsnLookup}
+                disabled={psnStatus === "verifying" || psnStatus === "verified" || psnCooldown > 0}
+                style={({ pressed }) => [
+                  styles.platformButton,
+                  { marginTop: 0, paddingVertical: 8, paddingHorizontal: 12, minWidth: 80 },
+                  psnStatus === "verified" && styles.platformButtonActive,
+                  (psnStatus === "verifying" || psnCooldown > 0) && { opacity: 0.5 },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                {psnStatus === "verifying" ? <ActivityIndicator size="small" color={COLORS.text} /> : (
+                  <Text style={styles.platformButtonText}>{psnStatus === "verified" ? "Verified" : "Verify"}</Text>
+                )}
+              </Pressable>
             </View>
-
-            <Pressable
-              onPress={handlePsnLookup}
-              disabled={psnLoading || !psnOnlineId.trim()}
-              style={({ pressed }) => [
-                styles.platformButton,
-                psnVerified && { backgroundColor: "#1DB954" },
-                pressed && !psnLoading && { opacity: 0.9 },
-              ]}
-            >
-              <Text style={styles.platformButtonText}>
-                {psnLoading
-                  ? "Checking..."
-                  : psnVerified
-                    ? "PSN verified"
-                    : "Verify PSN ID"}
-              </Text>
-            </Pressable>
-
-            {psnStats && (
+            {psnCooldown > 0 && <Text style={styles.cooldownText}>Try again in {psnCooldown}s</Text>}
+            {psnProfile && (
               <View style={{ marginTop: 8 }}>
-                <Text style={styles.summaryLabel}>Verified: {psnStats.psnOnlineId}</Text>
-                <Text style={[styles.summaryValue, { color: COLORS.accent }]}>
-                  Level {psnStats.trophyLevel} · {psnStats.totalTrophies?.platinum ?? 0} Platinums
-                </Text>
-
-                {/* Tekken Check */}
-                {playsTekken && (
-                  <Text style={[styles.summaryValue, { marginTop: 4, fontSize: 13 }]}>
-                    Tekken 8: {psnStats.tekken8.present
-                      ? `${psnStats.tekken8.progress}% Trophies` + (psnStats.tekken8.formatPlayDuration ? ` · ${psnStats.tekken8.formatPlayDuration} played` : "")
-                      : "Not found on profile"}
-                  </Text>
-                )}
-                {/* FC Check */}
-                {playsFc && (
-                  <Text style={[styles.summaryValue, { marginTop: 2, fontSize: 13 }]}>
-                    FC 25/26: {psnStats.fc.present
-                      ? `${psnStats.fc.progress}% Trophies` + (psnStats.fc.formatPlayDuration ? ` · ${psnStats.fc.formatPlayDuration} played` : "")
-                      : "Not found on profile"}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            {psnLooksWeird && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperWarning]}>
-                  That looks very short. Please double-check your PSN Online ID.
-                </Text>
-              </View>
-            )}
-            {psnStatus === "taken" && (
-              <View style={styles.helperTextRow}>
-                <Text style={[styles.helperText, styles.helperError]}>
-                  This link is already in use.
-                </Text>
+                <Text style={styles.summaryLabel}>Verified: {psnProfile.psnOnlineId}</Text>
+                <Text style={styles.summaryValue}>Level {psnProfile.trophyLevel} · {psnProfile.totalTrophies?.platinum ?? 0} Platinums</Text>
               </View>
             )}
           </View>
         )}
 
-        {/* Only CS2 helper now */}
-        {playsCs2 && !cs2Ok && (
-          <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>
-              CS2: add at least a Steam or FACEIT link.
-            </Text>
-          </View>
-        )}
-
-        {/* Back to Step 2 */}
-        <Pressable
-          onPress={() => router.push("/auth/register-step2")}
-          style={styles.backLinkWrapper}
-        >
+        <Pressable onPress={() => router.push("/auth/register-step2")} style={styles.backLinkWrapper}>
           <Text style={styles.backLinkText}>← Back to games & location</Text>
         </Pressable>
 
-        {/* Continue button */}
-        <View
-          style={[
-            styles.buttonShadowWrapper,
-            isFormValid && !saving && styles.buttonShadowWrapperActive,
-          ]}
-        >
+        <View style={[styles.buttonShadowWrapper, isFormValid && !saving && styles.buttonShadowWrapperActive]}>
           <Pressable
             onPress={handleContinue}
             disabled={saving || !isFormValid}
@@ -1118,18 +444,14 @@ export default function RegisterStep3() {
               !isFormValid || saving ? styles.primaryBtnDisabled : null,
               pressed && !saving && isFormValid && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
-            <Text style={styles.primaryBtnText}>Continue</Text>
+            <Text style={styles.primaryBtnText}>{saving ? "Saving..." : "Continue"}</Text>
           </Pressable>
         </View>
 
-        {/* Bottom link */}
         <Text style={styles.bottomText}>
           Want to sign in instead?{" "}
-          <Link href="/auth/login" style={{ color: COLORS.accent }}>
-            Go to login
-          </Link>
+          <Link href="/auth/login" style={{ color: COLORS.accent }}>Go to login</Link>
         </Text>
       </ScrollView>
     </Container>

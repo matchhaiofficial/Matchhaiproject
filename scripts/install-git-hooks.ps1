@@ -1,27 +1,30 @@
 # scripts/install-git-hooks.ps1
-# Install Git hooks (Windows PowerShell)
+# Install Git hooks (Windows PowerShell) - repo-root safe
 
-$hookSrc = "scripts/hooks/pre-push"
-$hookDest = ".git/hooks/pre-push"
-$modeFile = ".gitguard.mode"
+$ErrorActionPreference = "Stop"
+
+# Resolve actual repo root (works no matter where script is executed from)
+$repoRoot = (git rev-parse --show-toplevel).Trim()
+
+$hookSrc  = Join-Path $repoRoot "scripts/hooks/pre-push"
+$hookDest = Join-Path $repoRoot ".git/hooks/pre-push"
+$modeFile = Join-Path $repoRoot ".gitguard.mode"
 
 if (-not (Test-Path $hookSrc)) {
-    Write-Error "❌ Error: $hookSrc not found. Ensure you are in the repo root."
-    exit 1
+  throw "Hook source not found: $hookSrc"
 }
 
-# 1. Create .gitguard.mode locally if missing (default JUNIOR)
+# Create .gitguard.mode locally if missing (default JUNIOR)
 if (-not (Test-Path $modeFile)) {
-    "JUNIOR" | Out-File -FilePath $modeFile -Encoding ascii -NoNewline
-    Write-Host "✅ Created local $modeFile (Default: JUNIOR)" -ForegroundColor Cyan
+  "JUNIOR" | Out-File -FilePath $modeFile -Encoding ascii -NoNewline
+  Write-Host "✅ Created local .gitguard.mode (Default: JUNIOR)" -ForegroundColor Cyan
 }
 
-# 2. Install hook
-if (-not (Test-Path ".git/hooks")) {
-    New-Item -ItemType Directory -Path ".git/hooks" -Force | Out-Null
-}
+# Ensure hooks directory exists
+$hooksDir = Split-Path $hookDest -Parent
+New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
 
-# Preserve LF/UTF8 for Git Bash compatibility (UTF8 No BOM)
+# Write hook as UTF8 No BOM (Git Bash compatible)
 $content = [System.IO.File]::ReadAllText($hookSrc)
 [System.IO.File]::WriteAllText($hookDest, $content, (New-Object System.Text.UTF8Encoding($false)))
 

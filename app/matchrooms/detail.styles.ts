@@ -84,7 +84,7 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
     },
     infoItem: {
-        width: '45%',
+        width: '100%',
         flexDirection: 'row',
         alignItems: 'center',
     },
