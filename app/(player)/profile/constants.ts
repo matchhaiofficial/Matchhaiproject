@@ -21,7 +21,7 @@ export type GameRule = {
     hasPosition?: boolean;
 };
 
-export const GAME_RULES: Record<string, GameRule> = {
+export const GAME_RULES = {
     cs2: {
         label: 'Counter-Strike 2',
         requiresOneOf: ['steam', 'faceit'],
@@ -67,4 +67,4 @@ export const GAME_RULES: Record<string, GameRule> = {
         multi: false,
         hasPosition: true
     },
-};
+} satisfies Record<string, GameRule>;
