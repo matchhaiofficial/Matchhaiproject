@@ -371,7 +371,7 @@ export interface UserProfile {
   displayName?: string;
   fullName?: string;
   username?: string;
-  role?: 'player' | 'zone-admin';
+  role?: 'player' | 'zone-admin' | 'super-admin';
   trustScore?: number; // 0-1 confidence score for voting interactions
   isOnline?: boolean;
 
@@ -449,7 +449,9 @@ export async function getUserProfile(
       displayName: data.displayName ?? undefined,
       fullName: data.fullName ?? undefined,
       username: data.username ?? undefined,
-      role: data.accountType === 'zone' ? 'zone-admin' : (data.accountType || data.role || 'player'),
+      role: (data.accountType === "super-admin" || data.role === "super-admin" || (data.email && data.email.toLowerCase() === "superadmin@matchhai.com"))
+        ? "super-admin"
+        : (data.accountType === 'zone' ? 'zone-admin' : (data.accountType || data.role || 'player')),
       trustScore: typeof data.trustScore === 'number' ? data.trustScore : 0.5, // Default trust
       isOnline: data.isOnline ?? false,
 

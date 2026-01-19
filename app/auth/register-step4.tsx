@@ -115,13 +115,17 @@ export default function RegisterStep4() {
   const containerProps =
     Platform.OS === "ios"
       ? {
-          style: styles.screen,
-          behavior: "padding" as const,
-          keyboardVerticalOffset: 0,
-        }
+        style: styles.screen,
+        behavior: "padding" as const,
+        keyboardVerticalOffset: 0,
+      }
       : { style: styles.screen };
 
-  // ---- Final submit (with parallel Firestore saves) ----
+  const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
+  const [currentSubStep, setCurrentSubStep] = useState<number>(0);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+
+  // ---- Final submit (with phase-based reliability) ----
   const handleFinalSignUp = async () => {
     if (!allAgreementsChecked) {
       showToast({
@@ -143,145 +147,224 @@ export default function RegisterStep4() {
         message:
           "Some of your basic account details are missing. Please go back and complete Step 1.",
       });
-      console.log(
-        "[Step4] missing step1 data in submit → redirecting to /auth/register"
-      );
       router.replace("/auth/register");
       return;
     }
 
     setSubmitting(true);
+    setPhase("submitting");
+    setErrorDetails(null);
 
     try {
-      // 1) Create auth user
-      console.log("[Step4] signUpWithEmail payload:", {
-        fullName,
-        username,
-        email,
-        phone,
-      });
+      // PHASE 1: Auth + Basic Profile
+      if (currentSubStep <= 0) {
+        setCurrentSubStep(1);
+        console.log("[Step4] Phase 1: Creating account...");
+        const resSignUp = await signUpWithEmail(
+          email.trim(),
+          password,
+          fullName.trim(),
+          username.trim(),
+          phone.trim()
+        );
 
-      const resSignUp = await signUpWithEmail(
-        email.trim(),
-        password,
-        fullName.trim(),
-        username.trim(),
-        phone.trim()
-      );
-
-      console.log("[Step4] signUpWithEmail result", resSignUp);
-
-      if (!resSignUp || !resSignUp.ok) {
-        showToast({
-          type: "error",
-          title: "Sign up failed",
-          message:
-            resSignUp?.message ??
-            "Something went wrong while creating your account.",
-        });
-        return;
+        if (!resSignUp || !resSignUp.ok) {
+          throw { step: 1, message: resSignUp?.message || "Auth creation failed." };
+        }
       }
 
-      console.log(
-        "[Step4] saving step2 & step3 in Firestore (parallel with Promise.all)"
-      );
+      // PHASE 2: Preferences (Step 2)
+      if (currentSubStep <= 1) {
+        setCurrentSubStep(2);
+        console.log("[Step4] Phase 2: Saving preferences...");
 
-      // new sports-related fields from step2
-      const playsFutsal = (step2 as any).playsFutsal ?? false;
-      const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
-      const playsPadel = (step2 as any).playsPadel ?? false;
-      const playsPickleball = (step2 as any).playsPickleball ?? false;
+        const playsFutsal = (step2 as any).playsFutsal ?? false;
+        const playsIndoorCricket = (step2 as any).playsIndoorCricket ?? false;
+        const playsPadel = (step2 as any).playsPadel ?? false;
+        const playsPickleball = (step2 as any).playsPickleball ?? false;
 
-      const futsalPositions =
-        (((step2 as any).futsalPositions ?? []) as string[]) || [];
-      const indoorCricketRole =
-        ((step2 as any).indoorCricketRole as string) ?? null;
-      const indoorCricketBowlingStyle =
-        ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
-      const indoorCricketBattingStyle =
-        ((step2 as any).indoorCricketBattingStyle as string) ?? null;
-      const padelRole = ((step2 as any).padelRole as string) ?? null;
-      const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
+        const futsalPositions = (((step2 as any).futsalPositions ?? []) as string[]) || [];
+        const indoorCricketRole = ((step2 as any).indoorCricketRole as string) ?? null;
+        const indoorCricketBowlingStyle = ((step2 as any).indoorCricketBowlingStyle as string) ?? null;
+        const indoorCricketBattingStyle = ((step2 as any).indoorCricketBattingStyle as string) ?? null;
+        const padelRole = ((step2 as any).padelRole as string) ?? null;
+        const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
-      // 2) Save Step 2 + Step 3 in PARALLEL
-      const step2Payload: any = {
-        areasPreferred: step2.selectedAreas,
-        playsCs2: step2.playsCs2,
-        cs2Role: step2.cs2Role,
-        playsFc: step2.playsFc,
-        fcTeam: step2.fcTeam.trim() || null,
-        fcFormation: step2.fcFormation,
-        playsTekken: step2.playsTekken,
-        tekkenFavorites: step2.tekkenFavorites,
-
-        // new offline sports fields
-        playsFutsal,
-        playsIndoorCricket,
-        playsPadel,
-        playsPickleball,
-        futsalPositions,
-        indoorCricketRole,
-        indoorCricketBowlingStyle,
-        indoorCricketBattingStyle,
-        padelRole,
-        pickleballRole,
-      };
-
-      const step3Payload: any = {
-        steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
-        faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
-        eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
-        xboxGamertag: (step3.xboxGamertag || "").trim() || null,
-        psnOnlineId: (step3.psnOnlineId || "").trim() || null,
-      };
-
-      const [resStep2, resStep3] = await Promise.all([
-        saveOnboardingStep2(step2Payload),
-        saveOnboardingStep3Platforms(step3Payload),
-      ]);
-
-      console.log("[Step4] saveOnboardingStep2 result", resStep2);
-      console.log("[Step4] saveOnboardingStep3Platforms result", resStep3);
-
-      if (!resStep2.ok) {
-        showToast({
-          type: "error",
-          title: "Could not save preferences",
-          message: resStep2.message || "Please try again in a moment.",
+        const resStep2 = await saveOnboardingStep2({
+          areasPreferred: step2.selectedAreas,
+          playsCs2: step2.playsCs2,
+          cs2Role: step2.cs2Role,
+          playsFc: step2.playsFc,
+          fcTeam: step2.fcTeam.trim() || null,
+          fcFormation: step2.fcFormation,
+          playsTekken: step2.playsTekken,
+          tekkenFavorites: step2.tekkenFavorites,
+          // new sports fields logic
+          ...({
+            playsFutsal,
+            playsIndoorCricket,
+            playsPadel,
+            playsPickleball,
+            futsalPositions,
+            indoorCricketRole,
+            indoorCricketBowlingStyle,
+            indoorCricketBattingStyle,
+            padelRole,
+            pickleballRole,
+          } as any)
         });
-        return;
-      }
-      if (!resStep3.ok) {
-        showToast({
-          type: "error",
-          title: "Could not save platforms",
-          message: resStep3.message || "Please try again in a moment.",
-        });
-        return;
+
+        if (!resStep2.ok) {
+          throw { step: 2, message: resStep2.message };
+        }
       }
 
-      console.log("[Step4] resetAll onboarding store");
+      // PHASE 3: Platforms (Step 3)
+      if (currentSubStep <= 2) {
+        setCurrentSubStep(3);
+        console.log("[Step4] Phase 3: Connecting platforms...");
+        const resStep3 = await saveOnboardingStep3Platforms({
+          steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
+          faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
+          eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
+          xboxGamertag: (step3.xboxGamertag || "").trim() || null,
+          psnOnlineId: (step3.psnOnlineId || "").trim() || null,
+          // summaries from Step 3
+          steamProfile: step3.steamProfile,
+          faceitProfile: step3.faceitProfile,
+          psnProfile: step3.psnProfile,
+        });
 
-      // 3) Clear onboarding state & go home
-      resetAll();
-      showToast({
-        type: "success",
-        title: "Welcome to MatchHai",
-        message: "Your account is ready. Let’s find your squad!",
-      });
-      console.log("[Step4] redirecting to /home");
-      router.replace("/home");
-    } catch (err) {
-      console.log("[Step4] unexpected error:", err);
+        if (!resStep3.ok) {
+          throw { step: 3, message: resStep3.message };
+        }
+      }
+
+      // SUCCESS
+      setCurrentSubStep(4);
+      setPhase("success");
+      console.log("[Step4] Registration fully complete!");
+
+      setTimeout(() => {
+        resetAll();
+        showToast({
+          type: "success",
+          title: "Welcome to MatchHai",
+          message: "Account ready! Let’s find your squad.",
+        });
+        router.replace("/home");
+      }, 1500);
+
+    } catch (err: any) {
+      console.error("[Step4] Submission error:", err);
+      // Determine how far we got
+      const failedAt = err.step || currentSubStep;
+      setCurrentSubStep(failedAt);
+      setPhase("partial-fail");
+      setErrorDetails(err.message || "An unexpected error occurred.");
+      setSubmitting(false);
+
       showToast({
         type: "error",
-        title: "Sign up failed",
-        message:
-          "Unexpected error while creating your account. Please try again.",
+        title: "Registration incomplete",
+        message: err.message || "Something went wrong. You can try again to finish setup.",
       });
-    } finally {
-      setSubmitting(false);
     }
+  };
+
+  // Rendering the loading overlay
+  const renderLoadingOverlay = () => {
+    if (phase === "idle") return null;
+
+    const steps = [
+      { id: 1, label: "Creating account" },
+      { id: 2, label: "Saving preferences" },
+      { id: 3, label: "Connecting platforms" },
+    ];
+
+    return (
+      <View style={styles.loadingOverlay}>
+        <View style={styles.loadingContent}>
+          {phase !== "partial-fail" && phase !== "success" && (
+            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+          )}
+
+          {phase === "success" && (
+            <MaterialIcons name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+          )}
+
+          {phase === "partial-fail" && (
+            <MaterialIcons name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+          )}
+
+          <Text style={styles.loadingPhaseTitle}>
+            {phase === "submitting" ? "Setting up your profile..." :
+              phase === "partial-fail" ? "Setup Interrupted" : "Welcome aboard!"}
+          </Text>
+
+          <View style={{ width: '100%', marginBottom: 20 }}>
+            {steps.map((s, idx) => {
+              const isDone = currentSubStep > s.id || (phase === 'success');
+              const isActive = currentSubStep === s.id && phase === 'submitting';
+              const isFailed = currentSubStep === s.id && phase === 'partial-fail';
+
+              return (
+                <View key={s.id}>
+                  <View style={styles.progressStep}>
+                    <View style={styles.progressIcon}>
+                      {isDone ? (
+                        <MaterialIcons name="check-circle" size={20} color={COLORS.success} />
+                      ) : isFailed ? (
+                        <MaterialIcons name="cancel" size={20} color={COLORS.error} />
+                      ) : isActive ? (
+                        <ActivityIndicator size="small" color={COLORS.accent} />
+                      ) : (
+                        <MaterialIcons name="radio-button-unchecked" size={20} color="rgba(255,255,255,0.2)" />
+                      )}
+                    </View>
+                    <Text style={[
+                      styles.progressText,
+                      isActive && styles.progressTextActive,
+                      isDone && styles.progressTextDone,
+                      isFailed && { color: COLORS.error }
+                    ]}>
+                      {s.label}
+                    </Text>
+                  </View>
+                  {idx < steps.length - 1 && <View style={styles.progressStepLine} />}
+                </View>
+              );
+            })}
+          </View>
+
+          {phase === "partial-fail" && (
+            <>
+              <Text style={[styles.helperText, styles.helperError, { textAlign: 'center', marginBottom: 20 }]}>
+                {errorDetails}
+              </Text>
+              <Pressable
+                onPress={handleFinalSignUp}
+                style={[styles.primaryBtn, { width: '100%', marginBottom: 12 }]}
+              >
+                <Text style={styles.primaryBtnText}>Retry failed steps</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setPhase("idle"); setSubmitting(false); }}
+                style={{ padding: 10 }}
+              >
+                <Text style={{ color: COLORS.muted }}>Cancel</Text>
+              </Pressable>
+            </>
+          )}
+
+          {phase === "success" && (
+            <Text style={[styles.progressText, { textAlign: 'center' }]}>
+              Redirecting you to the dashboard...
+            </Text>
+          )}
+        </View>
+      </View>
+    );
   };
 
   return (
@@ -564,8 +647,8 @@ export default function RegisterStep4() {
           style={[
             styles.buttonShadowWrapper,
             allAgreementsChecked &&
-              !submitting &&
-              styles.buttonShadowWrapperActive,
+            !submitting &&
+            styles.buttonShadowWrapperActive,
           ]}
         >
           <Pressable
@@ -574,10 +657,10 @@ export default function RegisterStep4() {
             style={({ pressed }) => [
               styles.primaryBtn,
               (!allAgreementsChecked || submitting) &&
-                styles.primaryBtnDisabled,
+              styles.primaryBtnDisabled,
               pressed &&
-                !submitting &&
-                allAgreementsChecked && { opacity: 0.92 },
+              !submitting &&
+              allAgreementsChecked && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.08)" }}
           >
@@ -597,6 +680,9 @@ export default function RegisterStep4() {
           </Link>
         </Text>
       </ScrollView>
+
+      {/* Improved Loading & Status Overlay */}
+      {renderLoadingOverlay()}
     </Container>
   );
 }

@@ -11,6 +11,16 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Helper to check if user has super-admin role (multi-layered fallback)
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "super-admin") ||
+        request.auth.token.email == "superadmin@matchhai.com" ||
+        request.auth.uid == "jM2JZrPNNNahPb844rHmr0MQKYo1"
+      );
+    }
+
     // Users collection:
     // - Authenticated users can read any profile (for matchmaking/social)
     // - Users can only write/update their own profile
@@ -138,16 +148,47 @@ service cloud.firestore {
       allow update: if isAuthenticated();
     }
 
-    // Zones - Publicly readable for finding venues
+    // Zones management
     match /zones/{zoneId} {
-        allow read: if true; 
-        allow write: if isAuthenticated(); // Only admins in reality, but for dev auth is fine
+      // Publicly readable for finding venues (active only for players, all for admins)
+      allow read: if isAuthenticated(); 
+      
+      // Create: Any authenticated user can create a zone (registers it as owner)
+      // Must set status to 'pending-review'
+      allow create: if isAuthenticated() && 
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.status == "pending-review";
+
+      // Update: 
+      // 1. Owners can update their details BUT NOT the status or meta fields
+      // 2. Super-admins can update everything (including status)
+      allow update: if isSuperAdmin() || (
+        isAuthenticated() && 
+        resource.data.ownerUid == request.auth.uid &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'status', 'ownerUid', 'approvedAt', 'rejectedAt', 'rejectionReason'
+        ])
+      );
+
+      // Delete: Only super-admins
+      allow delete: if isSuperAdmin();
     }
 
-    // Zone Registrations (Onboarding)
+    // Booking Offers (Zones replying to requests)
+    match /booking_offers/{offerId} {
+      allow read: if isAuthenticated();
+      // Only the zone owner of the offering zone (or super-admin) can create/update
+      allow create: if isAuthenticated(); // Simplified for now, should check zone ownership
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() || 
+        resource.data.zoneOwnerUid == request.auth.uid ||
+        resource.data.requestOwnerUid == request.auth.uid
+      );
+    }
+
+    // Zone Registrations (Legacy - can keep for now)
     match /zone_registrations/{regId} {
-        allow create: if true; // Any prospective owner can start
-        allow read, update: if isAuthenticated(); 
+        allow read, write: if isSuperAdmin(); 
     }
 
     // Default deny

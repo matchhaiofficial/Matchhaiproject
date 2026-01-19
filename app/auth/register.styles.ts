@@ -544,4 +544,92 @@ export default StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+
+  // ---- Requirement Banner (Step 3) ----
+  requirementBanner: {
+    backgroundColor: 'rgba(255, 183, 77, 0.1)',
+    borderRadius: RADII.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 183, 77, 0.3)',
+  },
+  requirementTitle: {
+    color: '#ffb74d',
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.label - 1,
+    marginBottom: 4,
+  },
+  requirementText: {
+    color: COLORS.text,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
+  },
+  requirementMet: {
+    borderColor: 'rgba(76, 175, 80, 0.3)',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  requirementMetTitle: {
+    color: COLORS.success,
+  },
+
+  cooldownText: {
+    color: COLORS.error,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+
+  // ---- Loading Overlay ----
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(10, 10, 10, 0.95)",
+    zIndex: 9999,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: SPACING.xl,
+  },
+  loadingContent: {
+    width: "100%",
+    maxWidth: 320,
+    alignItems: "center",
+  },
+  loadingSpinner: {
+    marginBottom: SPACING.lg,
+  },
+  loadingPhaseTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.subheading,
+    textAlign: "center",
+    marginBottom: SPACING.md,
+  },
+  progressStep: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: SPACING.sm,
+    width: "100%",
+  },
+  progressStepLine: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    marginVertical: SPACING.sm,
+    width: "100%",
+  },
+  progressIcon: {
+    marginRight: SPACING.sm,
+  },
+  progressText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.body - 2,
+  },
+  progressTextActive: {
+    color: COLORS.text,
+  },
+  progressTextDone: {
+    color: COLORS.success,
+  },
 });
