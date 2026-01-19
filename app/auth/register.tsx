@@ -23,6 +23,7 @@ import {
 } from "../../src/services/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
+import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import styles from "./register.styles";
 
 type FocusField =
@@ -34,38 +35,7 @@ type FocusField =
   | null;
 type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 
-// 📱 Pakistani phone formatter (same as login)
-const formatPakistaniPhone = (value: string) => {
-  const numeric = value.replace(/\D/g, "");
-  if (!numeric) return value;
-
-  let prefix = "";
-  let rest = numeric;
-
-  if (numeric.startsWith("92")) {
-    prefix = "+92 ";
-    rest = numeric.slice(2);
-  } else if (numeric.startsWith("0")) {
-    prefix = "0";
-    rest = numeric.slice(1);
-  } else {
-    // not clearly Pakistani → don't format
-    return value;
-  }
-
-  let formatted = prefix;
-
-  if (rest.length <= 3) {
-    formatted += rest;
-  } else if (rest.length <= 7) {
-    formatted += rest.slice(0, 3) + " " + rest.slice(3);
-  } else {
-    formatted +=
-      rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
-  }
-
-  return formatted.trim();
-};
+// (Removed local formatPakistaniPhone, using shared version)
 
 
 
@@ -91,6 +61,13 @@ export default function Register() {
     useState<AvailabilityStatus>("idle");
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>("idle");
+
+  // Latest request IDs for race condition guard
+  const [latestRequestIds, setLatestRequestIds] = useState({
+    username: 0,
+    email: 0,
+    phone: 0,
+  });
 
   // when we hydrate, if fields already have values, show "available" by default
   useEffect(() => {
@@ -128,11 +105,9 @@ export default function Register() {
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
     const emailValid = emailRegex.test(emailTrimmed);
 
-    // ---- Phone validation (same as Login) ----
-    const phoneTrimmed = phone.trim();
-    const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
-    const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
-    const phoneFormatValid = phoneRegex.test(normalizedPhone);
+    // ---- Phone validation ----
+    const { phoneDigits } = normalizePakistaniPhone(phone);
+    const phoneFormatValid = isValidPakistaniPhone(phone);
 
     // --- password rules ---
     const hasUpperRule = /[A-Z]/.test(password);
@@ -154,7 +129,7 @@ export default function Register() {
     let strengthPct = 0;
 
     if (password.length > 0) {
-      if (rulesMet <= 2) {
+      if (rulesMet <= 2 || !lengthOkRule) {
         strengthLbl = "Weak";
         strengthClr = "#ef5350";
         strengthPct = 25;
@@ -164,11 +139,11 @@ export default function Register() {
         strengthPct = 50;
       } else if (rulesMet === 4) {
         strengthLbl = "Strong";
-        strengthClr = COLORS.success; // ✅ system green
+        strengthClr = COLORS.success;
         strengthPct = 75;
-      } else {
+      } else if (rulesMet === 5) {
         strengthLbl = "Very strong";
-        strengthClr = COLORS.success; // same green for max
+        strengthClr = COLORS.success;
         strengthPct = 100;
       }
     }
@@ -239,57 +214,98 @@ export default function Register() {
       }
       : { style: styles.screen };
 
-  // ---------- Availability checks ----------
-  const handleUsernameBlur = async () => {
-    const trimmed = username.trim();
-    if (!trimmed || !isUsernameFormatValid) {
+  // ---------- Availability checks (with race condition guard) ----------
+  const checkUsername = async (val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed || !/^[a-zA-Z0-9_]{3,20}$/.test(trimmed)) {
       setUsernameStatus("idle");
       return;
     }
 
+    const requestId = Date.now();
+    setLatestRequestIds(prev => ({ ...prev, username: requestId }));
+    setUsernameStatus("checking");
+
     try {
-      setUsernameStatus("checking");
       const available = await isUsernameAvailable(trimmed);
-      setUsernameStatus(available ? "available" : "taken");
+      setLatestRequestIds(current => {
+        if (current.username === requestId) {
+          setUsernameStatus(available ? "available" : "taken");
+        }
+        return current;
+      });
     } catch {
-      setUsernameStatus("error");
+      setLatestRequestIds(current => {
+        if (current.username === requestId) {
+          setUsernameStatus("error");
+        }
+        return current;
+      });
     }
   };
 
-  const handlePhoneBlur = async () => {
-    const phoneTrimmed = phone.trim();
-    const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
-    const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
-
-    if (!normalizedPhone || !phoneRegex.test(normalizedPhone)) {
-      setPhoneStatus("idle");
-      return;
-    }
-
-    try {
-      setPhoneStatus("checking");
-      const available = await isPhoneAvailable(normalizedPhone);
-      setPhoneStatus(available ? "available" : "taken");
-    } catch {
-      setPhoneStatus("error");
-    }
-  };
-
-  const handleEmailBlur = async () => {
-    const trimmed = email.trim();
-    if (!trimmed || !isEmailValid) {
+  const checkEmail = async (val: string) => {
+    const trimmed = val.trim();
+    const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    if (!trimmed || !emailRegex.test(trimmed)) {
       setEmailStatus("idle");
       return;
     }
 
+    const requestId = Date.now();
+    setLatestRequestIds(prev => ({ ...prev, email: requestId }));
+    setEmailStatus("checking");
+
     try {
-      setEmailStatus("checking");
       const available = await isEmailAvailable(trimmed);
-      setEmailStatus(available ? "available" : "taken");
+      setLatestRequestIds(current => {
+        if (current.email === requestId) {
+          setEmailStatus(available ? "available" : "taken");
+        }
+        return current;
+      });
     } catch {
-      setEmailStatus("error");
+      setLatestRequestIds(current => {
+        if (current.email === requestId) {
+          setEmailStatus("error");
+        }
+        return current;
+      });
     }
   };
+
+  const checkPhone = async (val: string) => {
+    const { phoneDigits } = normalizePakistaniPhone(val);
+    if (!phoneDigits || !isValidPakistaniPhone(val)) {
+      setPhoneStatus("idle");
+      return;
+    }
+
+    const requestId = Date.now();
+    setLatestRequestIds(prev => ({ ...prev, phone: requestId }));
+    setPhoneStatus("checking");
+
+    try {
+      const available = await isPhoneAvailable(phoneDigits);
+      setLatestRequestIds(current => {
+        if (current.phone === requestId) {
+          setPhoneStatus(available ? "available" : "taken");
+        }
+        return current;
+      });
+    } catch {
+      setLatestRequestIds(current => {
+        if (current.phone === requestId) {
+          setPhoneStatus("error");
+        }
+        return current;
+      });
+    }
+  };
+
+  const handleUsernameBlur = () => checkUsername(username);
+  const handleEmailBlur = () => checkEmail(email);
+  const handlePhoneBlur = () => checkPhone(phone);
 
   // reset availability when typing
   const handleUsernameChange = (value: string) => {
@@ -311,6 +327,10 @@ export default function Register() {
     }
     setPhone(next);
     if (phoneStatus !== "idle") setPhoneStatus("idle");
+    // best effort typing check
+    if (next.length >= 10) {
+      checkPhone(next);
+    }
   };
 
   // ---------- Submit (LOCAL ONLY) ----------
@@ -324,11 +344,13 @@ export default function Register() {
       return;
     }
 
+    const { phoneE164 } = normalizePakistaniPhone(phone);
+
     setStep1({
       fullName: fullName.trim(),
       username: username.trim(),
       email: email.trim(),
-      phone,
+      phone: phoneE164, // Store normalized E164
       password,
       city,
       ageRange,

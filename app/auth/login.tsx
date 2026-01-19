@@ -18,7 +18,6 @@ import { useToast } from "../../src/hooks/useToast";
 import { signInWithEmail, signOutUser } from "../../src/services/authService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
-import { seedZones } from "../../src/utils/seedZones";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -404,37 +403,49 @@ export default function Login() {
         return;
       }
 
-      const accountType = profileRes.data.role; // In UserProfile it's called 'role'
-      console.log("[Login] User accountType:", accountType, "Selected userType:", userType);
+      const accountType = profileRes.data.role;
+      const inputEmail = emailOrPhone.trim().toLowerCase();
+      const userEmail = (res.user.email || inputEmail).toLowerCase();
+      const SUPER_ADMIN_UID = "jM2JZrPNNNahPb844rHmr0MQKYo1";
+      const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
 
-      if (userType === "zone" && accountType !== "zone-admin") {
-        console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
-        await signOutUser();
-        setLoading(false);
-        setEmailServerError("Please sign in as user.");
-        showToast({
-          type: "error",
-          title: "Access Denied",
-          message: "Please sign in as user.",
-        });
-        return;
-      }
+      // ✅ Robust Super Admin Check
+      const isSuperAdmin = accountType === "super-admin" ||
+        userEmail === SUPER_ADMIN_EMAIL ||
+        res.user.uid === SUPER_ADMIN_UID;
 
-      if (userType === "player" && accountType === "zone-admin") {
-        console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
-        await signOutUser();
-        setLoading(false);
-        setEmailServerError("Please sign in as zone admin.");
-        showToast({
-          type: "error",
-          title: "Access Denied",
-          message: "Please sign in as zone admin.",
-        });
-        return;
+      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "uid:", res.user.uid);
+
+      if (!isSuperAdmin) {
+        if (userType === "zone" && accountType !== "zone-admin") {
+          console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
+          await signOutUser();
+          setLoading(false);
+          setEmailServerError("Please sign in as user.");
+          showToast({
+            type: "error",
+            title: "Access Denied",
+            message: "Please sign in as user.",
+          });
+          return;
+        }
+
+        if (userType === "player" && accountType === "zone-admin") {
+          console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
+          await signOutUser();
+          setLoading(false);
+          setEmailServerError("Please sign in as zone admin.");
+          showToast({
+            type: "error",
+            title: "Access Denied",
+            message: "Please sign in as zone admin.",
+          });
+          return;
+        }
       }
 
       setLoading(false);
-      console.log("[Login] signInWithEmail OK, navigating, userType=", userType);
+      console.log("[Login] signInWithEmail OK, navigations target logic start");
 
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
@@ -442,14 +453,14 @@ export default function Login() {
       showToast({
         type: "success",
         title: "Welcome back",
-        message:
-          userType === "zone"
-            ? "Signed in as Zone Admin."
-            : "You’re now signed in.",
+        message: isSuperAdmin ? "Signed in as Super Admin" : "You’re now signed in.",
       });
 
-      // Redirect based on user type
-      if (userType === "zone") {
+      // ✅ Redirect based on user type or role
+      if (isSuperAdmin) {
+        console.log("[Login] Redirecting to Super Admin Dashboard");
+        router.replace("/super-admin" as any);
+      } else if (userType === "zone") {
         router.replace("/zone");
       } else {
         router.replace("/home");
@@ -470,27 +481,6 @@ export default function Login() {
     router.push("/auth/forgot-password");
   };
 
-  const handleSeed = async () => {
-    console.log("[Login] Seed Data pressed");
-    setLoading(true);
-    try {
-      const result = await seedZones();
-      showToast({
-        type: "success",
-        title: "Seeding Complete",
-        message: `Successfully re-seeded ${result.successCount} zones.`,
-      });
-    } catch (error) {
-      console.error("[Login] Seed failed", error);
-      showToast({
-        type: "error",
-        title: "Seeding Failed",
-        message: "Check console for details.",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
 
 
@@ -800,15 +790,6 @@ export default function Login() {
           </Link>
         </View>
 
-        {/* Developer Seed Button */}
-        <Pressable
-          onPress={handleSeed}
-          style={{ marginTop: 40, opacity: 0.5, alignSelf: "center" }}
-        >
-          <Text style={[styles.bottomText, { fontSize: 12, textDecorationLine: "underline" }]}>
-            [DEV] Reset & Re-seed Zones
-          </Text>
-        </Pressable>
       </ScrollView>
     </Container>
   );

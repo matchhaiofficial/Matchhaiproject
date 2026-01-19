@@ -1,11 +1,44 @@
-# Zone Admin Improvements
+# Task: Refactor Discovery Tab
 
-- [x] **Location-Based Request Filtering**
-    - [x] Filter booking requests to only show those matching zone's area
-    - [x] Update empty state message for no nearby requests
-    - [ ] Test location matching logic
+## Setup
+- [x] Create `src/features/discover` directory structure
+- [x] Create `src/features/discover/types.ts` (GameKey, DiscoverSegment)
+- [x] Create `src/features/discover/utils/gameKeys.ts` (normalization)
 
-- [x] **Logout Button**
-    - [x] Add logout button to Zone Dashboard header
-    - [x] Implement logout functionality
-    - [ ] Test logout flow
+## Component Extraction
+- [x] Extract `DiscoverMatchroomList.tsx` from `matchrooms.tsx`
+    - [x] Remove local game chips
+    - [x] Accept global `selectedGame` and `searchQuery`
+    - [x] Implement contextual filters
+- [x] Extract `DiscoverPlayerList.tsx` from `find-players.tsx`
+    - [x] Remove local chips
+    - [x] Implement global filter logic
+- [x] Extract `DiscoverTeamList.tsx` from `teams.tsx`
+    - [x] Remove "My Teams" toggle (Discovery only)
+    - [x] Implement global filters
+
+## Discover Container
+- [x] Create `app/(player)/(tabs)/discover.tsx`
+    - [x] Implement Header (Search + Global Chips)
+    - [x] Implement Segmented Control (Matchrooms | Players | Teams)
+    - [x] Implement State hoisting & Caching logic
+    - [x] Implement Lazy Loading of segments
+- [x] Create `discover.styles.ts`
+
+## Navigation & Cleanup
+- [x] Update `_layout.tsx` (Add Discover, Remove old tabs)
+- [x] Create `app/(player)/my-teams.tsx` (Migrate "My Teams" view)
+- [x] Verify deep links and navigation flow
+
+# Task: Refine Discover UI & Features
+
+## UI Consistency & filters
+- [x] Fix Segmented Control Styling (Make consistent tabs)
+- [x] Implement Collapsible Filters in `DiscoverMatchroomList`
+- [x] Add Contextual Filters to `DiscoverPlayerList` (Role, Level)
+- [x] Add Contextual Filters to `DiscoverTeamList` (Open Slots, etc.)
+
+## Zones Integration
+- [ ] Create `DiscoverZoneList.tsx`
+- [ ] Integrate Zones into `discover.tsx`
+

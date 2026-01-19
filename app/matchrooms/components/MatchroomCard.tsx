@@ -50,8 +50,16 @@ export default function MatchroomCard({ room }: MatchroomCardProps) {
         router.push({ pathname: "/matchrooms/[id]" as any, params: { id: room.id! } });
     };
 
-    // Format Time
-    const timeDisplay = room.scheduledTime || (room.startTime?.seconds ? new Date(room.startTime.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Flexible Time');
+    // Format Time (12h)
+    let timeDisplay = 'Flexible Time';
+    if (room.scheduledTime) {
+        const [h, m] = room.scheduledTime.split(':').map(Number);
+        const period = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        timeDisplay = `${h12}:${String(m).padStart(2, '0')} ${period}`;
+    } else if (room.startTime?.seconds) {
+        timeDisplay = new Date(room.startTime.seconds * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+    }
 
     // Format Location (Mock distance for now, or use location name)
     const locationDisplay = room.location || 'Online';
