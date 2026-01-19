@@ -95,6 +95,29 @@ export default StyleSheet.create({
         color: COLORS.text,
     },
 
+    // Collapsible Filters Panel
+    filtersPanel: {
+        backgroundColor: COLORS.cardBackground,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        paddingVertical: 12,
+    },
+    filterSection: {
+        marginBottom: 12,
+        paddingHorizontal: 16,
+    },
+    filterLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.heading,
+        fontSize: 12,
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    filterOptionsScroll: {
+        flexGrow: 0,
+    },
+
     listContent: {
         paddingHorizontal: SPACING.screenPadding,
         paddingBottom: 100, // Matched with matchrooms.styles

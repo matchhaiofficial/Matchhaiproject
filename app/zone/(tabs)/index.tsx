@@ -186,18 +186,72 @@ export default function ZoneDashboard() {
         );
     }
 
-    if (!zone) {
+    if (!zone || zone.status === 'pending-review') {
         return (
             <SafeAreaView style={styles.screen}>
-                <View style={[styles.emptyState, { flex: 1, justifyContent: 'center' }]}>
-                    <MaterialIcons name="business" size={48} color={COLORS.muted} style={styles.emptyStateIcon} />
-                    <Text style={[styles.emptyStateText, { fontSize: 16 }]}>No zone found</Text>
-                    <Text style={styles.emptyStateText}>Register a zone to get started</Text>
+                <View style={[styles.emptyState, { flex: 1, justifyContent: 'center', padding: 40 }]}>
+                    <MaterialIcons
+                        name={!zone ? "business" : "hourglass-empty"}
+                        size={64}
+                        color={COLORS.accent}
+                        style={styles.emptyStateIcon}
+                    />
+                    <Text style={[styles.emptyStateText, { fontSize: 22, color: COLORS.text, fontWeight: 'bold', marginBottom: 12 }]}>
+                        {!zone ? "No zone found" : "Registration Pending"}
+                    </Text>
+                    <Text style={[styles.emptyStateText, { fontSize: 16, textAlign: 'center', lineHeight: 24 }]}>
+                        {!zone
+                            ? "Register a zone to get started and access your dashboard."
+                            : `Your registration for "${zone.venueBrandName}" is currently under review by our team.`}
+                    </Text>
+                    <Text style={[styles.emptyStateText, { fontSize: 14, color: COLORS.muted, marginTop: 12, textAlign: 'center' }]}>
+                        {!zone
+                            ? "It only takes a few minutes to set up your business."
+                            : "We'll notify you via email once your zone has been approved."}
+                    </Text>
+
+                    {!zone ? (
+                        <TouchableOpacity
+                            onPress={() => router.replace("/auth/zone-register")}
+                            style={[styles.requestActionPrimary, { marginTop: 32, paddingHorizontal: 32 }]}
+                        >
+                            <Text style={styles.requestActionPrimaryText}>Register Zone</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity
+                            onPress={handleLogout}
+                            style={[styles.requestActionSecondary, { marginTop: 32, paddingHorizontal: 32 }]}
+                        >
+                            <Text style={styles.requestActionSecondaryText}>Sign Out</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    if (zone.status === 'rejected') {
+        return (
+            <SafeAreaView style={styles.screen}>
+                <View style={[styles.emptyState, { flex: 1, justifyContent: 'center', padding: 40 }]}>
+                    <MaterialIcons name="error-outline" size={64} color={COLORS.error} style={styles.emptyStateIcon} />
+                    <Text style={[styles.emptyStateText, { fontSize: 22, color: COLORS.text, fontWeight: 'bold', marginBottom: 12 }]}>
+                        Registration Rejected
+                    </Text>
+                    <Text style={[styles.emptyStateText, { fontSize: 16, textAlign: 'center', lineHeight: 24 }]}>
+                        Your registration for "{zone.venueBrandName}" was not approved.
+                    </Text>
+                    {zone.rejectionReason && (
+                        <View style={{ backgroundColor: 'rgba(255, 68, 68, 0.1)', padding: 16, borderRadius: 12, marginTop: 20, width: '100%' }}>
+                            <Text style={{ color: COLORS.error, fontWeight: '600', marginBottom: 4 }}>Reason:</Text>
+                            <Text style={{ color: COLORS.textSecondary }}>{zone.rejectionReason}</Text>
+                        </View>
+                    )}
                     <TouchableOpacity
-                        onPress={() => router.replace("/auth/zone-register")}
-                        style={[styles.requestActionPrimary, { marginTop: 20 }]}
+                        onPress={handleLogout}
+                        style={[styles.requestActionSecondary, { marginTop: 32, paddingHorizontal: 32 }]}
                     >
-                        <Text style={styles.requestActionPrimaryText}>Register Zone</Text>
+                        <Text style={styles.requestActionSecondaryText}>Sign Out & Contact Support</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>

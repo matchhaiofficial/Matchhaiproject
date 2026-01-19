@@ -97,7 +97,7 @@ export async function signUpWithEmail(
       }
     }
 
-    // 2) Fire-and-forget Firestore profile write (DO NOT await)
+    // 2) Firestore profile write
     try {
       const uid = cred.user.uid;
       const usernameTrimmed = username?.trim() || null;
@@ -106,33 +106,25 @@ export async function signUpWithEmail(
         : null;
       const normalizedPhone = phone ? normalizePhoneForSave(phone) : null;
 
-      console.log("[authService] scheduling Firestore user doc write");
-      setDoc(doc(db, "users", uid), {
+      console.log("[authService] creating Firestore user doc...");
+      await setDoc(doc(db, "users", uid), {
         uid,
         email: trimmedEmail.toLowerCase(),
         fullName: displayName ? displayName.trim() : null,
         username: usernameTrimmed,
         usernameLower,
         phone: normalizedPhone,
-        accountType, // Use the passed accountType
+        accountType,
         isOnline: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      })
-        .then(() => {
-          console.log("[authService] Firestore user doc written");
-        })
-        .catch((e) => {
-          console.warn(
-            "[authService] Failed to create Firestore user document (non-fatal):",
-            e
-          );
-        });
+      });
+      console.log("[authService] Firestore user doc written");
     } catch (e) {
-      console.warn(
-        "[authService] Firestore user doc threw synchronously (non-fatal):",
-        e
-      );
+      console.error("[authService] Failed to create Firestore user document (FATAL):", e);
+      // If profile creation fails, we might want to throw or return error 
+      // so the UI knows the account is half-created.
+      return { ok: false, message: "Account created but profile setup failed. Please try again." };
     }
 
     console.log(
