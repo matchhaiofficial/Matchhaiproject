@@ -14,6 +14,7 @@ import {
 import { auth, db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
 import { Matchroom } from "./matchService";
+import { isRoomExpired, isRoomLocked } from "../utils/matchroomLifecycle";
 
 export interface BookingIntent {
     id?: string;
@@ -163,6 +164,16 @@ export async function createBookingIntentDetailed({
             slotCount: slotIds.length,
             inviteeCount: invs.length
         });
+
+        // Guard: Check if room is expired
+        if (isRoomExpired(room)) {
+            return { ok: false, message: "This matchroom has expired (valid for 48 hours)" };
+        }
+
+        // Guard: Check if room is locked or full
+        if (isRoomLocked(room)) {
+            return { ok: false, message: "Matchroom is full and locked" };
+        }
 
 
         const intentId = generateIntentId(room?.id || 'unknown', side, user.uid, slotIds);

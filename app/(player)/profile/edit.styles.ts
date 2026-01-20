@@ -263,4 +263,37 @@ export default StyleSheet.create({
         color: COLORS.accent,
         fontWeight: '700',
     },
+
+    // Privacy Toggles
+    privacySection: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.lg,
+        padding: SPACING.lg,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        marginBottom: SPACING.xl,
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: SPACING.md,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+    },
+    toggleInfo: {
+        flex: 1,
+        marginRight: SPACING.md,
+    },
+    toggleLabel: {
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.bold,
+        marginBottom: 2,
+    },
+    toggleSubtext: {
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+    },
 });

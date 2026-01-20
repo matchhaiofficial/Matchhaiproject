@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -24,9 +24,12 @@ import {
     PADEL_ROLES,
     PICKLEBALL_ROLES
 } from "../../../constants/profileOptions";
-import { getMatchrooms, Matchroom } from "../../../src/services/matchService";
+import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../src/constants/timelineFilters";
+import { getMatchrooms, Matchroom, Slot } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { matchesTimeline } from "../../../src/utils/timeFilters";
+import { isRoomExpired } from "../../../src/utils/matchroomLifecycle";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import styles from "./matchrooms.styles";
 
@@ -74,6 +77,9 @@ export default function MatchroomsIndex() {
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [locationSearch, setLocationSearch] = useState('');
 
+    // Timeline filter state
+    const [selectedTimeline, setSelectedTimeline] = useState<TimelineFilterKey>('any');
+
     const fetchRooms = async () => {
         try {
             const res = await getMatchrooms();
@@ -101,6 +107,7 @@ export default function MatchroomsIndex() {
         setSelectedSeries('Any');
         setSelectedOvers('Any');
         setSelectedLocation('Any');
+        setSelectedTimeline('any');
     }, [selectedGame]);
 
     const onRefresh = () => {
@@ -108,49 +115,56 @@ export default function MatchroomsIndex() {
         fetchRooms();
     };
 
-    // List filtering logic
-    const filteredRooms = rooms.filter(room => {
-        if (searchQuery) {
-            const query = searchQuery.toLowerCase();
-            const matchesSearch =
-                room.title.toLowerCase().includes(query) ||
-                room.game.toLowerCase().includes(query) ||
-                room.location?.toLowerCase().includes(query);
-            if (!matchesSearch) return false;
-        }
+    const filteredRooms = useMemo(() => {
+        return rooms.filter((room: Matchroom) => {
+            // Filter out expired rooms
+            if (isRoomExpired(room)) return false;
 
-        if (selectedGame !== 'all') {
-            if (room.game.toLowerCase() !== selectedGame.toLowerCase()) return false;
-        }
+            if (searchQuery) {
+                const query = searchQuery.toLowerCase();
+                const matchesSearch =
+                    room.title.toLowerCase().includes(query) ||
+                    room.game.toLowerCase().includes(query) ||
+                    room.location?.toLowerCase().includes(query);
+                if (!matchesSearch) return false;
+            }
 
-        if (selectedGame === 'cs2' && selectedSkill !== 'Any') {
-            const roomSkill = room.skillLevel || 'Any';
-            if (!roomSkill.includes(selectedSkill.replace('FACEIT ', ''))) return false;
-        }
+            if (selectedGame !== 'all') {
+                if (room.game.toLowerCase() !== selectedGame.toLowerCase()) return false;
+            }
 
-        if (selectedFormat !== 'Any') {
-            if (!room.format?.toLowerCase().includes(selectedFormat.toLowerCase())) return false;
-        }
+            if (selectedGame === 'cs2' && selectedSkill !== 'Any') {
+                const roomSkill = room.skillLevel || 'Any';
+                if (!roomSkill.includes(selectedSkill.replace('FACEIT ', ''))) return false;
+            }
 
-        // Role filter - Atomic slot-based check
-        if (selectedRole !== 'Any') {
-            const hasSlotWithRole = (
-                room.slotsA?.some(s => s.status === 'open' && s.role === selectedRole) ||
-                room.slotsB?.some(s => s.status === 'open' && s.role === selectedRole)
-            );
-            if (!hasSlotWithRole) return false;
-        }
+            if (selectedFormat !== 'Any') {
+                if (!room.format?.toLowerCase().includes(selectedFormat.toLowerCase())) return false;
+            }
 
-        if (selectedSeries !== 'Any') {
-            if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
-        }
+            // Role filter - Atomic slot-based check
+            if (selectedRole !== 'Any') {
+                const hasSlotWithRole = (
+                    room.slotsA?.some((s: Slot) => s.status === 'open' && s.role === selectedRole) ||
+                    room.slotsB?.some((s: Slot) => s.status === 'open' && s.role === selectedRole)
+                );
+                if (!hasSlotWithRole) return false;
+            }
 
-        if (selectedLocation !== 'Any') {
-            if (!room.location?.toLowerCase().includes(selectedLocation.toLowerCase())) return false;
-        }
+            if (selectedSeries !== 'Any') {
+                if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
+            }
 
-        return true;
-    });
+            if (selectedLocation !== 'Any') {
+                if (!room.location?.toLowerCase().includes(selectedLocation.toLowerCase())) return false;
+            }
+
+            // Timeline filter (using shared helper)
+            if (!matchesTimeline(room, selectedTimeline)) return false;
+
+            return true;
+        });
+    }, [rooms, searchQuery, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedLocation, selectedTimeline]);
 
     // Get contextual options based on selected game
     const getFormatOptions = () => {
@@ -302,6 +316,24 @@ export default function MatchroomsIndex() {
                     )}
                     {hasSeriesFilter() && renderFilterRow('Series', getSeriesOptions(), selectedSeries, setSelectedSeries)}
                     {hasOversFilter() && renderFilterRow('Overs', OVERS_OPTIONS, selectedOvers, setSelectedOvers)}
+
+                    {/* Timeline filter */}
+                    <View style={styles.filterSection}>
+                        <Text style={styles.filterLabel}>Timeline</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+                            {TIMELINE_FILTERS.map(filter => (
+                                <TouchableOpacity
+                                    key={filter.key}
+                                    onPress={() => setSelectedTimeline(filter.key)}
+                                    style={[styles.optionChip, selectedTimeline === filter.key && styles.optionChipActive]}
+                                >
+                                    <Text style={[styles.optionChipText, selectedTimeline === filter.key && styles.optionChipTextActive]}>
+                                        {filter.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
 
                     {/* Location Dropdown */}
                     <View style={styles.filterSection}>

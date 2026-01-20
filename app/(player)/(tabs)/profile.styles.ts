@@ -109,7 +109,9 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderRadius: RADII.md,
         padding: SPACING.md,
-        marginBottom: SPACING.sm,
+        marginRight: SPACING.md,
+        width: 280,
+        height: 80,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         borderStyle: 'dashed',
@@ -140,13 +142,23 @@ export default StyleSheet.create({
     // Section
     section: {
         marginTop: SPACING.xl,
+    },
+    sectionHorizontal: {
+        marginTop: SPACING.xl,
+    },
+    sectionPadding: {
         paddingHorizontal: SPACING.screenPadding,
+    },
+    gamesScrollContainer: {
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.sm,
     },
     sectionHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: SPACING.md,
+        paddingHorizontal: SPACING.screenPadding,
     },
     sectionTitle: {
         color: COLORS.text,
@@ -177,7 +189,9 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderRadius: RADII.md,
         padding: SPACING.md,
-        marginBottom: SPACING.sm,
+        marginRight: SPACING.md,
+        width: 280,
+        height: 80,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         flexDirection: 'row',

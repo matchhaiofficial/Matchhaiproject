@@ -23,7 +23,7 @@ import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { COLORS } from "../../../src/theme";
-import { GAME_RULES } from "../profile/constants";
+import { GAME_RULES } from "../profile/_constants";
 import styles from "./profile.styles";
 
 // FACEIT Level Icons
@@ -297,60 +297,68 @@ export default function Profile() {
                         <Text style={styles.sectionTitle}>My Games</Text>
                     </View>
 
-                    {ALL_GAMES.map(game => {
-                        const isActive = isGameActive(game.key);
-                        const skillScore = profile?.skillScores?.[game.key];
-                        const externalStat = getExternalStatLine(game.key);
-                        const roleText = getGameRole(game.key);
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.gamesScrollContainer}
+                    >
+                        {ALL_GAMES.map(game => {
+                            const isActive = isGameActive(game.key);
+                            const skillScore = profile?.skillScores?.[game.key];
+                            const externalStat = getExternalStatLine(game.key);
+                            const roleText = getGameRole(game.key);
 
-                        if (isActive) {
-                            return (
-                                <TouchableOpacity key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
-                                    <View style={styles.gameIcon}>
-                                        <MaterialIcons name={game.icon} size={24} color={COLORS.accent} />
-                                    </View>
-                                    <View style={styles.gameInfo}>
-                                        <Text style={styles.gameName}>{game.name}</Text>
-                                        <Text style={styles.gameRole}>{roleText}</Text>
-                                        {/* New Secondary Stat Line */}
-                                        {externalStat && (
-                                            <Text style={styles.secondaryStat}>
-                                                Verified: {externalStat}
-                                            </Text>
-                                        )}
-                                    </View>
+                            if (isActive) {
+                                return (
+                                    <TouchableOpacity key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
+                                        <View style={styles.gameIcon}>
+                                            <MaterialIcons name={game.icon} size={24} color={COLORS.accent} />
+                                        </View>
+                                        <View style={styles.gameInfo}>
+                                            <Text style={styles.gameName} numberOfLines={1}>{game.name}</Text>
+                                            <Text style={styles.gameRole} numberOfLines={1}>{roleText}</Text>
+                                            {/* New Secondary Stat Line */}
+                                            {externalStat && (
+                                                <Text style={styles.secondaryStat} numberOfLines={1}>
+                                                    Verified: {externalStat}
+                                                </Text>
+                                            )}
+                                        </View>
 
-                                    {/* Primary Badge: SkillScore > Faceit Level > PSN */}
-                                    <View style={{ marginLeft: 'auto' }}>
-                                        {skillScore ? (
-                                            <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
-                                        ) : (
-                                            /* Legacy/External Badge Fallback */
-                                            game.key === 'cs2' && profile?.faceitSkillLevel ? (
-                                                <Image source={faceitLevelIcons[profile.faceitSkillLevel]} style={styles.faceitIcon} resizeMode="contain" />
-                                            ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
-                                                <View style={styles.gameSkill}>
-                                                    <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={{ marginRight: 4 }} />
-                                                </View>
+                                        {/* Primary Badge: SkillScore > Faceit Level > PSN */}
+                                        <View style={{ marginLeft: 'auto' }}>
+                                            {skillScore ? (
+                                                <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
                                             ) : (
-                                                <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                                            )
-                                        )}
-                                    </View>
-                                </TouchableOpacity>
-                            );
-                        } else {
-                            return (
-                                <TouchableOpacity key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
-                                    <View style={styles.gameIconInactive}>
-                                        <MaterialIcons name={game.icon} size={24} color={COLORS.muted} />
-                                    </View>
-                                    <Text style={styles.gameNameInactive}>{game.name}</Text>
-                                    <Text style={styles.gameAddText}>Tap to add</Text>
-                                </TouchableOpacity>
-                            );
-                        }
-                    })}
+                                                /* Legacy/External Badge Fallback */
+                                                game.key === 'cs2' && profile?.faceitSkillLevel ? (
+                                                    <Image source={faceitLevelIcons[profile.faceitSkillLevel]} style={styles.faceitIcon} resizeMode="contain" />
+                                                ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
+                                                    <View style={styles.gameSkill}>
+                                                        <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={{ marginRight: 4 }} />
+                                                    </View>
+                                                ) : (
+                                                    <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
+                                                )
+                                            )}
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            } else {
+                                return (
+                                    <TouchableOpacity key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
+                                        <View style={styles.gameIconInactive}>
+                                            <MaterialIcons name={game.icon} size={24} color={COLORS.muted} />
+                                        </View>
+                                        <View>
+                                            <Text style={styles.gameNameInactive}>{game.name}</Text>
+                                            <Text style={styles.gameAddText}>Tap to add</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            }
+                        })}
+                    </ScrollView>
                 </View>
 
                 {/* Platforms */}
@@ -359,63 +367,64 @@ export default function Profile() {
                         <Text style={styles.sectionTitle}>Connected Platforms</Text>
                     </View>
 
-                    {/* Steam */}
-                    <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
-                        <View style={[styles.platformIcon, styles.steamIcon]}>
-                            <MaterialIcons name="sports-esports" size={20} color={COLORS.steamBorder} />
-                        </View>
-                        <View style={styles.platformInfo}>
-                            <Text style={styles.platformName}>Steam</Text>
-                            {profile?.steamPersonaName ? (
-                                <>
-                                    <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
-                                    {/* Last Synced could be driven by `updatedAt` for now as proxy or real sync time if we stored it */}
-                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
-                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
-                                    </Text>
-                                </>
-                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
-                        </View>
-                        <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                    </TouchableOpacity>
+                    <View style={styles.sectionPadding}>
+                        {/* Steam */}
+                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                            <View style={[styles.platformIcon, styles.steamIcon]}>
+                                <MaterialIcons name="sports-esports" size={20} color={COLORS.steamBorder} />
+                            </View>
+                            <View style={styles.platformInfo}>
+                                <Text style={styles.platformName}>Steam</Text>
+                                {profile?.steamPersonaName ? (
+                                    <>
+                                        <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
+                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                        </Text>
+                                    </>
+                                ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
+                            </View>
+                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
+                        </TouchableOpacity>
 
-                    {/* FACEIT */}
-                    <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
-                        <View style={[styles.platformIcon, styles.faceitPlatformIcon]}>
-                            <MaterialIcons name="verified" size={20} color={COLORS.faceitBorder} />
-                        </View>
-                        <View style={styles.platformInfo}>
-                            <Text style={styles.platformName}>FACEIT</Text>
-                            {profile?.faceitNickname ? (
-                                <>
-                                    <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
-                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
-                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
-                                    </Text>
-                                </>
-                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
-                        </View>
-                        <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                    </TouchableOpacity>
+                        {/* FACEIT */}
+                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                            <View style={[styles.platformIcon, styles.faceitPlatformIcon]}>
+                                <MaterialIcons name="verified" size={20} color={COLORS.faceitBorder} />
+                            </View>
+                            <View style={styles.platformInfo}>
+                                <Text style={styles.platformName}>FACEIT</Text>
+                                {profile?.faceitNickname ? (
+                                    <>
+                                        <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
+                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                        </Text>
+                                    </>
+                                ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
+                            </View>
+                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
+                        </TouchableOpacity>
 
-                    {/* PSN */}
-                    <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
-                        <View style={[styles.platformIcon, { backgroundColor: 'rgba(0, 48, 135, 0.1)', borderColor: '#003087', borderWidth: 1 }]}>
-                            <MaterialIcons name="sports-esports" size={20} color="#003791" />
-                        </View>
-                        <View style={styles.platformInfo}>
-                            <Text style={styles.platformName}>PlayStation Network</Text>
-                            {profile?.psnStats?.psnOnlineId ? (
-                                <>
-                                    <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
-                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
-                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
-                                    </Text>
-                                </>
-                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
-                        </View>
-                        <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                    </TouchableOpacity>
+                        {/* PSN */}
+                        <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
+                            <View style={[styles.platformIcon, { backgroundColor: 'rgba(0, 48, 135, 0.1)', borderColor: '#003087', borderWidth: 1 }]}>
+                                <MaterialIcons name="sports-esports" size={20} color="#003791" />
+                            </View>
+                            <View style={styles.platformInfo}>
+                                <Text style={styles.platformName}>PlayStation Network</Text>
+                                {profile?.psnStats?.psnOnlineId ? (
+                                    <>
+                                        <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
+                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                        </Text>
+                                    </>
+                                ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
+                            </View>
+                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* Preferred Areas */}
@@ -424,12 +433,14 @@ export default function Profile() {
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Preferred Areas</Text>
                         </View>
-                        <View style={styles.areaChipsRow}>
-                            {profile.areasPreferred.map(area => (
-                                <View key={area} style={styles.areaChip}>
-                                    <Text style={styles.areaChipText}>{area}</Text>
-                                </View>
-                            ))}
+                        <View style={styles.sectionPadding}>
+                            <View style={styles.areaChipsRow}>
+                                {profile.areasPreferred.map(area => (
+                                    <View key={area} style={styles.areaChip}>
+                                        <Text style={styles.areaChipText}>{area}</Text>
+                                    </View>
+                                ))}
+                            </View>
                         </View>
                     </View>
                 )}
@@ -442,11 +453,13 @@ export default function Profile() {
                             <Text style={styles.sectionLink}>View All</Text>
                         </TouchableOpacity>
                     </View>
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
-                        <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
-                            <Text style={styles.emptyButtonText}>Create a Team</Text>
-                        </TouchableOpacity>
+                    <View style={styles.sectionPadding}>
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
+                            <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
+                                <Text style={styles.emptyButtonText}>Create a Team</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
 
@@ -458,11 +471,13 @@ export default function Profile() {
                             <Text style={styles.sectionLink}>View All</Text>
                         </TouchableOpacity>
                     </View>
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyText}>No matches played yet.</Text>
-                        <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(player)/(tabs)/matchrooms")}>
-                            <Text style={styles.emptyButtonText}>Find a Match</Text>
-                        </TouchableOpacity>
+                    <View style={styles.sectionPadding}>
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyText}>No matches played yet.</Text>
+                            <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(player)/(tabs)/matchrooms")}>
+                                <Text style={styles.emptyButtonText}>Find a Match</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
 
