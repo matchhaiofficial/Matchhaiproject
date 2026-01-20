@@ -24,6 +24,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { isWithinFairnessBand } from "../../src/services/bookingService";
 import { deleteMatchroom, getMatchroom, joinMatchroom, leaveMatchroom, Matchroom, startMatch } from "../../src/services/matchService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
+import { isRoomExpired, isRoomLocked } from "../../src/utils/matchroomLifecycle";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./detail.styles";
@@ -390,6 +391,11 @@ export default function MatchroomDetails() {
     const isJoined = playersArr.some(p => p.uid === user?.uid);
     const isFull = playersArr.length >= (room.maxPlayers || 0);
 
+    // Lifecycle states
+    const isExpired = isRoomExpired(room);
+    const isLocked = isRoomLocked(room);
+    const canJoin = !isExpired && !isLocked && !isJoined && !isFull;
+
     // Calculate available roles
     const availableRoles: any[] = []; // room.requiredRoles removed from schema
 
@@ -418,6 +424,42 @@ export default function MatchroomDetails() {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
+                {/* Expired Banner */}
+                {isExpired && (
+                    <View style={{
+                        backgroundColor: '#FF5722',
+                        padding: 12,
+                        borderRadius: 8,
+                        marginBottom: 16,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                    }}>
+                        <MaterialIcons name="warning" size={20} color="#FFF" />
+                        <Text style={{ color: '#FFF', flex: 1, fontWeight: '500' }}>
+                            This matchroom has expired (valid for 48 hours)
+                        </Text>
+                    </View>
+                )}
+
+                {/* Locked Banner */}
+                {isLocked && !isExpired && (
+                    <View style={{
+                        backgroundColor: COLORS.warning,
+                        padding: 12,
+                        borderRadius: 8,
+                        marginBottom: 16,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                    }}>
+                        <MaterialIcons name="lock" size={20} color="#FFF" />
+                        <Text style={{ color: '#FFF', flex: 1, fontWeight: '500' }}>
+                            Matchroom is full and locked
+                        </Text>
+                    </View>
+                )}
+
                 {/* Main Card */}
                 <View style={styles.mainCard}>
                     <View style={styles.gameDateRow}>
@@ -562,8 +604,17 @@ export default function MatchroomDetails() {
 
             {/* Footer Actions */}
             <View style={styles.footer}>
-                {room.status === 'open' ? (
-                    !isJoined && !isFull ? (
+                {/* Expired state - show message only */}
+                {isExpired ? (
+                    <View style={[styles.fullButton, { backgroundColor: '#FF5722' }]}>
+                        <Text style={styles.fullText}>Matchroom Expired</Text>
+                    </View>
+                ) : isLocked && !isJoined ? (
+                    <View style={[styles.fullButton, { backgroundColor: COLORS.warning }]}>
+                        <Text style={styles.fullText}>Matchroom Locked</Text>
+                    </View>
+                ) : room.status === 'open' ? (
+                    canJoin ? (
                         <TouchableOpacity
                             onPress={() => router.push(`/matchrooms/book/${id}` as any)}
                             disabled={joining}
@@ -758,6 +809,6 @@ export default function MatchroomDetails() {
                 userId={user?.uid || ''}
                 onSuccess={handleAssessmentSuccess}
             />
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }

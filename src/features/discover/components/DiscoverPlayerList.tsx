@@ -107,6 +107,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
     const [filtersExpanded, setFiltersExpanded] = useState(true);
     const [selectedRole, setSelectedRole] = useState('Any');
     const [selectedSkill, setSelectedSkill] = useState('Any');
+    const [selectedAvailability, setSelectedAvailability] = useState('Any');
 
     // Social State
     const [friendUids, setFriendUids] = useState<Set<string>>(new Set());
@@ -194,6 +195,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
     useEffect(() => {
         setSelectedRole('Any');
         setSelectedSkill('Any');
+        setSelectedAvailability('Any');
         if (selectedGame !== 'all') {
             setFiltersExpanded(true);
         }
@@ -256,6 +258,16 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                 if (skillStr === '1-3' && (level < 1 || level > 3)) return false;
                 if (skillStr === '4-6' && (level < 4 || level > 6)) return false;
                 if (skillStr === '7-10' && (level < 7 || level > 10)) return false;
+            }
+        }
+
+        // Availability filter
+        if (selectedAvailability !== 'Any') {
+            if (selectedAvailability === 'Online Now') {
+                if (!player.isOnline) return false;
+            } else if (selectedAvailability === 'Available Today') {
+                // Best-effort: use isOnline until lastActiveAt is added
+                if (!player.isOnline) return false;
             }
         }
 
@@ -459,6 +471,9 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
     // CS2 FACEIT skill levels
     const CS2_SKILL_LEVELS = ['Any', 'FACEIT 1-3', 'FACEIT 4-6', 'FACEIT 7-10'];
 
+    // Availability options
+    const AVAILABILITY_OPTIONS = ['Any', 'Online Now', 'Available Today'];
+
     return (
         <View style={{ flex: 1 }}>
             {/* Contextual Filters */}
@@ -488,18 +503,26 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                     </TouchableOpacity>
 
                     {filtersExpanded && (
-                        <View style={[styles.filtersPanel, { marginTop: 0 }]}>
-                            {selectedGame === 'cs2' && renderFilterRow('Skill (FACEIT)', CS2_SKILL_LEVELS, selectedSkill, setSelectedSkill)}
+                        <View style={{ maxHeight: 300 }}>
+                            <ScrollView
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                            >
+                                {/* Availability filter - show for all games */}
+                                {renderFilterRow('Availability', AVAILABILITY_OPTIONS, selectedAvailability, setSelectedAvailability)}
 
-                            {/* Role Filter for games that have roles */}
-                            {['cs2', 'futsal', 'indoor_cricket', 'padel', 'pickleball'].includes(selectedGame) &&
-                                renderFilterRow(
-                                    selectedGame === 'futsal' ? 'Position' : 'Role',
-                                    getRoleOptions(),
-                                    selectedRole,
-                                    setSelectedRole
-                                )
-                            }
+                                {selectedGame === 'cs2' && renderFilterRow('Skill (FACEIT)', CS2_SKILL_LEVELS, selectedSkill, setSelectedSkill)}
+
+                                {/* Role Filter for games that have roles */}
+                                {['cs2', 'futsal', 'indoor_cricket', 'padel', 'pickleball'].includes(selectedGame) &&
+                                    renderFilterRow(
+                                        selectedGame === 'futsal' ? 'Position' : 'Role',
+                                        getRoleOptions(),
+                                        selectedRole,
+                                        setSelectedRole
+                                    )
+                                }
+                            </ScrollView>
                         </View>
                     )}
                 </View>

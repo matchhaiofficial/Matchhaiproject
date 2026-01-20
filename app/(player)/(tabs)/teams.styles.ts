@@ -177,7 +177,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 12, // Increased spacing since desc is gone
+        marginBottom: 8,
     },
     teamName: {
         color: COLORS.text,
@@ -232,7 +232,7 @@ export default StyleSheet.create({
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 8,
-        backgroundColor: 'rgba(255, 152, 0, 0.1)', // Orange tint
+        backgroundColor: 'rgba(255, 152, 0, 0.1)',
         borderWidth: 1,
         borderColor: COLORS.warning,
     },
@@ -257,7 +257,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: 4,
+        marginTop: 8,
     },
     captainRow: {
         flexDirection: 'row',
