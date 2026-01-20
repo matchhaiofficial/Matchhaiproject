@@ -16,6 +16,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { getUserMatchrooms, Matchroom } from "../../src/services/matchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
+import { getRoomDisplayStatus } from "../../src/utils/matchroomLifecycle";
 import styles from "./my.styles";
 
 type Tab = 'hosted' | 'joined';
@@ -70,9 +71,15 @@ export default function MyMatchrooms() {
                     </View>
                     <View style={[
                         styles.statusBadge,
-                        { backgroundColor: item.status === 'open' ? COLORS.success : COLORS.muted }
+                        {
+                            backgroundColor:
+                                getRoomDisplayStatus(item) === 'open' ? COLORS.success :
+                                    getRoomDisplayStatus(item) === 'locked' ? COLORS.warning :
+                                        getRoomDisplayStatus(item) === 'expired' ? '#FF5722' :
+                                            COLORS.muted
+                        }
                     ]}>
-                        <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
+                        <Text style={styles.statusText}>{getRoomDisplayStatus(item).toUpperCase()}</Text>
                     </View>
                 </View>
 

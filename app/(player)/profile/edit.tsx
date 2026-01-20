@@ -10,6 +10,7 @@ import {
     Platform,
     Pressable,
     ScrollView,
+    Switch,
     Text,
     TextInput,
     TouchableOpacity,
@@ -118,6 +119,11 @@ export default function EditProfile() {
     const [psnOnlineId, setPsnOnlineId] = useState("");
     const [eaProfileUrl, setEaProfileUrl] = useState("");
     const [xboxGamertag, setXboxGamertag] = useState("");
+
+    // Privacy Settings
+    const [hideAreasPublicly, setHideAreasPublicly] = useState(false);
+    const [hidePlatformsPublicly, setHidePlatformsPublicly] = useState(false);
+    const [restrictInvitesToFriends, setRestrictInvitesToFriends] = useState(false);
 
     // Verification State
     const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(null);
@@ -235,6 +241,10 @@ export default function EditProfile() {
                     setPsnOnlineId(data.psnOnlineId || "");
                     setEaProfileUrl(data.eaProfileUrl || "");
                     setXboxGamertag(data.xboxGamertag || "");
+
+                    setHideAreasPublicly(data.hideAreasPublicly || false);
+                    setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
+                    setRestrictInvitesToFriends(data.restrictInvitesToFriends || false);
 
                     // Hydrate verified profiles if available
                     if (data.steamId) {
@@ -702,6 +712,9 @@ export default function EditProfile() {
                 psnOnlineId: psnOnlineId.trim() || null,
                 eaProfileUrl: eaProfileUrl.trim() || null,
                 xboxGamertag: xboxGamertag.trim() || null,
+                hideAreasPublicly,
+                hidePlatformsPublicly,
+                restrictInvitesToFriends,
                 updatedAt: new Date(),
             };
 
@@ -1183,6 +1196,49 @@ export default function EditProfile() {
                         {selectedAreas.length === 0 && (
                             <Text style={[styles.helperText, styles.helperError]}>Select at least one area.</Text>
                         )}
+                    </View>
+
+                    {/* Privacy Settings */}
+                    <Text style={styles.sectionTitle}>Privacy Settings (Beta)</Text>
+                    <View style={styles.privacySection}>
+                        <View style={styles.toggleRow}>
+                            <View style={styles.toggleInfo}>
+                                <Text style={styles.toggleLabel}>Hide Areas Publicly</Text>
+                                <Text style={styles.toggleSubtext}>Keep your preferred gaming zones private from others.</Text>
+                            </View>
+                            <Switch
+                                value={hideAreasPublicly}
+                                onValueChange={setHideAreasPublicly}
+                                trackColor={{ false: COLORS.divider, true: COLORS.accent }}
+                                thumbColor="#FFF"
+                            />
+                        </View>
+
+                        <View style={styles.toggleRow}>
+                            <View style={styles.toggleInfo}>
+                                <Text style={styles.toggleLabel}>Hide Platform Usernames</Text>
+                                <Text style={styles.toggleSubtext}>Linked platforms will show as "Verified" but hide your IDs.</Text>
+                            </View>
+                            <Switch
+                                value={hidePlatformsPublicly}
+                                onValueChange={setHidePlatformsPublicly}
+                                trackColor={{ false: COLORS.divider, true: COLORS.accent }}
+                                thumbColor="#FFF"
+                            />
+                        </View>
+
+                        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+                            <View style={styles.toggleInfo}>
+                                <Text style={styles.toggleLabel}>Restrict Match Invites</Text>
+                                <Text style={styles.toggleSubtext}>Only allow friends to send you matchroom invitations.</Text>
+                            </View>
+                            <Switch
+                                value={restrictInvitesToFriends}
+                                onValueChange={setRestrictInvitesToFriends}
+                                trackColor={{ false: COLORS.divider, true: COLORS.accent }}
+                                thumbColor="#FFF"
+                            />
+                        </View>
                     </View>
 
                     <Text style={styles.sectionTitle}>Linked Platforms</Text>
