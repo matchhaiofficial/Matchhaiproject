@@ -1154,7 +1154,16 @@ export default function EditProfile() {
 
                     {/* Preferred Areas */}
                     <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>Preferred Areas (1-5)</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <Text style={[styles.label, { marginBottom: 0 }]}>Preferred Areas</Text>
+                            <Text style={{
+                                color: selectedAreas.length >= 5 ? COLORS.warning : COLORS.muted,
+                                fontSize: 12,
+                                fontWeight: '600'
+                            }}>
+                                {selectedAreas.length}/5 Selected
+                            </Text>
+                        </View>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                             {KARACHI_AREAS.map(area => {
                                 const selected = selectedAreas.includes(area);

@@ -1,7 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import React, { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -14,7 +15,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { doc, getDoc } from "firebase/firestore";
 import SkillBadge from "../../../src/components/SkillBadge";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -23,6 +23,7 @@ import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { COLORS } from "../../../src/theme";
+import { GAME_RULES } from "../profile/constants";
 import styles from "./profile.styles";
 
 // FACEIT Level Icons
@@ -39,76 +40,53 @@ const faceitLevelIcons: Record<number, any> = {
     10: require("../../../assets/images/faceit-levels/Level 10.png"),
 };
 
-// All available games for the platform
-const ALL_GAMES: Array<{ key: string; name: string; icon: keyof typeof MaterialIcons.glyphMap }> = [
-    { key: 'cs2', name: 'Counter-Strike 2', icon: 'sports-esports' },
-    { key: 'fc26', name: 'FC 26', icon: 'sports-soccer' },
-    { key: 'tekken8', name: 'Tekken 8', icon: 'sports-mma' },
-    { key: 'futsal', name: 'Futsal', icon: 'sports-soccer' },
-    { key: 'indoor_cricket', name: 'Indoor Cricket', icon: 'sports-cricket' },
-    { key: 'padel', name: 'Padel', icon: 'sports-tennis' },
-    { key: 'pickleball', name: 'Pickleball', icon: 'sports-tennis' },
-];
+// Generate list from GAME_RULES to ensure consistency
+const ALL_GAMES = Object.entries(GAME_RULES).map(([key, rule]) => ({
+    key,
+    name: rule.label,
+    // Icon mapping (could be moved to constants but fine here for now)
+    icon: (key === 'cs2' ? 'sports-esports' :
+        key === 'fc26' ? 'sports-soccer' :
+            key === 'tekken8' ? 'sports-mma' :
+                key === 'indoor_cricket' ? 'sports-cricket' :
+                    ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer') as keyof typeof MaterialIcons.glyphMap
+}));
 
 interface FullUserProfile {
     uid: string;
     email?: string;
     fullName?: string;
     username?: string;
-    phone?: string;
     city?: string;
     ageRange?: string;
 
-    // Game preferences
-    playsCs2?: boolean;
-    cs2Role?: string;
-    faceitSkillLevel?: number;
-    faceitElo?: number;
-    faceitNickname?: string;
+    // Generic Play Flags & Roles
+    playsCs2?: boolean; cs2Role?: string;
+    playsFc?: boolean; fcTeam?: string; fcFormation?: string;
+    playsTekken?: boolean; tekkenFavorites?: string[];
+    playsFutsal?: boolean; futsalPositions?: string[];
+    playsIndoorCricket?: boolean; indoorCricketRole?: string; indoorCricketBowlingStyle?: string; indoorCricketBattingStyle?: string;
+    playsPadel?: boolean; padelRole?: string;
+    playsPickleball?: boolean; pickleballRole?: string;
 
-    playsFc?: boolean;
-    fcTeam?: string;
-    fcFormation?: string;
-
-    playsTekken?: boolean;
-    tekkenFavorites?: string[];
-
-    playsFutsal?: boolean;
-    futsalPositions?: string[];
-
-    playsIndoorCricket?: boolean;
-    indoorCricketRole?: string;
-    indoorCricketBowlingStyle?: string;
-    indoorCricketBattingStyle?: string;
-
-    playsPadel?: boolean;
-    padelRole?: string;
-
-    playsPickleball?: boolean;
-    pickleballRole?: string;
-
-    // Location
-    areasPreferred?: string[];
-
-    // Platform links
-    steamProfileUrl?: string;
-    steamPersonaName?: string;
-    faceitProfileUrl?: string;
-
-    // Teams
-    teamsByGame?: Record<string, string[]>;
-
-    // PSN
+    // Platform Data
+    steamProfileUrl?: string; steamPersonaName?: string; steamId?: string;
+    faceitProfileUrl?: string; faceitNickname?: string; faceitSkillLevel?: number; faceitElo?: number;
     psnStats?: PsnVerificationResult;
 
-    // MatchHai Skill Scores
+    // Skill Scores
     skillScores?: Record<string, GameSkillScore>;
 
-    // Steam Stats
+    // Generic Stats
     steamCs2Hours?: number;
     steamTekken8Hours?: number;
     steamFc26Hours?: number;
-    steamStats?: any;
+
+    areasPreferred?: string[];
+
+    // Platform Metadata
+    platformLastSynced?: Record<string, any>; // Reserved for future detailed timestamps per platform if structure changes
+    updatedAt?: any;
 }
 
 export default function Profile() {
@@ -118,10 +96,16 @@ export default function Profile() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
-    const fetchProfile = async () => {
-        if (!user?.uid) return;
+    // Prevent double fetch
+    const isFetching = useRef(false);
+
+    const fetchProfile = useCallback(async (isRefresh = false) => {
+        if (!user?.uid || (isFetching.current && !isRefresh)) return;
 
         try {
+            isFetching.current = true;
+            if (!isRefresh && !profile) setLoading(true); // Initial load only
+
             const userRef = doc(db, "users", user.uid);
             const snap = await getDoc(userRef);
 
@@ -130,26 +114,24 @@ export default function Profile() {
             }
         } catch (e) {
             console.error("[Profile] Failed to fetch profile", e);
+            if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
         } finally {
             setLoading(false);
             setRefreshing(false);
+            isFetching.current = false;
         }
-    };
-
-    useEffect(() => {
-        fetchProfile();
     }, [user?.uid]);
 
-    // Auto-refresh profile when screen gains focus (e.g., after editing platforms)
+    // Focus Effect: Re-fetch only if data might be stale (simplified to always fetch on focus for now to ensure sync after edit)
     useFocusEffect(
         useCallback(() => {
             fetchProfile();
-        }, [user?.uid])
+        }, [fetchProfile])
     );
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchProfile();
+        fetchProfile(true);
     };
 
     const handleLogout = async () => {
@@ -163,150 +145,99 @@ export default function Profile() {
                     style: "destructive",
                     onPress: async () => {
                         const res = await signOutUser();
-                        if (res.ok) {
-                            router.replace("/auth/login");
-                        } else {
-                            Alert.alert("Logout Failed", res.message);
-                        }
+                        if (res.ok) router.replace("/auth/login");
+                        else Alert.alert("Logout Failed", res.message);
                     }
                 }
             ]
         );
     };
 
-    const handleSettings = () => {
-        router.push("/profile/edit");
-    };
+    const handleSettings = () => router.push("/profile/edit");
 
     const handleAddGame = (gameKey: string) => {
-        // Validation: Check if user has required platform verification
-        if (gameKey === 'cs2') {
-            // CS2 requires Steam OR FACEIT
-            const hasSteam = !!(profile?.steamProfileUrl);
-            const hasFaceit = !!(profile?.faceitNickname);
+        // Validation based on GAME_RULES requirements
+        const rules = GAME_RULES[gameKey];
+        if (rules && rules.requiresOneOf) {
+            const hasRequirement = rules.requiresOneOf.some(platform => {
+                if (platform === 'steam') return !!profile?.steamId; // Check ID specifically to be sure
+                if (platform === 'faceit') return !!profile?.faceitNickname;
+                if (platform === 'psn') return !!profile?.psnStats?.psnOnlineId;
+                if (platform === 'xbox') return false; // Not fully implemented in profile type yet
+                return false;
+            });
 
-            if (!hasSteam && !hasFaceit) {
+            if (!hasRequirement) {
+                const prettyPlatforms = rules.requiresOneOf.map(p => p.toUpperCase()).join(' or ');
                 showToast({
                     type: "warning",
                     title: "Platform Required",
-                    message: "Please connect your Steam or FACEIT account in Edit Profile to add CS2."
+                    message: `Please connect your ${prettyPlatforms} account in Edit Profile to add ${rules.label}.`
                 });
                 return;
             }
         }
-
-        if (gameKey === 'tekken8' || gameKey === 'fc26') {
-            // Tekken 8 and FC26 require PSN OR Steam
-            const hasPsn = !!(profile?.psnStats?.psnOnlineId);
-            const hasSteam = !!(profile?.steamProfileUrl);
-
-            if (!hasPsn && !hasSteam) {
-                const gameName = gameKey === 'tekken8' ? 'Tekken 8' : 'FC 26';
-                showToast({
-                    type: "warning",
-                    title: "Platform Required",
-                    message: `Please connect your PSN or Steam account in Edit Profile to add ${gameName}.`
-                });
-                return;
-            }
-        }
-
-        // Validation passed, proceed to game details
         router.push(`/profile/game-details?gameId=${gameKey}`);
     };
 
-    const handleEditGame = (gameKey: string) => {
-        router.push(`/profile/game-details?gameId=${gameKey}`);
-    };
+    const handleEditGame = (gameKey: string) => router.push(`/profile/game-details?gameId=${gameKey}`);
+
     const getInitials = () => {
         if (profile?.fullName) {
             const parts = profile.fullName.trim().split(' ');
-            if (parts.length >= 2) {
-                return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-            }
+            if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
             return profile.fullName[0].toUpperCase();
         }
-        if (profile?.username) {
-            return profile.username[0].toUpperCase();
-        }
-        return user?.email?.[0].toUpperCase() || '?';
+        return profile?.username?.[0].toUpperCase() || user?.email?.[0].toUpperCase() || '?';
     };
 
     // Check if a game is active
     const isGameActive = (gameKey: string): boolean => {
         if (!profile) return false;
-
         switch (gameKey) {
-            case 'cs2': return !!(profile.playsCs2 || profile.cs2Role);
-            case 'fc26': return !!(profile.playsFc || profile.fcTeam);
-            case 'tekken8': return !!(profile.playsTekken || (profile.tekkenFavorites?.length ?? 0) > 0);
-            case 'futsal': return !!(profile.playsFutsal || (profile.futsalPositions?.length ?? 0) > 0);
-            case 'indoor_cricket': return !!(profile.playsIndoorCricket || profile.indoorCricketRole);
-            case 'padel': return !!(profile.playsPadel || profile.padelRole);
-            case 'pickleball': return !!(profile.playsPickleball || profile.pickleballRole);
+            case 'cs2': return !!(profile.playsCs2);
+            case 'fc26': return !!(profile.playsFc);
+            case 'tekken8': return !!(profile.playsTekken);
+            case 'futsal': return !!(profile.playsFutsal);
+            case 'indoor_cricket': return !!(profile.playsIndoorCricket);
+            case 'padel': return !!(profile.playsPadel);
+            case 'pickleball': return !!(profile.playsPickleball);
             default: return false;
         }
     };
 
-    // Get game role/details for display
-    const getGameDetails = (gameKey: string): {
-        role: string;
-        extras?: string[];
-        faceitLevel?: number;
-        faceitElo?: number;
-        psnData?: { percent: number; playtime?: string };
-        steamHours?: number;
-    } => {
-        if (!profile) return { role: 'Not configured' };
+    // Helper to get secondary stat (External)
+    const getExternalStatLine = (gameKey: string) => {
+        if (!profile) return null;
 
+        if (gameKey === 'cs2') {
+            if (profile.faceitSkillLevel) return `Faceit LvL ${profile.faceitSkillLevel}`;
+            if (profile.faceitElo) return `Elo ${profile.faceitElo}`;
+            if (profile.steamCs2Hours) return `${Math.round(profile.steamCs2Hours)}h Played`;
+        }
+        if (gameKey === 'fc26') {
+            if (profile.psnStats?.fc?.progress) return `PSN ${profile.psnStats.fc.progress}%`;
+            if (profile.steamFc26Hours) return `${Math.round(profile.steamFc26Hours)}h Played`;
+        }
+        if (gameKey === 'tekken8') {
+            if (profile.psnStats?.tekken8?.progress) return `PSN ${profile.psnStats.tekken8.progress}%`;
+            if (profile.steamTekken8Hours) return `${Math.round(profile.steamTekken8Hours)}h Played`;
+        }
+        return null;
+    };
+
+    // Get game role text
+    const getGameRole = (gameKey: string) => {
+        if (!profile) return 'Not configured';
         switch (gameKey) {
-            case 'cs2':
-                return {
-                    role: profile.cs2Role || 'No role set',
-                    faceitLevel: profile.faceitSkillLevel,
-                    faceitElo: profile.faceitElo,
-                    steamHours: profile.steamCs2Hours, // Fallback for CS2
-                };
-            case 'fc26':
-                const fcPsn = profile.psnStats?.fc;
-                return {
-                    role: profile.fcTeam || 'No team set',
-                    extras: profile.fcFormation ? [profile.fcFormation] : [],
-                    psnData: fcPsn && fcPsn.present ? {
-                        percent: fcPsn.progress || 0,
-                        playtime: fcPsn.formatPlayDuration || undefined
-                    } : undefined,
-                    steamHours: profile.steamFc26Hours // Fallback to Steam
-                };
-            case 'tekken8':
-                const tekPsn = profile.psnStats?.tekken8;
-                return {
-                    role: profile.tekkenFavorites?.join(', ') || 'No characters set',
-                    psnData: tekPsn && tekPsn.present ? {
-                        percent: tekPsn.progress || 0,
-                        playtime: tekPsn.formatPlayDuration || undefined
-                    } : undefined,
-                    steamHours: profile.steamTekken8Hours // Fallback to Steam
-                };
-            case 'futsal':
-                return {
-                    role: profile.futsalPositions?.join(', ') || 'No position set',
-                };
-            case 'indoor_cricket':
-                return {
-                    role: profile.indoorCricketRole || 'No role set',
-                    extras: [profile.indoorCricketBattingStyle, profile.indoorCricketBowlingStyle].filter(Boolean) as string[],
-                };
-            case 'padel':
-                return {
-                    role: profile.padelRole || 'No role set',
-                };
-            case 'pickleball':
-                return {
-                    role: profile.pickleballRole || 'No role set',
-                };
-            default:
-                return { role: 'Not configured' };
+            case 'cs2': return profile.cs2Role || 'No role set';
+            case 'fc26': return profile.fcTeam || 'No team set';
+            case 'tekken8': return profile.tekkenFavorites?.join(', ') || 'No characters set';
+            case 'futsal': return profile.futsalPositions?.join(', ') || 'No position set';
+            case 'indoor_cricket': return profile.indoorCricketRole || 'No role set';
+            case 'padel': return profile.padelRole || 'No side set';
+            case 'pickleball': return profile.pickleballRole || 'No mode set';
+            default: return 'Active';
         }
     };
 
@@ -322,7 +253,7 @@ export default function Profile() {
 
     return (
         <SafeAreaView style={styles.screen}>
-            {/* Header with Settings Icon */}
+            {/* Header */}
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Profile</Text>
                 <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
@@ -333,27 +264,17 @@ export default function Profile() {
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
-                }
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
             >
-                {/* Profile Card (no edit button) */}
+                {/* Profile Card */}
                 <View style={styles.profileCard}>
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>{getInitials()}</Text>
                     </View>
-
-                    <Text style={styles.profileName}>
-                        {profile?.fullName || 'Player'}
-                    </Text>
-
-                    {profile?.username && (
-                        <Text style={styles.profileUsername}>@{profile.username}</Text>
-                    )}
-
+                    <Text style={styles.profileName}>{profile?.fullName || 'Player'}</Text>
+                    {profile?.username && <Text style={styles.profileUsername}>@{profile.username}</Text>}
                     <Text style={styles.profileEmail}>{user?.email}</Text>
 
-                    {/* Meta info: City, Age */}
                     <View style={styles.profileMeta}>
                         {profile?.city && (
                             <View style={styles.profileMetaItem}>
@@ -370,7 +291,7 @@ export default function Profile() {
                     </View>
                 </View>
 
-                {/* My Games Section - Show ALL games */}
+                {/* My Games */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>My Games</Text>
@@ -378,50 +299,38 @@ export default function Profile() {
 
                     {ALL_GAMES.map(game => {
                         const isActive = isGameActive(game.key);
-                        const details = getGameDetails(game.key);
+                        const skillScore = profile?.skillScores?.[game.key];
+                        const externalStat = getExternalStatLine(game.key);
+                        const roleText = getGameRole(game.key);
 
                         if (isActive) {
-                            // Active game card
                             return (
-                                <TouchableOpacity
-                                    key={game.key}
-                                    style={styles.gameCard}
-                                    onPress={() => handleEditGame(game.key)}
-                                >
+                                <TouchableOpacity key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
                                     <View style={styles.gameIcon}>
                                         <MaterialIcons name={game.icon} size={24} color={COLORS.accent} />
                                     </View>
                                     <View style={styles.gameInfo}>
                                         <Text style={styles.gameName}>{game.name}</Text>
-                                        <Text style={styles.gameRole}>
-                                            {details.role}
-                                            {details.extras && details.extras.length > 0 && (
-                                                ` · ${details.extras.join(' · ')}`
-                                            )}
-                                        </Text>
+                                        <Text style={styles.gameRole}>{roleText}</Text>
+                                        {/* New Secondary Stat Line */}
+                                        {externalStat && (
+                                            <Text style={styles.secondaryStat}>
+                                                Verified: {externalStat}
+                                            </Text>
+                                        )}
                                     </View>
-                                    {/* Skill Badge Display */}
+
+                                    {/* Primary Badge: SkillScore > Faceit Level > PSN */}
                                     <View style={{ marginLeft: 'auto' }}>
-                                        {profile?.skillScores?.[game.key] ? (
-                                            <SkillBadge
-                                                tier={profile.skillScores[game.key].tier}
-                                                rating={profile.skillScores[game.key].rating}
-                                                size="compact"
-                                            />
+                                        {skillScore ? (
+                                            <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
                                         ) : (
-                                            /* Legacy/Fallback displays if no SkillScore exists yet */
-                                            game.key === 'cs2' && details.faceitLevel ? (
-                                                <Image
-                                                    source={faceitLevelIcons[details.faceitLevel]}
-                                                    style={styles.faceitIcon}
-                                                    resizeMode="contain"
-                                                />
-                                            ) : (game.key === 'fc26' || game.key === 'tekken8') && details.psnData ? (
+                                            /* Legacy/External Badge Fallback */
+                                            game.key === 'cs2' && profile?.faceitSkillLevel ? (
+                                                <Image source={faceitLevelIcons[profile.faceitSkillLevel]} style={styles.faceitIcon} resizeMode="contain" />
+                                            ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
                                                 <View style={styles.gameSkill}>
                                                     <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={{ marginRight: 4 }} />
-                                                    <Text style={[styles.gameRole, { color: COLORS.text, fontWeight: '600' }]}>
-                                                        {details.psnData.percent}%
-                                                    </Text>
                                                 </View>
                                             ) : (
                                                 <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
@@ -431,13 +340,8 @@ export default function Profile() {
                                 </TouchableOpacity>
                             );
                         } else {
-                            // Inactive game card (grayed out, tap to add)
                             return (
-                                <TouchableOpacity
-                                    key={game.key}
-                                    style={styles.gameCardInactive}
-                                    onPress={() => handleAddGame(game.key)}
-                                >
+                                <TouchableOpacity key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
                                     <View style={styles.gameIconInactive}>
                                         <MaterialIcons name={game.icon} size={24} color={COLORS.muted} />
                                     </View>
@@ -449,7 +353,7 @@ export default function Profile() {
                     })}
                 </View>
 
-                {/* Platform Links */}
+                {/* Platforms */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Connected Platforms</Text>
@@ -463,10 +367,14 @@ export default function Profile() {
                         <View style={styles.platformInfo}>
                             <Text style={styles.platformName}>Steam</Text>
                             {profile?.steamPersonaName ? (
-                                <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
-                            ) : (
-                                <Text style={styles.platformNotLinked}>Not linked</Text>
-                            )}
+                                <>
+                                    <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
+                                    {/* Last Synced could be driven by `updatedAt` for now as proxy or real sync time if we stored it */}
+                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                    </Text>
+                                </>
+                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                         </View>
                         <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
                     </TouchableOpacity>
@@ -479,10 +387,13 @@ export default function Profile() {
                         <View style={styles.platformInfo}>
                             <Text style={styles.platformName}>FACEIT</Text>
                             {profile?.faceitNickname ? (
-                                <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
-                            ) : (
-                                <Text style={styles.platformNotLinked}>Not linked</Text>
-                            )}
+                                <>
+                                    <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
+                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                    </Text>
+                                </>
+                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                         </View>
                         <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
                     </TouchableOpacity>
@@ -495,10 +406,13 @@ export default function Profile() {
                         <View style={styles.platformInfo}>
                             <Text style={styles.platformName}>PlayStation Network</Text>
                             {profile?.psnStats?.psnOnlineId ? (
-                                <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
-                            ) : (
-                                <Text style={styles.platformNotLinked}>Not linked</Text>
-                            )}
+                                <>
+                                    <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
+                                    <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                    </Text>
+                                </>
+                            ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
                         </View>
                         <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
                     </TouchableOpacity>
@@ -528,15 +442,9 @@ export default function Profile() {
                             <Text style={styles.sectionLink}>View All</Text>
                         </TouchableOpacity>
                     </View>
-
                     <View style={styles.emptyState}>
-                        <Text style={styles.emptyText}>
-                            You haven't joined any teams yet.
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.emptyButton}
-                            onPress={() => router.push("/teams/create")}
-                        >
+                        <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
+                        <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
                             <Text style={styles.emptyButtonText}>Create a Team</Text>
                         </TouchableOpacity>
                     </View>
@@ -550,21 +458,15 @@ export default function Profile() {
                             <Text style={styles.sectionLink}>View All</Text>
                         </TouchableOpacity>
                     </View>
-
                     <View style={styles.emptyState}>
-                        <Text style={styles.emptyText}>
-                            No matches played yet.
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.emptyButton}
-                            onPress={() => router.push("/(player)/(tabs)/matchrooms")}
-                        >
+                        <Text style={styles.emptyText}>No matches played yet.</Text>
+                        <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(player)/(tabs)/matchrooms")}>
                             <Text style={styles.emptyButtonText}>Find a Match</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* Logout Button */}
+                {/* Logout */}
                 <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
                     <MaterialIcons name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>
