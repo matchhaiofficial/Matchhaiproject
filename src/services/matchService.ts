@@ -11,10 +11,12 @@ import {
     query,
     runTransaction,
     serverTimestamp,
-    updateDoc
+    updateDoc,
+    where
 } from "firebase/firestore";
 import { db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
+import { isRoomExpired, isRoomLocked, isRoomFull } from "../utils/matchroomLifecycle";
 
 export interface Slot {
     slotId: string;
@@ -41,7 +43,7 @@ export interface Matchroom {
     game: string;
     title: string;
     description: string;
-    status: 'open' | 'in-progress' | 'completed';
+    status: 'open' | 'in-progress' | 'completed' | 'locked' | 'expired';
     maxPlayers: number;
     currentPlayers: number;
     players: Array<{
@@ -119,6 +121,8 @@ export interface Matchroom {
     }>;
 
     isPrivate?: boolean; // Invite-only
+    isLocked?: boolean; // Explicitly locked
+    lockedAt?: any; // When the room was locked
     zoneAdminApproved?: boolean;
     resultVerification?: {
         status: 'pending' | 'participant_vote' | 'admin_review' | 'resolved';
@@ -246,10 +250,29 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
-        // Use a transaction to safely join (concurrency)
-        // For MVP, simplified update:
-        await updateDoc(roomRef, {
-            currentPlayers: (await getDoc(roomRef)).data()?.currentPlayers + 1,
+        // Fetch room first to check expiry/lock status
+        const roomSnap = await getDoc(roomRef);
+        if (!roomSnap.exists()) {
+            return { ok: false, message: "Matchroom not found" };
+        }
+        const room = roomSnap.data() as Matchroom;
+
+        // Guard: Check if room is expired
+        if (isRoomExpired(room)) {
+            return { ok: false, message: "This matchroom has expired (valid for 48 hours)" };
+        }
+
+        // Guard: Check if room is locked or full
+        if (isRoomLocked(room)) {
+            return { ok: false, message: "Matchroom is full and locked" };
+        }
+
+        // Calculate if this join will fill the room
+        const newPlayerCount = (room.currentPlayers || 0) + 1;
+        const willBeFull = newPlayerCount >= (room.maxPlayers || 10);
+
+        const updateData: any = {
+            currentPlayers: newPlayerCount,
             players: arrayUnion({
                 uid: user.uid,
                 username: user.username,
@@ -257,11 +280,16 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
                 role: role || 'Flex'
             }),
             playerUids: arrayUnion(user.uid)
-        });
+        };
 
-        // Update Slot if using slot system (Phase 1.5)
-        // Note: Real slot logic would find the first open slot and assign it.
-        // For now, we assume simple join pushes to players array.
+        // Auto-lock when full
+        if (willBeFull) {
+            updateData.status = 'locked';
+            updateData.isLocked = true;
+            updateData.lockedAt = serverTimestamp();
+        }
+
+        await updateDoc(roomRef, updateData);
 
         return { ok: true };
     } catch (error) {
@@ -303,5 +331,35 @@ export async function startMatch(
     } catch (error) {
         Logger.error("matchService", "Error starting match", error);
         return { ok: false, message: "Failed to start match" };
+    }
+}
+
+export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: { hosted: Matchroom[]; joined: Matchroom[] } } | { ok: false; message: string }> {
+    try {
+        const hostedQuery = query(
+            collection(db, COLLECTION_NAME),
+            where("hostUid", "==", uid),
+            orderBy("createdAt", "desc")
+        );
+        const joinedQuery = query(
+            collection(db, COLLECTION_NAME),
+            where("playerUids", "array-contains", uid),
+            orderBy("createdAt", "desc")
+        );
+
+        const [hostedSnap, joinedSnap] = await Promise.all([
+            getDocs(hostedQuery),
+            getDocs(joinedQuery)
+        ]);
+
+        const hosted = hostedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom));
+        const joined = joinedSnap.docs
+            .map(doc => ({ id: doc.id, ...doc.data() } as Matchroom))
+            .filter(room => room.hostUid !== uid); // Only non-hosted
+
+        return { ok: true, data: { hosted, joined } };
+    } catch (error) {
+        Logger.error("matchService", "Error fetching user matchrooms", error);
+        return { ok: false, message: "Failed to fetch your matchrooms" };
     }
 }

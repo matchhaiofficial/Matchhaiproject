@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -25,9 +25,12 @@ import {
     PADEL_ROLES,
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
-import { getMatchrooms, Matchroom } from "../../../../src/services/matchService";
+import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../../src/constants/timelineFilters";
+import { getMatchrooms, Matchroom, Slot } from "../../../../src/services/matchService";
 import { COLORS, FONTS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
+import { matchesTimeline } from "../../../../src/utils/timeFilters";
+import { isRoomExpired } from "../../../../src/utils/matchroomLifecycle";
 import MatchroomCard from "../../../../app/matchrooms/components/MatchroomCard";
 import { GameKey } from "../types";
 import { normalizeGameKey } from "../utils/gameKeys";
@@ -41,6 +44,9 @@ import styles from "../../../../app/(player)/(tabs)/matchrooms.styles";
 
 // CS2 FACEIT skill levels
 const CS2_SKILL_LEVELS = ['Any', 'FACEIT 1-3', 'FACEIT 4-6', 'FACEIT 7-10'];
+
+// Generic Skill Level options (applies to all games)
+const SKILL_LEVEL_OPTIONS = ['Any', 'Casual', 'Competitive', 'Pro / Tournament'];
 
 // Overs for Cricket
 const OVERS_OPTIONS = ['Any', '5', '6'];
@@ -68,6 +74,10 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
     const [selectedSeries, setSelectedSeries] = useState<string>('Any');
     const [selectedOvers, setSelectedOvers] = useState<string>('Any');
     const [selectedLocation, setSelectedLocation] = useState<string>('Any');
+
+    // New filters
+    const [selectedSkillLevel, setSelectedSkillLevel] = useState<string>('Any');
+    const [selectedTimeline, setSelectedTimeline] = useState<TimelineFilterKey>('any');
 
     // Location Modal
     const [showLocationModal, setShowLocationModal] = useState(false);
@@ -100,8 +110,9 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         setSelectedRole('Any');
         setSelectedSeries('Any');
         setSelectedOvers('Any');
-        // Keep location? Usually yes, but let's reset to be safe or keep consistent with old behavior
         setSelectedLocation('Any');
+        setSelectedSkillLevel('Any');
+        setSelectedTimeline('any');
 
         // Auto-show filters if specific game selected? 
         if (selectedGame !== 'all') {
@@ -116,51 +127,65 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         fetchRooms();
     };
 
-    // List filtering logic
-    const filteredRooms = rooms.filter(room => {
-        if (searchQuery) {
-            const query = searchQuery.toLowerCase();
-            const matchesSearch =
-                room.title.toLowerCase().includes(query) ||
-                room.game.toLowerCase().includes(query) ||
-                room.location?.toLowerCase().includes(query);
-            if (!matchesSearch) return false;
-        }
+    const filteredRooms = useMemo(() => {
+        return rooms.filter((room: Matchroom) => {
+            // Filter out expired rooms
+            if (isRoomExpired(room)) return false;
 
-        if (selectedGame !== 'all') {
-            const roomGameKey = normalizeGameKey(room.game);
-            // Allow loose matching if normalization isn't perfect, but normalization is preferred
-            if (roomGameKey !== selectedGame) return false;
-        }
+            if (searchQuery) {
+                const query = searchQuery.toLowerCase();
+                const matchesSearch =
+                    room.title.toLowerCase().includes(query) ||
+                    room.game.toLowerCase().includes(query) ||
+                    room.location?.toLowerCase().includes(query);
+                if (!matchesSearch) return false;
+            }
 
-        if (selectedGame === 'cs2' && selectedSkill !== 'Any') {
-            const roomSkill = room.skillLevel || 'Any';
-            if (!roomSkill.includes(selectedSkill.replace('FACEIT ', ''))) return false;
-        }
+            if (selectedGame !== 'all') {
+                const roomGameKey = normalizeGameKey(room.game);
+                if (roomGameKey !== selectedGame) return false;
+            }
 
-        if (selectedFormat !== 'Any') {
-            if (!room.format?.toLowerCase().includes(selectedFormat.toLowerCase())) return false;
-        }
+            if (selectedGame === 'cs2' && selectedSkill !== 'Any') {
+                const roomSkill = room.skillLevel || 'Any';
+                if (!roomSkill.includes(selectedSkill.replace('FACEIT ', ''))) return false;
+            }
 
-        // Role filter - Atomic slot-based check
-        if (selectedRole !== 'Any') {
-            const hasSlotWithRole = (
-                room.slotsA?.some(s => s.status === 'open' && s.role === selectedRole) ||
-                room.slotsB?.some(s => s.status === 'open' && s.role === selectedRole)
-            );
-            if (!hasSlotWithRole) return false;
-        }
+            if (selectedFormat !== 'Any') {
+                if (!room.format?.toLowerCase().includes(selectedFormat.toLowerCase())) return false;
+            }
 
-        if (selectedSeries !== 'Any') {
-            if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
-        }
+            // Role filter - Atomic slot-based check
+            if (selectedRole !== 'Any') {
+                const hasSlotWithRole = (
+                    room.slotsA?.some((s: Slot) => s.status === 'open' && s.role === selectedRole) ||
+                    room.slotsB?.some((s: Slot) => s.status === 'open' && s.role === selectedRole)
+                );
+                if (!hasSlotWithRole) return false;
+            }
 
-        if (selectedLocation !== 'Any') {
-            if (!room.location?.toLowerCase().includes(selectedLocation.toLowerCase())) return false;
-        }
+            if (selectedSeries !== 'Any') {
+                if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
+            }
 
-        return true;
-    });
+            if (selectedLocation !== 'Any') {
+                if (!room.location?.toLowerCase().includes(selectedLocation.toLowerCase())) return false;
+            }
+
+            // Generic Skill Level filter
+            if (selectedSkillLevel !== 'Any') {
+                const roomSkillLevel = room.skillLevel || 'Casual';
+                if (selectedSkillLevel === 'Pro / Tournament') {
+                    if (!roomSkillLevel.toLowerCase().includes('pro') && !roomSkillLevel.toLowerCase().includes('tournament')) return false;
+                } else if (!roomSkillLevel.toLowerCase().includes(selectedSkillLevel.toLowerCase())) return false;
+            }
+
+            // Timeline filter (using shared helper)
+            if (!matchesTimeline(room, selectedTimeline)) return false;
+
+            return true;
+        });
+    }, [rooms, searchQuery, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedLocation, selectedSkillLevel, selectedTimeline]);
 
     // Get contextual options based on selected game
     const getFormatOptions = () => {
@@ -273,31 +298,58 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                     </TouchableOpacity>
 
                     {filtersExpanded && (
-                        <View style={[styles.filtersPanel, { marginTop: 0 }]}>
-                            {hasCS2SkillFilter() && renderFilterRow('Skill (FACEIT)', CS2_SKILL_LEVELS, selectedSkill, setSelectedSkill)}
-                            {hasFormatFilter() && renderFilterRow('Format', getFormatOptions(), selectedFormat, setSelectedFormat)}
-                            {hasRoleFilter() && renderFilterRow(
-                                selectedGame === 'futsal' ? 'Position' : 'Role',
-                                getRoleOptions(),
-                                selectedRole,
-                                setSelectedRole
-                            )}
-                            {hasSeriesFilter() && renderFilterRow('Series', getSeriesOptions(), selectedSeries, setSelectedSeries)}
-                            {hasOversFilter() && renderFilterRow('Overs', OVERS_OPTIONS, selectedOvers, setSelectedOvers)}
+                        <View style={{ maxHeight: 300 }}>
+                            <ScrollView
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                            >
+                                {/* New universal filters */}
+                                {renderFilterRow('Skill Level', SKILL_LEVEL_OPTIONS, selectedSkillLevel, setSelectedSkillLevel)}
 
-                            {/* Location Dropdown */}
-                            <View style={styles.filterSection}>
-                                <Text style={styles.filterLabel}>Location</Text>
-                                <TouchableOpacity
-                                    onPress={() => setShowLocationModal(true)}
-                                    style={[styles.locationDropdown, selectedLocation !== 'Any' && styles.locationDropdownActive]}
-                                >
-                                    <Text style={[styles.locationDropdownText, selectedLocation !== 'Any' && styles.locationDropdownTextActive]}>
-                                        {selectedLocation}
-                                    </Text>
-                                    <MaterialIcons name="arrow-drop-down" size={24} color={COLORS.muted} />
-                                </TouchableOpacity>
-                            </View>
+                                {/* Timeline filter - use TIMELINE_FILTERS */}
+                                <View style={styles.filterSection}>
+                                    <Text style={styles.filterLabel}>Timeline</Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+                                        {TIMELINE_FILTERS.map(filter => (
+                                            <TouchableOpacity
+                                                key={filter.key}
+                                                onPress={() => setSelectedTimeline(filter.key)}
+                                                style={[styles.optionChip, selectedTimeline === filter.key && styles.optionChipActive]}
+                                            >
+                                                <Text style={[styles.optionChipText, selectedTimeline === filter.key && styles.optionChipTextActive]}>
+                                                    {filter.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                </View>
+
+                                {/* Game-specific filters */}
+                                {hasCS2SkillFilter() && renderFilterRow('FACEIT Level', CS2_SKILL_LEVELS, selectedSkill, setSelectedSkill)}
+                                {hasFormatFilter() && renderFilterRow('Format', getFormatOptions(), selectedFormat, setSelectedFormat)}
+                                {hasRoleFilter() && renderFilterRow(
+                                    selectedGame === 'futsal' ? 'Position' : 'Role',
+                                    getRoleOptions(),
+                                    selectedRole,
+                                    setSelectedRole
+                                )}
+                                {hasSeriesFilter() && renderFilterRow('Series', getSeriesOptions(), selectedSeries, setSelectedSeries)}
+                                {hasOversFilter() && renderFilterRow('Overs', OVERS_OPTIONS, selectedOvers, setSelectedOvers)}
+
+                                {/* Location Dropdown */}
+                                <View style={styles.filterSection}>
+                                    <Text style={styles.filterLabel}>Location</Text>
+                                    <TouchableOpacity
+                                        onPress={() => setShowLocationModal(true)}
+                                        style={[styles.locationDropdown, selectedLocation !== 'Any' && styles.locationDropdownActive]}
+                                    >
+                                        <Text style={[styles.locationDropdownText, selectedLocation !== 'Any' && styles.locationDropdownTextActive]}>
+                                            {selectedLocation}
+                                        </Text>
+                                        <MaterialIcons name="arrow-drop-down" size={24} color={COLORS.muted} />
+                                    </TouchableOpacity>
+                                </View>
+                            </ScrollView>
                         </View>
                     )}
                 </View>
@@ -332,7 +384,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
             />
 
             {/* Create Matchroom FAB */}
-            <View style={[styles.fabWrapper, { bottom: 20 }]}>
+            <View style={[styles.fabWrapper, { bottom: 90 }]}>
                 <TouchableOpacity
                     onPress={() => router.push("/matchrooms/create" as any)}
                     activeOpacity={0.8}

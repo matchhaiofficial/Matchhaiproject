@@ -26,7 +26,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { calculateInitialRating, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
-import { GAME_RULES, GameRule } from "./constants";
+import { GAME_RULES, GameRule } from "./_constants";
 import styles from "./game-details.styles";
 
 // FACEIT Level Icons
