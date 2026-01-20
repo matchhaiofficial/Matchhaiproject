@@ -207,6 +207,12 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
     },
+    secondaryStat: {
+        color: COLORS.accent,
+        fontSize: TEXT_SIZES.xs,
+        fontFamily: FONTS.body,
+        marginTop: 2,
+    },
     gameSkill: {
         flexDirection: 'row',
         alignItems: 'center',

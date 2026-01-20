@@ -244,21 +244,23 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm,
-        marginRight: SPACING.sm,
-        marginBottom: SPACING.xs,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        marginRight: 8,
+        marginBottom: 8,
     },
     areaChipActive: {
-        backgroundColor: '#1e2a38',
+        backgroundColor: COLORS.accent + '15', // 15% opacity accent
         borderColor: COLORS.accent,
     },
     areaChipText: {
-        color: COLORS.muted,
+        color: COLORS.textSecondary,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.label - 1,
+        fontWeight: '500',
     },
     areaChipTextActive: {
-        color: COLORS.text,
+        color: COLORS.accent,
+        fontWeight: '700',
     },
 });
