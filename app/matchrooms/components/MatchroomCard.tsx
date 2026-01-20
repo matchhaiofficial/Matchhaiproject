@@ -4,6 +4,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
 import { Matchroom } from "../../../src/services/matchService";
+import { isRoomLocked, isRoomFull } from "../../../src/utils/matchroomLifecycle";
 import { COLORS } from "../../../src/theme";
 import styles from "../matchrooms.styles";
 
@@ -13,6 +14,10 @@ interface MatchroomCardProps {
 
 export default function MatchroomCard({ room }: MatchroomCardProps) {
     const router = useRouter();
+
+    // Check if room is locked/full
+    const isLocked = isRoomLocked(room);
+    const isFull = isRoomFull(room);
 
     // Prepare Roles/Skills for display
     const displayRoles: string[] = [];
@@ -73,15 +78,34 @@ export default function MatchroomCard({ room }: MatchroomCardProps) {
             onPress={handlePress}
             activeOpacity={0.7}
         >
-            {/* Row 1: Game Name & Skill Score */}
+            {/* Row 1: Game Name, Skill Score & Lock Badge */}
             <View style={[styles.nearbyTitleRow, { marginBottom: 6 }]}>
                 <Text style={[styles.nearbyGame, { marginBottom: 0 }]}>{room.game}</Text>
-                {room.hostSkillScore !== undefined && room.hostSkillScore !== null && (
-                    <View style={styles.matchScoreBadge}>
-                        <MaterialIcons name="local-fire-department" size={12} color="#FFF" />
-                        <Text style={styles.matchScoreText}>{room.hostSkillScore}%</Text>
-                    </View>
-                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {/* LOCKED/FULL Badge */}
+                    {isLocked && (
+                        <View style={{
+                            backgroundColor: '#FF5722',
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 2,
+                        }}>
+                            <MaterialIcons name="lock" size={10} color="#FFF" />
+                            <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>
+                                {isFull ? 'FULL' : 'LOCKED'}
+                            </Text>
+                        </View>
+                    )}
+                    {room.hostSkillScore !== undefined && room.hostSkillScore !== null && (
+                        <View style={styles.matchScoreBadge}>
+                            <MaterialIcons name="local-fire-department" size={12} color="#FFF" />
+                            <Text style={styles.matchScoreText}>{room.hostSkillScore}%</Text>
+                        </View>
+                    )}
+                </View>
             </View>
 
             {/* Row 2: Title & Book Slot Button */}

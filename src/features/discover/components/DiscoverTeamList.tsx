@@ -47,6 +47,8 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
     // Filter State
     const [filtersExpanded, setFiltersExpanded] = useState(true);
     const [selectedTeamFilter, setSelectedTeamFilter] = useState('All'); // 'All' | 'Open Slots'
+    const [selectedTeamSize, setSelectedTeamSize] = useState('Any');
+    const [selectedCompetitiveLevel, setSelectedCompetitiveLevel] = useState('Any');
 
     // Social State
     const [requestedTeamIds, setRequestedTeamIds] = useState<Set<string>>(new Set());
@@ -129,6 +131,8 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
     // Reset filters
     useEffect(() => {
         setSelectedTeamFilter('All');
+        setSelectedTeamSize('Any');
+        setSelectedCompetitiveLevel('Any');
         if (selectedGame !== 'all') {
             setFiltersExpanded(true);
         }
@@ -179,6 +183,16 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
 
                 <View style={styles.teamTitleRow}>
                     <Text style={styles.teamName} numberOfLines={1}>{item.name}</Text>
+                </View>
+
+                <View style={styles.teamBottomRow}>
+                    <View style={styles.captainRow}>
+                        <MaterialIcons name="person" size={12} color={COLORS.muted} />
+                        <Text style={styles.captainText}>
+                            Cap: {item.captainUsername || "Unknown"}
+                        </Text>
+                    </View>
+
                     {isRequested ? (
                         <View style={styles.requestedBtn}>
                             <Text style={styles.requestedBtnText}>Requested</Text>
@@ -196,25 +210,35 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
                         </TouchableOpacity>
                     )}
                 </View>
-
-                <View style={styles.teamBottomRow}>
-                    <View style={styles.captainRow}>
-                        <MaterialIcons name="person" size={12} color={COLORS.muted} />
-                        <Text style={styles.captainText}>
-                            Cap: {item.captainUsername || "Unknown"}
-                        </Text>
-                    </View>
-                    {/* Stats or other info */}
-                </View>
             </Pressable>
         );
     };
 
     // Client-side filtering check
     const displayedTeams = publicTeams.filter(t => {
+        // Existing Open Slots filter
         if (selectedTeamFilter === 'Open Slots') {
-            return (t.memberCount || 0) < (t.maxMembers || 0);
+            if ((t.memberCount || 0) >= (t.maxMembers || 0)) return false;
         }
+
+        // Team Size filter
+        if (selectedTeamSize !== 'Any') {
+            const memberCount = t.memberCount || 0;
+            if (selectedTeamSize === '1-2 players') {
+                if (memberCount < 1 || memberCount > 2) return false;
+            } else if (selectedTeamSize === '3-5 players') {
+                if (memberCount < 3 || memberCount > 5) return false;
+            } else if (selectedTeamSize === 'Full Team') {
+                if (memberCount !== (t.maxMembers || 0)) return false;
+            }
+        }
+
+        // Competitive Level filter (placeholder field)
+        if (selectedCompetitiveLevel !== 'Any') {
+            const teamLevel = (t as any).competitiveLevel || 'Casual';
+            if (!teamLevel.toLowerCase().includes(selectedCompetitiveLevel.toLowerCase().replace('-focused', ''))) return false;
+        }
+
         return true;
     });
 
@@ -245,6 +269,10 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
         </View>
     );
 
+    // Filter options
+    const TEAM_SIZE_OPTIONS = ['Any', '1-2 players', '3-5 players', 'Full Team'];
+    const COMPETITIVE_LEVEL_OPTIONS = ['Any', 'Casual', 'Competitive', 'Tournament-focused'];
+
     return (
         <View style={{ flex: 1 }}>
             {/* Contextual Filters */}
@@ -274,13 +302,20 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
                     </TouchableOpacity>
 
                     {filtersExpanded && (
-                        <View style={[styles.filtersPanel, { marginTop: 0 }]}>
-                            {renderFilterRow(
-                                'Availability',
-                                ['All', 'Open Slots'],
-                                selectedTeamFilter,
-                                setSelectedTeamFilter
-                            )}
+                        <View style={{ maxHeight: 300 }}>
+                            <ScrollView
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                            >
+                                {renderFilterRow(
+                                    'Availability',
+                                    ['All', 'Open Slots'],
+                                    selectedTeamFilter,
+                                    setSelectedTeamFilter
+                                )}
+                                {renderFilterRow('Team Size', TEAM_SIZE_OPTIONS, selectedTeamSize, setSelectedTeamSize)}
+                                {renderFilterRow('Competitive Level', COMPETITIVE_LEVEL_OPTIONS, selectedCompetitiveLevel, setSelectedCompetitiveLevel)}
+                            </ScrollView>
                         </View>
                     )}
                 </View>
@@ -314,6 +349,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
                     </View>
                 }
             />
+
         </View>
     );
 }

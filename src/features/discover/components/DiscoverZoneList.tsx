@@ -6,6 +6,7 @@ import {
     FlatList,
     Image,
     RefreshControl,
+    ScrollView,
     Text,
     TouchableOpacity,
     View,
@@ -29,6 +30,14 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
+    // Filter state
+    const [filtersExpanded, setFiltersExpanded] = useState(true);
+    const [selectedProximity, setSelectedProximity] = useState('Any');
+
+    // User's area/city for proximity filtering (could be from context/profile)
+    const [userArea, setUserArea] = useState<string | null>(null);
+    const [userCity, setUserCity] = useState<string | null>('Karachi'); // Default to Karachi
+
     const fetchZones = async () => {
         try {
             // If selectedGame is 'all', pass undefined to fetch all active zones
@@ -49,6 +58,7 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
     useEffect(() => {
         setLoading(true);
+        setSelectedProximity('Any');
         fetchZones();
     }, [selectedGame]);
 
@@ -66,6 +76,21 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
             if (!matchesName && !matchesCity && !matchesArea) return false;
         }
+
+        // Proximity filter
+        if (selectedProximity !== 'Any') {
+            const zoneArea = zone.primaryBranch?.areaLabel?.toLowerCase();
+            const zoneCity = zone.primaryBranch?.city?.toLowerCase();
+
+            if (selectedProximity === 'Same Area') {
+                // Match area if user has set their area
+                if (userArea && zoneArea && !zoneArea.includes(userArea.toLowerCase())) return false;
+            } else if (selectedProximity === 'Same City') {
+                // Match city
+                if (userCity && zoneCity && !zoneCity.includes(userCity.toLowerCase())) return false;
+            }
+        }
+
         return true;
     });
 
@@ -126,8 +151,70 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
         );
     }
 
+    // Filter options
+    const PROXIMITY_OPTIONS = ['Any', 'Same Area', 'Same City'];
+
+    // Render filter row helper (consistent with other tabs)
+    const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
+        <View style={filterStyles.filterSection}>
+            <Text style={filterStyles.filterLabel}>{label}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
+                {options.map(opt => (
+                    <TouchableOpacity
+                        key={opt}
+                        onPress={() => onSelect(opt)}
+                        style={[filterStyles.optionChip, selected === opt && filterStyles.optionChipActive]}
+                    >
+                        <Text style={[filterStyles.optionChipText, selected === opt && filterStyles.optionChipTextActive]}>
+                            {opt}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </ScrollView>
+        </View>
+    );
+
     return (
         <View style={{ flex: 1 }}>
+            {/* Contextual Filters */}
+            {selectedGame !== 'all' && (
+                <View>
+                    <TouchableOpacity
+                        onPress={() => setFiltersExpanded(!filtersExpanded)}
+                        activeOpacity={0.7}
+                        style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingHorizontal: 16,
+                            paddingBottom: 8,
+                            paddingTop: 8,
+                            backgroundColor: COLORS.background
+                        }}
+                    >
+                        <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
+                            Filters
+                        </Text>
+                        <MaterialIcons
+                            name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
+                            size={20}
+                            color={COLORS.muted}
+                        />
+                    </TouchableOpacity>
+
+                    {filtersExpanded && (
+                        <View style={{ maxHeight: 300 }}>
+                            <ScrollView
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={[filterStyles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                            >
+                                {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
+                            </ScrollView>
+                        </View>
+                    )}
+                </View>
+            )}
+
             <View style={styles.resultsCount}>
                 <Text style={styles.resultsCountText}>
                     {filteredZones.length} zone{filteredZones.length !== 1 ? 's' : ''} found
@@ -261,5 +348,54 @@ const styles = StyleSheet.create({
     emptySubtitle: {
         color: COLORS.muted,
         textAlign: 'center',
+    },
+});
+
+// Filter styles (consistent with other tabs)
+const filterStyles = StyleSheet.create({
+    filtersPanel: {
+        backgroundColor: COLORS.cardBackground,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        paddingVertical: 12,
+    },
+    filterSection: {
+        marginBottom: 12,
+        paddingHorizontal: 16,
+    },
+    filterLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.heading,
+        fontSize: 12,
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    filterOptionsScroll: {
+        flexGrow: 0,
+    },
+    optionChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm - 1,
+        marginRight: SPACING.sm,
+        marginBottom: 5,
+    },
+    optionChipActive: {
+        backgroundColor: '#1e2a38',
+        borderColor: COLORS.accent,
+    },
+    optionChipText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+    },
+    optionChipTextActive: {
+        color: COLORS.text,
     },
 });

@@ -8,9 +8,14 @@ import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
 import { getUserProfile, UserProfile } from "../../../src/services/userService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
+import { useToast } from "../../../src/hooks/useToast";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
+import { formatDistanceToNow } from "date-fns";
+import { Timestamp } from "firebase/firestore";
+import { refreshUserStats } from "../../../src/services/userService";
+import { useMemo } from "react";
 
 const GAMES = [
     { key: 'cs2', label: 'CS2' },
@@ -35,10 +40,26 @@ const getFaceitLevel = (elo: number): number => {
     return 10;
 };
 
+const getPlayerGames = (profile: UserProfile): string[] => {
+    const games: string[] = [];
+
+    // Check for explicit "plays" flags or existing skill scores
+    if (profile.playsCs2 || profile.skillScores?.cs2) games.push('cs2');
+    if (profile.playsTekken || profile.skillScores?.tekken8) games.push('tekken8');
+    if (profile.playsFc || profile.skillScores?.fc26) games.push('fc26');
+    if (profile.playsFutsal || profile.skillScores?.futsal) games.push('futsal');
+    if (profile.playsIndoorCricket || profile.skillScores?.indoor_cricket) games.push('indoor_cricket');
+    if (profile.playsPadel || profile.skillScores?.padel) games.push('padel');
+    if (profile.playsPickleball || profile.skillScores?.pickleball) games.push('pickleball');
+
+    return games;
+};
+
 export default function PlayerProfile() {
     const { uid } = useLocalSearchParams<{ uid: string }>();
     const router = useRouter();
     const { user } = useAuth();
+    const { showToast } = useToast();
 
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
@@ -48,6 +69,71 @@ export default function PlayerProfile() {
     const [hasIncomingRequest, setHasIncomingRequest] = useState(false); // Incoming request
     const [incomingRequestId, setIncomingRequestId] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+
+    // --- Derived Logic Helpers ---
+
+    const { winRate, confidence, activityStatus, trend } = useMemo(() => {
+        if (!profile || !selectedGame) return { winRate: 0, confidence: 'Low', activityStatus: 'No data', trend: 'Stable' };
+
+        const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
+
+        // 1. Win Rate
+        const wins = skillData?.wins || 0;
+        const totalMatches = skillData?.matchesPlayed || 0;
+        const wr = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+
+        // 2. Confidence
+        let conf = 'Low';
+        const isVerified = profile.steamId || profile.faceitId || profile.psnAccountId;
+        if (totalMatches >= 10 || (isVerified && totalMatches >= 3)) conf = 'High';
+        else if (totalMatches > 0 || isVerified) conf = 'Medium';
+
+        // 3. Activity Status
+        let status = 'Inactive';
+        const lastMatch = skillData?.lastMatchDate;
+        if (lastMatch) {
+            const date = lastMatch instanceof Timestamp ? lastMatch.toDate() : new Date(lastMatch);
+            status = `Played ${formatDistanceToNow(date)} ago`;
+        } else if (profile.isOnline) {
+            status = 'Online Now';
+        }
+
+        // 4. Trend
+        let tr = 'Stable';
+        const lastUpdated = skillData?.lastUpdated;
+        if (lastUpdated) {
+            const updateDate = lastUpdated instanceof Timestamp ? lastUpdated.toDate() : new Date(lastUpdated);
+            const daysSinceUpdate = (new Date().getTime() - updateDate.getTime()) / (1000 * 3600 * 24);
+            if (daysSinceUpdate < 7 && totalMatches > 0) tr = 'Increasing';
+            else if (daysSinceUpdate > 14) tr = 'Decreasing';
+        }
+
+        return { winRate: wr, confidence: conf, activityStatus: status, trend: tr };
+    }, [profile, selectedGame]);
+
+    const mutualContext = useMemo(() => {
+        if (!user || !profile) return [];
+        const chips = [];
+
+        // Shared Games
+        const myGames = getPlayerGames(user as any); // useAuth user might not have full profile, but typically has some fields
+        const sharedGames = getPlayerGames(profile).filter(g => myGames.includes(g));
+        if (sharedGames.length > 0) {
+            const matchedNames = GAMES.filter(g => sharedGames.includes(g.key)).map(g => g.label);
+            chips.push(`Also plays ${matchedNames.join(', ')}`);
+        }
+
+        // Shared Areas
+        if (!profile.hideAreasPublicly && user && (user as any).areasPreferred && profile.areasPreferred) {
+            const sharedAreas = profile.areasPreferred.filter(a => (user as any).areasPreferred.includes(a));
+            if (sharedAreas.length > 0) {
+                chips.push(`Same areas: ${sharedAreas.slice(0, 2).join(', ')}`);
+            }
+        }
+
+        return chips;
+    }, [user, profile]);
 
     useEffect(() => {
         loadProfile();
@@ -131,16 +217,310 @@ export default function PlayerProfile() {
         }
     };
 
-    const getPlayerGames = (profile: UserProfile): string[] => {
-        const games: string[] = [];
-        if (profile.cs2Role) games.push('cs2');
-        if (profile.tekkenFavorites && profile.tekkenFavorites.length > 0) games.push('tekken8');
-        if (profile.fcTeam) games.push('fc26');
-        if (profile.futsalPosition) games.push('futsal');
-        if (profile.indoorCricketRole) games.push('indoor_cricket');
-        if (profile.padelRole) games.push('padel');
-        if (profile.pickleballRole) games.push('pickleball');
-        return games;
+    const handleSync = async () => {
+        if (!uid || syncing) return;
+        setSyncing(true);
+        try {
+            const res = await refreshUserStats(uid);
+            if (res.ok) {
+                showToast({ type: "success", title: "Synced", message: "Gaming stats updated successfully" });
+                loadProfile();
+            }
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const renderFriendActions = () => {
+        if (!uid || user?.uid === uid) return null;
+
+        if (isFriend) {
+            return (
+                <View style={[styles.statusBadge, styles.friendBadge]}>
+                    <MaterialIcons name="check-circle" size={18} color={COLORS.success} />
+                    <Text style={[styles.statusBadgeText, { color: COLORS.success }]}>Connected</Text>
+                </View>
+            );
+        }
+
+        if (hasIncomingRequest) {
+            return (
+                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                    <TouchableOpacity
+                        onPress={async () => {
+                            if (!incomingRequestId) return;
+                            setActionLoading(true);
+                            try {
+                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'accept' });
+                                if (res.ok) {
+                                    setIsFriend(true);
+                                    setHasIncomingRequest(false);
+                                } else {
+                                    alert(res.message);
+                                }
+                            } catch (error) {
+                                console.error(error);
+                            } finally {
+                                setActionLoading(false);
+                            }
+                        }}
+                        disabled={actionLoading}
+                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.success }]}
+                    >
+                        {actionLoading ? (
+                            <ActivityIndicator color="#FFF" size="small" />
+                        ) : (
+                            <>
+                                <MaterialIcons name="check" size={18} color="#FFF" />
+                                <Text style={styles.mainButtonText}>Accept</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={async () => {
+                            if (!incomingRequestId) return;
+                            setActionLoading(true);
+                            try {
+                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'decline' });
+                                if (res.ok) {
+                                    setHasIncomingRequest(false);
+                                    setIncomingRequestId(null);
+                                } else {
+                                    alert(res.message);
+                                }
+                            } catch (error) {
+                                console.error(error);
+                            } finally {
+                                setActionLoading(false);
+                            }
+                        }}
+                        disabled={actionLoading}
+                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight, borderWidth: 1, borderColor: COLORS.divider }]}
+                    >
+                        <MaterialIcons name="close" size={18} color={COLORS.text} />
+                        <Text style={[styles.mainButtonText, { color: COLORS.text }]}>Decline</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
+
+        if (isPending) {
+            return (
+                <View style={[styles.statusBadge, styles.pendingBadge]}>
+                    <MaterialIcons name="schedule" size={18} color={COLORS.warning} />
+                    <Text style={[styles.statusBadgeText, { color: COLORS.warning }]}>Request Sent</Text>
+                </View>
+            );
+        }
+
+        return (
+            <TouchableOpacity onPress={handleAddFriend} disabled={actionLoading} style={styles.mainButton}>
+                {actionLoading ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                    <>
+                        <MaterialIcons name="person-add" size={18} color="#FFF" />
+                        <Text style={styles.mainButtonText}>Add Friend</Text>
+                    </>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
+    const renderSummary = () => {
+        if (!profile) return null;
+        return (
+            <View style={styles.profileCard}>
+                <View style={styles.avatar}>
+                    <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                    {profile.isOnline && <View style={styles.onlineBadge} />}
+                </View>
+
+                <Text style={styles.profileName}>{profile.fullName || 'Player'}</Text>
+                <Text style={styles.profileUsername}>@{profile.username}</Text>
+
+                {/* Mutual Context Chips */}
+                {mutualContext.length > 0 && (
+                    <View style={[styles.chipRow, { marginTop: SPACING.sm, justifyContent: 'center' }]}>
+                        {mutualContext.map((c, i) => (
+                            <View key={i} style={styles.contextChip}>
+                                <MaterialIcons name="groups" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextText}>{c}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+
+                <View style={styles.profileMeta}>
+                    {profile.city && (
+                        <View style={styles.profileMetaItem}>
+                            <MaterialIcons name="location-on" size={14} color={COLORS.muted} />
+                            <Text style={styles.profileMetaText}>{profile.city}</Text>
+                        </View>
+                    )}
+                    <View style={styles.profileMetaItem}>
+                        <MaterialIcons name="security" size={14} color={COLORS.muted} />
+                        <Text style={styles.profileMetaText}>
+                            {Math.round((profile.trustScore || 0.5) * 100)}% Trust
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Recent Activity Label */}
+                <View style={styles.activityCard}>
+                    <MaterialIcons
+                        name="access-time"
+                        size={14}
+                        color={activityStatus.includes('ago') || activityStatus === 'Online Now' ? COLORS.success : COLORS.muted}
+                    />
+                    <Text style={styles.activityText}>{activityStatus}</Text>
+                </View>
+
+                {user?.uid !== uid && (
+                    <View style={styles.actionContainer}>
+                        {renderFriendActions()}
+                    </View>
+                )}
+            </View>
+        );
+    };
+
+    const renderPrimarySkillCard = () => {
+        if (!profile || !selectedGame) return null;
+        const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
+        if (!skillData) return null;
+
+        const sourceLabel = skillData.initialSource === 'faceit' ? 'FACEIT' :
+            skillData.initialSource === 'psn' ? 'PSN' :
+                skillData.initialSource === 'steam' ? 'Steam' : 'MatchHai';
+
+        return (
+            <View style={styles.primarySkillCard}>
+                <View style={styles.skillTitleRow}>
+                    <Text style={styles.statsHeaderTitle}>{selectedGame} PERFORMANCE</Text>
+                    <Text style={styles.skillSource}>Verified via {sourceLabel}</Text>
+                </View>
+
+                <View style={styles.ratingMainRow}>
+                    <View style={[styles.ratingCircle, { borderColor: trend === 'Increasing' ? COLORS.success : trend === 'Decreasing' ? COLORS.error : COLORS.accent }]}>
+                        <Text style={styles.ratingValue}>{skillData.rating}</Text>
+                    </View>
+                    <View style={styles.ratingInfo}>
+                        <Text style={styles.tierName}>{skillData.tier}</Text>
+                        <View style={styles.confidenceRow}>
+                            <MaterialIcons
+                                name="verified"
+                                size={14}
+                                color={confidence === 'High' ? COLORS.success : confidence === 'Medium' ? COLORS.warning : COLORS.muted}
+                            />
+                            <Text style={styles.confidenceText}>Confidence: {confidence}</Text>
+
+                            {/* Trend Icon */}
+                            <MaterialIcons
+                                name={trend === 'Increasing' ? "trending-up" : trend === 'Decreasing' ? "trending-down" : "trending-flat"}
+                                size={16}
+                                style={[
+                                    styles.trendIcon,
+                                    trend === 'Increasing' ? styles.trendUp : trend === 'Decreasing' ? styles.trendDown : styles.trendStable
+                                ]}
+                            />
+                        </View>
+                    </View>
+                </View>
+
+                <View style={styles.primaryStatsGrid}>
+                    <View style={styles.primaryStatBox}>
+                        <Text style={styles.primaryStatLabel}>Win Rate</Text>
+                        <Text style={styles.primaryStatValue}>{winRate}%</Text>
+                    </View>
+                    <View style={styles.primaryStatBox}>
+                        <Text style={styles.primaryStatLabel}>Matches</Text>
+                        <Text style={styles.primaryStatValue}>{skillData.matchesPlayed}</Text>
+                    </View>
+                    <View style={styles.primaryStatBox}>
+                        <Text style={styles.primaryStatLabel}>W / L</Text>
+                        <Text style={styles.primaryStatValue}>{skillData.wins} / {skillData.losses}</Text>
+                    </View>
+                </View>
+            </View>
+        );
+    };
+
+    const renderPlatformCard = (name: string, value: string | undefined, icon: string, color: string, isVerified: boolean) => {
+        if (!value || !profile) {
+            return (
+                <View style={[styles.platformCard, styles.notConnected]}>
+                    <View style={[styles.platformIcon, { backgroundColor: color }]}>
+                        <FontAwesome5 name={icon} size={18} color="#FFF" />
+                    </View>
+                    <View style={styles.platformInfo}>
+                        <Text style={styles.platformName}>{name}</Text>
+                        <Text style={styles.platformValue}>Not connected</Text>
+                    </View>
+                    {uid === user?.uid && (
+                        <TouchableOpacity onPress={() => router.push('/(player)/profile/edit' as any)}>
+                            <MaterialIcons name="add-circle-outline" size={24} color={COLORS.muted} />
+                        </TouchableOpacity>
+                    )}
+                </View>
+            );
+        }
+
+        return (
+            <View style={styles.platformCard}>
+                <View style={[styles.platformIcon, { backgroundColor: color }]}>
+                    <FontAwesome5 name={icon} size={18} color="#FFF" />
+                </View>
+                <View style={styles.platformInfo}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={styles.platformName}>{name}</Text>
+                        {isVerified && (
+                            <View style={[styles.badge, styles.verifiedBadge]}>
+                                <Text style={styles.verifiedBadgeText}>Verified</Text>
+                            </View>
+                        )}
+                    </View>
+                    <Text style={styles.platformValue}>
+                        {profile.hidePlatformsPublicly && uid !== user?.uid ? 'Verified Account' : value}
+                    </Text>
+                </View>
+                {uid === user?.uid && (
+                    <TouchableOpacity
+                        onPress={handleSync}
+                        disabled={syncing}
+                        style={styles.syncButton}
+                    >
+                        {syncing ? (
+                            <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : (
+                            <MaterialIcons name="sync" size={20} color={COLORS.accent} />
+                        )}
+                    </TouchableOpacity>
+                )}
+                {!isVerified && (
+                    <TouchableOpacity onPress={() => Linking.openURL(value)}>
+                        <MaterialIcons name="launch" size={20} color={COLORS.muted} style={{ marginLeft: 8 }} />
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    };
+
+    const renderPlatforms = () => {
+        if (!profile) return null;
+
+        return (
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Connected Platforms</Text>
+                <View style={styles.sectionPadding}>
+                    {renderPlatformCard('Steam', profile.steamProfileUrl, 'steam', '#1b2838', !!profile.steamId)}
+                    {renderPlatformCard('FACEIT', profile.faceitProfileUrl, 'foursquare', '#ff5500', !!profile.faceitId)}
+                    {renderPlatformCard('PlayStation', profile.psnOnlineId, 'playstation', '#003791', !!profile.psnAccountId)}
+                </View>
+            </View>
+        );
     };
 
     const renderGameStats = () => {
@@ -291,190 +671,87 @@ export default function PlayerProfile() {
             </SafeAreaView>
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                {/* Profile Summary Card (Matching Profile Tab) */}
-                <View style={styles.profileCard}>
-                    <View style={styles.avatar}>
-                        <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                        {profile.isOnline && <View style={styles.onlineBadge} />}
-                    </View>
-
-                    <Text style={styles.profileName}>{profile.fullName || 'Player'}</Text>
-                    <Text style={styles.profileUsername}>@{profile.username}</Text>
-
-                    {/* Meta info: City */}
-                    <View style={styles.profileMeta}>
-                        {profile.city && (
-                            <View style={styles.profileMetaItem}>
-                                <MaterialIcons name="location-on" size={14} color={COLORS.muted} />
-                                <Text style={styles.profileMetaText}>{profile.city}</Text>
-                            </View>
-                        )}
-                        <View style={styles.profileMetaItem}>
-                            <MaterialIcons name="security" size={14} color={COLORS.muted} />
-                            <Text style={styles.profileMetaText}>
-                                {Math.round((profile.trustScore || 0.5) * 100)}% Trust
-                            </Text>
-                        </View>
-                    </View>
-
-                    {user?.uid !== uid && (
-                        <View style={styles.actionContainer}>
-                            {isFriend ? (
-                                <View style={[styles.statusBadge, styles.friendBadge]}>
-                                    <MaterialIcons name="check-circle" size={18} color={COLORS.success} />
-                                    <Text style={[styles.statusBadgeText, { color: COLORS.success }]}>Connected</Text>
-                                </View>
-                            ) : hasIncomingRequest ? (
-                                // Show Accept/Reject for incoming requests
-                                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
-                                    <TouchableOpacity
-                                        onPress={async () => {
-                                            if (!incomingRequestId) return;
-                                            setActionLoading(true);
-                                            try {
-                                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'accept' });
-                                                if (res.ok) {
-                                                    setIsFriend(true);
-                                                    setHasIncomingRequest(false);
-                                                } else {
-                                                    alert(res.message);
-                                                }
-                                            } catch (error) {
-                                                console.error(error);
-                                            } finally {
-                                                setActionLoading(false);
-                                            }
-                                        }}
-                                        disabled={actionLoading}
-                                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.success }]}
-                                    >
-                                        {actionLoading ? (
-                                            <ActivityIndicator color="#FFF" size="small" />
-                                        ) : (
-                                            <>
-                                                <MaterialIcons name="check" size={18} color="#FFF" />
-                                                <Text style={styles.mainButtonText}>Accept</Text>
-                                            </>
-                                        )}
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={async () => {
-                                            if (!incomingRequestId) return;
-                                            setActionLoading(true);
-                                            try {
-                                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'decline' });
-                                                if (res.ok) {
-                                                    setHasIncomingRequest(false);
-                                                    setIncomingRequestId(null);
-                                                } else {
-                                                    alert(res.message);
-                                                }
-                                            } catch (error) {
-                                                console.error(error);
-                                            } finally {
-                                                setActionLoading(false);
-                                            }
-                                        }}
-                                        disabled={actionLoading}
-                                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight, borderWidth: 1, borderColor: COLORS.divider }]}
-                                    >
-                                        <MaterialIcons name="close" size={18} color={COLORS.text} />
-                                        <Text style={[styles.mainButtonText, { color: COLORS.text }]}>Decline</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ) : isPending ? (
-                                <View style={[styles.statusBadge, styles.pendingBadge]}>
-                                    <MaterialIcons name="schedule" size={18} color={COLORS.warning} />
-                                    <Text style={[styles.statusBadgeText, { color: COLORS.warning }]}>Request Sent</Text>
-                                </View>
-                            ) : (
-                                <TouchableOpacity onPress={handleAddFriend} disabled={actionLoading} style={styles.mainButton}>
-                                    {actionLoading ? (
-                                        <ActivityIndicator color="#FFF" size="small" />
-                                    ) : (
-                                        <>
-                                            <MaterialIcons name="person-add" size={18} color="#FFF" />
-                                            <Text style={styles.mainButtonText}>Add Friend</Text>
-                                        </>
-                                    )}
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    )}
-                </View>
+                {renderSummary()}
 
                 {/* Shared Games Section */}
                 {playerGames.length > 0 && (
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Shared Games</Text>
-                        <View style={styles.chipRow}>
-                            {playerGames.map(gameKey => {
-                                const gameObj = GAMES.find(g => g.key === gameKey);
-                                const isSelected = selectedGame === gameKey;
-                                return (
-                                    <TouchableOpacity
-                                        key={gameKey}
-                                        onPress={() => setSelectedGame(gameKey)}
-                                        style={[styles.optionChip, isSelected && styles.optionChipActive]}
-                                    >
-                                        <Text style={[styles.optionChipText, isSelected && styles.optionChipTextActive]}>
-                                            {gameObj?.label || gameKey}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.gamesScrollContainer}
+                        >
+                            <View style={styles.chipRow}>
+                                {playerGames.map(gameKey => {
+                                    const gameObj = GAMES.find(g => g.key === gameKey);
+                                    const isSelected = selectedGame === gameKey;
+                                    return (
+                                        <TouchableOpacity
+                                            key={gameKey}
+                                            onPress={() => setSelectedGame(gameKey)}
+                                            style={[styles.optionChip, isSelected && styles.optionChipActive]}
+                                        >
+                                            <Text style={[styles.optionChipText, isSelected && styles.optionChipTextActive]}>
+                                                {gameObj?.label || gameKey}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </ScrollView>
 
                         {/* Game Stats Card */}
-                        {renderGameStats()}
+                        {selectedGame && renderPrimarySkillCard()}
+
+                        <View style={styles.sectionPadding}>
+                            {renderGameStats()}
+                        </View>
                     </View>
                 )}
 
-                {/* Platforms Section */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Connected Platforms</Text>
+                {renderPlatforms()}
 
-                    {profile.steamProfileUrl && (
-                        <TouchableOpacity onPress={() => openLink(profile.steamProfileUrl)} style={styles.platformCard}>
-                            <View style={[styles.platformIcon, { backgroundColor: 'rgba(102, 192, 244, 0.1)', borderColor: COLORS.steamBorder, borderWidth: 1 }]}>
-                                <FontAwesome5 name="steam" size={20} color={COLORS.steamBorder} />
-                            </View>
-                            <View style={styles.platformInfo}>
-                                <Text style={styles.platformName}>Steam</Text>
-                                <Text style={styles.platformValue}>View Profile</Text>
-                            </View>
-                            <MaterialIcons name="open-in-new" size={18} color={COLORS.muted} />
-                        </TouchableOpacity>
-                    )}
-
-                    {profile.faceitProfileUrl && (
-                        <TouchableOpacity onPress={() => openLink(profile.faceitProfileUrl)} style={styles.platformCard}>
-                            <View style={[styles.platformIcon, { backgroundColor: 'rgba(255, 85, 0, 0.1)', borderColor: COLORS.faceitBorder, borderWidth: 1 }]}>
-                                <MaterialIcons name="verified" size={20} color={COLORS.faceitBorder} />
-                            </View>
-                            <View style={styles.platformInfo}>
-                                <Text style={styles.platformName}>Faceit</Text>
-                                <Text style={styles.platformValue}>View Profile</Text>
-                            </View>
-                            <MaterialIcons name="open-in-new" size={18} color={COLORS.muted} />
-                        </TouchableOpacity>
-                    )}
-
-                    {profile.psnOnlineId && (
-                        <View style={styles.platformCard}>
-                            <View style={[styles.platformIcon, { backgroundColor: 'rgba(0, 48, 135, 0.1)', borderColor: '#003087', borderWidth: 1 }]}>
-                                <FontAwesome5 name="playstation" size={20} color="#003791" />
-                            </View>
-                            <View style={styles.platformInfo}>
-                                <Text style={styles.platformName}>PlayStation</Text>
-                                <Text style={styles.platformValue}>{profile.psnOnlineId}</Text>
+                {/* Preferred Areas */}
+                {profile?.areasPreferred && profile.areasPreferred.length > 0 && !profile.hideAreasPublicly && (
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Preferred Areas</Text>
+                        </View>
+                        <View style={styles.sectionPadding}>
+                            <View style={styles.areaChipsRow}>
+                                {profile.areasPreferred.map(area => (
+                                    <View key={area} style={styles.areaChip}>
+                                        <Text style={styles.areaChipText}>{area}</Text>
+                                    </View>
+                                ))}
                             </View>
                         </View>
-                    )}
+                    </View>
+                )}
 
-                    {!profile.steamProfileUrl && !profile.faceitProfileUrl && !profile.psnOnlineId && (
-                        <Text style={styles.emptyPlatformsText}>No platforms connected</Text>
-                    )}
+                {/* My Teams */}
+                <View style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>My Teams</Text>
+                    </View>
+                    <View style={styles.sectionPadding}>
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyText}>No teams joined yet.</Text>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Recent Matches */}
+                <View style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Matches</Text>
+                    </View>
+                    <View style={styles.sectionPadding}>
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyText}>No matches played yet.</Text>
+                        </View>
+                    </View>
                 </View>
             </ScrollView>
         </View>

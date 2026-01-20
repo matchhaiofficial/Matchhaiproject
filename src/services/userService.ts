@@ -376,11 +376,22 @@ export interface UserProfile {
   isOnline?: boolean;
 
   // Gaming profiles
+  playsCs2?: boolean;
+  playsFc?: boolean;
+  playsTekken?: boolean;
+  playsFutsal?: boolean;
+  playsIndoorCricket?: boolean;
+  playsPadel?: boolean;
+  playsPickleball?: boolean;
+
   cs2Role?: string;
+  faceitId?: string;
   faceitSkillLevel?: number;
   faceitElo?: number;
   faceitProfileUrl?: string;
 
+  steamId?: string;
+  steamPersonaName?: string;
   steamProfileUrl?: string;
   steamCs2Hours?: number;
   steamFc26Hours?: number;
@@ -405,6 +416,7 @@ export interface UserProfile {
   city?: string;
 
   // PSN Stats
+  psnAccountId?: string;
   psnOnlineId?: string;
   psnStats?: PsnVerificationResult;
 
@@ -424,6 +436,11 @@ export interface UserProfile {
   teamsByGame?: {
     [gameKey: string]: string[]; // teamIds
   };
+
+  // Frontend Privacy Settings
+  hideAreasPublicly?: boolean;
+  hidePlatformsPublicly?: boolean;
+  restrictInvitesToFriends?: boolean;
 }
 
 
@@ -456,6 +473,14 @@ export async function getUserProfile(
       isOnline: data.isOnline ?? false,
 
       // Gaming profiles
+      playsCs2: !!data.playsCs2,
+      playsFc: !!data.playsFc,
+      playsTekken: !!data.playsTekken,
+      playsFutsal: !!data.playsFutsal,
+      playsIndoorCricket: !!data.playsIndoorCricket,
+      playsPadel: !!data.playsPadel,
+      playsPickleball: !!data.playsPickleball,
+
       cs2Role: data.cs2Role ?? undefined,
       faceitSkillLevel: data.faceitSkillLevel ?? undefined,
       faceitElo: data.faceitElo ?? undefined,
