@@ -513,7 +513,9 @@ export default function PlayerProfile() {
 
         return (
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Connected Platforms</Text>
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Connected Platforms</Text>
+                </View>
                 <View style={styles.sectionPadding}>
                     {renderPlatformCard('Steam', profile.steamProfileUrl, 'steam', '#1b2838', !!profile.steamId)}
                     {renderPlatformCard('FACEIT', profile.faceitProfileUrl, 'foursquare', '#ff5500', !!profile.faceitId)}
@@ -676,7 +678,9 @@ export default function PlayerProfile() {
                 {/* Shared Games Section */}
                 {playerGames.length > 0 && (
                     <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Shared Games</Text>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Shared Games</Text>
+                        </View>
                         <ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}

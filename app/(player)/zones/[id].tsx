@@ -210,7 +210,7 @@ export default function PlayerZoneDetails() {
                         params: { zoneId: zone.id, zoneName: zone.venueBrandName }
                     })}
                 >
-                    <Text style={styles.actionButtonText}>Create Matchroom Here</Text>
+                    <Text style={styles.actionButtonText}>Book Now</Text>
                 </TouchableOpacity>
             </ScrollView>
         </View>
