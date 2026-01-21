@@ -21,12 +21,12 @@ import {
 } from "../../../constants/profileOptions";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
 import { db } from "../../../src/config/firebaseConfig";
+import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { calculateInitialRating, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
+import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
-import { GAME_RULES, GameRule } from "./_constants";
 import styles from "./game-details.styles";
 
 // FACEIT Level Icons
@@ -43,7 +43,7 @@ const faceitLevelIcons: Record<number, any> = {
     10: require("../../../assets/images/faceit-levels/Level 10.png"),
 };
 
-type GameKey = keyof typeof GAME_RULES;
+// type GameKey = keyof typeof GAME_RULES;
 
 const TIER_CONFIG: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; color: string }> = {
     Beginner: { icon: 'star-border', color: COLORS.muted },

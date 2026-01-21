@@ -1,4 +1,4 @@
-import { CS2_ROLES, FUTSAL_POSITIONS, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from "../../../constants/profileOptions";
+import { CS2_ROLES, FUTSAL_POSITIONS, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from "../../constants/profileOptions";
 
 export type PlatformStatus = 'idle' | 'verifying' | 'verified' | 'taken' | 'error';
 
