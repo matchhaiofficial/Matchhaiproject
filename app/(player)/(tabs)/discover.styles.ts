@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
@@ -107,5 +107,22 @@ export default StyleSheet.create({
     optionChipTextActive: {
         color: COLORS.text,
         fontWeight: 'bold',
+    },
+
+    // FAB
+    fabWrapper: {
+        position: 'absolute',
+        bottom: 110, // Adjust based on tab bar height if needed
+        right: 24,
+        zIndex: 1000,
+    },
+    fab: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: COLORS.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...SHADOWS.cardElevated,
     },
 });

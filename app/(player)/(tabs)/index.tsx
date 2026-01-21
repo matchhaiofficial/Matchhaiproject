@@ -9,6 +9,7 @@ import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { fetchOnboardingSummary } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 import styles from "./_dashboard.styles";
 
 export default function PlayerDashboard() {
@@ -248,13 +249,19 @@ export default function PlayerDashboard() {
                             icon="search"
                             label="Find Match"
                             color={COLORS.successBright}
-                            onPress={() => router.push("/(player)/(tabs)/matchrooms" as any)}
+                            onPress={() => {
+                                Logger.info("Dashboard", "Navigating to Discover:Rooms segment");
+                                router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'matchrooms', t: Date.now().toString() } } as any);
+                            }}
                         />
                         <QuickAction
                             icon="people"
                             label="Find Players"
                             color={COLORS.warning}
-                            onPress={() => router.push("/(player)/(tabs)/find-players")}
+                            onPress={() => {
+                                Logger.info("Dashboard", "Navigating to Discover:Players segment");
+                                router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'players', t: Date.now().toString() } } as any);
+                            }}
                         />
                         <QuickAction
                             icon="groups"

@@ -6,11 +6,11 @@ import {
     TextInput,
     TouchableOpacity,
     View,
-    SafeAreaView,
     StatusBar,
     Platform
 } from "react-native";
-import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 import DiscoverMatchroomList from "../../../src/features/discover/components/DiscoverMatchroomList";
 import DiscoverPlayerList from "../../../src/features/discover/components/DiscoverPlayerList";
@@ -18,6 +18,7 @@ import DiscoverTeamList from "../../../src/features/discover/components/Discover
 import DiscoverZoneList from "../../../src/features/discover/components/DiscoverZoneList";
 import { DiscoverSegment, GameKey } from "../../../src/features/discover/types";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 import styles from "./discover.styles";
 
 // Global Game Configuration
@@ -32,17 +33,54 @@ const GAMES: { key: GameKey; label: string }[] = [
     { key: 'pickleball', label: 'Pickleball' },
 ];
 
+const ALLOWED_SEGMENTS: DiscoverSegment[] = ['matchrooms', 'players', 'teams', 'zones'];
+
+const getValidSegment = (s?: string): DiscoverSegment | null => {
+    if (!s) return null;
+    return ALLOWED_SEGMENTS.includes(s as DiscoverSegment) ? (s as DiscoverSegment) : null;
+};
+
 export default function DiscoverScreen() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ segment?: string; t?: string }>();
+
     // Global State
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedGame, setSelectedGame] = useState<GameKey>('all');
 
     // Segment State
-    const [activeSegment, setActiveSegment] = useState<DiscoverSegment>('matchrooms');
+    const [activeSegment, setActiveSegment] = useState<DiscoverSegment>(
+        getValidSegment(params.segment) || 'matchrooms'
+    );
 
-    // Lazy Loading State: Track which segments have been visited to keep them mounted
-    const [visitedSegments, setVisitedSegments] = useState<Set<DiscoverSegment>>(new Set(['matchrooms']));
+    // Lazy Loading State
+    const [visitedSegments, setVisitedSegments] = useState<Set<DiscoverSegment>>(
+        new Set([activeSegment])
+    );
+
+    // Sync activeSegment with URL params (handling navigation to same screen with different params)
+    useEffect(() => {
+        const validSegment = getValidSegment(params.segment);
+        Logger.info("Discover", "Sync Effect", {
+            paramSegment: params.segment,
+            validSegment,
+            currentActive: activeSegment,
+            intentTime: params.t
+        });
+
+        if (validSegment && validSegment !== activeSegment) {
+            Logger.info("Discover", "Updating activeSegment from param", { newSegment: validSegment });
+            setActiveSegment(validSegment);
+        } else if (validSegment === activeSegment && params.t) {
+            // Force re-trigger of any child effects or logic if needed
+            Logger.info("Discover", "Segment already active, but intent refreshed", { segment: validSegment });
+        }
+    }, [params.segment, params.t]);
+
+    // Log every state change for activeSegment
+    useEffect(() => {
+        Logger.info("Discover", "activeSegment state changed", { activeSegment });
+    }, [activeSegment]);
 
     // Update visited segments when active segment changes
     useEffect(() => {
@@ -56,7 +94,12 @@ export default function DiscoverScreen() {
 
     const renderSegmentButton = (segment: DiscoverSegment, label: string) => (
         <TouchableOpacity
-            onPress={() => setActiveSegment(segment)}
+            onPress={() => {
+                setActiveSegment(segment);
+                // Core Fix: Update URL params so they stay in sync with manual switch
+                // This prevents "stale" params from Dashboard being stuck in URL
+                router.setParams({ segment } as any);
+            }}
             style={[styles.segmentButton, activeSegment === segment && styles.segmentButtonActive]}
         >
             <Text style={[styles.segmentText, activeSegment === segment && styles.segmentTextActive]}>
@@ -180,6 +223,25 @@ export default function DiscoverScreen() {
                     </View>
                 )}
             </View>
+
+            {/* Floating Action Button (FAB) - Contextual for Rooms and Teams */}
+            {(activeSegment === 'matchrooms' || activeSegment === 'teams') && (
+                <View style={styles.fabWrapper}>
+                    <TouchableOpacity
+                        onPress={() => {
+                            if (activeSegment === 'matchrooms') {
+                                router.push("/matchrooms/create" as any);
+                            } else {
+                                router.push("/teams/create" as any);
+                            }
+                        }}
+                        activeOpacity={0.8}
+                        style={styles.fab}
+                    >
+                        <MaterialIcons name="add" size={28} color="#FFF" />
+                    </TouchableOpacity>
+                </View>
+            )}
         </SafeAreaView>
     );
 }
