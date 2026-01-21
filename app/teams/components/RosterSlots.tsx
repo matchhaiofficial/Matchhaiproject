@@ -19,6 +19,7 @@ interface RosterSlotsProps {
     isCaptain: boolean;
     game: string;
     onMemberPress?: (member: Member) => void;
+    onEmptySlotPress?: () => void;
 }
 
 export default function RosterSlots({
@@ -28,7 +29,8 @@ export default function RosterSlots({
     viewerUid,
     isCaptain,
     game,
-    onMemberPress
+    onMemberPress,
+    onEmptySlotPress
 }: RosterSlotsProps) {
 
     // Pad with empty slots
@@ -89,12 +91,20 @@ export default function RosterSlots({
 
     const renderEmptySlot = (index: number) => {
         return (
-            <View key={`empty-${index}`} style={styles.emptySlot}>
+            <Pressable
+                key={`empty-${index}`}
+                style={({ pressed }) => [
+                    styles.emptySlot,
+                    pressed && styles.pressed
+                ]}
+                onPress={() => onEmptySlotPress?.()}
+                disabled={!onEmptySlotPress}
+            >
                 <View style={styles.emptyIcon}>
                     <MaterialIcons name="person-add-alt" size={20} color={COLORS.muted} />
                 </View>
                 <Text style={styles.emptyText}>Open</Text>
-            </View>
+            </Pressable>
         );
     };
 
