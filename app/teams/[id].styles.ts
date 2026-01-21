@@ -35,6 +35,16 @@ export default StyleSheet.create({
     },
 
     // Team Header
+    teamNameContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: SPACING.xs,
+    },
+    editNameIcon: {
+        marginLeft: SPACING.sm,
+        padding: 4,
+    },
     teamHeader: {
         marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
@@ -56,6 +66,23 @@ export default StyleSheet.create({
         marginBottom: SPACING.lg,
         borderWidth: 2,
         borderColor: COLORS.divider,
+        overflow: 'hidden',
+    },
+    teamLogoLargeCaptain: {
+        borderColor: COLORS.accent,
+    },
+    logoEditBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        backgroundColor: COLORS.accent,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: COLORS.background,
     },
     teamLogoImage: {
         width: 80,

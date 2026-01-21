@@ -48,8 +48,13 @@ service cloud.firestore {
       // FIX: Also allow read if the ID *ends* with the user's UID (for deterministic join requests)
       // This handles the case where the doc doesn't exist yet (so resource.data is null)
       allow read, list: if isAuthenticated() && (
-        (resource != null && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid)) ||
-        notificationId.matches('.*_' + request.auth.uid)
+        (resource != null && (
+          resource.data.toUid == request.auth.uid || 
+          resource.data.fromUid == request.auth.uid ||
+          (resource.data.type == 'team_invite' && get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid)
+        )) ||
+        notificationId.matches('.*_' + request.auth.uid + '$') ||
+        (resource == null && notificationId.startsWith('team_invite__'))
       );
       
       // Create: Sending a request/invite to someone else
@@ -60,7 +65,8 @@ service cloud.firestore {
       // 2. Sender re-requesting (updating via fromUid) - e.g. overwriting expired/declined
       allow update: if isAuthenticated() && (
         resource.data.toUid == request.auth.uid || 
-        resource.data.fromUid == request.auth.uid
+        resource.data.fromUid == request.auth.uid ||
+        (resource.data.type == 'team_invite' && get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid)
       );
     }
 
@@ -84,6 +90,9 @@ service cloud.firestore {
                 get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )).data.expiresAt > request.time
             )
         );
+
+        // Allow captain to delete team
+        allow delete: if isAuthenticated() && resource.data.captainUid == request.auth.uid;
     }
     
     // Team Members Subcollection
@@ -93,7 +102,7 @@ service cloud.firestore {
         // 1. You are the captain.
         // 2. You are the member joining AND you have a valid invite.
         allow create: if isAuthenticated() && (
-            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
+            getAfter(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
             (
                 memberId == request.auth.uid &&
                 exists(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + memberId )) &&
