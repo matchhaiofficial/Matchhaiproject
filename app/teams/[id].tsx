@@ -1,13 +1,14 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, Pressable, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
-import { Team, getUserTeams } from "../../src/services/teamService";
+import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -40,6 +41,10 @@ export default function TeamDetails() {
     // Join Request States
     const [pendingRequests, setPendingRequests] = useState<any[]>([]);
     const [myPendingRequest, setMyPendingRequest] = useState<boolean>(false);
+
+    // Rename States
+    const [showRenameModal, setShowRenameModal] = useState(false);
+    const [newName, setNewName] = useState("");
 
     // Invite States
     const [showInviteSheet, setShowInviteSheet] = useState(false);
@@ -295,6 +300,81 @@ export default function TeamDetails() {
         );
     };
 
+    const handleDeleteAction = () => {
+        Alert.alert(
+            "Delete Team",
+            "Are you sure you want to delete this team? This action cannot be undone.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        setSubmitting(true);
+                        try {
+                            const res = await deleteTeam(id as string);
+                            if (res.ok) {
+                                router.replace("/(player)/(tabs)/teams");
+                            } else {
+                                Alert.alert("Error", res.message || "Failed to delete team.");
+                            }
+                        } catch (e: any) {
+                            Alert.alert("Error", e.message);
+                        } finally {
+                            setSubmitting(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleRenameTeam = async () => {
+        if (!newName.trim() || !id) return;
+        setSubmitting(true);
+        try {
+            const res = await updateTeamName(id as string, newName.trim());
+            if (res.ok) {
+                setShowRenameModal(false);
+                fetchTeam();
+            } else {
+                Alert.alert("Error", res.message || "Failed to rename team.");
+            }
+        } catch (e: any) {
+            Alert.alert("Error", e.message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handlePickLogo = async () => {
+        if (!isCaptain) return;
+
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.5,
+            });
+
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                setSubmitting(true);
+                const res = await uploadTeamLogo(id as string, result.assets[0].uri);
+                if (res.ok) {
+                    fetchTeam();
+                } else {
+                    Alert.alert("Error", res.message || "Failed to upload logo.");
+                }
+            }
+        } catch (e: any) {
+            Logger.error("TeamDetails", "Error picking image", e);
+            Alert.alert("Error", "Could not pick image.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const handleShare = async () => {
         if (!team) return;
         try {
@@ -338,6 +418,11 @@ export default function TeamDetails() {
                     <Text style={styles.headerTitle}>Team Details</Text>
                 </View>
                 {isCaptain && (
+                    <TouchableOpacity onPress={handleDeleteAction} style={styles.headerIcon}>
+                        <MaterialIcons name="delete" size={24} color={COLORS.error} />
+                    </TouchableOpacity>
+                )}
+                {isCaptain && (
                     <TouchableOpacity onPress={() => setShowInviteSheet(true)} style={styles.headerIcon}>
                         <MaterialIcons name="person-add" size={24} color={COLORS.accent} />
                     </TouchableOpacity>
@@ -352,7 +437,12 @@ export default function TeamDetails() {
             >
                 {/* Team Info Section */}
                 <View style={styles.teamHeader}>
-                    <View style={styles.teamLogoLarge}>
+                    <TouchableOpacity
+                        onPress={handlePickLogo}
+                        disabled={!isCaptain || submitting}
+                        activeOpacity={0.8}
+                        style={[styles.teamLogoLarge, isCaptain && styles.teamLogoLargeCaptain]}
+                    >
                         {team.logoUrl ? (
                             <Image source={{ uri: team.logoUrl }} style={styles.teamLogoImage} />
                         ) : (
@@ -360,8 +450,26 @@ export default function TeamDetails() {
                                 {team.name.charAt(0).toUpperCase()}
                             </Text>
                         )}
+                        {isCaptain && (
+                            <View style={styles.logoEditBadge}>
+                                <MaterialIcons name="photo-camera" size={14} color="#FFF" />
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                    <View style={styles.teamNameContainer}>
+                        <Text style={styles.teamNameLarge}>{team.name}</Text>
+                        {isCaptain && (
+                            <TouchableOpacity
+                                onPress={() => {
+                                    setNewName(team.name);
+                                    setShowRenameModal(true);
+                                }}
+                                style={styles.editNameIcon}
+                            >
+                                <MaterialIcons name="edit" size={20} color={COLORS.accent} />
+                            </TouchableOpacity>
+                        )}
                     </View>
-                    <Text style={styles.teamNameLarge}>{team.name}</Text>
                     <View style={styles.gameBadge}>
                         <Text style={styles.gameBadgeText}>{team.game.toUpperCase()}</Text>
                     </View>
@@ -520,6 +628,40 @@ export default function TeamDetails() {
                     )}
                 </View>
             )}
+
+            {/* Rename Modal */}
+            <Modal
+                visible={showRenameModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowRenameModal(false)}
+            >
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' }}>
+                    <View style={{ backgroundColor: COLORS.surfaceHighlight, padding: 24, borderRadius: 16, width: '85%', borderWidth: 1, borderColor: COLORS.divider }}>
+                        <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>Rename Team</Text>
+                        <TextInput
+                            style={{ backgroundColor: COLORS.background, color: COLORS.text, padding: 14, borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: COLORS.inputBorder, fontSize: 16 }}
+                            value={newName}
+                            onChangeText={setNewName}
+                            placeholder="Enter new team name"
+                            placeholderTextColor={COLORS.muted}
+                            autoFocus
+                        />
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 20 }}>
+                            <TouchableOpacity onPress={() => setShowRenameModal(false)}>
+                                <Text style={{ color: COLORS.muted, fontSize: 16 }}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleRenameTeam} disabled={submitting}>
+                                {submitting ? (
+                                    <ActivityIndicator size="small" color={COLORS.accent} />
+                                ) : (
+                                    <Text style={{ color: COLORS.accent, fontSize: 16, fontWeight: 'bold' }}>Save Changes</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
 
             {/* Invite Friends Sheet */}
             <InviteFriendsSheet

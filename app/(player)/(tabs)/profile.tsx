@@ -17,13 +17,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import SkillBadge from "../../../src/components/SkillBadge";
 import { db } from "../../../src/config/firebaseConfig";
+import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { COLORS } from "../../../src/theme";
-import { GAME_RULES } from "../profile/_constants";
 import styles from "./profile.styles";
 
 // FACEIT Level Icons
