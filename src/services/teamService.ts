@@ -3,6 +3,7 @@ import {
     arrayRemove,
     arrayUnion,
     collection,
+    deleteDoc,
     doc,
     getDoc,
     getDocs,
@@ -11,7 +12,8 @@ import {
     updateDoc,
     where
 } from "firebase/firestore";
-import { db } from "../config/firebaseConfig";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { db, storage } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
 import { requestToJoinTeam as functionRequestToJoinTeam } from "./functions";
 
@@ -221,4 +223,78 @@ export const getPublicTeams = async (options: GetPublicTeamsOptions = {}): Promi
 
 export const requestToJoinTeam = async (teamId: string) => {
     return functionRequestToJoinTeam({ teamId });
+};
+
+export const deleteTeam = async (teamId: string): Promise<{ ok: boolean; message?: string }> => {
+    try {
+        await deleteDoc(doc(db, TEAMS_COLLECTION, teamId));
+        return { ok: true };
+    } catch (error: any) {
+        Logger.error('teamService', 'Error deleting team', error);
+        return { ok: false, message: 'Failed to delete team. Please make sure you are the captain and the team exists.' };
+    }
+};
+
+export const updateTeamName = async (teamId: string, newName: string): Promise<{ ok: boolean; message?: string }> => {
+    try {
+        const nameLower = newName.trim().toLowerCase();
+
+        // 1. Uniqueness check
+        const q = query(
+            collection(db, TEAMS_COLLECTION),
+            where('nameLower', '==', nameLower)
+        );
+        const snap = await getDocs(q);
+
+        // If name exists and it's not the current team (though usually you wouldn't rename to your own name, but good to check)
+        if (!snap.empty && snap.docs[0].id !== teamId) {
+            return { ok: false, message: "A team with this name already exists." };
+        }
+
+        // 2. Update doc
+        const teamRef = doc(db, TEAMS_COLLECTION, teamId);
+        await updateDoc(teamRef, {
+            name: newName.trim(),
+            nameLower,
+            updatedAt: serverTimestamp()
+        });
+
+        Logger.info('teamService', 'Team name updated', { teamId, newName });
+        return { ok: true };
+    } catch (error: any) {
+        Logger.error('teamService', 'Error updating team name', error);
+        return { ok: false, message: 'Failed to update team name.' };
+    }
+};
+
+export const uploadTeamLogo = async (teamId: string, imageUri: string): Promise<{ ok: boolean; url?: string; message?: string }> => {
+    try {
+        Logger.info('teamService', 'Starting logo upload...', { teamId });
+
+        // 1. Fetch the blob from URI
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+
+        // 2. Create storage ref
+        const fileRef = ref(storage, `teams/${teamId}/logo_${Date.now()}.jpg`);
+
+        // 3. Upload
+        await uploadBytes(fileRef, blob);
+
+        // 4. Get download URL
+        const downloadUrl = await getDownloadURL(fileRef);
+
+        // 5. Update Firestore
+        const teamRef = doc(db, TEAMS_COLLECTION, teamId);
+        await updateDoc(teamRef, {
+            logoUrl: downloadUrl,
+            updatedAt: serverTimestamp()
+        });
+
+        Logger.info('teamService', 'Logo upload complete', { teamId, downloadUrl });
+        return { ok: true, url: downloadUrl };
+    } catch (error: any) {
+        Logger.error('teamService', 'Error uploading logo', error);
+        return { ok: false, message: 'Failed to upload logo.' };
+    }
 };
