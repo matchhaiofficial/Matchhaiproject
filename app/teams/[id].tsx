@@ -371,9 +371,9 @@ export default function TeamDetails() {
                     <View style={styles.occupancyRow}>
                         <MaterialIcons name="people" size={16} color={COLORS.muted} />
                         <Text style={styles.occupancyText}>
-                            {team.memberCount || 0} / {team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5}
+                            {team.memberCount || 0} / 5
                         </Text>
-                        {isFull && <Text style={styles.fullBadge}>FULL</Text>}
+                        {(team.memberCount || 0) >= 5 && <Text style={styles.fullBadge}>FULL</Text>}
                     </View>
 
                     {/* Member Badge */}
@@ -447,12 +447,13 @@ export default function TeamDetails() {
                 <View style={styles.rosterSection}>
                     <Text style={styles.rosterTitle}>Lineup</Text>
                     <RosterSlots
-                        maxMembers={team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5}
+                        maxMembers={5}
                         members={team.members || []}
                         captainUid={team.captainUid}
                         viewerUid={user?.uid}
                         isCaptain={isCaptain}
                         game={team.game}
+                        onEmptySlotPress={isCaptain ? () => setShowInviteSheet(true) : undefined}
                         onMemberPress={isCaptain ? (member) => {
                             if (member.uid !== user?.uid) {
                                 Alert.alert(

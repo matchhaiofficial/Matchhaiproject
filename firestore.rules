@@ -68,7 +68,7 @@ service cloud.firestore {
     match /teams/{teamId} {
         allow read: if isAuthenticated();
         // Allow creating a new team
-        allow create: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.captainUid == request.auth.uid;
         
         // Update logic:
         // 1. Captain can update anything.
@@ -90,10 +90,10 @@ service cloud.firestore {
     match /teams/{teamId}/members/{memberId} {
         allow read: if isAuthenticated();
         // Allow write if:
-        // 1. You are the captain.
+        // 1. You are the captain (using getAfter to support batch creation).
         // 2. You are the member joining AND you have a valid invite.
         allow create: if isAuthenticated() && (
-            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
+            getAfter(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
             (
                 memberId == request.auth.uid &&
                 exists(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + memberId )) &&
@@ -102,7 +102,7 @@ service cloud.firestore {
             )
         );
         allow update, delete: if isAuthenticated() && (
-            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
+            getAfter(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
             memberId == request.auth.uid
         );
     }

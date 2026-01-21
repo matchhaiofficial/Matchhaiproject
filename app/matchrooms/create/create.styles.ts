@@ -124,22 +124,23 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm - 1,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
         marginRight: SPACING.sm,
         marginBottom: SPACING.sm,
     },
     optionChipActive: {
-        backgroundColor: '#1e2a38',
+        backgroundColor: COLORS.cardDark,
         borderColor: COLORS.accent,
     },
     optionChipText: {
         color: COLORS.muted,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.label - 1,
+        fontSize: 13,
     },
     optionChipTextActive: {
         color: COLORS.text,
+        fontWeight: 'bold',
     },
 
     // Button

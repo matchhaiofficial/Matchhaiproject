@@ -383,17 +383,6 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                 }
             />
 
-            {/* Create Matchroom FAB */}
-            <View style={[styles.fabWrapper, { bottom: 90 }]}>
-                <TouchableOpacity
-                    onPress={() => router.push("/matchrooms/create" as any)}
-                    activeOpacity={0.8}
-                    style={styles.fab}
-                >
-                    <MaterialIcons name="add" size={28} color="#FFF" />
-                </TouchableOpacity>
-            </View>
-
             {/* Location Selection Modal */}
             <Modal
                 visible={showLocationModal}
