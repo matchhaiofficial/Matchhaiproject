@@ -65,20 +65,21 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
     },
     optionChipActive: {
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
+        backgroundColor: COLORS.cardDark,
         borderColor: COLORS.accent,
     },
     optionChipText: {
         color: COLORS.muted,
         fontSize: 13,
+        fontFamily: FONTS.body,
     },
     optionChipTextActive: {
         color: COLORS.text,
-        fontWeight: '600',
+        fontWeight: 'bold',
     },
     headerRow: {
         flexDirection: 'row',
