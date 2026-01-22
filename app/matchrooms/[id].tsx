@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -22,11 +22,12 @@ import { db } from "../../src/config/firebaseConfig";
 import { SKILL_ASSESSMENT_CONFIG } from "../../src/constants/skillQuestions";
 import { useAuth } from "../../src/context/AuthContext";
 import { isWithinFairnessBand } from "../../src/services/bookingService";
-import { deleteMatchroom, getMatchroom, joinMatchroom, leaveMatchroom, Matchroom, startMatch } from "../../src/services/matchService";
+import { cancelUserPendingMatchroomRequests } from "../../src/services/functions";
+import { deleteMatchroom, getMatchroom, isUserInActiveMatchroom, joinMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
-import { isRoomExpired, isRoomLocked } from "../../src/utils/matchroomLifecycle";
-import { COLORS } from "../../src/theme";
+import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
+import { isRoomExpired, isRoomLocked } from "../../src/utils/matchroomLifecycle";
 import styles from "./detail.styles";
 
 export default function MatchroomDetails() {
@@ -108,9 +109,16 @@ export default function MatchroomDetails() {
         fetchRatings();
     }, [room?.players, room?.game]);
 
-    const handleJoinPress = () => {
+    const handleJoinPress = async () => {
         Logger.debug("MatchroomDetails", "handleJoinPress called", { room: room?.id, userId: user?.uid });
         if (!room || !user) return;
+
+        // BUSY CHECK
+        const busyCheck = await isUserInActiveMatchroom(user.uid);
+        if (busyCheck.inRoom && busyCheck.roomId !== id) {
+            Alert.alert("Already Busy", busyCheck.message);
+            return;
+        }
 
         const gameKey = room.game;
         const currentScore = profile?.skillScores?.[gameKey];
@@ -136,10 +144,10 @@ export default function MatchroomDetails() {
         if (!inBand) {
             Alert.alert(
                 "Skill Verification",
-                "Your skill score is outside the fairness band. Captain approval is required.",
+                "Your skill score is outside the fairness band. Captain approval is required. Would you like to request to join?",
                 [
                     { text: "Cancel", style: "cancel" },
-                    { text: "Request Approval", onPress: () => router.push(`/matchrooms/book/${id}`) }
+                    { text: "Request to Join", onPress: () => handleRequestJoin() }
                 ]
             );
             return;
@@ -149,18 +157,37 @@ export default function MatchroomDetails() {
         confirmJoin();
     };
 
+    const handleRequestJoin = async (role?: string) => {
+        if (!room || !user || !id) return;
+
+        // BUSY CHECK
+        const busyCheck = await isUserInActiveMatchroom(user.uid);
+        if (busyCheck.inRoom && busyCheck.roomId !== id) {
+            Alert.alert("Already Busy", busyCheck.message);
+            return;
+        }
+
+        setJoining(true);
+        try {
+            const res = await requestJoinMatchroom(room, {
+                uid: user.uid,
+                username: user.displayName || 'Player',
+            }, role || 'Flex');
+
+            if (res.ok) {
+                Alert.alert("Request Sent", "Your request to join has been sent to the host.");
+            } else {
+                Alert.alert("Error", res.message || "Failed to send request.");
+            }
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Error requesting join", e);
+        } finally {
+            setJoining(false);
+        }
+    };
+
     const handleAssessmentSuccess = (rating: number) => {
         setAssessmentDone(true);
-        // Resume join flow automatically
-        // We need to wait a tick? No, state update is async. 
-        // We can't call handleJoinPress directly expecting assessmentDone to be true yet.
-        // So we duplicate the continuation logic here or useEffect.
-        // Simplest: Just set assessmentDone(true) and wait for user to tap Join again?
-        // No, that's friction. "Save & Continue" implies continue.
-        // Let's call a continuation function directly.
-
-        // Fairness Re-Check (Post-Assessment)
-        // Assessment returns a rating, we should use it.
         const score = rating;
         const inBand = isWithinFairnessBand(score, room?.hostSkillScore || 50, room?.game || '');
 
@@ -170,7 +197,7 @@ export default function MatchroomDetails() {
                 "Even with the assessment, your skill score is outside the fairness band. Captain approval is required.",
                 [
                     { text: "Cancel", style: "cancel" },
-                    { text: "Request Approval", onPress: () => router.push(`/matchrooms/book/${id}` as any) }
+                    { text: "Request to Join", onPress: () => handleRequestJoin() }
                 ]
             );
             return;
@@ -204,6 +231,8 @@ export default function MatchroomDetails() {
 
             if (res.ok) {
                 Alert.alert("Success", "Joined squad!");
+                // Cancel other pending requests
+                await cancelUserPendingMatchroomRequests(user.uid);
                 fetchRoom(); // Refresh to see self in list
             } else {
                 Alert.alert("Error", (res as any).message || "Failed to join");
@@ -376,25 +405,27 @@ export default function MatchroomDetails() {
         );
     };
 
+    const isHost = useMemo(() => user?.uid === room?.hostUid, [user?.uid, room?.hostUid]);
+    const playersArr = useMemo(() => room?.players || [], [room?.players]);
+    const isJoined = useMemo(() => playersArr.some((p: any) => p.uid === user?.uid), [playersArr, user?.uid]);
+    const isFull = useMemo(() => playersArr.length >= (room?.maxPlayers || 0), [playersArr.length, room?.maxPlayers]);
+
+    // Lifecycle states
+    const isExpired = useMemo(() => (room ? isRoomExpired(room) : false), [room]);
+    const isLocked = useMemo(() => (room ? isRoomLocked(room) : false), [room]);
+    const canJoin = useMemo(() => !isExpired && !isLocked && !isJoined && !isFull, [isExpired, isLocked, isJoined, isFull]);
+
     if (loading) {
         return (
-            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark, alignItems: "center", justifyContent: "center" }}>
-                <ActivityIndicator color={COLORS.accent} />
-            </View>
+            <SafeAreaView style={styles.screen}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator color={COLORS.accent} />
+                </View>
+            </SafeAreaView>
         );
     }
 
     if (!room) return null;
-
-    const isHost = user?.uid === room.hostUid;
-    const playersArr = room.players || [];
-    const isJoined = playersArr.some(p => p.uid === user?.uid);
-    const isFull = playersArr.length >= (room.maxPlayers || 0);
-
-    // Lifecycle states
-    const isExpired = isRoomExpired(room);
-    const isLocked = isRoomLocked(room);
-    const canJoin = !isExpired && !isLocked && !isJoined && !isFull;
 
     // Calculate available roles
     const availableRoles: any[] = []; // room.requiredRoles removed from schema
@@ -426,17 +457,9 @@ export default function MatchroomDetails() {
             <ScrollView contentContainerStyle={styles.content}>
                 {/* Expired Banner */}
                 {isExpired && (
-                    <View style={{
-                        backgroundColor: '#FF5722',
-                        padding: 12,
-                        borderRadius: 8,
-                        marginBottom: 16,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 8,
-                    }}>
+                    <View style={[styles.banner, styles.expiredBanner]}>
                         <MaterialIcons name="warning" size={20} color="#FFF" />
-                        <Text style={{ color: '#FFF', flex: 1, fontWeight: '500' }}>
+                        <Text style={styles.bannerText}>
                             This matchroom has expired (valid for 48 hours)
                         </Text>
                     </View>
@@ -444,17 +467,9 @@ export default function MatchroomDetails() {
 
                 {/* Locked Banner */}
                 {isLocked && !isExpired && (
-                    <View style={{
-                        backgroundColor: COLORS.warning,
-                        padding: 12,
-                        borderRadius: 8,
-                        marginBottom: 16,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 8,
-                    }}>
+                    <View style={[styles.banner, styles.lockedBanner]}>
                         <MaterialIcons name="lock" size={20} color="#FFF" />
-                        <Text style={{ color: '#FFF', flex: 1, fontWeight: '500' }}>
+                        <Text style={styles.bannerText}>
                             Matchroom is full and locked
                         </Text>
                     </View>
@@ -585,7 +600,7 @@ export default function MatchroomDetails() {
 
                             {/* Skill Badge */}
                             {playerRatings[player.uid] && (
-                                <View style={{ marginRight: 8 }}>
+                                <View style={{ marginRight: SPACING.sm }}>
                                     <SkillBadge
                                         tier={playerRatings[player.uid]!.tier}
                                         rating={playerRatings[player.uid]!.rating}
@@ -606,26 +621,36 @@ export default function MatchroomDetails() {
             <View style={styles.footer}>
                 {/* Expired state - show message only */}
                 {isExpired ? (
-                    <View style={[styles.fullButton, { backgroundColor: '#FF5722' }]}>
+                    <View style={[styles.fullButton, styles.expiredBanner]}>
                         <Text style={styles.fullText}>Matchroom Expired</Text>
                     </View>
                 ) : isLocked && !isJoined ? (
-                    <View style={[styles.fullButton, { backgroundColor: COLORS.warning }]}>
+                    <View style={[styles.fullButton, styles.lockedBanner]}>
                         <Text style={styles.fullText}>Matchroom Locked</Text>
                     </View>
                 ) : room.status === 'open' ? (
                     canJoin ? (
-                        <TouchableOpacity
-                            onPress={() => router.push(`/matchrooms/book/${id}` as any)}
-                            disabled={joining}
-                            style={styles.joinButton}
-                        >
-                            {joining ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <Text style={styles.joinButtonText}>Join Matchroom</Text>
-                            )}
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: SPACING.sm }}>
+                            <TouchableOpacity
+                                onPress={handleJoinPress}
+                                disabled={joining}
+                                style={[styles.joinButton, { flex: 1 }]}
+                            >
+                                {joining ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.joinButtonText}>Join Directly</Text>
+                                )}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={() => handleRequestJoin()}
+                                disabled={joining}
+                                style={[styles.joinButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight }]}
+                            >
+                                <Text style={styles.joinButtonText}>Request</Text>
+                            </TouchableOpacity>
+                        </View>
                     ) : isJoined ? (
                         <View style={styles.footerRow}>
                             {isHost && isFull ? (
@@ -670,9 +695,9 @@ export default function MatchroomDetails() {
                     )
                 ) : (
                     // Match In Progress or Verifying
-                    <View style={{ gap: 10 }}>
-                        <View style={[styles.fullButton, { backgroundColor: COLORS.overlayLight }]}>
-                            <Text style={[styles.fullText, { color: COLORS.accent }]}>
+                    <View style={{ gap: SPACING.sm }}>
+                        <View style={styles.statusBanner}>
+                            <Text style={styles.statusText}>
                                 Status: {room.status === 'in-progress' ? 'In Progress' : 'Verifying Results'}
                             </Text>
                         </View>
@@ -727,7 +752,7 @@ export default function MatchroomDetails() {
                                 </TouchableOpacity>
                             ))
                         ) : (
-                            <Text style={{ color: COLORS.textSecondary, textAlign: 'center', marginBottom: 20 }}>
+                            <Text style={styles.assessmentMessage}>
                                 No specific roles required. Join as Flex?
                             </Text>
                         )}
@@ -760,22 +785,12 @@ export default function MatchroomDetails() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Enter Join Code</Text>
-                        <Text style={{ color: COLORS.textSecondary, textAlign: 'center', marginBottom: 16 }}>
+                        <Text style={styles.codeSubtext}>
                             This lobby is private. Please enter the code to join.
                         </Text>
 
                         <TextInput
-                            style={{
-                                backgroundColor: COLORS.inputBackground,
-                                color: COLORS.text,
-                                padding: 12,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: COLORS.inputBorder,
-                                fontSize: 16,
-                                textAlign: 'center',
-                                marginBottom: 20
-                            }}
+                            style={styles.codeInput}
                             placeholder="Enter Code"
                             placeholderTextColor={COLORS.muted}
                             value={joinCode}

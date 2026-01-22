@@ -11,9 +11,7 @@ export default StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: SPACING.screenPadding,
         paddingTop: SPACING.md,
-        paddingBottom: SPACING.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
+        paddingBottom: SPACING.md,
         backgroundColor: COLORS.background,
     },
     backButton: {
@@ -98,6 +96,7 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         marginLeft: SPACING.xs,
         fontFamily: FONTS.body,
+        fontWeight: '500',
     },
 
     // Action Section
@@ -116,10 +115,11 @@ export default StyleSheet.create({
     },
     mainButtonText: {
         color: '#FFF',
-        fontFamily: FONTS.bold,
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.label,
         textTransform: 'uppercase',
         marginLeft: SPACING.sm,
+        fontWeight: '700',
     },
     statusBadge: {
         height: 44,
@@ -435,6 +435,7 @@ export default StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: COLORS.divider,
         justifyContent: 'space-between',
+        gap: SPACING.md,
     },
     primaryStatBox: {
         alignItems: 'center',
@@ -443,14 +444,16 @@ export default StyleSheet.create({
     primaryStatLabel: {
         fontSize: 10,
         color: COLORS.muted,
-        fontFamily: FONTS.bold,
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
         textTransform: 'uppercase',
         marginBottom: 2,
     },
     primaryStatValue: {
         fontSize: 14,
         color: COLORS.text,
-        fontFamily: FONTS.bold,
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
     },
 
     // Recent Activity
@@ -525,5 +528,35 @@ export default StyleSheet.create({
     },
     trendDown: {
         color: COLORS.error,
+    },
+    // New Styles
+    mutualContextRow: {
+        flexDirection: 'row',
+        marginTop: SPACING.sm,
+        justifyContent: 'center',
+        gap: SPACING.sm,
+    },
+    notFoundContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    notFoundText: {
+        color: COLORS.text,
+        fontSize: 18,
+        marginTop: 16,
+        fontFamily: FONTS.body,
+    },
+    backButtonLarge: {
+        marginTop: 20,
+    },
+    backButtonTextLarge: {
+        color: COLORS.accent,
+        fontSize: 16,
+        fontFamily: FONTS.bold,
+    },
+    backgroundHeader: {
+        backgroundColor: COLORS.background,
     },
 });

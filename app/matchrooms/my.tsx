@@ -142,7 +142,7 @@ export default function MyMatchrooms() {
 
             {/* Content */}
             {loading ? (
-                <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
             ) : (

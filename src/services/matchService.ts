@@ -11,12 +11,13 @@ import {
     query,
     runTransaction,
     serverTimestamp,
+    setDoc,
     updateDoc,
     where
 } from "firebase/firestore";
 import { db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
-import { isRoomExpired, isRoomLocked, isRoomFull } from "../utils/matchroomLifecycle";
+import { isRoomExpired, isRoomLocked } from "../utils/matchroomLifecycle";
 
 export interface Slot {
     slotId: string;
@@ -246,6 +247,80 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
     }
 }
 
+/**
+ * Checks if a user is currently in any active (not completed/expired) matchroom.
+ */
+export async function isUserInActiveMatchroom(uid: string): Promise<{ inRoom: boolean; roomId?: string; message?: string }> {
+    try {
+        const q = query(
+            collection(db, COLLECTION_NAME),
+            where("playerUids", "array-contains", uid),
+            where("status", "in", ["open", "locked", "in-progress"])
+        );
+        const snap = await getDocs(q);
+
+        if (!snap.empty) {
+            const room = snap.docs[0].data() as Matchroom;
+            return {
+                inRoom: true,
+                roomId: snap.docs[0].id,
+                message: `User is already in an active matchroom: ${room.title}`
+            };
+        }
+        return { inRoom: false };
+    } catch (error) {
+        Logger.error("matchService", "Error checking active matchrooms", error);
+        return { inRoom: false };
+    }
+}
+
+/**
+ * Creates a join request notification for the matchroom host.
+ */
+export async function requestJoinMatchroom(
+    room: Matchroom,
+    user: { uid: string; username: string },
+    role?: string
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+    try {
+        const roomId = room.id;
+        if (!roomId) throw "Matchroom ID missing";
+
+        // Idempotency: Use deterministic ID to prevent duplicate pending requests
+        const requestId = `match_join_request_${roomId}_${user.uid}`;
+        const notifRef = doc(db, 'notifications', requestId);
+
+        const existingSnap = await getDoc(notifRef);
+        if (existingSnap.exists() && existingSnap.data().status === 'pending') {
+            return { ok: false, message: "Request already pending for this room." };
+        }
+
+        const now = serverTimestamp();
+        await setDoc(notifRef, {
+            type: 'match_join_request',
+            toUid: room.hostUid,
+            fromUid: user.uid,
+            fromUsername: user.username,
+            status: 'pending',
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+            meta: {
+                matchroomId: roomId,
+                matchroomTitle: room.title,
+                game: room.game,
+                role: role || 'Flex'
+            }
+        });
+
+        Logger.info("matchService", "Join request sent", { roomId, uid: user.uid });
+        return { ok: true, id: requestId };
+    } catch (error) {
+        Logger.error("matchService", "Error requesting to join", error);
+        return { ok: false, message: "Failed to send request." };
+    }
+}
+
 export async function joinMatchroom(roomId: string, user: { uid: string; username: string }, role?: string, joinCode?: string): Promise<{ ok: true } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
@@ -256,6 +331,12 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
             return { ok: false, message: "Matchroom not found" };
         }
         const room = roomSnap.data() as Matchroom;
+
+        // BUSY CHECK
+        const busyCheck = await isUserInActiveMatchroom(user.uid);
+        if (busyCheck.inRoom && busyCheck.roomId !== roomId) {
+            return { ok: false, message: busyCheck.message || "You are already in another active matchroom." };
+        }
 
         // Guard: Check if room is expired
         if (isRoomExpired(room)) {

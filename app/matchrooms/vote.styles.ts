@@ -1,6 +1,6 @@
 // app/matchrooms/vote.styles.ts
 import { StyleSheet } from 'react-native';
-import { COLORS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     container: {
@@ -17,14 +17,14 @@ export default StyleSheet.create({
     },
 
     title: {
-        fontFamily: 'Inter_700Bold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.xxl,
         color: COLORS.text,
         marginBottom: SPACING.xs,
     },
 
     subtitle: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
         color: COLORS.muted,
         lineHeight: 22,
@@ -42,7 +42,7 @@ export default StyleSheet.create({
     },
 
     disputeTitle: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.warning,
         marginBottom: SPACING.sm,
@@ -82,7 +82,7 @@ export default StyleSheet.create({
     },
 
     sectionLabel: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.text,
         marginBottom: SPACING.md,
@@ -113,7 +113,7 @@ export default StyleSheet.create({
     },
 
     voteTeamName: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.text,
     },
@@ -126,7 +126,7 @@ export default StyleSheet.create({
     },
 
     voteCountText: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.caption,
         color: COLORS.accent,
     },
@@ -146,7 +146,7 @@ export default StyleSheet.create({
     },
 
     submitButtonText: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.background,
     },
@@ -161,7 +161,7 @@ export default StyleSheet.create({
     },
 
     alreadyVotedTitle: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.success,
         marginBottom: SPACING.xs,
@@ -203,7 +203,7 @@ export default StyleSheet.create({
     },
 
     progressText: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.label,
         color: COLORS.text,
         marginTop: SPACING.xs,
@@ -244,7 +244,7 @@ export default StyleSheet.create({
     },
 
     deadlineText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
         color: COLORS.warning,
         marginTop: SPACING.sm,

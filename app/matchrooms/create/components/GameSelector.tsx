@@ -52,28 +52,20 @@ export default function GameSelector({ selectedGame, onSelectGame, userProfile }
         return (
             <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Select Game / Sport</Text>
-                <View style={{ paddingVertical: 32, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={styles.emptyContainer}>
                     <MaterialIcons name="sports-esports" size={56} color={COLORS.muted} />
-                    <Text style={[styles.sectionLabel, { color: COLORS.text, marginTop: 16, marginBottom: 8 }]}>
+                    <Text style={styles.emptyTitle}>
                         No Games Added
                     </Text>
-                    <Text style={[styles.gameName, { color: COLORS.muted, textAlign: 'center', marginBottom: 20, lineHeight: 20 }]}>
+                    <Text style={styles.emptySubtitle}>
                         Add games to your profile to start creating matchrooms and playing with others
                     </Text>
                     <TouchableOpacity
-                        style={{
-                            backgroundColor: COLORS.accent,
-                            paddingVertical: 12,
-                            paddingHorizontal: 24,
-                            borderRadius: 8,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 8,
-                        }}
+                        style={styles.actionButton}
                         onPress={() => router.push('/profile')}
                     >
                         <MaterialIcons name="add-circle" size={20} color={COLORS.background} />
-                        <Text style={{ color: COLORS.background, fontSize: 16, fontWeight: '600' }}>
+                        <Text style={styles.actionButtonText}>
                             Add Games
                         </Text>
                     </TouchableOpacity>

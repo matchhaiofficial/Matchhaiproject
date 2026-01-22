@@ -94,23 +94,23 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
             {/* Date and Time (CS2 & Others) */}
             <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Date & Time</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <View style={[styles.inputBox, { flex: 1 }]}>
+                <View style={styles.tabContainer}>
+                    <View style={[styles.inputBox, styles.flex1]}>
                         <Pressable
                             onPress={() => setShowDatePicker(true)}
-                            style={{ flex: 1, justifyContent: 'center' }}
+                            style={styles.flex1Center}
                         >
-                            <Text style={[styles.input, !formData.date && { color: '#757575' }]}>
+                            <Text style={[styles.input, !formData.date && styles.mutedText]}>
                                 {formData.date || 'DD/MM/YYYY'}
                             </Text>
                         </Pressable>
                     </View>
-                    <View style={[styles.inputBox, { flex: 1 }]}>
+                    <View style={[styles.inputBox, styles.flex1]}>
                         <Pressable
                             onPress={() => setShowTimePicker(true)}
-                            style={{ flex: 1, justifyContent: 'center' }}
+                            style={styles.flex1Center}
                         >
-                            <Text style={[styles.input, !formData.time && { color: '#757575' }]}>
+                            <Text style={[styles.input, !formData.time && styles.mutedText]}>
                                 {formData.time ? formatTimeForDisplay(formData.time) : 'HH:MM'}
                             </Text>
                         </Pressable>
