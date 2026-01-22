@@ -11,9 +11,8 @@ export default StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: SPACING.screenPadding,
-        paddingBottom: SPACING.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
+        paddingBottom: SPACING.md,
+        backgroundColor: COLORS.background,
     },
     headerTitle: {
         color: COLORS.text,
@@ -34,10 +33,15 @@ export default StyleSheet.create({
         borderRadius: RADII.lg,
         padding: SPACING.lg,
         marginHorizontal: SPACING.screenPadding,
-        marginTop: SPACING.lg,
+        marginTop: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     avatar: {
         width: 80,
@@ -136,7 +140,8 @@ export default StyleSheet.create({
     gameAddText: {
         color: COLORS.accent,
         fontSize: TEXT_SIZES.caption,
-        marginLeft: 'auto',
+        fontFamily: FONTS.body,
+        marginTop: 2,
     },
 
     // Section
@@ -198,9 +203,9 @@ export default StyleSheet.create({
         alignItems: 'center',
     },
     gameIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: RADII.sm,
+        width: 44,
+        height: 44,
+        borderRadius: RADII.md,
         backgroundColor: COLORS.overlayMedium,
         alignItems: 'center',
         justifyContent: 'center',
@@ -243,6 +248,18 @@ export default StyleSheet.create({
     },
     gameEditIcon: {
         padding: SPACING.xs,
+        marginLeft: SPACING.xs,
+    },
+    syncText: {
+        fontSize: 10,
+        marginTop: 2,
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+    },
+    psnIconContainer: {
+        backgroundColor: 'rgba(0, 48, 135, 0.1)',
+        borderColor: '#003087',
+        borderWidth: 1,
     },
 
     // Add Game Card (dashed border)
@@ -511,5 +528,14 @@ export default StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: COLORS.background,
+    },
+    flex1: {
+        flex: 1,
+    },
+    marginLeftAuto: {
+        marginLeft: 'auto',
+    },
+    yellowIcon: {
+        marginRight: 4,
     },
 });

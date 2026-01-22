@@ -20,6 +20,7 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.heading,
+        fontWeight: '700',
         marginBottom: SPACING.xs,
     },
     headerSubtitle: {
@@ -28,6 +29,10 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
     },
 
+    tabContainer: {
+        flexDirection: 'row',
+        gap: SPACING.md,
+    },
     // Section
     section: {
         marginBottom: SPACING.lg,
@@ -110,6 +115,11 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.input,
         paddingVertical: SPACING.sm + 1,
     },
+    inputPicker: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
 
     // Chip Row (multi-select)
     chipRow: {
@@ -160,9 +170,10 @@ export default StyleSheet.create({
         ...SHADOWS.cardElevated,
     },
     primaryButtonText: {
-        color: COLORS.text,
+        color: COLORS.background,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.body,
+        fontWeight: '700',
     },
 
     // Zone Cards (New)
@@ -258,6 +269,17 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
     },
+    modalItemTextActive: {
+        color: COLORS.accent,
+        fontWeight: 'bold',
+        fontFamily: FONTS.heading,
+    },
+    modalItemSubtitle: {
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 2,
+        fontFamily: FONTS.body,
+    },
 
     // Calibrate Level
     calibrateContainer: {
@@ -342,6 +364,13 @@ export default StyleSheet.create({
     accentText: {
         color: COLORS.accent,
     },
+    italicHelper: {
+        fontSize: 12,
+        color: COLORS.muted,
+        marginTop: 6,
+        fontStyle: 'italic',
+        fontFamily: FONTS.body,
+    },
 
     // Info Boxes
     infoBox: {
@@ -355,8 +384,88 @@ export default StyleSheet.create({
     infoBoxText: {
         color: COLORS.text,
         fontSize: 13,
-        fontFamily: FONTS.body, // Standard fallback
+        fontFamily: FONTS.body,
         lineHeight: 18,
+    },
+    infoBoxTitle: {
+        color: COLORS.text,
+        fontSize: 12,
+        fontFamily: FONTS.heading,
+        marginBottom: 4,
+    },
+    infoBoxSmall: {
+        color: COLORS.muted,
+        fontSize: 11,
+        fontFamily: FONTS.body,
+    },
+    flex1Center: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    mutedText: {
+        color: COLORS.muted,
+    },
+    emptyContainer: {
+        paddingVertical: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.subheading,
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    emptySubtitle: {
+        color: COLORS.muted,
+        textAlign: 'center',
+        marginBottom: 20,
+        lineHeight: 20,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    actionButton: {
+        backgroundColor: COLORS.accent,
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: RADII.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    actionButtonText: {
+        color: COLORS.background,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: 'bold',
+        fontFamily: FONTS.heading,
+    },
+    noResultsText: {
+        color: COLORS.muted,
+        fontSize: 12,
+        marginTop: 8,
+        fontFamily: FONTS.body,
+    },
+    zoneListScroll: {
+        maxHeight: 300,
+    },
+    zoneInfoWrapper: {
+        flex: 1,
+        maxWidth: '65%',
+        marginRight: 12,
+    },
+    zonePriceWrapper: {
+        alignItems: 'flex-end',
+        minWidth: 80,
+    },
+    marginTop12: {
+        marginTop: 12,
+    },
+    creationHelperText: {
+        color: COLORS.muted,
+        fontSize: 12,
+        marginBottom: 8,
+        fontFamily: FONTS.body,
     },
 });
 

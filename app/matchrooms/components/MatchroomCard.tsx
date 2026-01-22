@@ -1,19 +1,20 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { memo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
 import { Matchroom } from "../../../src/services/matchService";
-import { isRoomLocked, isRoomFull } from "../../../src/utils/matchroomLifecycle";
 import { COLORS } from "../../../src/theme";
+import { isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
 import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
     room: Matchroom;
 }
 
-export default function MatchroomCard({ room }: MatchroomCardProps) {
+const MatchroomCard = memo(({ room }: MatchroomCardProps) => {
     const router = useRouter();
+    // ... rest of the logic remains the same
 
     // Check if room is locked/full
     const isLocked = isRoomLocked(room);
@@ -84,17 +85,9 @@ export default function MatchroomCard({ room }: MatchroomCardProps) {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     {/* LOCKED/FULL Badge */}
                     {isLocked && (
-                        <View style={{
-                            backgroundColor: '#FF5722',
-                            paddingHorizontal: 6,
-                            paddingVertical: 2,
-                            borderRadius: 4,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 2,
-                        }}>
+                        <View style={styles.lockBadge}>
                             <MaterialIcons name="lock" size={10} color="#FFF" />
-                            <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>
+                            <Text style={styles.lockBadgeText}>
                                 {isFull ? 'FULL' : 'LOCKED'}
                             </Text>
                         </View>
@@ -154,4 +147,6 @@ export default function MatchroomCard({ room }: MatchroomCardProps) {
             </View>
         </TouchableOpacity>
     );
-}
+});
+
+export default MatchroomCard;

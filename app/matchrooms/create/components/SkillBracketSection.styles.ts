@@ -21,11 +21,12 @@ export default StyleSheet.create({
     },
     calibrateTitle: {
         fontSize: 14,
-        fontWeight: 'bold',
+        fontFamily: FONTS.heading,
         color: COLORS.accent,
     },
     calibrateBullet: {
         fontSize: 12,
+        fontFamily: FONTS.body,
         color: COLORS.muted,
         marginLeft: SPACING.sm,
     },
@@ -45,6 +46,7 @@ export default StyleSheet.create({
     },
     calibrateButtonText: {
         color: '#fff',
+        fontFamily: FONTS.heading,
         fontWeight: 'bold',
     },
     sectionLabel: {
@@ -100,11 +102,13 @@ export default StyleSheet.create({
     },
     skillBadgeText: {
         color: COLORS.text,
+        fontFamily: FONTS.heading,
         fontWeight: 'bold',
         fontSize: 15,
     },
     skillBadgeRating: {
         color: COLORS.muted,
+        fontFamily: FONTS.body,
         fontSize: 12,
         marginTop: 2,
     },

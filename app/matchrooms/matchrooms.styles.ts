@@ -159,6 +159,21 @@ export default StyleSheet.create({
         fontWeight: 'bold',
         marginLeft: 4,
     },
+    lockBadge: {
+        backgroundColor: COLORS.error,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    lockBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+    },
 
     // -------------------------------------------------------------------------
     // New Matchroom Card Styles (Replicating NearbyCard from Dashboard)

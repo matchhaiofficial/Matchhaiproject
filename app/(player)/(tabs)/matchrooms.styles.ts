@@ -29,6 +29,7 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.heading,
         marginBottom: SPACING.lg,
+        lineHeight: 34,
     },
     searchBar: {
         backgroundColor: COLORS.inputBackground,
@@ -114,7 +115,157 @@ export default StyleSheet.create({
     },
     locationDropdownTextActive: {
         color: COLORS.accent,
-        fontWeight: '600',
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+    },
+    lockBadge: {
+        backgroundColor: COLORS.error,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    lockBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+    },
+    nearbyCard: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+        borderWidth: 1,
+        borderColor: COLORS.divider,
+        ...SHADOWS.cardSoft,
+    },
+    nearbyTitleRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    nearbyGame: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.xs,
+        textTransform: 'uppercase',
+    },
+    nearbyTitle: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.subheading,
+        marginRight: SPACING.md,
+    },
+    bookSlotBtn: {
+        backgroundColor: COLORS.accent,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: RADII.sm,
+    },
+    bookSlotText: {
+        color: '#FFF',
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+        fontWeight: 'bold',
+    },
+    nearbyInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+        gap: SPACING.md,
+    },
+    nearbyDistance: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    nearbyDistanceText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    nearbyTime: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    nearbyTimeText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    nearbyBottomRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    roleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    roleTag: {
+        backgroundColor: COLORS.overlayLight,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 4,
+    },
+    roleText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 10,
+    },
+    skillTag: {
+        backgroundColor: COLORS.accent + '15',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 4,
+    },
+    skillText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    moreRolesText: {
+        color: COLORS.textSecondary,
+        fontSize: 10,
+        fontFamily: FONTS.body,
+    },
+    priceTagContainer: {
+        backgroundColor: COLORS.success + '15',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: COLORS.success + '30',
+    },
+    priceTagText: {
+        color: COLORS.success,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+        fontWeight: 'bold',
+    },
+    matchScoreBadge: {
+        backgroundColor: '#FFD54F20',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    matchScoreText: {
+        color: '#FFD54F',
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
     },
     resultsCount: {
         paddingHorizontal: SPACING.screenPadding,
@@ -175,8 +326,8 @@ export default StyleSheet.create({
     },
     fabWrapper: {
         position: 'absolute',
-        bottom: 120,
-        right: 24,
+        bottom: 100, // Adjusted for tab bar + spacing
+        right: SPACING.xl,
         zIndex: 1000,
     },
     fab: {
@@ -248,6 +399,7 @@ export default StyleSheet.create({
     },
     modalListItemTextActive: {
         color: COLORS.accent,
-        fontWeight: '600',
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
     }
 });

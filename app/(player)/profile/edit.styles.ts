@@ -10,9 +10,8 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         padding: SPACING.screenPadding,
-        paddingBottom: SPACING.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
+        paddingBottom: SPACING.md,
+        backgroundColor: COLORS.background,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -33,6 +32,7 @@ export default StyleSheet.create({
     saveButtonText: {
         color: '#FFF',
         fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.heading,
         fontWeight: '600',
     },
     saveButtonDisabled: {
@@ -48,6 +48,7 @@ export default StyleSheet.create({
     sectionTitle: {
         color: COLORS.accent,
         fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.heading,
         fontWeight: '700',
         textTransform: 'uppercase',
         letterSpacing: 1,
@@ -62,6 +63,7 @@ export default StyleSheet.create({
     label: {
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.body,
         marginBottom: SPACING.xs,
         marginLeft: 4,
     },
@@ -142,7 +144,7 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingVertical: SPACING.md,
+        paddingVertical: 14,
         marginTop: SPACING.sm,
     },
     platformButtonActive: {
@@ -187,6 +189,7 @@ export default StyleSheet.create({
         marginTop: SPACING.xs,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
+        fontWeight: '600',
     },
     passwordRequirementsRow: {
         flexDirection: "row",
@@ -231,7 +234,7 @@ export default StyleSheet.create({
     },
     passwordButtonText: {
         color: COLORS.text,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.body,
         fontWeight: '600',
     },
@@ -295,5 +298,180 @@ export default StyleSheet.create({
         color: COLORS.muted,
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
+    },
+    // New Styles
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.background,
+    },
+    disabledInput: {
+        opacity: 0.6,
+    },
+    mutedHelperText: {
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 4,
+        marginLeft: 4,
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+    },
+    flexRowCentered: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    iconMarginRight: {
+        marginRight: 8,
+        opacity: 0.9,
+    },
+    pendingEmailContainer: {
+        marginTop: 8,
+        padding: 12,
+        backgroundColor: COLORS.warning + '20',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: COLORS.warning + '40',
+    },
+    pendingEmailHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    pendingEmailTitle: {
+        color: COLORS.warning,
+        fontSize: 13,
+        fontWeight: '600',
+        fontFamily: FONTS.heading,
+    },
+    pendingEmailText: {
+        color: COLORS.text,
+        fontSize: 12,
+        marginTop: 4,
+        fontFamily: FONTS.body,
+    },
+    marginTopSm: {
+        marginTop: 8,
+    },
+    gapMdRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    gapMd: {
+        gap: 12,
+    },
+    inputWithIcon: {
+        flex: 1,
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.input,
+        fontFamily: FONTS.body,
+        paddingVertical: SPACING.sm + 2,
+        paddingRight: 40,
+    },
+    marginLeftSm: {
+        marginLeft: 8,
+    },
+    marginTopNone: {
+        marginTop: 0,
+    },
+    inputWithToggle: {
+        flex: 1,
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.input,
+        fontFamily: FONTS.body,
+        paddingVertical: SPACING.sm + 2,
+        paddingRight: 44,
+    },
+    togglePosition: {
+        position: 'absolute',
+        right: 12,
+    },
+    passwordActionsRow: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 4,
+    },
+    preferredAreasHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    labelNoMargin: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.body,
+        marginLeft: 4,
+    },
+    selectedCountText: {
+        fontSize: 12,
+        fontWeight: '600',
+        fontFamily: FONTS.body,
+        color: COLORS.muted,
+    },
+    warningText: {
+        color: COLORS.warning,
+    },
+    flexWrapRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    borderBottomNone: {
+        borderBottomWidth: 0,
+    },
+    verifiedSummaryContainer: {
+        marginTop: 8,
+        paddingHorizontal: 4,
+    },
+    flexColumn: {
+        flexDirection: "column",
+    },
+    accentBoldText: {
+        color: COLORS.accent,
+        fontWeight: "600",
+    },
+    psnSubValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: 11,
+    },
+    flex1: {
+        flex: 1,
+    },
+    marginBottomLg: {
+        marginBottom: 24,
+    },
+    statusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: RADII.md,
+    },
+    friendBadge: {
+        backgroundColor: COLORS.success + '20',
+    },
+    pendingBadge: {
+        backgroundColor: COLORS.warning + '20',
+    },
+    statusBadgeText: {
+        marginLeft: 8,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.bold,
+    },
+    mainButton: {
+        flexDirection: 'row',
+        height: 50,
+        backgroundColor: COLORS.accent,
+        borderRadius: RADII.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    mainButtonText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: '700',
+        fontFamily: FONTS.heading,
     },
 });

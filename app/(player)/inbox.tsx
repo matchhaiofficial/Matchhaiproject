@@ -7,14 +7,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
-import { respondFriendRequest, respondToJoinRequest, respondToTeamInvite } from "../../src/services/functions";
+import { respondFriendRequest, respondToJoinRequest, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
 
 interface Notification {
     id: string;
-    type: 'friend_request' | 'team_invite' | 'team_join_request' | 'team_join_decision' | 'match_booking_captain_approval' | 'match_seat_invitation';
+    type: 'friend_request' | 'team_invite' | 'team_join_request' | 'team_join_decision' | 'match_booking_captain_approval' | 'match_seat_invitation' | 'match_join_request';
     fromUid: string;
     fromUsername: string;
     status: 'pending' | 'accepted' | 'declined' | 'rejected';
@@ -30,6 +30,7 @@ interface Notification {
             linked?: { steam?: boolean; faceit?: boolean; psn?: boolean; xbox?: boolean };
         };
         matchroomId?: string;
+        matchroomTitle?: string;
         intentId?: string;
         side?: string;
         role?: string;
@@ -102,6 +103,19 @@ export default function Inbox() {
         setProcessing(notifId);
         try {
             const res = await respondToJoinRequest({ notificationId: notifId, decision });
+            if (!res.ok) alert(res.message || 'Failed to respond.');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setProcessing(null);
+        }
+    };
+
+    const handleMatchJoinResponse = async (notifId: string, decision: 'accept' | 'reject') => {
+        if (processing) return;
+        setProcessing(notifId);
+        try {
+            const res = await respondToMatchroomJoinRequest({ notificationId: notifId, decision });
             if (!res.ok) alert(res.message || 'Failed to respond.');
         } catch (e) {
             console.error(e);
@@ -205,6 +219,7 @@ export default function Inbox() {
     const renderItem = ({ item }: { item: Notification }) => {
         const isRequest = item.type === 'friend_request';
         const isJoinRequest = item.type === 'team_join_request';
+        const isMatchJoinRequest = item.type === 'match_join_request';
         const isTeamInvite = item.type === 'team_invite';
         const isDecision = item.type === 'team_join_decision';
         const isBookingApproval = item.type === 'match_booking_captain_approval';
@@ -212,8 +227,8 @@ export default function Inbox() {
         const isPending = item.status === 'pending';
         const isProcessing = processing === item.id;
 
-        const iconColor = (isJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? COLORS.accent : COLORS.success;
-        const iconBg = (isJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? 'rgba(66, 165, 245, 0.1)' : 'rgba(76, 175, 80, 0.1)';
+        const iconColor = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? COLORS.accent : COLORS.success;
+        const iconBg = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? 'rgba(66, 165, 245, 0.1)' : 'rgba(76, 175, 80, 0.1)';
 
         return (
             <View style={styles.notificationCard}>
@@ -229,9 +244,10 @@ export default function Inbox() {
                         <Text style={styles.typeText}>
                             {isRequest ? "Friend Request" :
                                 (isJoinRequest ? "Team Join Request" :
-                                    (isTeamInvite ? "Team Invitation" :
-                                        (isBookingApproval ? "Booking Approval" :
-                                            (isSeatInv ? "Seat Invitation" : "Team Update"))))}
+                                    (isMatchJoinRequest ? "Matchroom Join Request" :
+                                        (isTeamInvite ? "Team Invitation" :
+                                            (isBookingApproval ? "Booking Approval" :
+                                                (isSeatInv ? "Seat Invitation" : "Team Update")))))}
                         </Text>
                         <Text style={styles.timeText}>{getTimeAgo(item.createdAt)}</Text>
                     </View>
@@ -280,6 +296,14 @@ export default function Inbox() {
                                     {" requested to book multiple seats in your matchroom."}
                                 </>
                             )}
+                            {isMatchJoinRequest && (
+                                <>
+                                    {" wants to join your matchroom "}
+                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.matchroomTitle}</Text>
+                                    {" as "}
+                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.role}</Text>
+                                </>
+                            )}
                             {isSeatInv && (
                                 <>
                                     {" invited you to join a squad for a "}
@@ -307,6 +331,7 @@ export default function Inbox() {
                             onPress={() => {
                                 if (isRequest) handleFriendResponse(item.id, 'accept');
                                 else if (isJoinRequest) handleJoinResponse(item.id, 'accept');
+                                else if (isMatchJoinRequest) handleMatchJoinResponse(item.id, 'accept');
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'accept');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'approved');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta!.matchroomId!, item.meta!.intentId!, item.meta!.side!, item.meta!.role!, 'accept');
@@ -327,6 +352,7 @@ export default function Inbox() {
                             onPress={() => {
                                 if (isRequest) handleFriendResponse(item.id, 'decline');
                                 else if (isJoinRequest) handleJoinResponse(item.id, 'reject');
+                                else if (isMatchJoinRequest) handleMatchJoinResponse(item.id, 'reject');
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'decline');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'rejected');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta!.matchroomId!, item.meta!.intentId!, item.meta!.side!, item.meta!.role!, 'decline');

@@ -445,7 +445,7 @@ export default function GameDetails() {
     if (loading) {
         return (
             <SafeAreaView style={styles.screen}>
-                <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
             </SafeAreaView>
@@ -516,7 +516,7 @@ export default function GameDetails() {
                                         </Text>
                                     </View>
                                 </View>
-                                <Text style={[styles.statCaption, { marginTop: 12 }]}>
+                                <Text style={styles.verifiedCaption}>
                                     Verified by MatchHai • Top 15% in your city
                                 </Text>
                             </View>
