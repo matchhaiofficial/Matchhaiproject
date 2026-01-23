@@ -25,7 +25,7 @@ import type { UserProfile } from '../../../src/services/userService';
 import { getUserProfile } from '../../../src/services/userService';
 import type { BookingRequest } from '../../../src/services/zoneService';
 import { createBookingRequest } from '../../../src/services/zoneService';
-import { COLORS } from '../../../src/theme';
+import { COLORS, FONTS } from '../../../src/theme';
 
 import Logger from '../../../src/utils/logger';
 import BasicFields from './components/BasicFields';
@@ -969,7 +969,7 @@ export default function CreateMatchroom() {
                                 {/* CS2 Summary Line */}
                                 {selectedGame === 'cs2' && formData.format && (
                                     <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(66, 165, 245, 0.1)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(66, 165, 245, 0.3)' }}>
-                                        <Text style={{ color: COLORS.text, fontSize: 13, fontFamily: 'Inter_500Medium', lineHeight: 18 }}>
+                                        <Text style={{ color: COLORS.text, fontSize: 13, fontFamily: FONTS.interMedium, lineHeight: 18 }}>
                                             {'Hosting CS2 5v5 in '}
                                             <Text style={{ color: COLORS.accent }}>
                                                 {locationMode === 'broadcast'
@@ -1008,7 +1008,7 @@ export default function CreateMatchroom() {
                                             style={{
                                                 color: COLORS.text,
                                                 fontSize: 13,
-                                                fontFamily: 'Inter_500Medium',
+                                                fontFamily: FONTS.interMedium,
                                                 lineHeight: 18,
                                             }}
                                         >

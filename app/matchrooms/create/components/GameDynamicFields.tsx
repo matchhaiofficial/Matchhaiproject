@@ -17,7 +17,7 @@ import {
     INDOOR_CRICKET_COMPOSITIONS,
     TEKKEN_CHARACTERS,
 } from '../../../../constants/profileOptions';
-import { COLORS } from '../../../../src/theme';
+import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
 
 interface GameDynamicFieldsProps {
@@ -411,7 +411,7 @@ export default function GameDynamicFields({
                             color: COLORS.muted,
                             fontSize: 12,
                             marginBottom: 8,
-                            fontFamily: 'Inter_400Regular',
+                            fontFamily: FONTS.interRegular,
                         }}
                     >
                         Define the team structure to ensure balanced matches
@@ -458,7 +458,7 @@ export default function GameDynamicFields({
                                 style={{
                                     color: COLORS.text,
                                     fontSize: 12,
-                                    fontFamily: 'Inter_500Medium',
+                                    fontFamily: FONTS.interMedium,
                                     marginBottom: 4,
                                 }}
                             >
@@ -472,7 +472,7 @@ export default function GameDynamicFields({
                                 style={{
                                     color: COLORS.muted,
                                     fontSize: 11,
-                                    fontFamily: 'Inter_400Regular',
+                                    fontFamily: FONTS.interRegular,
                                 }}
                             >
                                 Required:{' '}

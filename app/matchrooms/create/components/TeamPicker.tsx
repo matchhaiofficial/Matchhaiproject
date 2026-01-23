@@ -3,7 +3,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Team } from '../../../../src/services/teamService';
-import { COLORS } from '../../../../src/theme';
+import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
 
 interface TeamPickerProps {
@@ -66,7 +66,7 @@ export default function TeamPicker({ teams, selectedTeamId, onSelectTeam, curren
                 >
                     <View style={{ backgroundColor: COLORS.background, borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '70%' }}>
                         <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.inputBorder }}>
-                            <Text style={{ fontFamily: 'Montserrat_700Bold', fontSize: 18, color: COLORS.text }}>
+                            <Text style={{ fontFamily: FONTS.montserratBold, fontSize: 18, color: COLORS.text }}>
                                 Select Team
                             </Text>
                         </View>
@@ -88,10 +88,10 @@ export default function TeamPicker({ teams, selectedTeamId, onSelectTeam, curren
                                 >
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <View style={{ flex: 1 }}>
-                                            <Text style={{ fontFamily: 'Montserrat_700Bold', fontSize: 16, color: COLORS.text }}>
+                                            <Text style={{ fontFamily: FONTS.montserratBold, fontSize: 16, color: COLORS.text }}>
                                                 {team.name}
                                             </Text>
-                                            <Text style={{ fontFamily: 'Martel_400Regular', fontSize: 12, color: COLORS.muted, marginTop: 4 }}>
+                                            <Text style={{ fontFamily: FONTS.martelRegular, fontSize: 12, color: COLORS.muted, marginTop: 4 }}>
                                                 {team.captainUid === currentUserId ? '👑 Captain' : '👤 Member'} • {team.memberCount || 0} members
                                             </Text>
                                         </View>

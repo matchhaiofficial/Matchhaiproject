@@ -42,10 +42,31 @@ export const COLORS = {
 
 // 🔤 Fonts
 export const FONTS = {
+  // Semantic
   heading: 'Montserrat_700Bold',
   subheading: 'Lora_400Regular',
   body: 'Martel_400Regular',
   bold: 'Montserrat_700Bold',
+  medium: 'Montserrat_500Medium',
+  semibold: 'Montserrat_600SemiBold',
+  clean: 'Inter_500Medium',
+  serif: 'Martel_400Regular',
+
+  // Manual Control (Montserrat)
+  montserratRegular: 'Montserrat_400Regular',
+  montserratMedium: 'Montserrat_500Medium',
+  montserratSemiBold: 'Montserrat_600SemiBold',
+  montserratBold: 'Montserrat_700Bold',
+
+  // Manual Control (Inter)
+  interRegular: 'Inter_400Regular',
+  interMedium: 'Inter_500Medium',
+  interSemiBold: 'Inter_600SemiBold', // Ensure loaded in _layout
+  interBold: 'Inter_700Bold',       // Ensure loaded in _layout
+
+  // Manual Control (Others)
+  loraRegular: 'Lora_400Regular',
+  martelRegular: 'Martel_400Regular',
 };
 
 // 📏 Spacing scale (8pt-ish system)
@@ -107,14 +128,14 @@ export const SHADOWS = {
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 5,
+    elevation: 8, // Increased for Android
   },
   cardSoft: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3, // Increased for Android
   },
 };
 

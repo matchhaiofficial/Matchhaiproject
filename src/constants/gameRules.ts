@@ -21,6 +21,37 @@ export type GameRule = {
     hasPosition?: boolean;
 };
 
+// Variable Format Configuration
+export interface GameFormat {
+    label: string;
+    size: number;
+}
+
+export const GAME_FORMATS: Record<string, GameFormat[]> = {
+    futsal: [
+        { label: '5v5', size: 5 },
+        { label: '6v6', size: 6 },
+        { label: '7v7', size: 7 }
+    ],
+    indoor_cricket: [
+        { label: '6v6', size: 6 }, // Common variant, adding for completeness
+        { label: '8v8', size: 8 },
+        { label: '10v10', size: 10 }
+    ],
+    tekken8: [
+        { label: '1v1', size: 1 },
+        { label: '2v2', size: 2 }
+    ],
+    fc26: [
+        { label: '1v1', size: 1 },
+        { label: '2v2', size: 2 }
+    ],
+    // Defaults for others to ensure no crash if not specified
+    cs2: [{ label: '5v5', size: 5 }],
+    pickleball: [{ label: 'Double', size: 2 }],
+    padel: [{ label: 'Double', size: 2 }]
+};
+
 export const GAME_RULES: Record<string, GameRule> = {
     cs2: {
         label: 'Counter-Strike 2',
