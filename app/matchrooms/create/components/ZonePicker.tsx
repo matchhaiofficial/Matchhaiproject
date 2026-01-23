@@ -67,7 +67,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
         return (
             <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Select Zone</Text>
-                <ActivityIndicator color={COLORS.accent} style={{ marginTop: 12 }} />
+                <ActivityIndicator color={COLORS.accent} style={styles.marginTop12} />
             </View>
         );
     }
@@ -90,11 +90,11 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
 
             {/* Zone List - Card Style */}
             {filteredZones.length === 0 ? (
-                <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 8 }}>
+                <Text style={styles.noResultsText}>
                     {searchQuery ? 'No zones found' : 'No zones available'}
                 </Text>
             ) : (
-                <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled>
+                <ScrollView style={styles.zoneListScroll} nestedScrollEnabled>
                     {filteredZones.map((zone) => {
                         const isSelected = zone.id === selectedZoneId;
                         return (
@@ -106,7 +106,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                 ]}
                                 onPress={() => onZoneSelect(zone.id, zone.venueBrandName, zone.hourlyRate || 0, zone.ps5HourlyRate)}
                             >
-                                <View style={{ flex: 1, maxWidth: '65%', marginRight: 12 }}>
+                                <View style={styles.zoneInfoWrapper}>
                                     <Text style={styles.zoneName} numberOfLines={1} ellipsizeMode="tail">
                                         {zone.venueBrandName}
                                     </Text>
@@ -114,7 +114,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                         {zone.primaryBranch.areaLabel}
                                     </Text>
                                 </View>
-                                <View style={{ alignItems: 'flex-end', minWidth: 80 }}>
+                                <View style={styles.zonePriceWrapper}>
                                     {zone.effectiveRateLabel ? (
                                         <Text style={styles.zonePrice}>
                                             {zone.effectiveRateLabel}
@@ -123,7 +123,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                         <Text style={styles.zoneDetail}>Rate TBD</Text>
                                     )}
                                     {isSelected && (
-                                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} style={{ marginTop: 4 }} />
+                                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} style={styles.marginTop4} />
                                     )}
                                 </View>
                             </TouchableOpacity>

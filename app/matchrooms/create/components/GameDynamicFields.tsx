@@ -135,10 +135,7 @@ export default function GameDynamicFields({
                     <Text
                         style={[
                             styles.modalItemText,
-                            formData.formation === item && {
-                                color: COLORS.accent,
-                                fontWeight: 'bold',
-                            },
+                            formData.formation === item && styles.modalItemTextActive
                         ]}
                     >
                         {item}
@@ -213,19 +210,16 @@ export default function GameDynamicFields({
                         closeModal();
                     }}
                 >
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.flex1}>
                         <Text
                             style={[
                                 styles.modalItemText,
-                                formData.composition === item.name && {
-                                    color: COLORS.accent,
-                                    fontWeight: 'bold',
-                                },
+                                formData.composition === item.name && styles.modalItemTextActive,
                             ]}
                         >
                             {item.name}
                         </Text>
-                        <Text style={{ color: COLORS.muted, fontSize: 11, marginTop: 2 }}>
+                        <Text style={styles.modalItemSubtitle}>
                             {item.description}
                         </Text>
                     </View>
@@ -309,20 +303,13 @@ export default function GameDynamicFields({
                 <View style={styles.section}>
                     <Text style={styles.sectionLabel}>Favourite Club</Text>
                     <TouchableOpacity
-                        style={[
-                            styles.inputBox,
-                            {
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                            },
-                        ]}
+                        style={[styles.inputBox, styles.inputPicker]}
                         onPress={() => openModal('club_league')}
                     >
                         <Text
                             style={[
                                 styles.input,
-                                !formData.favouriteClub && { color: '#757575' },
+                                !formData.favouriteClub && styles.mutedText,
                             ]}
                         >
                             {formData.favouriteClub || 'Select Club'}
@@ -333,14 +320,7 @@ export default function GameDynamicFields({
                             color={COLORS.muted}
                         />
                     </TouchableOpacity>
-                    <Text
-                        style={{
-                            fontSize: 12,
-                            color: COLORS.muted,
-                            marginTop: 6,
-                            fontStyle: 'italic',
-                        }}
-                    >
+                    <Text style={styles.italicHelper}>
                         Note: You can choose any team in the actual match. This is just your preferred club.
                     </Text>
                 </View>

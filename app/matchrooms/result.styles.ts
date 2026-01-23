@@ -1,6 +1,6 @@
 // app/matchrooms/result.styles.ts
 import { StyleSheet } from 'react-native';
-import { COLORS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     container: {
@@ -17,14 +17,14 @@ export default StyleSheet.create({
     },
 
     title: {
-        fontFamily: 'Inter_700Bold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.xxl,
         color: COLORS.text,
         marginBottom: SPACING.xs,
     },
 
     subtitle: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
         color: COLORS.muted,
         lineHeight: 22,
@@ -46,20 +46,20 @@ export default StyleSheet.create({
     },
 
     matchInfoLabel: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.label,
         color: COLORS.muted,
         marginRight: SPACING.xs,
     },
 
     matchInfoValue: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.label,
         color: COLORS.text,
     },
 
     sectionLabel: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.text,
         marginBottom: SPACING.md,
@@ -91,7 +91,7 @@ export default StyleSheet.create({
     },
 
     teamName: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.text,
     },
@@ -198,7 +198,7 @@ export default StyleSheet.create({
     },
 
     statusText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.label,
         color: COLORS.text,
     },

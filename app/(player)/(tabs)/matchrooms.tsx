@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -28,8 +28,8 @@ import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../src/constants/time
 import { getMatchrooms, Matchroom, Slot } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import { matchesTimeline } from "../../../src/utils/timeFilters";
 import { isRoomExpired } from "../../../src/utils/matchroomLifecycle";
+import { matchesTimeline } from "../../../src/utils/timeFilters";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import styles from "./matchrooms.styles";
 
@@ -204,9 +204,9 @@ export default function MatchroomsIndex() {
     const hasOversFilter = () => selectedGame === 'indoorCricket';
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
-    const renderItem = ({ item }: { item: Matchroom }) => (
+    const renderItem = useCallback(({ item }: { item: Matchroom }) => (
         <MatchroomCard room={item} />
-    );
+    ), []);
 
     // Render filter row helper
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (

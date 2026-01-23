@@ -43,7 +43,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                 {showAll ? (
                     <>
                         {!hasRole && (
-                            <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8, fontFamily: 'Inter_400Regular' }}>
+                            <Text style={styles.creationHelperText}>
                                 Pick what you'll mainly play this match
                             </Text>
                         )}
@@ -77,7 +77,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
                             <Text style={styles.roleChipTextReadOnly}>{selectedRole}</Text>
                         </View>
                         {onRoleChange && (
-                            <TouchableOpacity onPress={() => setIsEditing(true)} style={{ marginLeft: 8 }}>
+                            <TouchableOpacity onPress={() => setIsEditing(true)} style={styles.marginLeft8}>
                                 <MaterialIcons name="edit" size={16} color={COLORS.accent} />
                             </TouchableOpacity>
                         )}

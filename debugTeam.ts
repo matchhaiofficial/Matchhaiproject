@@ -1,7 +1,7 @@
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "./src/config/firebaseConfig";
 
-async function inspectTeam(teamId) {
+async function inspectTeam(teamId: string) {
     console.log(`Inspecting team: ${teamId}`);
     try {
         const snap = await getDoc(doc(db, "teams", teamId));
