@@ -2,6 +2,7 @@
 import { StyleSheet } from 'react-native';
 import {
     COLORS,
+    FONTS,
     RADII,
     SPACING,
     TEXT_SIZES
@@ -131,7 +132,8 @@ export default StyleSheet.create({
     roomTitle: {
         color: COLORS.text,
         fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
         marginBottom: SPACING.xs,
     },
 

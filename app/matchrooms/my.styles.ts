@@ -10,11 +10,9 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.xl,
+        paddingTop: SPACING.lg,
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.backgroundDark,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.overlayMedium,
+        backgroundColor: COLORS.background,
     },
     backButton: {
         padding: 8,
@@ -142,7 +140,7 @@ export default StyleSheet.create({
         marginTop: SPACING.xs,
         paddingTop: SPACING.sm,
         borderTopWidth: 1,
-        borderTopColor: COLORS.overlayLight,
+        borderTopColor: COLORS.divider,
     },
     roleText: {
         fontFamily: FONTS.body,
@@ -159,5 +157,11 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         color: COLORS.textSecondary,
         marginRight: 4,
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.background,
     },
 });

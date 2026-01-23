@@ -1,21 +1,18 @@
 import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
+import { formatDistanceToNow } from "date-fns";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Linking, ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
-import { getUserProfile, UserProfile } from "../../../src/services/userService";
-import { COLORS, SPACING } from "../../../src/theme";
 import { useToast } from "../../../src/hooks/useToast";
+import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
+import { getUserProfile, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
-import { formatDistanceToNow } from "date-fns";
-import { Timestamp } from "firebase/firestore";
-import { refreshUserStats } from "../../../src/services/userService";
-import { useMemo } from "react";
 
 const GAMES = [
     { key: 'cs2', label: 'CS2' },
@@ -343,7 +340,7 @@ export default function PlayerProfile() {
 
                 {/* Mutual Context Chips */}
                 {mutualContext.length > 0 && (
-                    <View style={[styles.chipRow, { marginTop: SPACING.sm, justifyContent: 'center' }]}>
+                    <View style={styles.mutualContextRow}>
                         {mutualContext.map((c, i) => (
                             <View key={i} style={styles.contextChip}>
                                 <MaterialIcons name="groups" size={14} color={COLORS.accent} />
@@ -636,7 +633,7 @@ export default function PlayerProfile() {
     if (loading) {
         return (
             <SafeAreaView style={styles.screen}>
-                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
             </SafeAreaView>
@@ -646,11 +643,11 @@ export default function PlayerProfile() {
     if (!profile) {
         return (
             <SafeAreaView style={styles.screen}>
-                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+                <View style={styles.notFoundContainer}>
                     <MaterialIcons name="person-off" size={64} color={COLORS.textSecondary} />
-                    <Text style={{ color: COLORS.text, fontSize: 18, marginTop: 16 }}>Profile not found</Text>
-                    <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-                        <Text style={{ color: COLORS.accent, fontSize: 16 }}>Go Back</Text>
+                    <Text style={styles.notFoundText}>Profile not found</Text>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backButtonLarge}>
+                        <Text style={styles.backButtonTextLarge}>Go Back</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -663,7 +660,7 @@ export default function PlayerProfile() {
     return (
         <View style={styles.screen}>
             <StatusBar barStyle="light-content" />
-            <SafeAreaView edges={['top']} style={{ backgroundColor: COLORS.background }}>
+            <SafeAreaView edges={['top']} style={styles.backgroundHeader}>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                         <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />

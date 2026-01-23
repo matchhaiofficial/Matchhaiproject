@@ -326,7 +326,7 @@ export default function Profile() {
                                         </View>
 
                                         {/* Primary Badge: SkillScore > Faceit Level > PSN */}
-                                        <View style={{ marginLeft: 'auto' }}>
+                                        <View style={styles.marginLeftAuto}>
                                             {skillScore ? (
                                                 <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
                                             ) : (
@@ -335,7 +335,7 @@ export default function Profile() {
                                                     <Image source={faceitLevelIcons[profile.faceitSkillLevel]} style={styles.faceitIcon} resizeMode="contain" />
                                                 ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
                                                     <View style={styles.gameSkill}>
-                                                        <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={{ marginRight: 4 }} />
+                                                        <MaterialIcons name="emoji-events" size={16} color="#FFD700" style={styles.yellowIcon} />
                                                     </View>
                                                 ) : (
                                                     <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
@@ -378,7 +378,7 @@ export default function Profile() {
                                 {profile?.steamPersonaName ? (
                                     <>
                                         <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
-                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        <Text style={styles.syncText}>
                                             Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
                                         </Text>
                                     </>
@@ -397,7 +397,7 @@ export default function Profile() {
                                 {profile?.faceitNickname ? (
                                     <>
                                         <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
-                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        <Text style={styles.syncText}>
                                             Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
                                         </Text>
                                     </>
@@ -408,7 +408,7 @@ export default function Profile() {
 
                         {/* PSN */}
                         <TouchableOpacity style={styles.platformCard} onPress={handleSettings}>
-                            <View style={[styles.platformIcon, { backgroundColor: 'rgba(0, 48, 135, 0.1)', borderColor: '#003087', borderWidth: 1 }]}>
+                            <View style={[styles.platformIcon, styles.psnIconContainer]}>
                                 <MaterialIcons name="sports-esports" size={20} color="#003791" />
                             </View>
                             <View style={styles.platformInfo}>
@@ -416,7 +416,7 @@ export default function Profile() {
                                 {profile?.psnStats?.psnOnlineId ? (
                                     <>
                                         <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
-                                        <Text style={[styles.platformValue, { fontSize: 10, marginTop: 2, color: COLORS.muted }]}>
+                                        <Text style={styles.syncText}>
                                             Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
                                         </Text>
                                     </>

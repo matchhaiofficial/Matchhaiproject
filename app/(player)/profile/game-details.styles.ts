@@ -196,4 +196,17 @@ export default StyleSheet.create({
         justifyContent: 'center',
         zIndex: 100,
     },
+    // New Styles
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.background,
+    },
+    verifiedCaption: {
+        color: COLORS.muted,
+        fontSize: 12,
+        fontFamily: FONTS.body,
+        marginTop: 12,
+    },
 });

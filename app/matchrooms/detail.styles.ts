@@ -11,9 +11,7 @@ export default StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: SPACING.screenPadding,
         paddingVertical: SPACING.md,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.overlayLight,
-        backgroundColor: COLORS.backgroundDark,
+        backgroundColor: COLORS.background,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -47,7 +45,7 @@ export default StyleSheet.create({
     },
     gameText: {
         color: '#FFF',
-        fontSize: TEXT_SIZES.caption,
+        fontSize: 10,
         fontFamily: FONTS.heading,
         fontWeight: 'bold',
         textTransform: 'uppercase',
@@ -84,22 +82,48 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
     },
     infoItem: {
-        width: '100%',
+        width: '48%', // Responsive grid
         flexDirection: 'row',
         alignItems: 'center',
+        marginBottom: SPACING.sm,
     },
     infoIcon: {
         marginRight: SPACING.sm,
     },
     infoLabel: {
         color: COLORS.textSecondary,
-        fontSize: 10,
+        fontSize: TEXT_SIZES.xs,
         fontFamily: FONTS.body,
+        textTransform: 'uppercase',
     },
     infoValue: {
         color: COLORS.text,
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
+        fontWeight: '700',
+    },
+
+    // Banners
+    banner: {
+        padding: SPACING.md,
+        borderRadius: RADII.sm,
+        marginBottom: SPACING.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    expiredBanner: {
+        backgroundColor: COLORS.error,
+    },
+    lockedBanner: {
+        backgroundColor: COLORS.warning,
+    },
+    bannerText: {
+        color: '#FFF',
+        flex: 1,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.heading,
+        fontWeight: '500',
     },
 
     // Section Headers
@@ -292,5 +316,53 @@ export default StyleSheet.create({
     },
     confirmButton: {
         backgroundColor: COLORS.accent,
+    },
+
+    // Join Code Modal Specifics
+    codeSubtext: {
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        marginBottom: SPACING.lg,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label,
+    },
+    codeInput: {
+        backgroundColor: COLORS.inputBackground,
+        color: COLORS.text,
+        padding: SPACING.md,
+        borderRadius: RADII.sm,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        fontSize: TEXT_SIZES.input,
+        textAlign: 'center',
+        marginBottom: SPACING.xl,
+        fontFamily: FONTS.body,
+    },
+    statusBanner: {
+        padding: SPACING.md,
+        borderRadius: RADII.sm,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.overlayLight,
+    },
+    statusText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+        fontWeight: 'bold',
+    },
+    assessmentMessage: {
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        marginBottom: SPACING.xl,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+    },
+    // New Styles
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.background,
     },
 });

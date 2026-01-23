@@ -35,7 +35,7 @@ import {
     isUsernameAvailable,
     isXboxIdAvailable,
 } from "../../../src/services/userService";
-import { COLORS, INPUT_PADDING } from "../../../src/theme";
+import { COLORS } from "../../../src/theme";
 import styles from "./edit.styles";
 
 // FACEIT Level Icons (matching register-step3 logic)
@@ -807,7 +807,7 @@ export default function EditProfile() {
     if (loading) {
         return (
             <SafeAreaView style={styles.screen}>
-                <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
             </SafeAreaView>
@@ -834,7 +834,7 @@ export default function EditProfile() {
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
-                style={{ flex: 1 }}
+                style={styles.flex1}
             >
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
@@ -857,7 +857,7 @@ export default function EditProfile() {
                     {/* Username - Read Only */}
                     <View style={styles.fieldGroup}>
                         <Text style={styles.label}>Username (Cannot be changed)</Text>
-                        <View style={[styles.inputBox, { opacity: 0.6 }]}>
+                        <View style={[styles.inputBox, styles.disabledInput]}>
                             <TextInput
                                 value={username}
                                 style={styles.input}
@@ -867,11 +867,11 @@ export default function EditProfile() {
                                 editable={false}
                             />
                         </View>
-                        <Text style={[styles.helperText, { color: COLORS.muted }]}>Usernames are permanent and cannot be changed</Text>
+                        <Text style={styles.mutedHelperText}>Usernames are permanent and cannot be changed</Text>
                     </View>
 
                     {/* City & Age */}
-                    <View style={{ marginBottom: 24 }}>
+                    <View style={styles.marginBottomLg}>
                         <CustomSingleSelect
                             label="City"
                             value={city}
@@ -892,12 +892,12 @@ export default function EditProfile() {
                     {/* Email */}
                     <View style={styles.fieldGroup}>
                         <Text style={styles.label}>Email Address</Text>
-                        <View style={[styles.inputBox, { opacity: 0.6 }]}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        <View style={[styles.inputBox, styles.disabledInput]}>
+                            <View style={styles.flexRowCentered}>
                                 <MaterialIcons
                                     name="email"
                                     size={20}
-                                    style={{ marginRight: 8, opacity: 0.9 }}
+                                    style={styles.iconMarginRight}
                                     color={COLORS.muted}
                                 />
                                 <TextInput
@@ -915,21 +915,14 @@ export default function EditProfile() {
 
                         {/* Pending Email Status */}
                         {pendingEmail && (
-                            <View style={{
-                                marginTop: 8,
-                                padding: 12,
-                                backgroundColor: COLORS.warning + '20',
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: COLORS.warning + '40'
-                            }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={styles.pendingEmailContainer}>
+                                <View style={styles.pendingEmailHeader}>
                                     <MaterialIcons name="pending" size={18} color={COLORS.warning} />
-                                    <Text style={{ color: COLORS.warning, fontSize: 13, fontWeight: '600' }}>
+                                    <Text style={styles.pendingEmailTitle}>
                                         Pending Verification
                                     </Text>
                                 </View>
-                                <Text style={{ color: COLORS.text, fontSize: 12, marginTop: 4 }}>
+                                <Text style={styles.pendingEmailText}>
                                     {pendingEmail}
                                 </Text>
                             </View>
@@ -938,19 +931,21 @@ export default function EditProfile() {
                         {!isEmailChanging ? (
                             <Pressable
                                 onPress={() => setIsEmailChanging(true)}
-                                style={[styles.platformButton, { marginTop: 8 }]}
+                                style={styles.marginTopSm}
                             >
-                                <Text style={styles.platformButtonText}>Change Email</Text>
+                                <View style={styles.platformButton}>
+                                    <Text style={styles.platformButtonText}>Change Email</Text>
+                                </View>
                             </Pressable>
                         ) : (
-                            <View style={{ gap: 12, marginTop: 12 }}>
+                            <View style={styles.gapMd}>
                                 {/* New Email Input */}
                                 <View style={styles.inputBox}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                    <View style={styles.flexRowCentered}>
                                         <MaterialIcons
                                             name="email"
                                             size={20}
-                                            style={{ marginRight: 8, opacity: 0.9 }}
+                                            style={styles.iconMarginRight}
                                             color={
                                                 isNewEmailValid && newEmail.trim().length > 0
                                                     ? COLORS.accent
@@ -976,7 +971,7 @@ export default function EditProfile() {
                                     </Text>
                                 )}
 
-                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <View style={styles.gapMdRow}>
                                     <Pressable
                                         onPress={handleUpdateEmail}
                                         disabled={emailUpdating || !isNewEmailValid}
@@ -1002,11 +997,11 @@ export default function EditProfile() {
                     <View style={styles.fieldGroup}>
                         <Text style={styles.label}>Phone Number</Text>
                         <View style={styles.inputBox}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={styles.flexRowCentered}>
                                 <MaterialIcons
                                     name="phone-android"
                                     size={20}
-                                    style={{ marginRight: 8, opacity: 0.9 }}
+                                    style={styles.iconMarginRight}
                                     color={
                                         isPhoneFormatValid && phone.trim().length > 0
                                             ? COLORS.accent
@@ -1024,7 +1019,7 @@ export default function EditProfile() {
                                         if (phoneStatus !== 'idle') setPhoneStatus('idle');
                                     }}
                                     onBlur={handlePhoneBlur}
-                                    style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
+                                    style={styles.inputWithIcon}
                                     placeholder="03XX XXX XXXX"
                                     placeholderTextColor={COLORS.muted}
                                     keyboardType="phone-pad"
@@ -1041,7 +1036,7 @@ export default function EditProfile() {
                                                         : "check-circle"
                                         }
                                         size={18}
-                                        style={{ marginLeft: 8 }}
+                                        style={styles.marginLeftSm}
                                         color={
                                             phoneStatus === "taken"
                                                 ? COLORS.error
@@ -1071,23 +1066,25 @@ export default function EditProfile() {
                         {!isPasswordChanging ? (
                             <Pressable
                                 onPress={() => setIsPasswordChanging(true)}
-                                style={[styles.platformButton, { marginTop: 0 }]}
+                                style={styles.marginTopNone}
                             >
-                                <Text style={styles.platformButtonText}>Change Password</Text>
+                                <View style={styles.platformButton}>
+                                    <Text style={styles.platformButtonText}>Change Password</Text>
+                                </View>
                             </Pressable>
                         ) : (
-                            <View style={{ gap: 12 }}>
+                            <View style={styles.gapMd}>
                                 {/* Current */}
                                 <View style={styles.inputBox}>
                                     <TextInput
                                         value={currentPassword}
                                         onChangeText={setCurrentPassword}
-                                        style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
+                                        style={styles.inputWithToggle}
                                         placeholder="Current Password"
                                         placeholderTextColor={COLORS.muted}
                                         secureTextEntry={!currentPasswordVisible}
                                     />
-                                    <Pressable onPress={() => setCurrentPasswordVisible(!currentPasswordVisible)} style={{ position: 'absolute', right: 12 }}>
+                                    <Pressable onPress={() => setCurrentPasswordVisible(!currentPasswordVisible)} style={styles.togglePosition}>
                                         <MaterialIcons name={currentPasswordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
                                     </Pressable>
                                 </View>
@@ -1097,12 +1094,12 @@ export default function EditProfile() {
                                     <TextInput
                                         value={password}
                                         onChangeText={setPassword}
-                                        style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
+                                        style={styles.inputWithToggle}
                                         placeholder="New Password"
                                         placeholderTextColor={COLORS.muted}
                                         secureTextEntry={!passwordVisible}
                                     />
-                                    <Pressable onPress={() => setPasswordVisible(!passwordVisible)} style={{ position: 'absolute', right: 12 }}>
+                                    <Pressable onPress={() => setPasswordVisible(!passwordVisible)} style={styles.togglePosition}>
                                         <MaterialIcons name={passwordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
                                     </Pressable>
                                 </View>
@@ -1142,7 +1139,7 @@ export default function EditProfile() {
                                     </View>
                                 )}
 
-                                <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+                                <View style={styles.passwordActionsRow}>
                                     <Pressable
                                         onPress={handleUpdatePassword}
                                         disabled={passwordUpdating || !isPasswordValid}
@@ -1167,17 +1164,16 @@ export default function EditProfile() {
 
                     {/* Preferred Areas */}
                     <View style={styles.fieldGroup}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text style={[styles.label, { marginBottom: 0 }]}>Preferred Areas</Text>
-                            <Text style={{
-                                color: selectedAreas.length >= 5 ? COLORS.warning : COLORS.muted,
-                                fontSize: 12,
-                                fontWeight: '600'
-                            }}>
+                        <View style={styles.preferredAreasHeader}>
+                            <Text style={styles.labelNoMargin}>Preferred Areas</Text>
+                            <Text style={[
+                                styles.selectedCountText,
+                                selectedAreas.length >= 5 && styles.warningText
+                            ]}>
                                 {selectedAreas.length}/5 Selected
                             </Text>
                         </View>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                        <View style={styles.flexWrapRow}>
                             {KARACHI_AREAS.map(area => {
                                 const selected = selectedAreas.includes(area);
                                 return (
@@ -1227,7 +1223,7 @@ export default function EditProfile() {
                             />
                         </View>
 
-                        <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+                        <View style={[styles.toggleRow, styles.borderBottomNone]}>
                             <View style={styles.toggleInfo}>
                                 <Text style={styles.toggleLabel}>Restrict Match Invites</Text>
                                 <Text style={styles.toggleSubtext}>Only allow friends to send you matchroom invitations.</Text>
@@ -1410,13 +1406,13 @@ export default function EditProfile() {
                         </Pressable>
 
                         {psnStats && (
-                            <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
+                            <View style={styles.verifiedSummaryContainer}>
                                 <Text style={styles.summaryLabel}>Verified Account</Text>
-                                <View style={{ flexDirection: "column" }}>
-                                    <Text style={[styles.summaryValue, { color: COLORS.accent, fontWeight: "600" }]}>
+                                <View style={styles.flexColumn}>
+                                    <Text style={[styles.summaryValue, styles.accentBoldText]}>
                                         {psnStats.psnOnlineId}
                                     </Text>
-                                    <Text style={[styles.summaryValue, { fontSize: 11 }]}>
+                                    <Text style={styles.psnSubValue}>
                                         Level {psnStats.trophyLevel} · {psnStats.totalTrophies?.platinum ?? 0} Platinums
                                     </Text>
                                 </View>

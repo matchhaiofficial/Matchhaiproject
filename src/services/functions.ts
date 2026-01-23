@@ -704,3 +704,115 @@ export const respondToTeamInvite = async (data: { notificationId: string; decisi
         return { ok: false, message: error.message || 'Failed to respond to invite.' };
     }
 };
+
+/**
+ * Cancels all pending matchroom join requests for a user.
+ * Usually called after they successfully join a room.
+ */
+export const cancelUserPendingMatchroomRequests = async (uid: string, excludeNotificationId?: string) => {
+    try {
+        const q = query(
+            collection(db, 'notifications'),
+            where('fromUid', '==', uid),
+            where('type', '==', 'match_join_request'),
+            where('status', '==', 'pending')
+        );
+        const snaps = await getDocs(q);
+        const batch = writeBatch(db);
+
+        snaps.forEach(d => {
+            if (d.id !== excludeNotificationId) {
+                batch.update(d.ref, {
+                    status: 'rejected',
+                    reason: 'joined_other_room',
+                    updatedAt: serverTimestamp()
+                });
+            }
+        });
+
+        await batch.commit();
+    } catch (e) {
+        Logger.error('functions', 'cancelUserPendingMatchroomRequests error', e);
+    }
+};
+
+export const respondToMatchroomJoinRequest = async (data: { notificationId: string; decision: 'accept' | 'reject' }): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { notificationId, decision } = data;
+        const notifRef = doc(db, 'notifications', notificationId);
+
+        const res = await runTransaction(db, async (transaction) => {
+            const notifSnap = await transaction.get(notifRef);
+            if (!notifSnap.exists()) throw new Error("Request not found");
+            const notifData = notifSnap.data();
+
+            if (notifData.status !== 'pending') throw new Error("Already handled");
+
+            const roomId = notifData.meta.matchroomId;
+            const roomRef = doc(db, 'matchrooms', roomId);
+            const roomSnap = await transaction.get(roomRef);
+            if (!roomSnap.exists()) throw new Error("Matchroom not found");
+            const roomData = roomSnap.data();
+
+            // Only host can respond
+            if (roomData.hostUid !== currentUser.uid) throw new Error("Only the host can respond");
+
+            if (decision === 'reject') {
+                transaction.update(notifRef, { status: 'rejected', updatedAt: serverTimestamp() });
+                return { ok: true };
+            }
+
+            // Accept Flow
+            // 1. Capacity Check
+            const maxPlayers = roomData.maxPlayers || 10;
+            const currentPlayers = roomData.currentPlayers || roomData.players?.length || 0;
+            if (currentPlayers >= maxPlayers) {
+                throw new Error("Matchroom is full");
+            }
+
+            const requesterUid = notifData.fromUid;
+            const now = serverTimestamp();
+
+            // 3. Add to room
+            const newPlayers = [...(roomData.players || []), {
+                uid: requesterUid,
+                username: notifData.fromUsername,
+                joinedAt: new Date(),
+                role: notifData.meta.role || 'Flex'
+            }];
+            const newUids = [...(roomData.playerUids || []), requesterUid];
+
+            const roomUpdates: any = {
+                players: newPlayers,
+                playerUids: newUids,
+                currentPlayers: newPlayers.length,
+                updatedAt: now
+            };
+
+            // Auto-lock if full
+            if (newPlayers.length >= maxPlayers) {
+                roomUpdates.status = 'locked';
+                roomUpdates.isLocked = true;
+                roomUpdates.lockedAt = now;
+            }
+
+            transaction.update(roomRef, roomUpdates);
+            transaction.update(notifRef, { status: 'accepted', updatedAt: now });
+
+            return { ok: true, requesterUid };
+        });
+
+        if (res.ok && res.requesterUid) {
+            // Cancel other requests for this user
+            await cancelUserPendingMatchroomRequests(res.requesterUid, notificationId);
+        }
+
+        return res;
+    } catch (error: any) {
+        Logger.error('functions', 'respondToMatchroomJoinRequest error', error);
+        return { ok: false, message: error.message || 'Failed to respond.' };
+    }
+};
