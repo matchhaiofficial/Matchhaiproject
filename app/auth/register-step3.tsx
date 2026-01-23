@@ -249,8 +249,12 @@ export default function RegisterStep3() {
 
   const faceitLevelIcon = faceitProfile?.skillLevel && faceitLevelIcons[faceitProfile.skillLevel];
 
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps = Platform.OS === "ios" ? { style: styles.screen, behavior: "padding" as const } : { style: styles.screen };
+  const Container = KeyboardAvoidingView;
+  const containerProps = {
+    style: styles.screen,
+    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
+    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
+  };
 
   return (
     <Container {...containerProps}>
@@ -310,13 +314,7 @@ export default function RegisterStep3() {
               <Pressable
                 onPress={handleSteamLookup}
                 disabled={steamStatus === "verifying" || steamStatus === "verified" || steamCooldown > 0}
-                style={({ pressed }) => [
-                  styles.platformButton,
-                  { marginTop: 0, paddingVertical: 8, paddingHorizontal: 12, minWidth: 80 },
-                  steamStatus === "verified" && styles.platformButtonActive,
-                  (steamStatus === "verifying" || steamCooldown > 0) && { opacity: 0.5 },
-                  pressed && { opacity: 0.8 },
-                ]}
+                android_ripple={{ color: COLORS.overlayMedium }}
               >
                 {steamStatus === "verifying" ? <ActivityIndicator size="small" color={COLORS.text} /> : (
                   <Text style={styles.platformButtonText}>{steamStatus === "verified" ? "Verified" : "Verify"}</Text>

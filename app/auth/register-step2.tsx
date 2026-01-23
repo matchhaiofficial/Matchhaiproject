@@ -76,16 +76,13 @@ export default function RegisterStep2() {
     playsPickleball,
   ]);
 
-  // ---- Keyboard handling ----
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps =
-    Platform.OS === "ios"
-      ? {
-        style: styles.screen,
-        behavior: "padding" as const,
-        keyboardVerticalOffset: 0,
-      }
-      : { style: styles.screen };
+  // Keyboard handling
+  const Container = KeyboardAvoidingView;
+  const containerProps = {
+    style: styles.screen,
+    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
+    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
+  };
 
   // ---- Helpers ----
   const toggleArea = (area: string) => {

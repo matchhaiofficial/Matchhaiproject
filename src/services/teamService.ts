@@ -15,7 +15,7 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
-import { requestToJoinTeam as functionRequestToJoinTeam } from "./functions";
+import { requestToJoinTeam as functionRequestToJoinTeam, deleteTeam as functionDeleteTeam } from "./functions";
 
 export interface TeamMember {
     uid: string;
@@ -226,13 +226,7 @@ export const requestToJoinTeam = async (teamId: string) => {
 };
 
 export const deleteTeam = async (teamId: string): Promise<{ ok: boolean; message?: string }> => {
-    try {
-        await deleteDoc(doc(db, TEAMS_COLLECTION, teamId));
-        return { ok: true };
-    } catch (error: any) {
-        Logger.error('teamService', 'Error deleting team', error);
-        return { ok: false, message: 'Failed to delete team. Please make sure you are the captain and the team exists.' };
-    }
+    return functionDeleteTeam({ teamId });
 };
 
 export const updateTeamName = async (teamId: string, newName: string): Promise<{ ok: boolean; message?: string }> => {

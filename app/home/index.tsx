@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useZoneData } from '../../src/hooks/useZoneData';
 import { signOutUser } from '../../src/services/authService';
-import { COLORS } from '../../src/theme';
+import { COLORS, FONTS } from '../../src/theme';
 import styles from './home.styles';
 
 export default function Home() {
@@ -100,7 +100,7 @@ export default function Home() {
         {signingOut ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={{ color: COLORS.text, fontSize: 16, fontFamily: 'Montserrat_700Bold' }}>
+          <Text style={{ color: COLORS.text, fontSize: 16, fontFamily: FONTS.montserratBold }}>
             Logout
           </Text>
         )}

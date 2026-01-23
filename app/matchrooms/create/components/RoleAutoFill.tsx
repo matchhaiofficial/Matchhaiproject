@@ -2,7 +2,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { CS2_ROLES, INDOOR_CRICKET_BATTING_ORDER, INDOOR_CRICKET_BATTING_STYLES, INDOOR_CRICKET_BOWLING_ORDER, INDOOR_CRICKET_BOWLING_STYLES, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from '../../../../constants/profileOptions';
-import { COLORS } from '../../../../src/theme';
+import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
 
 // Import from userService - using the existing interface

@@ -3,7 +3,7 @@ import { Tabs } from "expo-router";
 import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { COLORS } from "../../../src/theme";
+import { COLORS, FONTS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 
 export default function ZoneTabsLayout() {
@@ -40,7 +40,7 @@ export default function ZoneTabsLayout() {
                 tabBarLabelStyle: {
                     fontSize: 11,
                     fontWeight: '600',
-                    fontFamily: "Inter_500Medium",
+                    fontFamily: FONTS.interMedium,
                     marginTop: 4,
                 },
                 tabBarIconStyle: {

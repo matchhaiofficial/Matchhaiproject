@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Keyboard,
@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { GAME_FORMATS } from "../../src/constants/gameRules";
 import { useAuth } from "../../src/context/AuthContext";
 import { createTeam } from "../../src/services/functions";
 import { COLORS } from "../../src/theme";
@@ -37,11 +38,26 @@ export default function CreateTeam() {
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
+    const [selectedSize, setSelectedSize] = useState<number | null>(null);
     const [submitting, setSubmitting] = useState(false);
+
+    // Get available sizes for selected game
+    const availableFormats = useMemo(() => {
+        if (!selectedGame) return [];
+        return GAME_FORMATS[selectedGame] || [];
+    }, [selectedGame]);
+
+    // Reset size when game changes
+    const handleGameSelect = (gameKey: string) => {
+        setSelectedGame(gameKey);
+        const formats = GAME_FORMATS[gameKey] || [];
+        // Default to first format if available
+        setSelectedSize(formats.length > 0 ? formats[0].size : null);
+    };
 
     const handleSubmit = async () => {
         Keyboard.dismiss();
-        Logger.info("CreateTeam", "handleSubmit called", { name, selectedGame, uid: user?.uid });
+        Logger.info("CreateTeam", "handleSubmit called", { name, selectedGame, selectedSize, uid: user?.uid });
 
         if (!user) {
             alert("You must be logged in");
@@ -55,6 +71,10 @@ export default function CreateTeam() {
             alert("Please select a game");
             return;
         }
+        if (!selectedSize) {
+            alert("Please select a team size");
+            return;
+        }
 
         setSubmitting(true);
         try {
@@ -62,7 +82,8 @@ export default function CreateTeam() {
                 name: name.trim(),
                 description: description.trim(),
                 game: selectedGame,
-                visibility: 'public'
+                visibility: 'public',
+                maxMembers: selectedSize
             });
 
             if (result.ok) {
@@ -130,7 +151,7 @@ export default function CreateTeam() {
                             {GAMES.map(game => (
                                 <TouchableOpacity
                                     key={game.key}
-                                    onPress={() => setSelectedGame(game.key)}
+                                    onPress={() => handleGameSelect(game.key)}
                                     style={[
                                         styles.optionChip,
                                         selectedGame === game.key && styles.optionChipActive
@@ -146,6 +167,34 @@ export default function CreateTeam() {
                             ))}
                         </View>
                     </View>
+
+                    {/* Team Size Selection (only if game has multiple formats) */}
+                    {selectedGame && availableFormats.length > 1 && (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>
+                                Team Size *
+                            </Text>
+                            <View style={styles.chipRow}>
+                                {availableFormats.map(format => (
+                                    <TouchableOpacity
+                                        key={format.size}
+                                        onPress={() => setSelectedSize(format.size)}
+                                        style={[
+                                            styles.optionChip,
+                                            selectedSize === format.size && styles.optionChipActive
+                                        ]}
+                                    >
+                                        <Text style={[
+                                            styles.optionChipText,
+                                            selectedSize === format.size && styles.optionChipTextActive
+                                        ]}>
+                                            {format.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
 
                     {/* Description */}
                     <View style={styles.section}>

@@ -1,6 +1,6 @@
 // src/components/SkillBadge.styles.ts
 import { StyleSheet } from 'react-native';
-import { COLORS, RADII, SPACING, TEXT_SIZES } from '../theme';
+import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../theme';
 
 export default StyleSheet.create({
     container: {
@@ -57,7 +57,7 @@ export default StyleSheet.create({
     },
 
     text: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.interSemiBold,
         fontSize: TEXT_SIZES.label,
         color: COLORS.text,
     },
@@ -91,7 +91,7 @@ export default StyleSheet.create({
     },
 
     rating: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         marginLeft: SPACING.xs,
         fontSize: TEXT_SIZES.caption,
         color: COLORS.muted,
