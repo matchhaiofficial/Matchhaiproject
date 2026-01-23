@@ -427,9 +427,16 @@ export default function TeamDetails() {
                         <MaterialIcons name="person-add" size={24} color={COLORS.accent} />
                     </TouchableOpacity>
                 )}
-                <TouchableOpacity onPress={handleShare}>
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.headerIcon,
+                        pressed && { opacity: 0.7 }
+                    ]}
+                    onPress={handleShare}
+                    android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 24 }}
+                >
                     <MaterialIcons name="share" size={24} color={COLORS.accent} />
-                </TouchableOpacity>
+                </Pressable>
             </View>
 
             <ScrollView
@@ -459,15 +466,19 @@ export default function TeamDetails() {
                     <View style={styles.teamNameContainer}>
                         <Text style={styles.teamNameLarge}>{team.name}</Text>
                         {isCaptain && (
-                            <TouchableOpacity
+                            <Pressable
                                 onPress={() => {
                                     setNewName(team.name);
                                     setShowRenameModal(true);
                                 }}
-                                style={styles.editNameIcon}
+                                style={({ pressed }) => [
+                                    styles.editNameIcon,
+                                    pressed && { opacity: 0.7 }
+                                ]}
+                                android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 20 }}
                             >
                                 <MaterialIcons name="edit" size={20} color={COLORS.accent} />
-                            </TouchableOpacity>
+                            </Pressable>
                         )}
                     </View>
                     <View style={styles.gameBadge}>
@@ -479,9 +490,9 @@ export default function TeamDetails() {
                     <View style={styles.occupancyRow}>
                         <MaterialIcons name="people" size={16} color={COLORS.muted} />
                         <Text style={styles.occupancyText}>
-                            {team.memberCount || 0} / 5
+                            {team.memberCount || 0} / {team.maxMembers || 5}
                         </Text>
-                        {(team.memberCount || 0) >= 5 && <Text style={styles.fullBadge}>FULL</Text>}
+                        {(team.memberCount || 0) >= (team.maxMembers || 5) && <Text style={styles.fullBadge}>FULL</Text>}
                     </View>
 
                     {/* Member Badge */}
@@ -555,7 +566,7 @@ export default function TeamDetails() {
                 <View style={styles.rosterSection}>
                     <Text style={styles.rosterTitle}>Lineup</Text>
                     <RosterSlots
-                        maxMembers={5}
+                        maxMembers={team.maxMembers || 5}
                         members={team.members || []}
                         captainUid={team.captainUid}
                         viewerUid={user?.uid}

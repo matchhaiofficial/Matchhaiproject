@@ -1,6 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 import { COLORS } from '../../../src/theme';
 import styles from './RosterSlots.styles';
 
@@ -48,10 +48,11 @@ export default function RosterSlots({
                 style={({ pressed }) => [
                     styles.memberCard,
                     isCaptainSlot && styles.captainCard,
-                    pressed && styles.pressed
+                    pressed && Platform.OS === 'ios' && styles.pressed
                 ]}
                 onPress={() => onMemberPress?.(member)}
                 disabled={!onMemberPress}
+                android_ripple={{ color: COLORS.overlayMedium }}
             >
                 {/* Avatar */}
                 <View style={styles.avatar}>
@@ -95,10 +96,11 @@ export default function RosterSlots({
                 key={`empty-${index}`}
                 style={({ pressed }) => [
                     styles.emptySlot,
-                    pressed && styles.pressed
+                    pressed && Platform.OS === 'ios' && styles.pressed
                 ]}
                 onPress={() => onEmptySlotPress?.()}
                 disabled={!onEmptySlotPress}
+                android_ripple={{ color: COLORS.overlayMedium }}
             >
                 <View style={styles.emptyIcon}>
                     <MaterialIcons name="person-add-alt" size={20} color={COLORS.muted} />

@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
@@ -112,7 +112,7 @@ export default StyleSheet.create({
     // FAB
     fabWrapper: {
         position: 'absolute',
-        bottom: 110, // Adjust based on tab bar height if needed
+        bottom: Platform.OS === 'android' ? 130 : 110, // Increased to 130 to safely clear TabBar on all Android devices
         right: 24,
         zIndex: 1000,
     },
@@ -123,6 +123,10 @@ export default StyleSheet.create({
         backgroundColor: COLORS.accent,
         alignItems: 'center',
         justifyContent: 'center',
-        ...SHADOWS.cardElevated,
+        elevation: 8, // Explicit elevation for Android
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
     },
 });

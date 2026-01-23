@@ -115,7 +115,7 @@ export default StyleSheet.create({
     },
 
     playerName: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.label,
         color: COLORS.textSecondary,
     },
@@ -135,7 +135,7 @@ export default StyleSheet.create({
     },
 
     submitButtonText: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.interSemiBold,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.background,
     },
@@ -150,14 +150,14 @@ export default StyleSheet.create({
     },
 
     alreadySubmittedTitle: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.interSemiBold,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.success,
         marginBottom: SPACING.xs,
     },
 
     alreadySubmittedText: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.label,
         color: COLORS.muted,
         lineHeight: 20,
@@ -210,7 +210,7 @@ export default StyleSheet.create({
     },
 
     loadingText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.body,
         color: COLORS.muted,
         marginTop: SPACING.md,
@@ -224,7 +224,7 @@ export default StyleSheet.create({
     },
 
     errorText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.body,
         color: COLORS.error,
         textAlign: 'center',

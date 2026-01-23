@@ -49,7 +49,7 @@ export default StyleSheet.create({
     },
 
     disputeText: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.label,
         color: COLORS.muted,
         lineHeight: 20,
@@ -69,14 +69,14 @@ export default StyleSheet.create({
     },
 
     captainLabel: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.caption,
         color: COLORS.muted,
         marginBottom: SPACING.xs,
     },
 
     captainChoice: {
-        fontFamily: 'Inter_600SemiBold',
+        fontFamily: FONTS.interSemiBold,
         fontSize: TEXT_SIZES.label,
         color: COLORS.text,
     },
@@ -168,7 +168,7 @@ export default StyleSheet.create({
     },
 
     alreadyVotedText: {
-        fontFamily: 'Inter_400Regular',
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.label,
         color: COLORS.muted,
         lineHeight: 20,
@@ -184,7 +184,7 @@ export default StyleSheet.create({
     },
 
     progressLabel: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.label,
         color: COLORS.muted,
         marginBottom: SPACING.sm,
@@ -217,7 +217,7 @@ export default StyleSheet.create({
     },
 
     loadingText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.body,
         color: COLORS.muted,
         marginTop: SPACING.md,
@@ -231,7 +231,7 @@ export default StyleSheet.create({
     },
 
     errorText: {
-        fontFamily: 'Inter_500Medium',
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.body,
         color: COLORS.error,
         textAlign: 'center',

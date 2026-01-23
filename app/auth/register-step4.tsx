@@ -110,16 +110,13 @@ export default function RegisterStep4() {
   const toggleConsentMatchHistory = () =>
     setStep4({ consentMatchHistory: !step4.consentMatchHistory });
 
-  // ---- Keyboard container ----
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps =
-    Platform.OS === "ios"
-      ? {
-        style: styles.screen,
-        behavior: "padding" as const,
-        keyboardVerticalOffset: 0,
-      }
-      : { style: styles.screen };
+  // Keyboard handling
+  const Container = KeyboardAvoidingView;
+  const containerProps = {
+    style: styles.screen,
+    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
+    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
+  };
 
   const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
   const [currentSubStep, setCurrentSubStep] = useState<number>(0);
@@ -662,7 +659,7 @@ export default function RegisterStep4() {
               !submitting &&
               allAgreementsChecked && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
+            android_ripple={{ color: "rgba(255,255,255,0.12)" }}
           >
             {submitting ? (
               <ActivityIndicator color="#fff" />

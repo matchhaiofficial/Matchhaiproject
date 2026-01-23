@@ -14,9 +14,19 @@ LogBox.ignoreLogs(['Unable to activate keep awake']);
 import { Lora_400Regular, useFonts as useLora } from "@expo-google-fonts/lora";
 import { Martel_400Regular, useFonts as useMartel } from "@expo-google-fonts/martel";
 import {
+  Montserrat_400Regular,
+  Montserrat_500Medium,
+  Montserrat_600SemiBold,
   Montserrat_700Bold,
   useFonts as useMontserrat,
 } from "@expo-google-fonts/montserrat";
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts as useInter
+} from "@expo-google-fonts/inter";
 
 // Theme + Auth provider + Toast
 import Toast from "react-native-toast-message";
@@ -26,11 +36,22 @@ import { COLORS } from "../src/theme";
 import { toastConfig } from "../src/ui/toastConfig";
 
 export default function RootLayout() {
-  const [montLoaded] = useMontserrat({ Montserrat_700Bold });
+  const [montLoaded] = useMontserrat({
+    Montserrat_400Regular,
+    Montserrat_500Medium,
+    Montserrat_600SemiBold,
+    Montserrat_700Bold,
+  });
   const [loraLoaded] = useLora({ Lora_400Regular });
   const [martelLoaded] = useMartel({ Martel_400Regular });
+  const [interLoaded] = useInter({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold
+  });
 
-  const ready = montLoaded && loraLoaded && martelLoaded;
+  const ready = montLoaded && loraLoaded && martelLoaded && interLoaded;
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -93,7 +114,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" />
+        <StatusBar style="light" translucent backgroundColor="transparent" />
         <Stack
           screenOptions={{
             headerShown: false,
