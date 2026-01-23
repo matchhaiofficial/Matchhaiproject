@@ -4,7 +4,7 @@ import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "../../../src/context/AuthContext";
-import { COLORS } from "../../../src/theme";
+import { COLORS, FONTS } from "../../../src/theme";
 
 export default function PlayerTabsLayout() {
     const insets = useSafeAreaInsets();
@@ -47,7 +47,7 @@ export default function PlayerTabsLayout() {
                 tabBarLabelStyle: {
                     fontSize: 11,
                     fontWeight: '600',
-                    fontFamily: "Inter_500Medium",
+                    fontFamily: FONTS.interMedium,
                     marginTop: 4,
                 },
                 tabBarIconStyle: {

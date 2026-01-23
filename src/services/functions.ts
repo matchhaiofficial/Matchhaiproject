@@ -16,6 +16,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
+import { GAME_FORMATS } from '../constants/gameRules';
 import Logger from '../utils/logger';
 
 // ----------------------------------------------------------------------------
@@ -231,16 +232,57 @@ export interface CreateTeamData {
     game: string;
     description?: string;
     visibility?: 'public' | 'private';
+    maxMembers?: number; // Optional: Uses default from GAME_FORMATS if not provided
 }
+
+const checkUserTeamLimit = async (uid: string, game: string): Promise<void> => {
+    // Check if user is already in a team for this game
+    // Optimization: Query ONLY by memberUids (no composite index needed) and filter by game in memory.
+    // This avoids the "Missing Index" error for users and is performant since a user won't be in hundreds of teams.
+    const q = query(
+        collection(db, 'teams'),
+        where('memberUids', 'array-contains', uid)
+    );
+
+    try {
+        const snapshot = await getDocs(q);
+        const teamInGame = snapshot.docs.find(doc => doc.data().game === game);
+
+        if (teamInGame) {
+            throw new Error(`You are already in a ${game} team (${teamInGame.data().name}). You must leave it to create or join a new one.`);
+        }
+    } catch (error: any) {
+        if (error.message.includes('already in a')) throw error;
+        Logger.error('functions', 'checkUserTeamLimit error', error);
+        throw error;
+    }
+};
 
 export const createTeam = async (data: CreateTeamData): Promise<ServerResponse> => {
     try {
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error("Not authenticated");
 
-        const { name, game, description, visibility = 'public' } = data;
-        const cap = ROSTER_CAPS[game];
-        if (!cap) throw new Error("Unsupported game type");
+        const { name, game, description, visibility = 'public', maxMembers: inputMaxMembers } = data;
+
+        // Determine and validate maxMembers
+        const formats = GAME_FORMATS[game];
+        if (!formats || formats.length === 0) throw new Error("Unsupported game type");
+
+        let cap = inputMaxMembers;
+        if (cap) {
+            // Validate against allowed sizes
+            const validSizes = formats.map(f => f.size);
+            if (!validSizes.includes(cap)) {
+                throw new Error(`Invalid team size. Allowed sizes for ${game}: ${validSizes.join(', ')}`);
+            }
+        } else {
+            // Default to first format size
+            cap = formats[0].size;
+        }
+
+        // 0. Enforce One Team Per Game
+        await checkUserTeamLimit(currentUser.uid, game);
 
         // 1. Check for name uniqueness (case-insensitive)
         const nameQuery = query(
@@ -289,6 +331,9 @@ export const createTeam = async (data: CreateTeamData): Promise<ServerResponse> 
         await batch.commit();
         return { ok: true, teamId };
     } catch (error: any) {
+        if (error.message?.includes('already in a')) {
+            return { ok: false, message: error.message };
+        }
         Logger.error('functions', 'createTeam error', error);
         return { ok: false, message: error.message || 'Failed to create team.' };
     }
@@ -300,6 +345,13 @@ export const requestToJoinTeam = async (data: { teamId: string }): Promise<Serve
         if (!currentUser) throw new Error("Not authenticated");
 
         const { teamId } = data;
+
+        // 1. Verify User isn't in another team for this game
+        const teamDoc = await getDoc(doc(db, 'teams', teamId));
+        if (!teamDoc.exists()) throw new Error("Team not found");
+        const teamData = teamDoc.data();
+
+        await checkUserTeamLimit(currentUser.uid, teamData.game);
 
         // Deterministic ID for deduplication
         const notificationId = `team_join_request_${teamId}_${currentUser.uid}`;
@@ -358,6 +410,9 @@ export const requestToJoinTeam = async (data: { teamId: string }): Promise<Serve
 
         return res;
     } catch (error: any) {
+        if (error.message?.includes('already in a')) {
+            return { ok: false, message: error.message };
+        }
         Logger.error('functions', 'requestToJoinTeam error', error);
         return { ok: false, message: error.message || 'Failed to send request.' };
     }
@@ -392,6 +447,12 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
             }
 
             // Accept Flow
+            const requesterUid = notifData.fromUid;
+
+            // Enforce One Team Per Game (for the requester)
+            // Note: We await this non-transactional check inside the function block.
+            await checkUserTeamLimit(requesterUid, teamData.game);
+
             // 1. Capacity Check
             if (teamData.memberCount >= teamData.maxMembers) {
                 // Auto-reject if full
@@ -400,7 +461,7 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
             }
 
             // 2. Idempotency Check (Subcollection + Array)
-            const requesterUid = notifData.fromUid;
+            // requesterUid is already defined above
             const memberRef = doc(db, 'teams', teamData.teamId, 'members', requesterUid);
             const memberSnap = await transaction.get(memberRef);
 
@@ -459,6 +520,9 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
 
         return res;
     } catch (error: any) {
+        if (error.message?.includes('already in a')) {
+            return { ok: false, message: error.message };
+        }
         Logger.error('functions', 'respondToJoinRequest error', error);
         return { ok: false, message: error.message || 'Failed to respond.' };
     }
@@ -530,6 +594,16 @@ export const removeMember = async (data: { teamId: string; memberUid: string }):
                 updatedAt: serverTimestamp()
             });
 
+            // Cleanup: Delete any related notifications (invites/requests) for this user & team
+            // We can't query in a transaction easily without an index, so we might need a separate operations or use deterministic IDs.
+            // Deterministic IDs: `team_invite__${teamId}__${memberUid}` and `team_join_request_${teamId}_${memberUid}`
+            const inviteId = `team_invite__${teamId}__${memberUid}`;
+            const requestId = `team_join_request_${teamId}_${memberUid}`;
+
+            // Transactional delete (if they exist)
+            transaction.delete(doc(db, 'notifications', inviteId));
+            transaction.delete(doc(db, 'notifications', requestId));
+
             return { ok: true };
         });
 
@@ -542,35 +616,77 @@ export const removeMember = async (data: { teamId: string; memberUid: string }):
 
 export const inviteToTeam = async (data: { teamId: string; toUid: string }): Promise<ServerResponse> => {
     try {
+        Logger.info('functions', 'inviteToTeam: Starting', { data });
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error("Not authenticated");
 
         const { teamId, toUid } = data;
 
         // 1. Verify current user is captain
+        Logger.info('functions', 'inviteToTeam: Verifying captain permissions', { teamId, uid: currentUser.uid });
         const teamRef = doc(db, 'teams', teamId);
-        const teamSnap = await getDoc(teamRef);
+
+        let teamSnap;
+        try {
+            teamSnap = await getDoc(teamRef);
+        } catch (err: any) {
+            Logger.error('functions', 'inviteToTeam: Failed to fetch team', err);
+            throw new Error(`Failed to fetch team: ${err.message}`);
+        }
+
         if (!teamSnap.exists()) throw new Error("Team not found");
         const teamData = teamSnap.data();
         if (teamData.captainUid !== currentUser.uid) throw new Error("Only captain can invite members");
+        Logger.info('functions', 'inviteToTeam: Captain verified');
 
         // 2. Verify target is a friend (Friends-only rule)
+        Logger.info('functions', 'inviteToTeam: Verifying friend status', { friendUid: toUid });
         const friendRef = doc(db, 'users', currentUser.uid, 'friends', toUid);
-        const friendSnap = await getDoc(friendRef);
+
+        let friendSnap;
+        try {
+            friendSnap = await getDoc(friendRef);
+        } catch (err: any) {
+            Logger.error('functions', 'inviteToTeam: Failed to check friend status', err);
+            throw new Error(`Failed to check friend status: ${err.message}`);
+        }
+
         if (!friendSnap.exists()) throw new Error("Can only invite friends");
+        Logger.info('functions', 'inviteToTeam: Friend Verified');
 
         // 3. Verify target is not already a member
+        Logger.info('functions', 'inviteToTeam: Checking existing membership', { teamId, toUid });
         const memberRef = doc(db, 'teams', teamId, 'members', toUid);
-        const memberSnap = await getDoc(memberRef);
-        if (memberSnap.exists()) throw new Error("User is already a member");
+        try {
+            const memberSnap = await getDoc(memberRef);
+            if (memberSnap.exists()) throw new Error("User is already a member");
+        } catch (err: any) {
+            // If getDoc failed (permission?), we need to know. 
+            // IF the error was "User is already a member", rethrow.
+            // If it was a permission error on checking membership, log it.
+            if (err.message === "User is already a member") throw err;
+            Logger.error('functions', 'inviteToTeam: Failed to check existing membership', err);
+            throw new Error(`Failed to check membership: ${err.message}`);
+        }
+        Logger.info('functions', 'inviteToTeam: Membership check passed');
 
         // 4. Prevent duplicate pending invites (Deterministic ID + Expiration check)
         const notificationId = `team_invite__${teamId}__${toUid}`;
+        Logger.info('functions', 'inviteToTeam: Checking existing notifications', { notificationId });
         const notifRef = doc(db, 'notifications', notificationId);
-        const existingSnap = await getDoc(notifRef);
 
-        if (existingSnap.exists()) {
+        let existingSnap;
+        try {
+            existingSnap = await getDoc(notifRef);
+        } catch (err: any) {
+            Logger.warn('functions', 'inviteToTeam: Failed to read existing invite (likely permission issue or corrupt data). Proceeding to overwrite.', err);
+            existingSnap = null;
+        }
+
+        if (existingSnap && existingSnap.exists()) {
             const existingData = existingSnap.data();
+            Logger.info('functions', 'inviteToTeam: Found existing invite', { status: existingData.status });
+
             // Handle Re-invite logic: allow if expired or already handled (accepted/declined/rejected)
             if (existingData.status === 'pending') {
                 const expiresAt = existingData.expiresAt;
@@ -578,13 +694,15 @@ export const inviteToTeam = async (data: { teamId: string; toUid: string }): Pro
                 if (!isExpired) {
                     throw new Error("Invitation already pending");
                 }
-                // If expired, we proceed to setDoc (overwrite)
+                Logger.info('functions', 'inviteToTeam: Existing invite expired, overwriting');
             }
-            // If status is accepted/declined/rejected, we can overwrite (re-invite)
+        } else {
+            Logger.info('functions', 'inviteToTeam: No existing invite found');
         }
 
         // 5. Create/Overwrite Notification
-        await setDoc(notifRef, {
+        Logger.info('functions', 'inviteToTeam: Creating notification', { notificationId });
+        const payload = {
             type: 'team_invite',
             toUid,
             fromUid: currentUser.uid,
@@ -597,8 +715,16 @@ export const inviteToTeam = async (data: { teamId: string; toUid: string }): Pro
                 teamName: teamData.name,
                 game: teamData.game
             }
-        });
+        };
 
+        try {
+            await setDoc(notifRef, payload);
+        } catch (err: any) {
+            Logger.error('functions', 'inviteToTeam: Failed to create notification', err);
+            throw new Error(`Failed to create invite notification: ${err.message}`);
+        }
+
+        Logger.info('functions', 'inviteToTeam: Success');
         return { ok: true, message: "Invitation sent to friend." };
     } catch (error: any) {
         Logger.error('functions', 'inviteToTeam error', error);
@@ -642,6 +768,9 @@ export const respondToTeamInvite = async (data: { notificationId: string; decisi
             const teamSnap = await transaction.get(teamRef);
             if (!teamSnap.exists()) throw new Error("Team no longer exists");
             const teamData = teamSnap.data();
+
+            // Enforce One Team Per Game
+            await checkUserTeamLimit(currentUser.uid, teamData.game);
 
             // Check if Member doc exists OR if user is in memberUids (Idempotency Check)
             const memberRef = doc(db, 'teams', teamId, 'members', currentUser.uid);
@@ -700,119 +829,146 @@ export const respondToTeamInvite = async (data: { notificationId: string; decisi
 
         return res;
     } catch (error: any) {
+        if (error.message?.includes('already in a')) {
+            return { ok: false, message: error.message };
+        }
         Logger.error('functions', 'respondToTeamInvite error', error);
         return { ok: false, message: error.message || 'Failed to respond to invite.' };
     }
 };
 
-/**
- * Cancels all pending matchroom join requests for a user.
- * Usually called after they successfully join a room.
- */
-export const cancelUserPendingMatchroomRequests = async (uid: string, excludeNotificationId?: string) => {
-    try {
-        const q = query(
-            collection(db, 'notifications'),
-            where('fromUid', '==', uid),
-            where('type', '==', 'match_join_request'),
-            where('status', '==', 'pending')
-        );
-        const snaps = await getDocs(q);
-        const batch = writeBatch(db);
-
-        snaps.forEach(d => {
-            if (d.id !== excludeNotificationId) {
-                batch.update(d.ref, {
-                    status: 'rejected',
-                    reason: 'joined_other_room',
-                    updatedAt: serverTimestamp()
-                });
-            }
-        });
-
-        await batch.commit();
-    } catch (e) {
-        Logger.error('functions', 'cancelUserPendingMatchroomRequests error', e);
-    }
-};
-
-export const respondToMatchroomJoinRequest = async (data: { notificationId: string; decision: 'accept' | 'reject' }): Promise<ServerResponse> => {
+export const deleteTeam = async (data: { teamId: string }): Promise<ServerResponse> => {
     try {
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error("Not authenticated");
 
-        const { notificationId, decision } = data;
-        const notifRef = doc(db, 'notifications', notificationId);
+        const { teamId } = data;
+        Logger.info('functions', 'deleteTeam: Starting', { teamId });
 
-        const res = await runTransaction(db, async (transaction) => {
-            const notifSnap = await transaction.get(notifRef);
-            if (!notifSnap.exists()) throw new Error("Request not found");
-            const notifData = notifSnap.data();
+        // 1. Verify Captaincy
+        const teamRef = doc(db, 'teams', teamId);
+        const teamSnap = await getDoc(teamRef);
+        if (!teamSnap.exists()) throw new Error("Team not found");
+        const teamData = teamSnap.data();
+        if (teamData.captainUid !== currentUser.uid) throw new Error("Only captain can delete team");
 
-            if (notifData.status !== 'pending') throw new Error("Already handled");
+        // 2. Fetch all members to notify/delete
+        const membersCollection = collection(db, 'teams', teamId, 'members');
+        const membersSnap = await getDocs(membersCollection);
+        const memberUids = membersSnap.docs.map(doc => doc.id);
 
-            const roomId = notifData.meta.matchroomId;
-            const roomRef = doc(db, 'matchrooms', roomId);
-            const roomSnap = await transaction.get(roomRef);
-            if (!roomSnap.exists()) throw new Error("Matchroom not found");
-            const roomData = roomSnap.data();
+        Logger.info('functions', 'deleteTeam: Found members', { count: memberUids.length });
 
-            // Only host can respond
-            if (roomData.hostUid !== currentUser.uid) throw new Error("Only the host can respond");
+        // 3. Find and Delete ALL notifications related to this team (invites & join requests)
+        const notifQuery = query(
+            collection(db, 'notifications'),
+            where('meta.teamId', '==', teamId)
+        );
 
-            if (decision === 'reject') {
-                transaction.update(notifRef, { status: 'rejected', updatedAt: serverTimestamp() });
-                return { ok: true };
-            }
-
-            // Accept Flow
-            // 1. Capacity Check
-            const maxPlayers = roomData.maxPlayers || 10;
-            const currentPlayers = roomData.currentPlayers || roomData.players?.length || 0;
-            if (currentPlayers >= maxPlayers) {
-                throw new Error("Matchroom is full");
-            }
-
-            const requesterUid = notifData.fromUid;
-            const now = serverTimestamp();
-
-            // 3. Add to room
-            const newPlayers = [...(roomData.players || []), {
-                uid: requesterUid,
-                username: notifData.fromUsername,
-                joinedAt: new Date(),
-                role: notifData.meta.role || 'Flex'
-            }];
-            const newUids = [...(roomData.playerUids || []), requesterUid];
-
-            const roomUpdates: any = {
-                players: newPlayers,
-                playerUids: newUids,
-                currentPlayers: newPlayers.length,
-                updatedAt: now
-            };
-
-            // Auto-lock if full
-            if (newPlayers.length >= maxPlayers) {
-                roomUpdates.status = 'locked';
-                roomUpdates.isLocked = true;
-                roomUpdates.lockedAt = now;
-            }
-
-            transaction.update(roomRef, roomUpdates);
-            transaction.update(notifRef, { status: 'accepted', updatedAt: now });
-
-            return { ok: true, requesterUid };
-        });
-
-        if (res.ok && res.requesterUid) {
-            // Cancel other requests for this user
-            await cancelUserPendingMatchroomRequests(res.requesterUid, notificationId);
+        let notifDocs: any[] = [];
+        try {
+            const notifSnap = await getDocs(notifQuery);
+            notifDocs = notifSnap.docs;
+            Logger.info('functions', 'deleteTeam: Found notifications to cleanup', { count: notifDocs.length });
+        } catch (err: any) {
+            Logger.warn('functions', 'deleteTeam: Failed to query notifications (index missing?), skipping cleanup', err);
         }
 
-        return res;
+        const batch = writeBatch(db);
+
+        // A. Delete Notification Docs
+        notifDocs.forEach(docSnap => {
+            batch.delete(docSnap.ref);
+        });
+
+        // B. Send "Team Deleted" Notifications to Ex-Members (excluding captain)
+        const now = serverTimestamp();
+        membersSnap.docs.forEach(memberDoc => {
+            const memberUid = memberDoc.id;
+            if (memberUid !== currentUser.uid) {
+                const notifRef = doc(collection(db, 'notifications'));
+                batch.set(notifRef, {
+                    type: 'team_deleted',
+                    toUid: memberUid,
+                    fromUid: currentUser.uid,
+                    content: `Team "${teamData.name}" has been disbanded by the captain.`,
+                    status: 'unread',
+                    createdAt: now,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                });
+            }
+            // C. Delete Member Doc
+            batch.delete(memberDoc.ref);
+        });
+
+        // D. Delete Team Doc
+        batch.delete(teamRef);
+
+        await batch.commit();
+        Logger.info('functions', 'deleteTeam: Success');
+
+        return { ok: true, message: "Team deleted successfully." };
+
     } catch (error: any) {
-        Logger.error('functions', 'respondToMatchroomJoinRequest error', error);
-        return { ok: false, message: error.message || 'Failed to respond.' };
+        Logger.error('functions', 'deleteTeam error', error);
+        return { ok: false, message: error.message || 'Failed to delete team.' };
+    }
+};
+
+export const leaveTeam = async (data: { teamId: string }): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { teamId } = data;
+        Logger.info('functions', 'leaveTeam: Starting', { teamId, uid: currentUser.uid });
+
+        const teamRef = doc(db, 'teams', teamId);
+
+        const res = await runTransaction(db, async (transaction) => {
+            const teamSnap = await transaction.get(teamRef);
+            if (!teamSnap.exists()) throw new Error("Team not found");
+            const teamData = teamSnap.data();
+
+            if (teamData.captainUid === currentUser.uid) {
+                throw new Error("Captains cannot leave. Delete the team instead.");
+            }
+
+            const memberRef = doc(db, 'teams', teamId, 'members', currentUser.uid);
+            const memberSnap = await transaction.get(memberRef);
+            if (!memberSnap.exists()) throw new Error("You are not a member of this team");
+
+            // Delete Member Doc
+            transaction.delete(memberRef);
+
+            // Update Team Doc
+            transaction.update(teamRef, {
+                memberCount: increment(-1),
+                memberUids: arrayRemove(currentUser.uid),
+                updatedAt: serverTimestamp()
+            });
+
+            return { ok: true };
+        });
+
+        // Cleanup: Notification
+        const inviteId = `team_invite__${teamId}__${currentUser.uid}`;
+        const requestId = `team_join_request_${teamId}_${currentUser.uid}`;
+
+        try {
+            const batch = writeBatch(db);
+            batch.delete(doc(db, 'notifications', inviteId));
+            batch.delete(doc(db, 'notifications', requestId));
+            await batch.commit();
+        } catch (cleanupErr) {
+            Logger.warn('functions', 'leaveTeam: Cleanup failed', cleanupErr);
+        }
+
+        Logger.info('functions', 'leaveTeam: Success');
+        return { ok: true, message: "Left team successfully." };
+
+    } catch (error: any) {
+        Logger.error('functions', 'leaveTeam error', error);
+        return { ok: false, message: error.message || 'Failed to leave team.' };
     }
 };

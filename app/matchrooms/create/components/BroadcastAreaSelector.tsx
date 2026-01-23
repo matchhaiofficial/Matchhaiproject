@@ -3,7 +3,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { UserProfile } from '../../../../src/services/userService';
-import { COLORS } from '../../../../src/theme';
+import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
 
 interface BroadcastAreaSelectorProps {
@@ -57,7 +57,7 @@ export default function BroadcastAreaSelector({
 
                 {preferredAreas.length > 0 ? (
                     <>
-                        <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8, fontFamily: 'Inter_400Regular' }}>
+                        <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8, fontFamily: FONTS.interRegular }}>
                             Tap to toggle areas for this broadcast
                         </Text>
                         <View style={styles.chipRow}>
@@ -97,7 +97,7 @@ export default function BroadcastAreaSelector({
 
                 {/* Add temporary area */}
                 <View style={{ marginTop: 12 }}>
-                    <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8, fontFamily: 'Inter_400Regular' }}>
+                    <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8, fontFamily: FONTS.interRegular }}>
                         Add a temporary area (for this match only)
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -160,7 +160,7 @@ export default function BroadcastAreaSelector({
                     borderColor: 'rgba(66, 165, 245, 0.3)',
                     marginTop: 8
                 }}>
-                    <Text style={{ color: COLORS.text, fontSize: 13, fontFamily: 'Inter_500Medium', lineHeight: 18 }}>
+                    <Text style={{ color: COLORS.text, fontSize: 13, fontFamily: FONTS.interMedium, lineHeight: 18 }}>
                         <Text style={{ fontWeight: 'bold' }}>Note: </Text>
                         Broadcast sent! Please wait for zone/court admins to send you offers.
                     </Text>

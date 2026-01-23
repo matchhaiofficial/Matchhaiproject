@@ -2,7 +2,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Image, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { db } from "../../../src/config/firebaseConfig";
@@ -51,18 +51,20 @@ export default function PlayerDashboard() {
     };
 
     const QuickAction = ({ icon, label, onPress, color, shadowColor }: any) => (
-        <TouchableOpacity
-            style={[
+        <Pressable
+            style={({ pressed }) => [
                 styles.quickActionBtn,
-                { borderColor: color + '40', shadowColor: shadowColor || color }
+                { borderColor: color + '40', shadowColor: shadowColor || color },
+                pressed && Platform.OS === 'ios' && { opacity: 0.7 }
             ]}
             onPress={onPress}
+            android_ripple={{ color: color + '30', borderless: false }}
         >
             <View style={[styles.quickActionIconContainer, { backgroundColor: color + '15' }]}>
                 <MaterialIcons name={icon} size={28} color={color} />
             </View>
             <Text style={styles.quickActionText}>{label}</Text>
-        </TouchableOpacity>
+        </Pressable>
     );
 
     const NotificationCard = ({ icon, message, time, color }: any) => (
@@ -84,10 +86,13 @@ export default function PlayerDashboard() {
         const remainingRoles = roles && roles.length > 2 ? roles.length - 2 : 0;
 
         return (
-            <TouchableOpacity
-                style={styles.nearbyCard}
+            <Pressable
+                style={({ pressed }) => [
+                    styles.nearbyCard,
+                    pressed && Platform.OS === 'ios' && { opacity: 0.7 }
+                ]}
                 onPress={() => router.push("/(player)/(tabs)/matchrooms")}
-                activeOpacity={0.7}
+                android_ripple={{ color: COLORS.overlayMedium }}
             >
                 {/* Row 1: Game Name Only */}
                 <Text style={styles.nearbyGame}>{game}</Text>
@@ -95,9 +100,15 @@ export default function PlayerDashboard() {
                 {/* Row 2: Title & Book Slot Button */}
                 <View style={styles.nearbyTitleRow}>
                     <Text style={styles.nearbyTitle}>{title}</Text>
-                    <TouchableOpacity style={styles.bookSlotBtn}>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.bookSlotBtn,
+                            pressed && { opacity: 0.8 }
+                        ]}
+                        android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
+                    >
                         <Text style={styles.bookSlotText}>Book Slot</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
 
                 {/* Row 3: Distance & Time */}
@@ -128,15 +139,18 @@ export default function PlayerDashboard() {
                         <Text style={styles.priceTagText}>₨ {price}</Text>
                     </View>
                 </View>
-            </TouchableOpacity>
+            </Pressable>
         );
     };
 
     const RecommendedCard = ({ game, title, matchScore, price }: any) => (
-        <TouchableOpacity
-            style={styles.recommendedCard}
+        <Pressable
+            style={({ pressed }) => [
+                styles.recommendedCard,
+                pressed && Platform.OS === 'ios' && { opacity: 0.7 }
+            ]}
             onPress={() => router.push("/(player)/(tabs)/matchrooms")}
-            activeOpacity={0.7}
+            android_ripple={{ color: COLORS.overlayMedium }}
         >
             <View style={styles.recommendedHeader}>
                 <Text style={styles.recommendedGame}>{game}</Text>
@@ -152,7 +166,7 @@ export default function PlayerDashboard() {
                 </View>
                 <MaterialIcons name="arrow-forward" size={18} color={COLORS.accent} />
             </View>
-        </TouchableOpacity>
+        </Pressable>
     );
 
     const UpcomingCard = ({ game, title, time, players }: any) => (

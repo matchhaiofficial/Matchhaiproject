@@ -4,6 +4,8 @@ import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
+    Platform,
+    Pressable,
     ScrollView,
     StatusBar,
     Text,
@@ -87,9 +89,16 @@ export default function PlayerZoneDetails() {
             <StatusBar barStyle="light-content" />
             <SafeAreaView edges={['top']} style={{ backgroundColor: COLORS.background }}>
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                    <Pressable
+                        onPress={() => router.back()}
+                        style={({ pressed }) => [
+                            styles.backButton,
+                            pressed && { opacity: 0.7 }
+                        ]}
+                        android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 20 }}
+                    >
                         <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
+                    </Pressable>
                     <Text style={styles.headerTitle}>Zone Details</Text>
                 </View>
             </SafeAreaView>
@@ -110,11 +119,17 @@ export default function PlayerZoneDetails() {
                         <Text style={styles.locationText}>{address || "Location unavailable"}</Text>
                     </View>
                     {primaryBranch?.googleMapsUrl && (
-                        <TouchableOpacity style={{ marginTop: 8 }}>
+                        <Pressable
+                            style={({ pressed }) => [
+                                { marginTop: 8 },
+                                pressed && { opacity: 0.7 }
+                            ]}
+                            android_ripple={{ color: COLORS.overlayLight }}
+                        >
                             <Text style={{ color: COLORS.accent, fontSize: 13, fontWeight: '600' }}>
                                 View on Google Maps
                             </Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     )}
                 </View>
 
@@ -203,15 +218,19 @@ export default function PlayerZoneDetails() {
                 </View>
 
                 {/* Create Matchroom CTA */}
-                <TouchableOpacity
-                    style={styles.actionButton}
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.actionButton,
+                        pressed && { opacity: 0.9 }
+                    ]}
                     onPress={() => router.push({
                         pathname: "/matchrooms/create",
                         params: { zoneId: zone.id, zoneName: zone.venueBrandName }
                     })}
+                    android_ripple={{ color: 'rgba(255,255,255,0.15)' }}
                 >
                     <Text style={styles.actionButtonText}>Book Now</Text>
-                </TouchableOpacity>
+                </Pressable>
             </ScrollView>
         </View>
     );

@@ -289,16 +289,13 @@ export default function Login() {
   const emailErrorToShow =
     emailServerError || (emailTouched && !emailFocused ? emailFormatError : "");
 
-  // Keyboard handling (iOS only)
-  const Container: any = Platform.OS === "ios" ? KeyboardAvoidingView : View;
-  const containerProps =
-    Platform.OS === "ios"
-      ? {
-        style: styles.screen,
-        behavior: "padding" as const,
-        keyboardVerticalOffset: 0,
-      }
-      : { style: styles.screen };
+  // Keyboard handling
+  const Container = KeyboardAvoidingView;
+  const containerProps = {
+    style: styles.screen,
+    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
+    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
+  };
 
   const handleLogin = async () => {
     console.log("[Login] handleLogin called, userType=", userType);
@@ -742,7 +739,7 @@ export default function Login() {
               isSubmitDisabled ? styles.primaryBtnDisabled : null,
               pressed && !isSubmitDisabled && { opacity: 0.92 },
             ]}
-            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
+            android_ripple={{ color: "rgba(255,255,255,0.12)" }}
           >
             {loading ? (
               <ActivityIndicator color="#fff" />

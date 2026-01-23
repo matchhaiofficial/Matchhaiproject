@@ -44,29 +44,59 @@ service cloud.firestore {
 
     // Notifications (Inbox)
     match /notifications/{notificationId} {
-      // Read: Own inbox (received) AND Outgoing (sent)
-      // FIX: Also allow read if the ID *ends* with the user's UID (for deterministic join requests)
-      // This handles the case where the doc doesn't exist yet (so resource.data is null)
+      // READ Rules:
       allow read, list: if isAuthenticated() && (
-        (resource != null && (
-          resource.data.toUid == request.auth.uid || 
-          resource.data.fromUid == request.auth.uid ||
-          (resource.data.type == 'team_invite' && get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid)
-        )) ||
+        isSuperAdmin() ||
+        // 1. Existing Doc: I am the recipient
+        (resource != null && resource.data.toUid == request.auth.uid) || 
+        // 2. Existing Doc: I am the sender
+        (resource != null && resource.data.fromUid == request.auth.uid) ||
+        // 3. Existing Doc: I am the current captain of the team (handles captain transfers)
+        // SAFELY access meta.teamId
+        (
+          resource != null && 
+          resource.data.type == 'team_invite' && 
+          resource.data.get('meta', {}).get('teamId', null) != null &&
+          get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid
+        ) ||
+        // 4. ID-based Fallback for Recipient (Optimization)
         notificationId.matches('.*_' + request.auth.uid + '$') ||
+        // 5. Non-existant Doc: Allow reading team_invite keys to check for existence (for creation)
         (resource == null && notificationId.startsWith('team_invite__'))
       );
       
-      // Create: Sending a request/invite to someone else
-      allow create: if isAuthenticated() && request.resource.data.fromUid == request.auth.uid;
+      // CREATE
+      allow create: if isAuthenticated() && (request.resource.data.fromUid == request.auth.uid || isSuperAdmin());
       
-      // Update: 
-      // 1. Recipient accepting/declining (updating status via toUid)
-      // 2. Sender re-requesting (updating via fromUid) - e.g. overwriting expired/declined
+      // UPDATE: 
       allow update: if isAuthenticated() && (
+        isSuperAdmin() ||
         resource.data.toUid == request.auth.uid || 
         resource.data.fromUid == request.auth.uid ||
-        (resource.data.type == 'team_invite' && get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid)
+        // Allow captain to update (e.g. re-invite) - SAFELY access meta.teamId in EXISTING data
+        (
+          resource.data.type == 'team_invite' && 
+          resource.data.get('meta', {}).get('teamId', null) != null &&
+          get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid
+        ) ||
+        // DEADLOCK BREAKER: Allow update if the NEW data is a valid invite from the captain of that team
+        // This allows overwriting corrupt/legacy documents
+        (
+          request.resource.data.type == 'team_invite' &&
+          request.resource.data.fromUid == request.auth.uid &&
+          request.resource.data.get('meta', {}).get('teamId', null) != null &&
+          get(/databases/$(database)/documents/teams/$(request.resource.data.meta.teamId)).data.captainUid == request.auth.uid
+        )
+      );
+
+      // DELETE: Allow user to delete their own notifications.
+      // Also allow CAPTAIN to delete notifications related to their team (for cleanup during deletion)
+      allow delete: if isAuthenticated() && (
+        resource.data.toUid == request.auth.uid ||
+        (
+          resource.data.get('meta', {}).get('teamId', null) != null && 
+          get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid
+        )
       );
     }
 
@@ -79,7 +109,7 @@ service cloud.firestore {
         // Update logic:
         // 1. Captain can update anything.
         // 2. Joining member can increment memberCount/memberUids if they have a valid invite.
-        // We verify the invite deterministically.
+        // 3. Leaving member can decrement memberCount/memberUids if they are in the array.
         allow update: if isAuthenticated() && (
             resource.data.captainUid == request.auth.uid || 
             (
@@ -88,6 +118,12 @@ service cloud.firestore {
                 exists(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )) &&
                 get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )).data.status == "pending" &&
                 get(/databases/$(database)/documents/notifications/$( "team_invite__" + teamId + "__" + request.auth.uid )).data.expiresAt > request.time
+            ) ||
+            (
+                // LEAVE LOGIC: Decrement count, remove self from array
+                request.resource.data.memberCount == resource.data.memberCount - 1 &&
+                resource.data.memberUids.hasAny([request.auth.uid]) &&
+                !request.resource.data.memberUids.hasAny([request.auth.uid])
             )
         );
 

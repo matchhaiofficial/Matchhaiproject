@@ -3,7 +3,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Text, View, ViewStyle } from 'react-native';
 import type { SkillTier } from '../services/skillRatingService';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import styles from './SkillBadge.styles';
 
 interface SkillBadgeProps {
@@ -94,7 +94,7 @@ export default function SkillBadge({
                 <Text style={[
                     styles.rating,
                     ratingSizeStyle,
-                    isCompact && { color: config.color, fontFamily: 'Inter_600SemiBold', marginLeft: 2 }
+                    isCompact && { color: config.color, fontFamily: FONTS.interSemiBold, marginLeft: 2 }
                 ]}>
                     {isCompact ? rating : `(${rating})`}
                 </Text>
