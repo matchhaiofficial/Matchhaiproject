@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { fetchOnboardingSummary } from "../../../src/services/userService";
+import { getUserProfile } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./_dashboard.styles";
@@ -33,19 +33,37 @@ export default function PlayerDashboard() {
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            setNotificationCount(snapshot.size);
+            // Filter out expired notifications (match inbox behavior)
+            let count = 0;
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.expiresAt) {
+                    const expiresMs = data.expiresAt?.toMillis ? data.expiresAt.toMillis() :
+                        (data.expiresAt instanceof Date ? data.expiresAt.getTime() : data.expiresAt);
+                    if (expiresMs < Date.now()) {
+                        return; // Skip expired notifications
+                    }
+                }
+                count++;
+            });
+            setNotificationCount(count);
         });
 
         return () => unsubscribe();
     }, [user]);
 
     const loadTags = async () => {
-        const res = await fetchOnboardingSummary();
+        if (!user) return;
+        const res = await getUserProfile(user.uid);
         if (res.ok) {
             const t: string[] = [];
             if (res.data.playsCs2) t.push("CS2");
             if (res.data.playsFc) t.push("FC25");
             if (res.data.playsTekken) t.push("Tekken 8");
+            if (res.data.playsFutsal) t.push("Futsal");
+            if (res.data.playsIndoorCricket) t.push("Cricket");
+            if (res.data.playsPadel) t.push("Padel");
+            if (res.data.playsPickleball) t.push("Pickleball");
             setTags(t);
         }
     };
@@ -281,7 +299,10 @@ export default function PlayerDashboard() {
                             icon="groups"
                             label="My Teams"
                             color="#AB47BC" // Purple
-                            onPress={() => router.push("/(player)/(tabs)/teams")}
+                            onPress={() => {
+                                Logger.info("Dashboard", "Navigating to Discover:Teams segment with mode=my");
+                                router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'teams', mode: 'my', t: Date.now().toString() } } as any);
+                            }}
                         />
                     </View>
                 </View>

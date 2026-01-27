@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { getPublicTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
+import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
 import { COLORS, SPACING, FONTS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
@@ -28,14 +28,20 @@ import styles from "../../../../app/(player)/(tabs)/teams.styles";
 interface DiscoverTeamListProps {
     selectedGame: GameKey;
     searchQuery: string;
+    initialMode?: 'my' | 'discover'; // NEW: allow initial mode selection
+    intentTime?: string; // NEW: force sync on re-navigation
 }
 
-export default function DiscoverTeamList({ selectedGame, searchQuery }: DiscoverTeamListProps) {
+export default function DiscoverTeamList({ selectedGame, searchQuery, initialMode = 'discover', intentTime }: DiscoverTeamListProps) {
     const router = useRouter();
     const { user } = useAuth();
 
+    // NEW: Mode State
+    const [mode, setMode] = useState<'my' | 'discover'>(initialMode);
+
     // Data State
     const [publicTeams, setPublicTeams] = useState<Team[]>([]);
+    const [myTeams, setMyTeams] = useState<Team[]>([]); // NEW: My Teams state
     const [lastVisible, setLastVisible] = useState<any>(null);
     const [hasMore, setHasMore] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -74,6 +80,22 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
         }
     };
 
+    const fetchMyTeams = async () => {
+        if (!user) return;
+        try {
+            setLoading(true);
+            const result = await getUserTeams(user.uid);
+            if (result.ok && result.data) {
+                setMyTeams(result.data);
+            }
+        } catch (error) {
+            Logger.error("DiscoverTeams", "Error fetching my teams", error);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
     const fetchPublicTeams = async (isLoadMore = false) => {
         if (!user) return;
         try {
@@ -81,7 +103,6 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
             else setLoading(true);
 
             // Pass 'all' if selectedGame is 'all', otherwise the specific game key
-            // The service expects 'all' or specific game string
             const gameFilter = selectedGame === 'all' ? 'all' : selectedGame;
 
             const result = await getPublicTeams({
@@ -116,32 +137,40 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
         }
     };
 
-    // Refetch when filters change
+    // Sync mode with prop (needed because segments are persisted with display:none)
+    useEffect(() => {
+        if (initialMode) {
+            Logger.info("DiscoverTeams", "Syncing mode from URL", { initialMode, intentTime });
+            setMode(initialMode);
+        }
+    }, [initialMode, intentTime]);
+
+    // Refetch when mode, filters change
     useEffect(() => {
         const timeoutId = setTimeout(() => {
-            fetchPublicTeams(false);
+            if (mode === 'my') {
+                fetchMyTeams();
+            } else {
+                fetchPublicTeams(false);
+            }
         }, 500);
         return () => clearTimeout(timeoutId);
-    }, [user, selectedGame, searchQuery]);
+    }, [user, mode, selectedGame, searchQuery]);
 
     useEffect(() => {
-        fetchSocialState();
-    }, [user]);
-
-    // Reset filters
-    useEffect(() => {
-        setSelectedTeamFilter('All');
-        setSelectedTeamSize('Any');
-        setSelectedCompetitiveLevel('Any');
-        if (selectedGame !== 'all') {
-            setFiltersExpanded(true);
+        if (mode === 'discover') {
+            fetchSocialState();
         }
-    }, [selectedGame]);
+    }, [user, mode]);
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchPublicTeams(); // Reset
-        fetchSocialState();
+        if (mode === 'my') {
+            fetchMyTeams();
+        } else {
+            fetchPublicTeams(); // Reset
+            fetchSocialState();
+        }
     };
 
     const handleRequestToJoin = async (teamId: string) => {
@@ -160,7 +189,8 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
     };
 
     const renderTeamItem = ({ item }: { item: Team }) => {
-        const isRequested = requestedTeamIds.has(item.id!);
+        const isMyTeam = mode === 'my';
+        const isRequested = requestedTeamIds.has(item.id || "");
         const isFull = (item.memberCount || 0) >= (item.maxMembers || 0);
 
         return (
@@ -169,7 +199,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
                     styles.teamCard,
                     pressed && { opacity: 0.9 }
                 ]}
-                onPress={() => router.push(`/teams/${item.id}` as any)}
+                onPress={() => router.push(`/teams/${item.id || ""}` as any)}
             >
                 <View style={styles.teamTopRow}>
                     <Text style={styles.teamGame}>{(item.game || '???').toUpperCase()}</Text>
@@ -183,6 +213,31 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
 
                 <View style={styles.teamTitleRow}>
                     <Text style={styles.teamName} numberOfLines={1}>{item.name}</Text>
+                    {isMyTeam ? (
+                        <TouchableOpacity
+                            style={styles.viewBtn}
+                            onPress={() => router.push(`/teams/${item.id || ""}` as any)}
+                        >
+                            <Text style={styles.viewBtnText}>View</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        isRequested ? (
+                            <View style={styles.requestedBtn}>
+                                <Text style={styles.requestedBtnText}>Requested</Text>
+                            </View>
+                        ) : isFull ? (
+                            <View style={styles.fullBtn}>
+                                <Text style={styles.fullBtnText}>Full</Text>
+                            </View>
+                        ) : (
+                            <TouchableOpacity
+                                style={styles.requestBtn}
+                                onPress={() => handleRequestToJoin(item.id || "")}
+                            >
+                                <Text style={styles.requestBtnText}>Request to Join</Text>
+                            </TouchableOpacity>
+                        )
+                    )}
                 </View>
 
                 <View style={styles.teamBottomRow}>
@@ -193,21 +248,12 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
                         </Text>
                     </View>
 
-                    {isRequested ? (
-                        <View style={styles.requestedBtn}>
-                            <Text style={styles.requestedBtnText}>Requested</Text>
+                    {isMyTeam && (
+                        <View style={styles.statsTag}>
+                            <Text style={styles.statsText}>
+                                {(item.stats?.wins || 0) + (item.stats?.losses || 0)} MATCHES
+                            </Text>
                         </View>
-                    ) : isFull ? (
-                        <View style={styles.fullBtn}>
-                            <Text style={styles.fullBtnText}>Full</Text>
-                        </View>
-                    ) : (
-                        <TouchableOpacity
-                            style={styles.requestBtn}
-                            onPress={() => handleRequestToJoin(item.id!)}
-                        >
-                            <Text style={styles.requestBtnText}>Request to Join</Text>
-                        </TouchableOpacity>
                     )}
                 </View>
             </Pressable>
@@ -215,28 +261,44 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
     };
 
     // Client-side filtering check
-    const displayedTeams = publicTeams.filter(t => {
-        // Existing Open Slots filter
-        if (selectedTeamFilter === 'Open Slots') {
-            if ((t.memberCount || 0) >= (t.maxMembers || 0)) return false;
+    const displayedTeams = (mode === 'my' ? myTeams : publicTeams).filter(t => {
+        // Search query filter (for My Teams especially since it's fetched all at once)
+        if (searchQuery) {
+            const queryContent = searchQuery.toLowerCase();
+            const matchesSearch =
+                t.name.toLowerCase().includes(queryContent) ||
+                (t.game || '').toLowerCase().includes(queryContent);
+            if (!matchesSearch) return false;
         }
 
-        // Team Size filter
-        if (selectedTeamSize !== 'Any') {
-            const memberCount = t.memberCount || 0;
-            if (selectedTeamSize === '1-2 players') {
-                if (memberCount < 1 || memberCount > 2) return false;
-            } else if (selectedTeamSize === '3-5 players') {
-                if (memberCount < 3 || memberCount > 5) return false;
-            } else if (selectedTeamSize === 'Full Team') {
-                if (memberCount !== (t.maxMembers || 0)) return false;
+        // Game filter
+        if (selectedGame !== 'all') {
+            if ((t.game || '').toLowerCase() !== normalizeGameKey(selectedGame).toLowerCase()) return false;
+        }
+
+        if (mode === 'discover') {
+            // Existing Open Slots filter
+            if (selectedTeamFilter === 'Open Slots') {
+                if ((t.memberCount || 0) >= (t.maxMembers || 0)) return false;
             }
-        }
 
-        // Competitive Level filter (placeholder field)
-        if (selectedCompetitiveLevel !== 'Any') {
-            const teamLevel = (t as any).competitiveLevel || 'Casual';
-            if (!teamLevel.toLowerCase().includes(selectedCompetitiveLevel.toLowerCase().replace('-focused', ''))) return false;
+            // Team Size filter
+            if (selectedTeamSize !== 'Any') {
+                const memberCount = t.memberCount || 0;
+                if (selectedTeamSize === '1-2 players') {
+                    if (memberCount < 1 || memberCount > 2) return false;
+                } else if (selectedTeamSize === '3-5 players') {
+                    if (memberCount < 3 || memberCount > 5) return false;
+                } else if (selectedTeamSize === 'Full Team') {
+                    if (memberCount !== (t.maxMembers || 0)) return false;
+                }
+            }
+
+            // Competitive Level filter (placeholder field)
+            if (selectedCompetitiveLevel !== 'Any') {
+                const teamLevel = (t as any).competitiveLevel || 'Casual';
+                if (!teamLevel.toLowerCase().includes(selectedCompetitiveLevel.toLowerCase().replace('-focused', ''))) return false;
+            }
         }
 
         return true;
@@ -275,8 +337,54 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
 
     return (
         <View style={{ flex: 1 }}>
-            {/* Contextual Filters */}
-            {selectedGame !== 'all' && (
+            {/* NEW: Mode Toggle (Browse Teams vs My Teams) */}
+            <View style={{
+                flexDirection: 'row',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                marginHorizontal: 16,
+                marginTop: 8,
+                marginBottom: 8,
+                borderRadius: 12,
+                padding: 4,
+                borderWidth: 1,
+                borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}>
+                <TouchableOpacity
+                    onPress={() => setMode('discover')}
+                    style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        backgroundColor: mode === 'discover' ? COLORS.accent : 'transparent'
+                    }}
+                >
+                    <Text style={{
+                        color: mode === 'discover' ? '#FFF' : COLORS.muted,
+                        fontWeight: 'bold',
+                        fontSize: 13
+                    }}>Browse Teams</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={() => setMode('my')}
+                    style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        backgroundColor: mode === 'my' ? COLORS.accent : 'transparent'
+                    }}
+                >
+                    <Text style={{
+                        color: mode === 'my' ? '#FFF' : COLORS.muted,
+                        fontWeight: 'bold',
+                        fontSize: 13
+                    }}>My Teams</Text>
+                </TouchableOpacity>
+            </View>
+
+            {/* Contextual Filters - Only for Discover mode */}
+            {mode === 'discover' && selectedGame !== 'all' && (
                 <View>
                     <TouchableOpacity
                         onPress={() => setFiltersExpanded(!filtersExpanded)}
@@ -330,7 +438,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery }: Discover
             <FlatList
                 data={displayedTeams}
                 renderItem={renderTeamItem}
-                keyExtractor={(item) => item.id!}
+                keyExtractor={(item) => item.id || Math.random().toString()}
                 contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={

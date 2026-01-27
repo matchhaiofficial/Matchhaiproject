@@ -1,5 +1,5 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
@@ -43,6 +43,8 @@ import styles from './create.styles';
 
 export default function CreateMatchroom() {
     const { user } = useAuth();
+    const params = useLocalSearchParams<{ zoneId?: string; zoneName?: string; zoneSupportedGames?: string }>();
+
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
@@ -64,9 +66,9 @@ export default function CreateMatchroom() {
     const [locationMode, setLocationMode] = useState<'zone' | 'broadcast'>('zone');
     const [broadcastAreas, setBroadcastAreas] = useState<string[]>([]);
 
-    // Phase 3: Zone Selection State
-    const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
-    const [selectedZoneName, setSelectedZoneName] = useState<string | null>(null);
+    // Phase 3: Zone Selection State (pre-fill from params if coming from venue)
+    const [selectedZoneId, setSelectedZoneId] = useState<string | null>(params.zoneId || null);
+    const [selectedZoneName, setSelectedZoneName] = useState<string | null>(params.zoneName || null);
 
     // Phase 4: CS2 & FC25/26 Specific State
     const [zoneRate, setZoneRate] = useState<number>(0);
@@ -236,6 +238,79 @@ export default function CreateMatchroom() {
         setHostSkillTier(null);
         setHostSkillAnswers({});
     }, [selectedGame]);
+
+    // Check if user has games configured that match the venue's offerings
+    useEffect(() => {
+        if (!userProfile || !params.zoneSupportedGames) return;
+
+        try {
+            const zoneSupportedGames: string[] = JSON.parse(params.zoneSupportedGames);
+            if (zoneSupportedGames.length === 0) return;
+
+            // Game labels for display
+            const gameLabels: Record<string, string> = {
+                'cs2': 'CS2',
+                'fc26': 'FC26',
+                'tekken8': 'Tekken 8',
+                'futsal': 'Futsal',
+                'indoor_cricket': 'Indoor Cricket',
+                'padel': 'Padel',
+                'pickleball': 'Pickleball'
+            };
+
+            // Map game keys to profile flags
+            const gameToProfileFlag: Record<string, keyof typeof userProfile> = {
+                'cs2': 'playsCs2',
+                'fc26': 'playsFc',
+                'tekken8': 'playsTekken',
+                'futsal': 'playsFutsal',
+                'indoor_cricket': 'playsIndoorCricket',
+                'padel': 'playsPadel',
+                'pickleball': 'playsPickleball'
+            };
+
+            // Get user's configured games
+            const userConfiguredGames = Object.entries(gameToProfileFlag)
+                .filter(([game, flag]) => userProfile[flag])
+                .map(([game]) => game);
+
+            // Check if user has any of the venue's supported games configured
+            const matchingGames = zoneSupportedGames.filter(game => {
+                const flagKey = gameToProfileFlag[game];
+                return flagKey && userProfile[flagKey];
+            });
+
+            if (matchingGames.length === 0) {
+                const supportedLabels = zoneSupportedGames.map(g => gameLabels[g] || g).join(', ');
+                const userGamesLabels = userConfiguredGames.map(g => gameLabels[g] || g).join(', ');
+
+                // Different message based on whether user has any games at all
+                if (userConfiguredGames.length > 0) {
+                    // User has games but they don't match venue
+                    Alert.alert(
+                        'Game Mismatch',
+                        `Your games: ${userGamesLabels}\n\nThis venue supports: ${supportedLabels}\n\nTo create a matchroom here, please add one of the venue's supported games to your profile.`,
+                        [
+                            { text: 'Go Back', style: 'cancel', onPress: () => router.back() },
+                            { text: 'Add Game', onPress: () => router.replace('/(player)/(tabs)/profile') }
+                        ]
+                    );
+                } else {
+                    // User has no games configured at all
+                    Alert.alert(
+                        'Add a Game First',
+                        `This venue supports: ${supportedLabels}\n\nPlease add one of these games to your profile to create a matchroom here.`,
+                        [
+                            { text: 'Go Back', style: 'cancel', onPress: () => router.back() },
+                            { text: 'Edit Profile', onPress: () => router.replace('/(player)/(tabs)/profile') }
+                        ]
+                    );
+                }
+            }
+        } catch (e) {
+            Logger.error('CreateMatchroom', 'Error parsing zoneSupportedGames', e);
+        }
+    }, [userProfile, params.zoneSupportedGames]);
 
     const loadUserProfile = async () => {
         if (!user?.uid) {
