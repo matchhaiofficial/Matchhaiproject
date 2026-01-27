@@ -71,8 +71,7 @@ export default StyleSheet.create({
 
     // Info Grid (Location, Price, etc)
     infoGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
+        flexDirection: 'column',
         gap: SPACING.md,
         marginBottom: SPACING.xl,
         backgroundColor: COLORS.cardDark,
@@ -82,10 +81,9 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
     },
     infoItem: {
-        width: '48%', // Responsive grid
+        width: '100%',
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: SPACING.sm,
     },
     infoIcon: {
         marginRight: SPACING.sm,
@@ -258,6 +256,36 @@ export default StyleSheet.create({
     fullText: {
         color: COLORS.textSecondary,
         fontWeight: 'bold',
+    },
+    getRequestButton: {
+        backgroundColor: COLORS.accent,
+        paddingVertical: 14,
+        borderRadius: RADII.md,
+        alignItems: 'center',
+        ...SHADOWS.accentStrong,
+    },
+    getRequestButtonText: {
+        color: '#FFF',
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+    },
+    cancelRequestButton: {
+        backgroundColor: COLORS.error + '15',
+        borderWidth: 1.5,
+        borderColor: COLORS.error + '60',
+        paddingVertical: 14,
+        borderRadius: RADII.md,
+        alignItems: 'center',
+    },
+    cancelRequestButtonText: {
+        color: COLORS.error,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+        fontWeight: 'bold',
+        letterSpacing: 0.5,
     },
 
     // Role Selection Modal

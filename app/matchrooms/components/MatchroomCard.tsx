@@ -10,11 +10,14 @@ import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
     room: Matchroom;
+    onJoinPress?: () => void;
+    onCancelJoinPress?: () => void;
+    isRequested?: boolean;
+    isJoined?: boolean;
 }
 
-const MatchroomCard = memo(({ room }: MatchroomCardProps) => {
+const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined }: MatchroomCardProps) => {
     const router = useRouter();
-    // ... rest of the logic remains the same
 
     // Check if room is locked/full
     const isLocked = isRoomLocked(room);
@@ -72,7 +75,6 @@ const MatchroomCard = memo(({ room }: MatchroomCardProps) => {
     // Helper to mock distance if location is a string (real app would calc distance)
     const distanceDisplay = locationDisplay.length > 15 ? locationDisplay.substring(0, 15) + '...' : locationDisplay;
 
-
     return (
         <TouchableOpacity
             style={styles.nearbyCard}
@@ -101,12 +103,32 @@ const MatchroomCard = memo(({ room }: MatchroomCardProps) => {
                 </View>
             </View>
 
-            {/* Row 2: Title & Book Slot Button */}
+            {/* Row 2: Title & Book Slot Button / Request Button */}
             <View style={styles.nearbyTitleRow}>
                 <Text style={styles.nearbyTitle} numberOfLines={1}>{room.title}</Text>
-                <TouchableOpacity style={styles.bookSlotBtn} onPress={handlePress}>
-                    <Text style={styles.bookSlotText}>View</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {isJoined && (
+                        <View style={styles.joinedBtn}>
+                            <Text style={styles.joinedBtnText}>Joined</Text>
+                        </View>
+                    )}
+                    {isRequested && (
+                        <View style={styles.requestedBtn}>
+                            <Text style={styles.requestedBtnText}>Requested</Text>
+                        </View>
+                    )}
+                    {!isJoined && !isRequested && onJoinPress && (room.status !== 'in-progress' && room.status !== 'completed') && (
+                        <TouchableOpacity
+                            style={styles.requestBtn}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onJoinPress();
+                            }}
+                        >
+                            <Text style={styles.requestBtnText}>Request</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
 
             {/* Row 3: Location & Time */}
@@ -141,7 +163,7 @@ const MatchroomCard = memo(({ room }: MatchroomCardProps) => {
                 </View>
                 <View style={styles.priceTagContainer}>
                     <Text style={styles.priceTagText}>
-                        {room.pricing?.perPlayer && room.pricing.perPlayer > 0 ? `₨ ${room.pricing.perPlayer}` : 'FREE'}
+                        {room.pricing?.perPlayer && room.pricing.perPlayer > 0 ? `Rs. ${room.pricing.perPlayer}` : 'FREE'}
                     </Text>
                 </View>
             </View>

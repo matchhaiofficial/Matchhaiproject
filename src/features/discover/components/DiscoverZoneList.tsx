@@ -33,16 +33,45 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
     // Filter state
     const [filtersExpanded, setFiltersExpanded] = useState(true);
     const [selectedProximity, setSelectedProximity] = useState('Any');
+    const [selectedVenueType, setSelectedVenueType] = useState<'all' | 'zones' | 'courts'>('all');
+    const [internalSelectedGame, setInternalSelectedGame] = useState<string>('all');
 
     // User's area/city for proximity filtering (could be from context/profile)
     const [userArea, setUserArea] = useState<string | null>(null);
     const [userCity, setUserCity] = useState<string | null>('Karachi'); // Default to Karachi
 
+    // Game categorization
+    const ESPORTS_GAMES = [
+        { key: 'all', label: 'All' },
+        { key: 'cs2', label: 'CS2' },
+        { key: 'fc26', label: 'FC26' },
+        { key: 'tekken8', label: 'Tekken 8' },
+    ];
+    const SPORTS_GAMES = [
+        { key: 'all', label: 'All' },
+        { key: 'futsal', label: 'Futsal' },
+        { key: 'indoor_cricket', label: 'Cricket' },
+        { key: 'padel', label: 'Padel' },
+        { key: 'pickleball', label: 'Pickleball' },
+    ];
+
+    // Get available games based on venue type
+    const getGamesForVenueType = () => {
+        if (selectedVenueType === 'zones') return ESPORTS_GAMES;
+        if (selectedVenueType === 'courts') return SPORTS_GAMES;
+        return [];
+    };
+
+    // Reset game selection when venue type changes
+    const handleVenueTypeChange = (venueType: 'all' | 'zones' | 'courts') => {
+        setSelectedVenueType(venueType);
+        setInternalSelectedGame('all'); // Reset game filter when venue type changes
+    };
+
     const fetchZones = async () => {
         try {
-            // If selectedGame is 'all', pass undefined to fetch all active zones
-            // If selectedGame is specific, pass it to get filtered and simpler rate derivation
-            const gameParam = selectedGame === 'all' ? undefined : selectedGame;
+            // Use internal game filter if venue type is selected, otherwise fetch all
+            const gameParam = internalSelectedGame === 'all' ? undefined : internalSelectedGame;
 
             const res = await getActiveZones(gameParam);
             if (res.ok && res.data) {
@@ -60,14 +89,23 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
         setLoading(true);
         setSelectedProximity('Any');
         fetchZones();
-    }, [selectedGame]);
+    }, [internalSelectedGame]);
 
     const onRefresh = () => {
         setRefreshing(true);
         fetchZones();
     };
 
+    // Filter zones based on venue type and other filters
     const filteredZones = zones.filter(zone => {
+        // Venue type filter
+        if (selectedVenueType !== 'all') {
+            const zoneType = zone.type || 'gaming'; // Default to gaming
+            if (selectedVenueType === 'zones' && zoneType === 'sports') return false;
+            if (selectedVenueType === 'courts' && zoneType === 'gaming') return false;
+            // Hybrid zones show in both
+        }
+
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             const matchesName = zone.venueBrandName?.toLowerCase().includes(query);
@@ -96,6 +134,9 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
     const renderZoneItem = ({ item }: { item: Zone }) => {
         const address = [item.primaryBranch?.areaLabel, item.primaryBranch?.city].filter(Boolean).join(", ");
+        const isGamingZone = item.type === 'gaming' || !item.type; // Default to gaming
+        const isSportsCourt = item.type === 'sports';
+        const isHybrid = item.type === 'hybrid';
 
         return (
             <TouchableOpacity
@@ -104,8 +145,12 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                 style={styles.card}
             >
                 <View style={styles.cardHeader}>
-                    <View style={styles.cardIcon}>
-                        <MaterialIcons name="store" size={24} color={COLORS.accent} />
+                    <View style={[styles.cardIcon, isSportsCourt && { backgroundColor: 'rgba(0, 230, 118, 0.1)' }]}>
+                        <MaterialIcons
+                            name={isSportsCourt ? "sports-soccer" : "sports-esports"}
+                            size={24}
+                            color={isSportsCourt ? COLORS.success : COLORS.accent}
+                        />
                     </View>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.cardTitle}>{item.venueBrandName}</Text>
@@ -125,17 +170,16 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
                 {/* Tags */}
                 <View style={styles.tagsRow}>
-                    {/* Show supported games chips if 'all' selected, or just general info */}
-                    {selectedGame === 'all' && (
-                        Object.entries(item.games || {}).filter(([k, v]) => v).slice(0, 3).map(([key, val]) => (
-                            <View key={key} style={styles.tag}>
-                                <Text style={styles.tagText}>{key.replace('supports', '')}</Text>
-                            </View>
-                        ))
-                    )}
-                    {selectedGame !== 'all' && (
+                    {/* Venue type badge */}
+                    <View style={[styles.tag, isSportsCourt && { borderColor: 'rgba(0, 230, 118, 0.3)', backgroundColor: 'rgba(0, 230, 118, 0.05)' }]}>
+                        <Text style={[styles.tagText, isSportsCourt && { color: COLORS.success }]}>
+                            {isHybrid ? 'Hybrid' : isSportsCourt ? 'Court' : 'Zone'}
+                        </Text>
+                    </View>
+                    {/* Show selected game if filtered */}
+                    {internalSelectedGame !== 'all' && (
                         <View style={styles.tag}>
-                            <Text style={styles.tagText}>Supports {selectedGame.toUpperCase()}</Text>
+                            <Text style={styles.tagText}>{internalSelectedGame.toUpperCase()}</Text>
                         </View>
                     )}
                 </View>
@@ -153,6 +197,11 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
     // Filter options
     const PROXIMITY_OPTIONS = ['Any', 'Same Area', 'Same City'];
+    const VENUE_TYPE_OPTIONS = [
+        { key: 'all', label: 'All Venues' },
+        { key: 'zones', label: 'Gaming Zones' },
+        { key: 'courts', label: 'Sports Courts' },
+    ];
 
     // Render filter row helper (consistent with other tabs)
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
@@ -176,48 +225,86 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
     return (
         <View style={{ flex: 1 }}>
-            {/* Contextual Filters */}
-            {selectedGame !== 'all' && (
-                <View>
-                    <TouchableOpacity
-                        onPress={() => setFiltersExpanded(!filtersExpanded)}
-                        activeOpacity={0.7}
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            paddingHorizontal: 16,
-                            paddingBottom: 8,
-                            paddingTop: 8,
-                            backgroundColor: COLORS.background
-                        }}
-                    >
-                        <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
-                            Filters
-                        </Text>
-                        <MaterialIcons
-                            name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
-                            size={20}
-                            color={COLORS.muted}
-                        />
-                    </TouchableOpacity>
+            {/* Collapsible Filters - Always show venue type filter */}
+            <View>
+                <TouchableOpacity
+                    onPress={() => setFiltersExpanded(!filtersExpanded)}
+                    activeOpacity={0.7}
+                    style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingHorizontal: 16,
+                        paddingBottom: 8,
+                        paddingTop: 8,
+                        backgroundColor: COLORS.background
+                    }}
+                >
+                    <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
+                        Filters
+                    </Text>
+                    <MaterialIcons
+                        name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
+                        size={20}
+                        color={COLORS.muted}
+                    />
+                </TouchableOpacity>
 
-                    {filtersExpanded && (
-                        <View style={{ maxHeight: 300 }}>
-                            <ScrollView
-                                showsVerticalScrollIndicator={true}
-                                contentContainerStyle={[filterStyles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
-                            >
-                                {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
-                            </ScrollView>
-                        </View>
-                    )}
-                </View>
-            )}
+                {filtersExpanded && (
+                    <View style={{ maxHeight: 350 }}>
+                        <ScrollView
+                            showsVerticalScrollIndicator={true}
+                            contentContainerStyle={[filterStyles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                        >
+                            {/* Venue Type Filter (Primary) - Always visible */}
+                            <View style={filterStyles.filterSection}>
+                                <Text style={filterStyles.filterLabel}>Venue Type</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
+                                    {VENUE_TYPE_OPTIONS.map(opt => (
+                                        <TouchableOpacity
+                                            key={opt.key}
+                                            onPress={() => handleVenueTypeChange(opt.key as 'all' | 'zones' | 'courts')}
+                                            style={[filterStyles.optionChip, selectedVenueType === opt.key && filterStyles.optionChipActive]}
+                                        >
+                                            <Text style={[filterStyles.optionChipText, selectedVenueType === opt.key && filterStyles.optionChipTextActive]}>
+                                                {opt.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+
+                            {/* Game Filter - Only show after venue type is selected */}
+                            {selectedVenueType !== 'all' && (
+                                <View style={filterStyles.filterSection}>
+                                    <Text style={filterStyles.filterLabel}>
+                                        {selectedVenueType === 'zones' ? 'Game' : 'Sport'}
+                                    </Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
+                                        {getGamesForVenueType().map(game => (
+                                            <TouchableOpacity
+                                                key={game.key}
+                                                onPress={() => setInternalSelectedGame(game.key)}
+                                                style={[filterStyles.optionChip, internalSelectedGame === game.key && filterStyles.optionChipActive]}
+                                            >
+                                                <Text style={[filterStyles.optionChipText, internalSelectedGame === game.key && filterStyles.optionChipTextActive]}>
+                                                    {game.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                </View>
+                            )}
+
+                            {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
+                        </ScrollView>
+                    </View>
+                )}
+            </View>
 
             <View style={styles.resultsCount}>
                 <Text style={styles.resultsCountText}>
-                    {filteredZones.length} zone{filteredZones.length !== 1 ? 's' : ''} found
+                    {filteredZones.length} venue{filteredZones.length !== 1 ? 's' : ''} found
                 </Text>
             </View>
 
@@ -233,7 +320,7 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                 ListEmptyComponent={
                     <View style={styles.emptyState}>
                         <MaterialIcons name="store-mall-directory" size={48} color={COLORS.muted} style={styles.emptyIcon} />
-                        <Text style={styles.emptyTitle}>No Zones Found</Text>
+                        <Text style={styles.emptyTitle}>No Venues Found</Text>
                         <Text style={styles.emptySubtitle}>
                             Try adjusting your filters or search query.
                         </Text>
