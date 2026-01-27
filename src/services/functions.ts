@@ -594,18 +594,22 @@ export const removeMember = async (data: { teamId: string; memberUid: string }):
                 updatedAt: serverTimestamp()
             });
 
-            // Cleanup: Delete any related notifications (invites/requests) for this user & team
-            // We can't query in a transaction easily without an index, so we might need a separate operations or use deterministic IDs.
-            // Deterministic IDs: `team_invite__${teamId}__${memberUid}` and `team_join_request_${teamId}_${memberUid}`
-            const inviteId = `team_invite__${teamId}__${memberUid}`;
-            const requestId = `team_join_request_${teamId}_${memberUid}`;
-
-            // Transactional delete (if they exist)
-            transaction.delete(doc(db, 'notifications', inviteId));
-            transaction.delete(doc(db, 'notifications', requestId));
-
             return { ok: true };
         });
+
+        // Best-effort cleanup: Delete any related notifications (invites/requests) for this user & team
+        // Done OUTSIDE the transaction to prevent permission errors when notifications don't exist
+        const inviteId = `team_invite__${teamId}__${memberUid}`;
+        const requestId = `team_join_request_${teamId}_${memberUid}`;
+
+        try {
+            const batch = writeBatch(db);
+            batch.delete(doc(db, 'notifications', inviteId));
+            batch.delete(doc(db, 'notifications', requestId));
+            await batch.commit();
+        } catch (cleanupErr) {
+            Logger.warn('functions', 'removeMember: Notification cleanup failed (non-fatal)', cleanupErr);
+        }
 
         return res;
     } catch (error: any) {
@@ -970,5 +974,129 @@ export const leaveTeam = async (data: { teamId: string }): Promise<ServerRespons
     } catch (error: any) {
         Logger.error('functions', 'leaveTeam error', error);
         return { ok: false, message: error.message || 'Failed to leave team.' };
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Matchroom Join Request Response
+// ----------------------------------------------------------------------------
+
+export const respondToMatchroomJoinRequest = async (data: { notificationId: string; decision: 'accept' | 'reject' }): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { notificationId, decision } = data;
+        const notifRef = doc(db, 'notifications', notificationId);
+
+        const res = await runTransaction(db, async (transaction) => {
+            const notifSnap = await transaction.get(notifRef);
+            if (!notifSnap.exists()) throw new Error("Request not found");
+            const notifData = notifSnap.data();
+
+            if (notifData.type !== 'match_join_request') throw new Error("Invalid notification type");
+            if (notifData.status !== 'pending') throw new Error("Request already handled");
+
+            const matchroomId = notifData.meta?.matchroomId;
+            if (!matchroomId) throw new Error("Matchroom ID missing from request");
+
+            const matchroomRef = doc(db, 'matchrooms', matchroomId);
+            const matchroomSnap = await transaction.get(matchroomRef);
+            if (!matchroomSnap.exists()) throw new Error("Matchroom not found");
+            const matchroomData = matchroomSnap.data();
+
+            if (matchroomData.hostUid !== currentUser.uid) {
+                throw new Error("Only the host can respond to join requests");
+            }
+
+            if (decision === 'reject') {
+                transaction.update(notifRef, { status: 'rejected', updatedAt: serverTimestamp() });
+                return { ok: true, message: "Request rejected." };
+            }
+
+            const requesterUid = notifData.fromUid;
+            const requesterUsername = notifData.fromUsername;
+            const role = notifData.meta?.role || 'Flex';
+
+            const currentPlayers = matchroomData.currentPlayers || 0;
+            const maxPlayers = matchroomData.maxPlayers || 10;
+            if (currentPlayers >= maxPlayers) {
+                transaction.update(notifRef, { status: 'rejected', reason: 'room_full', updatedAt: serverTimestamp() });
+                throw new Error("Matchroom is full");
+            }
+
+            const playerUids = matchroomData.playerUids || [];
+            if (playerUids.includes(requesterUid)) {
+                transaction.update(notifRef, { status: 'accepted', updatedAt: serverTimestamp() });
+                return { ok: true, message: "User is already in the matchroom." };
+            }
+
+            const newPlayerCount = currentPlayers + 1;
+            const willBeFull = newPlayerCount >= maxPlayers;
+
+            const updateData: Record<string, any> = {
+                currentPlayers: newPlayerCount,
+                players: arrayUnion({
+                    uid: requesterUid,
+                    username: requesterUsername,
+                    joinedAt: new Date(),
+                    role: role
+                }),
+                playerUids: arrayUnion(requesterUid),
+                updatedAt: serverTimestamp()
+            };
+
+            if (willBeFull) {
+                updateData.status = 'locked';
+                updateData.isLocked = true;
+                updateData.lockedAt = serverTimestamp();
+            }
+
+            transaction.update(matchroomRef, updateData);
+            transaction.update(notifRef, { status: 'accepted', updatedAt: serverTimestamp() });
+
+            return { ok: true, message: "Player added to matchroom." };
+        });
+
+        return res;
+    } catch (error: any) {
+        Logger.error('functions', 'respondToMatchroomJoinRequest error', error);
+        return { ok: false, message: error.message || 'Failed to respond to join request.' };
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Cancel User's Pending Matchroom Requests
+// ----------------------------------------------------------------------------
+
+export const cancelUserPendingMatchroomRequests = async (uid: string): Promise<ServerResponse> => {
+    try {
+        const q = query(
+            collection(db, 'notifications'),
+            where('fromUid', '==', uid),
+            where('type', '==', 'match_join_request'),
+            where('status', '==', 'pending')
+        );
+
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            return { ok: true, message: "No pending requests to cancel." };
+        }
+
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(docSnap => {
+            batch.update(docSnap.ref, {
+                status: 'cancelled',
+                updatedAt: serverTimestamp()
+            });
+        });
+
+        await batch.commit();
+        Logger.info('functions', 'cancelUserPendingMatchroomRequests: Success', { count: snapshot.size });
+        return { ok: true, message: `Cancelled ${snapshot.size} pending request(s).` };
+    } catch (error: any) {
+        Logger.error('functions', 'cancelUserPendingMatchroomRequests error', error);
+        return { ok: false, message: error.message || 'Failed to cancel pending requests.' };
     }
 };

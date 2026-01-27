@@ -1,5 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -25,13 +25,17 @@ import {
     PICKLEBALL_ROLES
 } from "../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../src/constants/timelineFilters";
-import { getMatchrooms, Matchroom, Slot } from "../../../src/services/matchService";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../../../src/config/firebaseConfig";
+import { useAuth } from "../../../src/context/AuthContext";
+import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { isRoomExpired } from "../../../src/utils/matchroomLifecycle";
 import { matchesTimeline } from "../../../src/utils/timeFilters";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import styles from "./matchrooms.styles";
+import { Alert } from "react-native";
 
 // Game filter options
 const GAMES = [
@@ -55,11 +59,15 @@ const OVERS_OPTIONS = ['Any', '5', '6'];
 const LOCATION_OPTIONS = ['Any', ...KARACHI_AREAS.filter(a => a !== 'Other (Karachi)')];
 
 export default function MatchroomsIndex() {
+    const { user } = useAuth();
     const router = useRouter();
     const [rooms, setRooms] = useState<Matchroom[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+
+    // Social State
+    const [requestedRoomIds, setRequestedRoomIds] = useState<Set<string>>(new Set());
 
     // Filter states
     const [selectedGame, setSelectedGame] = useState<string>('all');
@@ -94,10 +102,88 @@ export default function MatchroomsIndex() {
         }
     };
 
+    const fetchSocialState = async () => {
+        if (!user) return;
+        try {
+            const q = query(
+                collection(db, "notifications"),
+                where("fromUid", "==", user.uid),
+                where("type", "==", "match_join_request"),
+                where("status", "==", "pending")
+            );
+            const snap = await getDocs(q);
+            const requested = new Set<string>();
+            snap.forEach(doc => {
+                const data = doc.data();
+                if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
+            });
+            setRequestedRoomIds(requested);
+        } catch (e) {
+            Logger.error("MatchroomsIndex", "Error fetching social state", e);
+        }
+    };
+
+    const handleRequestToJoin = async (room: Matchroom) => {
+        if (!user) {
+            Alert.alert("Login Required", "Please login to join matchrooms.");
+            return;
+        }
+        try {
+            // BUSY CHECK
+            const busyCheck = await isUserInActiveMatchroom(user.uid);
+            if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
+                Alert.alert("Already Busy", busyCheck.message);
+                return;
+            }
+
+            const res = await requestJoinMatchroom(room, {
+                uid: user.uid,
+                username: user.displayName || 'Player',
+            });
+            if (res.ok) {
+                Alert.alert("Success", "Join request sent to host.");
+                setRequestedRoomIds(prev => new Set(prev).add(room.id!));
+            } else {
+                Alert.alert("Error", res.message || "Failed to send request.");
+            }
+        } catch (e) {
+            Logger.error("MatchroomsIndex", "Join request error", e);
+            Alert.alert("Error", "An unexpected error occurred.");
+        }
+    };
+
+    const handleCancelRequestToJoin = async (room: Matchroom) => {
+        if (!user) return;
+        try {
+            const res = await cancelMatchJoinRequest(room.id!, user.uid);
+            if (res.ok) {
+                setRequestedRoomIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(room.id!);
+                    return next;
+                });
+            } else {
+                Alert.alert("Error", res.message || "Failed to cancel request.");
+            }
+        } catch (e) {
+            Logger.error("MatchroomsIndex", "Cancel request error", e);
+        }
+    };
+
     useEffect(() => {
         setLoading(true);
         fetchRooms();
-    }, []);
+        fetchSocialState();
+    }, [user]);
+
+    // Refetch social state on focus to catch host rejections or external cancellations
+    useFocusEffect(
+        useCallback(() => {
+            if (user) {
+                fetchSocialState();
+            }
+        }, [user])
+    );
 
     // Reset contextual filters when game changes
     useEffect(() => {
@@ -204,9 +290,18 @@ export default function MatchroomsIndex() {
     const hasOversFilter = () => selectedGame === 'indoorCricket';
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
-    const renderItem = useCallback(({ item }: { item: Matchroom }) => (
-        <MatchroomCard room={item} />
-    ), []);
+    const renderItem = useCallback(({ item }: { item: Matchroom }) => {
+        const isJoined = item.playerUids?.includes(user?.uid || "") || (item.players || []).some(p => p.uid === user?.uid);
+        return (
+            <MatchroomCard
+                room={item}
+                isRequested={requestedRoomIds.has(item.id!)}
+                isJoined={isJoined}
+                onJoinPress={() => handleRequestToJoin(item)}
+                onCancelJoinPress={() => handleCancelRequestToJoin(item)}
+            />
+        );
+    }, [user, requestedRoomIds]);
 
     // Render filter row helper
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (

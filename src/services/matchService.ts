@@ -321,6 +321,21 @@ export async function requestJoinMatchroom(
     }
 }
 
+/**
+ * Deletes a join request notification.
+ */
+export async function cancelMatchJoinRequest(roomId: string, userId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+    try {
+        const requestId = `match_join_request_${roomId}_${userId}`;
+        await deleteDoc(doc(db, 'notifications', requestId));
+        Logger.info("matchService", "Join request cancelled", { roomId, uid: userId });
+        return { ok: true };
+    } catch (error) {
+        Logger.error("matchService", "Error cancelling join request", error);
+        return { ok: false, message: "Failed to cancel request." };
+    }
+}
+
 export async function joinMatchroom(roomId: string, user: { uid: string; username: string }, role?: string, joinCode?: string): Promise<{ ok: true } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);

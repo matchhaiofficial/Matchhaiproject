@@ -223,10 +223,26 @@ export default function PlayerZoneDetails() {
                         styles.actionButton,
                         pressed && { opacity: 0.9 }
                     ]}
-                    onPress={() => router.push({
-                        pathname: "/matchrooms/create",
-                        params: { zoneId: zone.id, zoneName: zone.venueBrandName }
-                    })}
+                    onPress={() => {
+                        // Build supported games list
+                        const supportedGames: string[] = [];
+                        if (zone.games?.supportsCs2) supportedGames.push('cs2');
+                        if (zone.games?.supportsFc25) supportedGames.push('fc26');
+                        if (zone.games?.supportsTekken8) supportedGames.push('tekken8');
+                        if (zone.games?.supportsFutsal) supportedGames.push('futsal');
+                        if (zone.games?.supportsIndoorCricket) supportedGames.push('indoor_cricket');
+                        if (zone.games?.supportsPadel) supportedGames.push('padel');
+                        if (zone.games?.supportsPickleball) supportedGames.push('pickleball');
+
+                        router.push({
+                            pathname: "/matchrooms/create",
+                            params: {
+                                zoneId: zone.id,
+                                zoneName: zone.venueBrandName,
+                                zoneSupportedGames: JSON.stringify(supportedGames)
+                            }
+                        });
+                    }}
                     android_ripple={{ color: 'rgba(255,255,255,0.15)' }}
                 >
                     <Text style={styles.actionButtonText}>Book Now</Text>

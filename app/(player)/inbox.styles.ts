@@ -203,4 +203,25 @@ export default StyleSheet.create({
         textAlign: 'center',
         paddingHorizontal: 40,
     },
+    // Clear History Button
+    clearHistoryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: SPACING.sm,
+        paddingHorizontal: SPACING.lg,
+        marginHorizontal: SPACING.screenPadding,
+        marginTop: SPACING.md,
+        backgroundColor: 'rgba(239, 83, 80, 0.08)',
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: 'rgba(239, 83, 80, 0.2)',
+    },
+    clearHistoryText: {
+        color: COLORS.error,
+        marginLeft: SPACING.sm,
+        fontFamily: FONTS.bold,
+        fontSize: 13,
+        fontWeight: '600',
+    },
 });
