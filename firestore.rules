@@ -90,9 +90,10 @@ service cloud.firestore {
       );
 
       // DELETE: Allow user to delete their own notifications.
-      // Also allow CAPTAIN to delete notifications related to their team (for cleanup during deletion)
+      // Also allow CAPTAIN/SENDER to delete notifications related to their team
       allow delete: if isAuthenticated() && (
         resource.data.toUid == request.auth.uid ||
+        resource.data.fromUid == request.auth.uid ||
         (
           resource.data.get('meta', {}).get('teamId', null) != null && 
           get(/databases/$(database)/documents/teams/$(resource.data.meta.teamId)).data.captainUid == request.auth.uid
@@ -147,6 +148,7 @@ service cloud.firestore {
             )
         );
         allow update, delete: if isAuthenticated() && (
+            get(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
             getAfter(/databases/$(database)/documents/teams/$(teamId)).data.captainUid == request.auth.uid ||
             memberId == request.auth.uid
         );

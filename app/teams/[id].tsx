@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, Scro
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
-import { removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
+import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS } from "../../src/theme";
@@ -314,7 +314,7 @@ export default function TeamDetails() {
                         try {
                             const res = await deleteTeam(id as string);
                             if (res.ok) {
-                                router.replace("/(player)/(tabs)/teams");
+                                router.back();
                             } else {
                                 Alert.alert("Error", res.message || "Failed to delete team.");
                             }
@@ -384,6 +384,36 @@ export default function TeamDetails() {
         } catch (error) {
             Logger.error("TeamDetails", "Error sharing", error);
         }
+    };
+
+    const handleLeaveTeam = () => {
+        Alert.alert(
+            "Leave Team",
+            `Are you sure you want to leave ${team?.name}? You will need to request to rejoin.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Leave",
+                    style: "destructive",
+                    onPress: async () => {
+                        setSubmitting(true);
+                        try {
+                            const res = await leaveTeam({ teamId: id as string });
+                            if (res.ok) {
+                                Alert.alert("Success", "You have left the team.");
+                                router.replace("/(player)/(tabs)/teams");
+                            } else {
+                                Alert.alert("Error", res.message || "Failed to leave team.");
+                            }
+                        } catch (e: any) {
+                            Alert.alert("Error", e.message || "Error leaving team.");
+                        } finally {
+                            setSubmitting(false);
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     // Button State Logic
@@ -597,6 +627,23 @@ export default function TeamDetails() {
                 </View>
                 <View style={styles.footerSpacer} />
             </ScrollView>
+
+            {/* Action Bar */}
+            {isMember && !isCaptain && (
+                <View style={styles.actionBar}>
+                    <TouchableOpacity
+                        onPress={handleLeaveTeam}
+                        disabled={submitting}
+                        style={[styles.leaveButton, submitting && { opacity: 0.6 }]}
+                    >
+                        {submitting ? (
+                            <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                            <Text style={styles.leaveButtonText}>Leave Team</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            )}
 
             {/* Action Bar (Non-Members Only) */}
             {!isMember && (

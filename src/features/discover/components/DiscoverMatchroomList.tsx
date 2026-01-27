@@ -1,8 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState, useMemo } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Modal,
     RefreshControl,
@@ -26,7 +27,10 @@ import {
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../../src/constants/timelineFilters";
-import { getMatchrooms, Matchroom, Slot } from "../../../../src/services/matchService";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../../../../src/config/firebaseConfig";
+import { useAuth } from "../../../../src/context/AuthContext";
+import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/matchService";
 import { COLORS, FONTS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { matchesTimeline } from "../../../../src/utils/timeFilters";
@@ -60,10 +64,13 @@ interface DiscoverMatchroomListProps {
 }
 
 export default function DiscoverMatchroomList({ selectedGame, searchQuery }: DiscoverMatchroomListProps) {
-    const router = useRouter();
+    const { user } = useAuth();
     const [rooms, setRooms] = useState<Matchroom[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+
+    // Social State
+    const [requestedRoomIds, setRequestedRoomIds] = useState<Set<string>>(new Set());
 
     // Contextual filter states
     const [showFilters, setShowFilters] = useState(false);
@@ -97,11 +104,89 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         }
     };
 
+    const fetchSocialState = async () => {
+        if (!user) return;
+        try {
+            const q = query(
+                collection(db, "notifications"),
+                where("fromUid", "==", user.uid),
+                where("type", "==", "match_join_request"),
+                where("status", "==", "pending")
+            );
+            const snap = await getDocs(q);
+            const requested = new Set<string>();
+            snap.forEach(doc => {
+                const data = doc.data();
+                if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
+            });
+            setRequestedRoomIds(requested);
+        } catch (e) {
+            Logger.error("DiscoverMatchrooms", "Error fetching social state", e);
+        }
+    };
+
+    const handleRequestToJoin = async (room: Matchroom) => {
+        if (!user) {
+            Alert.alert("Login Required", "Please login to join matchrooms.");
+            return;
+        }
+        try {
+            // BUSY CHECK
+            const busyCheck = await isUserInActiveMatchroom(user.uid);
+            if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
+                Alert.alert("Already Busy", busyCheck.message);
+                return;
+            }
+
+            const res = await requestJoinMatchroom(room, {
+                uid: user.uid,
+                username: user.displayName || 'Player',
+            });
+            if (res.ok) {
+                Alert.alert("Success", "Join request sent to host.");
+                setRequestedRoomIds(prev => new Set(prev).add(room.id!));
+            } else {
+                Alert.alert("Error", res.message || "Failed to send request.");
+            }
+        } catch (e) {
+            Logger.error("DiscoverMatchrooms", "Join request error", e);
+            Alert.alert("Error", "An unexpected error occurred.");
+        }
+    };
+
+    const handleCancelRequestToJoin = async (room: Matchroom) => {
+        if (!user) return;
+        try {
+            const res = await cancelMatchJoinRequest(room.id!, user.uid);
+            if (res.ok) {
+                setRequestedRoomIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(room.id!);
+                    return next;
+                });
+            } else {
+                Alert.alert("Error", res.message || "Failed to cancel request.");
+            }
+        } catch (e) {
+            Logger.error("DiscoverMatchrooms", "Cancel request error", e);
+        }
+    };
+
     useEffect(() => {
         // Initial fetch
         setLoading(true);
         fetchRooms();
-    }, []);
+        fetchSocialState();
+    }, [user]);
+
+    // Refetch social state on focus to catch host rejections or external cancellations
+    useFocusEffect(
+        useCallback(() => {
+            if (user) {
+                fetchSocialState();
+            }
+        }, [user])
+    );
 
     // Reset contextual filters when game changes
     useEffect(() => {
@@ -232,9 +317,18 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
     const hasOversFilter = () => selectedGame === 'indoor_cricket';
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
-    const renderItem = ({ item }: { item: Matchroom }) => (
-        <MatchroomCard room={item} />
-    );
+    const renderItem = ({ item }: { item: Matchroom }) => {
+        const isJoined = item.playerUids?.includes(user?.uid || "") || (item.players || []).some(p => p.uid === user?.uid);
+        return (
+            <MatchroomCard
+                room={item}
+                isRequested={requestedRoomIds.has(item.id!)}
+                isJoined={isJoined}
+                onJoinPress={() => handleRequestToJoin(item)}
+                onCancelJoinPress={() => handleCancelRequestToJoin(item)}
+            />
+        );
+    };
 
     // Render filter row helper
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (

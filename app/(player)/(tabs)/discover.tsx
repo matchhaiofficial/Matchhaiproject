@@ -42,7 +42,7 @@ const getValidSegment = (s?: string): DiscoverSegment | null => {
 
 export default function DiscoverScreen() {
     const router = useRouter();
-    const params = useLocalSearchParams<{ segment?: string; t?: string }>();
+    const params = useLocalSearchParams<{ segment?: string; mode?: string; t?: string }>();
 
     // Global State
     const [searchQuery, setSearchQuery] = useState("");
@@ -71,11 +71,15 @@ export default function DiscoverScreen() {
         if (validSegment && validSegment !== activeSegment) {
             Logger.info("Discover", "Updating activeSegment from param", { newSegment: validSegment });
             setActiveSegment(validSegment);
+        } else if (params.mode === 'my' && activeSegment !== 'teams') {
+            // Special Case: Direct link to My Teams
+            Logger.info("Discover", "Switching to teams for mode=my");
+            setActiveSegment('teams');
         } else if (validSegment === activeSegment && params.t) {
             // Force re-trigger of any child effects or logic if needed
             Logger.info("Discover", "Segment already active, but intent refreshed", { segment: validSegment });
         }
-    }, [params.segment, params.t]);
+    }, [params.segment, params.mode, params.t]);
 
     // Log every state change for activeSegment
     useEffect(() => {
@@ -97,8 +101,8 @@ export default function DiscoverScreen() {
             onPress={() => {
                 setActiveSegment(segment);
                 // Core Fix: Update URL params so they stay in sync with manual switch
-                // This prevents "stale" params from Dashboard being stuck in URL
-                router.setParams({ segment } as any);
+                // Clear mode when switching segments manually to avoid sticking to 'my' mode
+                router.setParams({ segment, mode: undefined } as any);
             }}
             style={[styles.segmentButton, activeSegment === segment && styles.segmentButtonActive]}
         >
@@ -113,22 +117,10 @@ export default function DiscoverScreen() {
             {/* Header Section */}
             <View style={styles.header}>
                 <View style={styles.headerTopRow}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginBottom: 12 }}>
                         <Text style={[styles.headerTitle, { marginBottom: 0 }]}>Discover</Text>
                         {activeSegment === 'teams' && (
-                            <TouchableOpacity
-                                onPress={() => router.push('/(player)/my-teams' as any)}
-                                style={{
-                                    backgroundColor: 'rgba(66, 165, 245, 0.1)',
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 6,
-                                    borderRadius: 16,
-                                    borderWidth: 1,
-                                    borderColor: 'rgba(66, 165, 245, 0.3)'
-                                }}
-                            >
-                                <Text style={{ color: COLORS.accent, fontWeight: 'bold', fontSize: 12 }}>My Teams</Text>
-                            </TouchableOpacity>
+                            <View /> // Placeholder where button used to be
                         )}
                     </View>
 
@@ -155,34 +147,36 @@ export default function DiscoverScreen() {
                     {renderSegmentButton('matchrooms', 'Rooms')}
                     {renderSegmentButton('players', 'Players')}
                     {renderSegmentButton('teams', 'Teams')}
-                    {renderSegmentButton('zones', 'Zones')}
+                    {renderSegmentButton('zones', 'Venues')}
                 </View>
 
-                {/* Global Game Chips */}
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={[styles.itemFiltersScroll, { marginTop: 12 }]}
-                    contentContainerStyle={styles.itemFiltersContent}
-                >
-                    {GAMES.map(game => (
-                        <TouchableOpacity
-                            key={game.key}
-                            onPress={() => setSelectedGame(game.key)}
-                            style={[
-                                styles.optionChip,
-                                selectedGame === game.key && styles.optionChipActive
-                            ]}
-                        >
-                            <Text style={[
-                                styles.optionChipText,
-                                selectedGame === game.key && styles.optionChipTextActive
-                            ]}>
-                                {game.label}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                {/* Global Game Chips - Hidden for Venues tab (has its own filter system) */}
+                {activeSegment !== 'zones' && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={[styles.itemFiltersScroll, { marginTop: 12 }]}
+                        contentContainerStyle={styles.itemFiltersContent}
+                    >
+                        {GAMES.map(game => (
+                            <TouchableOpacity
+                                key={game.key}
+                                onPress={() => setSelectedGame(game.key)}
+                                style={[
+                                    styles.optionChip,
+                                    selectedGame === game.key && styles.optionChipActive
+                                ]}
+                            >
+                                <Text style={[
+                                    styles.optionChipText,
+                                    selectedGame === game.key && styles.optionChipTextActive
+                                ]}>
+                                    {game.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                )}
             </View>
 
             {/* Content Area - Lazy Mounted & Persisted */}
@@ -210,6 +204,8 @@ export default function DiscoverScreen() {
                         <DiscoverTeamList
                             selectedGame={selectedGame}
                             searchQuery={searchQuery}
+                            initialMode={params.mode as any}
+                            intentTime={params.t}
                         />
                     </View>
                 )}

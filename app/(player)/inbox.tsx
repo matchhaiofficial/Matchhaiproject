@@ -1,8 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
+import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, PanResponder, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
@@ -11,6 +11,9 @@ import { respondFriendRequest, respondToJoinRequest, respondToMatchroomJoinReque
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_THRESHOLD = -80;
 
 interface Notification {
     id: string;
@@ -61,6 +64,7 @@ export default function Inbox() {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         if (!user) return;
@@ -201,6 +205,49 @@ export default function Inbox() {
         }
     };
 
+    // Delete a single notification
+    const handleDeleteNotification = async (notifId: string) => {
+        try {
+            await deleteDoc(doc(db, "notifications", notifId));
+        } catch (e) {
+            Logger.error("Inbox", "Error deleting notification", e);
+            Alert.alert("Error", "Failed to delete notification.");
+        }
+    };
+
+    // Clear all resolved notifications
+    const handleClearAllHistory = async () => {
+        const resolvedNotifs = notifications.filter(n => n.status !== 'pending');
+        if (resolvedNotifs.length === 0) return;
+
+        Alert.alert(
+            "Clear All History",
+            `Are you sure you want to delete ${resolvedNotifs.length} notification(s)?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Clear All",
+                    style: "destructive",
+                    onPress: async () => {
+                        setDeleting(true);
+                        try {
+                            const batch = writeBatch(db);
+                            resolvedNotifs.forEach(n => {
+                                batch.delete(doc(db, "notifications", n.id));
+                            });
+                            await batch.commit();
+                        } catch (e) {
+                            Logger.error("Inbox", "Error clearing history", e);
+                            Alert.alert("Error", "Failed to clear history.");
+                        } finally {
+                            setDeleting(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const filtered = notifications.filter(n => {
         const isPending = n.status === 'pending';
 
@@ -216,6 +263,185 @@ export default function Inbox() {
         return !isPending;
     });
 
+    // Swipeable row component for delete action
+    const SwipeableRow = ({ children, onDelete, canSwipe }: { children: React.ReactNode; onDelete: () => void; canSwipe: boolean }) => {
+        const translateX = useRef(new Animated.Value(0)).current;
+        const rowOpacity = useRef(new Animated.Value(1)).current;
+        const isDeleting = useRef(false);
+        const gestureActive = useRef(false);
+
+        const DELETE_THRESHOLD = SCREEN_WIDTH * 0.35;
+
+        const panResponder = useRef(
+            PanResponder.create({
+                // Capture phase - claim gesture before children
+                onStartShouldSetPanResponderCapture: () => false,
+                onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+                    // Capture LEFT swipes before scroll view can
+                    const isLeftSwipe = gestureState.dx < -10;
+                    const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
+                    return isLeftSwipe && isHorizontal && !isDeleting.current;
+                },
+
+                onStartShouldSetPanResponder: () => false,
+                onMoveShouldSetPanResponder: (_, gestureState) => {
+                    const isLeftSwipe = gestureState.dx < -10;
+                    const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
+                    return isLeftSwipe && isHorizontal && !isDeleting.current;
+                },
+
+                // Reject termination - don't let other responders steal our gesture
+                onPanResponderTerminationRequest: () => !gestureActive.current,
+
+                onPanResponderGrant: () => {
+                    gestureActive.current = true;
+                    translateX.stopAnimation();
+                    translateX.setValue(0);
+                },
+
+                onPanResponderMove: (_, gestureState) => {
+                    if (isDeleting.current || !gestureActive.current) return;
+                    // Only allow left movement (negative dx)
+                    const clampedDx = Math.max(-SCREEN_WIDTH, Math.min(0, gestureState.dx));
+                    translateX.setValue(clampedDx);
+                },
+
+                onPanResponderRelease: (_, gestureState) => {
+                    gestureActive.current = false;
+                    if (isDeleting.current) return;
+
+                    const shouldDelete = gestureState.dx < -DELETE_THRESHOLD ||
+                        (gestureState.vx < -0.8 && gestureState.dx < -50);
+
+                    if (shouldDelete) {
+                        triggerDelete();
+                    } else {
+                        Animated.spring(translateX, {
+                            toValue: 0,
+                            useNativeDriver: true,
+                            friction: 8,
+                            tension: 60,
+                        }).start();
+                    }
+                },
+
+                onPanResponderTerminate: () => {
+                    gestureActive.current = false;
+                    if (!isDeleting.current) {
+                        Animated.spring(translateX, {
+                            toValue: 0,
+                            useNativeDriver: true,
+                            friction: 8,
+                            tension: 60,
+                        }).start();
+                    }
+                },
+            })
+        ).current;
+
+        const triggerDelete = () => {
+            if (isDeleting.current) return;
+            isDeleting.current = true;
+
+            // Smooth slide out and fade animation
+            Animated.parallel([
+                Animated.timing(translateX, {
+                    toValue: -SCREEN_WIDTH,
+                    duration: 250,
+                    useNativeDriver: true,
+                }),
+                Animated.sequence([
+                    Animated.delay(100),
+                    Animated.timing(rowOpacity, {
+                        toValue: 0,
+                        duration: 200,
+                        useNativeDriver: true,
+                    }),
+                ]),
+            ]).start(() => {
+                onDelete();
+            });
+        };
+
+        // Scale up delete icon as you swipe further
+        const deleteScale = translateX.interpolate({
+            inputRange: [-DELETE_THRESHOLD, -100, 0],
+            outputRange: [1.3, 1, 0.9],
+            extrapolate: 'clamp',
+        });
+
+        // Fade in delete content as you swipe
+        const deleteOpacity = translateX.interpolate({
+            inputRange: [-80, -30, 0],
+            outputRange: [1, 0.7, 0],
+            extrapolate: 'clamp',
+        });
+
+        return (
+            <Animated.View style={{
+                marginBottom: 12,
+                overflow: 'hidden',
+                opacity: rowOpacity,
+            }}>
+                <View style={{ position: 'relative' }}>
+                    {/* Full-width red background that reveals as card slides */}
+                    <View
+                        style={{
+                            position: 'absolute',
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            backgroundColor: COLORS.error,
+                            borderRadius: 12,
+                        }}
+                    >
+                        {/* Delete icon container - stays right-aligned */}
+                        <Animated.View
+                            style={{
+                                position: 'absolute',
+                                right: 0,
+                                top: 0,
+                                bottom: 0,
+                                width: 100,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                opacity: deleteOpacity,
+                            }}
+                        >
+                            <TouchableOpacity
+                                onPress={triggerDelete}
+                                style={{
+                                    flex: 1,
+                                    width: '100%',
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                }}
+                                activeOpacity={0.8}
+                            >
+                                <Animated.View style={{ transform: [{ scale: deleteScale }] }}>
+                                    <MaterialIcons name="delete" size={28} color="#FFF" />
+                                </Animated.View>
+                                <Text style={{ color: '#FFF', fontSize: 12, marginTop: 4, fontWeight: '600' }}>Delete</Text>
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </View>
+                    {/* Swipeable card */}
+                    <Animated.View
+                        style={{
+                            transform: [{ translateX }],
+                            backgroundColor: COLORS.cardBackground,
+                            borderRadius: 12,
+                        }}
+                        {...(canSwipe ? panResponder.panHandlers : {})}
+                    >
+                        {children}
+                    </Animated.View>
+                </View>
+            </Animated.View>
+        );
+    };
+
     const renderItem = ({ item }: { item: Notification }) => {
         const isRequest = item.type === 'friend_request';
         const isJoinRequest = item.type === 'team_join_request';
@@ -230,8 +456,8 @@ export default function Inbox() {
         const iconColor = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? COLORS.accent : COLORS.success;
         const iconBg = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? 'rgba(66, 165, 245, 0.1)' : 'rgba(76, 175, 80, 0.1)';
 
-        return (
-            <View style={styles.notificationCard}>
+        const cardContent = (
+            <View style={[styles.notificationCard, { marginBottom: 0 }]}>
                 <View style={styles.cardHeader}>
                     <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
                         <MaterialIcons
@@ -324,7 +550,7 @@ export default function Inbox() {
                     )}
                 </View>
 
-                {isPending && (isRequest || isJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) && (
+                {isPending && (isRequest || isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) && (
                     <View style={styles.actionRow}>
                         <TouchableOpacity
                             disabled={!!processing}
@@ -365,6 +591,17 @@ export default function Inbox() {
                 )}
             </View>
         );
+
+        // Only allow swipe-to-delete for resolved (history) items
+        if (!isPending) {
+            return (
+                <SwipeableRow onDelete={() => handleDeleteNotification(item.id)} canSwipe={true}>
+                    {cardContent}
+                </SwipeableRow>
+            );
+        }
+
+        return <View style={{ marginBottom: 12 }}>{cardContent}</View>;
     };
 
     return (
@@ -385,7 +622,21 @@ export default function Inbox() {
                     style={[styles.tab, activeTab === 'pending' && styles.activeTab]}
                 >
                     <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>
-                        Pending {notifications.filter(n => n.status === 'pending').length > 0 ? `(${notifications.filter(n => n.status === 'pending').length})` : ''}
+                        Pending {notifications.filter(n => {
+                            if (n.status !== 'pending') return false;
+                            if (n.expiresAt) {
+                                const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
+                                if (expiresMs < Date.now()) return false;
+                            }
+                            return true;
+                        }).length > 0 ? `(${notifications.filter(n => {
+                            if (n.status !== 'pending') return false;
+                            if (n.expiresAt) {
+                                const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
+                                if (expiresMs < Date.now()) return false;
+                            }
+                            return true;
+                        }).length})` : ''}
                     </Text>
                 </Pressable>
                 <Pressable
@@ -397,6 +648,26 @@ export default function Inbox() {
                     </Text>
                 </Pressable>
             </View>
+
+            {/* Clear All Button - Only visible in History tab when there are items */}
+            {activeTab === 'resolved' && notifications.filter(n => n.status !== 'pending').length > 0 && (
+                <TouchableOpacity
+                    onPress={handleClearAllHistory}
+                    disabled={deleting}
+                    style={styles.clearHistoryButton}
+                >
+                    {deleting ? (
+                        <ActivityIndicator size="small" color={COLORS.error} />
+                    ) : (
+                        <>
+                            <MaterialIcons name="delete-sweep" size={20} color={COLORS.error} />
+                            <Text style={styles.clearHistoryText}>
+                                Clear All History
+                            </Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+            )}
 
             {loading ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

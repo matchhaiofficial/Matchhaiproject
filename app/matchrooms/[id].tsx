@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import SkillAssessmentModal from "../../src/components/SkillAssessmentModal";
 import SkillBadge from "../../src/components/SkillBadge";
 import { db } from "../../src/config/firebaseConfig";
@@ -23,7 +23,7 @@ import { SKILL_ASSESSMENT_CONFIG } from "../../src/constants/skillQuestions";
 import { useAuth } from "../../src/context/AuthContext";
 import { isWithinFairnessBand } from "../../src/services/bookingService";
 import { cancelUserPendingMatchroomRequests } from "../../src/services/functions";
-import { deleteMatchroom, getMatchroom, isUserInActiveMatchroom, joinMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
+import { deleteMatchroom, getMatchroom, isUserInActiveMatchroom, joinMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, cancelMatchJoinRequest, startMatch } from "../../src/services/matchService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -39,21 +39,15 @@ export default function MatchroomDetails() {
     const [loading, setLoading] = useState(true);
     const [joining, setJoining] = useState(false);
     const [starting, setStarting] = useState(false);
+    const [isRequested, setIsRequested] = useState(false);
+    const [requestLoading, setRequestLoading] = useState(false);
 
     // Role Selection State
     const [showRoleModal, setShowRoleModal] = useState(false);
     const [selectedRole, setSelectedRole] = useState<string | null>(null);
     const [profile, setProfile] = useState<any>(null);
 
-    // Private Room State
-    const [showCodeModal, setShowCodeModal] = useState(false);
-
-    const [joinCode, setJoinCode] = useState("");
     const [playerRatings, setPlayerRatings] = useState<Record<string, GameSkillScore | null>>({});
-
-    // Assessment Logic
-    const [showAssessment, setShowAssessment] = useState(false);
-    const [assessmentDone, setAssessmentDone] = useState(false);
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -72,9 +66,32 @@ export default function MatchroomDetails() {
         }
     };
 
+    const checkRequestStatus = async () => {
+        if (!user || !id) return;
+        try {
+            const q = query(
+                collection(db, "notifications"),
+                where("fromUid", "==", user.uid),
+                where("type", "==", "match_join_request"),
+                where("status", "==", "pending")
+            );
+            const snap = await getDocs(q);
+            let requested = false;
+            snap.forEach(doc => {
+                if (doc.data().meta?.matchroomId === id) {
+                    requested = true;
+                }
+            });
+            setIsRequested(requested);
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Error checking request status", e);
+        }
+    };
+
     useEffect(() => {
         fetchRoom();
-    }, [id]);
+        checkRequestStatus();
+    }, [id, user]);
 
     useEffect(() => {
         if (user) {
@@ -109,53 +126,26 @@ export default function MatchroomDetails() {
         fetchRatings();
     }, [room?.players, room?.game]);
 
-    const handleJoinPress = async () => {
-        Logger.debug("MatchroomDetails", "handleJoinPress called", { room: room?.id, userId: user?.uid });
-        if (!room || !user) return;
 
-        // BUSY CHECK
-        const busyCheck = await isUserInActiveMatchroom(user.uid);
-        if (busyCheck.inRoom && busyCheck.roomId !== id) {
-            Alert.alert("Already Busy", busyCheck.message);
-            return;
+
+    const handleCancelRequest = async () => {
+        if (!user || !id) return;
+        setRequestLoading(true);
+        try {
+            const res = await cancelMatchJoinRequest(id as string, user.uid);
+            if (res.ok) {
+                setIsRequested(false);
+                Alert.alert("Cancelled", "Join request removed.");
+            } else {
+                Alert.alert("Error", res.message || "Failed to cancel request.");
+            }
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Error cancelling request", e);
+        } finally {
+            setRequestLoading(false);
         }
-
-        const gameKey = room.game;
-        const currentScore = profile?.skillScores?.[gameKey];
-        const hasConfig = !!SKILL_ASSESSMENT_CONFIG[gameKey];
-
-        // If physical game logic (has config) and missing score
-        if (hasConfig && !currentScore && !assessmentDone) {
-            setShowAssessment(true);
-            return;
-        }
-
-        // If private, ask for code first
-        if (room.isPrivate) {
-            setShowCodeModal(true);
-            return;
-        }
-
-        // Fairness Check
-        const score = currentScore?.rating || 50;
-        const effectiveAvg = room.avgSkillScoreLive ?? room.hostSkillScore ?? 50;
-        const inBand = isWithinFairnessBand(score, effectiveAvg, room.game);
-
-        if (!inBand) {
-            Alert.alert(
-                "Skill Verification",
-                "Your skill score is outside the fairness band. Captain approval is required. Would you like to request to join?",
-                [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Request to Join", onPress: () => handleRequestJoin() }
-                ]
-            );
-            return;
-        }
-
-        // Direct Join
-        confirmJoin();
     };
+
 
     const handleRequestJoin = async (role?: string) => {
         if (!room || !user || !id) return;
@@ -176,6 +166,7 @@ export default function MatchroomDetails() {
 
             if (res.ok) {
                 Alert.alert("Request Sent", "Your request to join has been sent to the host.");
+                setIsRequested(true);
             } else {
                 Alert.alert("Error", res.message || "Failed to send request.");
             }
@@ -183,65 +174,6 @@ export default function MatchroomDetails() {
             Logger.error("MatchroomDetails", "Error requesting join", e);
         } finally {
             setJoining(false);
-        }
-    };
-
-    const handleAssessmentSuccess = (rating: number) => {
-        setAssessmentDone(true);
-        const score = rating;
-        const inBand = isWithinFairnessBand(score, room?.hostSkillScore || 50, room?.game || '');
-
-        if (!inBand) {
-            Alert.alert(
-                "Skill Verification",
-                "Even with the assessment, your skill score is outside the fairness band. Captain approval is required.",
-                [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Request to Join", onPress: () => handleRequestJoin() }
-                ]
-            );
-            return;
-        }
-
-        if (room?.isPrivate) {
-            setShowCodeModal(true);
-        } else {
-            confirmJoin();
-        }
-    };
-
-    const handleCodeSubmit = () => {
-        if (joinCode.trim() === "") return;
-        setShowCodeModal(false);
-
-        confirmJoin();
-    };
-
-    const confirmJoin = async (role?: string) => {
-        Logger.debug("MatchroomDetails", "confirmJoin called", { role, id });
-        if (!room || !user || !id || typeof id !== 'string') return;
-
-        setJoining(true);
-        setShowRoleModal(false);
-        try {
-            const res = await joinMatchroom(id, {
-                uid: user.uid,
-                username: user.displayName || 'Player',
-            }, role, joinCode); // Pass role and code correctly
-
-            if (res.ok) {
-                Alert.alert("Success", "Joined squad!");
-                // Cancel other pending requests
-                await cancelUserPendingMatchroomRequests(user.uid);
-                fetchRoom(); // Refresh to see self in list
-            } else {
-                Alert.alert("Error", (res as any).message || "Failed to join");
-            }
-        } catch (e) {
-            Logger.error("MatchroomDetails", "Error joining", e);
-        } finally {
-            setJoining(false);
-            setJoinCode(""); // Reset code
         }
     };
 
@@ -562,7 +494,7 @@ export default function MatchroomDetails() {
                         <View>
                             <Text style={styles.infoLabel}>PRICE</Text>
                             <Text style={[styles.infoValue, { color: COLORS.successBright }]}>
-                                {(room.pricing?.perPlayer || (room as any).pricePerPlayer) ? `₨${room.pricing?.perPlayer || (room as any).pricePerPlayer}` : 'Free'}
+                                {(room.pricing?.perPlayer || (room as any).pricePerPlayer) ? `Rs.${room.pricing?.perPlayer || (room as any).pricePerPlayer}` : 'Free'}
                             </Text>
                         </View>
                     </View>
@@ -624,36 +556,48 @@ export default function MatchroomDetails() {
                     <View style={[styles.fullButton, styles.expiredBanner]}>
                         <Text style={styles.fullText}>Matchroom Expired</Text>
                     </View>
-                ) : isLocked && !isJoined ? (
-                    <View style={[styles.fullButton, styles.lockedBanner]}>
-                        <Text style={styles.fullText}>Matchroom Locked</Text>
-                    </View>
-                ) : room.status === 'open' ? (
-                    canJoin ? (
-                        <View style={{ flexDirection: 'row', gap: SPACING.sm }}>
-                            <TouchableOpacity
-                                onPress={handleJoinPress}
-                                disabled={joining}
-                                style={[styles.joinButton, { flex: 1 }]}
-                            >
-                                {joining ? (
-                                    <ActivityIndicator color="#fff" />
-                                ) : (
-                                    <Text style={styles.joinButtonText}>Join Directly</Text>
-                                )}
-                            </TouchableOpacity>
+                ) : (room.status !== 'in-progress' && room.status !== 'completed') ? (
+                    !isJoined ? (
+                        <View style={{ gap: SPACING.md }}>
+                            {(isFull || room.isLocked) ? (
+                                <View style={[styles.fullButton, (room.isLocked && !isFull) ? styles.lockedBanner : null]}>
+                                    <Text style={styles.fullText}>
+                                        {room.isLocked && !isFull ? 'Lobby Locked' : 'Lobby Full'}
+                                    </Text>
+                                </View>
+                            ) : null}
 
-                            <TouchableOpacity
-                                onPress={() => handleRequestJoin()}
-                                disabled={joining}
-                                style={[styles.joinButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight }]}
-                            >
-                                <Text style={styles.joinButtonText}>Request</Text>
-                            </TouchableOpacity>
+                            <View style={{ marginTop: SPACING.xs }}>
+                                {isRequested ? (
+                                    <TouchableOpacity
+                                        onPress={handleCancelRequest}
+                                        disabled={requestLoading}
+                                        style={styles.cancelRequestButton}
+                                    >
+                                        {requestLoading ? (
+                                            <ActivityIndicator color={COLORS.error} />
+                                        ) : (
+                                            <Text style={styles.cancelRequestButtonText}>Cancel Join Request</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity
+                                        onPress={() => handleRequestJoin()}
+                                        disabled={joining}
+                                        style={styles.getRequestButton}
+                                    >
+                                        {joining ? (
+                                            <ActivityIndicator color="#fff" />
+                                        ) : (
+                                            <Text style={styles.getRequestButtonText}>Request to Join</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                )}
+                            </View>
                         </View>
-                    ) : isJoined ? (
+                    ) : (
                         <View style={styles.footerRow}>
-                            {isHost && isFull ? (
+                            {isHost && (isFull || room.isLocked) ? (
                                 <TouchableOpacity
                                     onPress={handleStartMatch}
                                     disabled={starting}
@@ -688,10 +632,6 @@ export default function MatchroomDetails() {
                                 </TouchableOpacity>
                             )}
                         </View>
-                    ) : (
-                        <View style={styles.fullButton}>
-                            <Text style={styles.fullText}>Lobby Full</Text>
-                        </View>
                     )
                 ) : (
                     // Match In Progress or Verifying
@@ -725,105 +665,6 @@ export default function MatchroomDetails() {
                 )}
             </View>
 
-            {/* Role Selection Modal */}
-            <Modal
-                visible={showRoleModal}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowRoleModal(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Select Your Role</Text>
-
-                        {availableRoles.length > 0 ? (
-                            availableRoles.map((r, idx) => (
-                                <TouchableOpacity
-                                    key={idx}
-                                    style={[
-                                        styles.roleOption,
-                                        selectedRole === r.role && styles.roleOptionSelected
-                                    ]}
-                                    onPress={() => setSelectedRole(r.role)}
-                                >
-                                    <Text style={styles.roleOptionText}>
-                                        {r.role} ({r.count - r.filled} spots left)
-                                    </Text>
-                                </TouchableOpacity>
-                            ))
-                        ) : (
-                            <Text style={styles.assessmentMessage}>
-                                No specific roles required. Join as Flex?
-                            </Text>
-                        )}
-
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.cancelButton]}
-                                onPress={() => setShowRoleModal(false)}
-                            >
-                                <Text style={{ color: COLORS.textSecondary }}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.confirmButton]}
-                                onPress={() => confirmJoin(selectedRole || 'Flex')}
-                            >
-                                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Confirm Join</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Join Code Modal */}
-            <Modal
-                visible={showCodeModal}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowCodeModal(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Enter Join Code</Text>
-                        <Text style={styles.codeSubtext}>
-                            This lobby is private. Please enter the code to join.
-                        </Text>
-
-                        <TextInput
-                            style={styles.codeInput}
-                            placeholder="Enter Code"
-                            placeholderTextColor={COLORS.muted}
-                            value={joinCode}
-                            onChangeText={setJoinCode}
-                            autoCapitalize="none"
-                        />
-
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.cancelButton]}
-                                onPress={() => setShowCodeModal(false)}
-                            >
-                                <Text style={{ color: COLORS.textSecondary }}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.confirmButton]}
-                                onPress={handleCodeSubmit}
-                            >
-                                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Submit</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Just-in-Time Assessment Modal */}
-            <SkillAssessmentModal
-                visible={showAssessment}
-                onClose={() => setShowAssessment(false)}
-                gameKey={room.game}
-                userId={user?.uid || ''}
-                onSuccess={handleAssessmentSuccess}
-            />
         </SafeAreaView >
     );
 }
