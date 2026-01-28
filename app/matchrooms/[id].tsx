@@ -1,29 +1,27 @@
-import { MaterialIcons } from "@expo/vector-icons";
+import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    FlatList,
     Modal,
     Pressable,
     ScrollView,
     Share,
     Text,
-    TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
-import SkillAssessmentModal from "../../src/components/SkillAssessmentModal";
 import SkillBadge from "../../src/components/SkillBadge";
 import { db } from "../../src/config/firebaseConfig";
-import { SKILL_ASSESSMENT_CONFIG } from "../../src/constants/skillQuestions";
 import { useAuth } from "../../src/context/AuthContext";
-import { isWithinFairnessBand } from "../../src/services/bookingService";
-import { cancelUserPendingMatchroomRequests } from "../../src/services/functions";
-import { deleteMatchroom, getMatchroom, isUserInActiveMatchroom, joinMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, cancelMatchJoinRequest, startMatch } from "../../src/services/matchService";
+import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
+import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -34,6 +32,7 @@ export default function MatchroomDetails() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
+    const { width } = useWindowDimensions();
 
     const [room, setRoom] = useState<Matchroom | null>(null);
     const [loading, setLoading] = useState(true);
@@ -48,6 +47,12 @@ export default function MatchroomDetails() {
     const [profile, setProfile] = useState<any>(null);
 
     const [playerRatings, setPlayerRatings] = useState<Record<string, GameSkillScore | null>>({});
+
+    // Invitation State
+    const [showInviteModal, setShowInviteModal] = useState(false);
+    const [friends, setFriends] = useState<any[]>([]);
+    const [loadingFriends, setLoadingFriends] = useState(false);
+    const [invitingSlot, setInvitingSlot] = useState<{ team: 'A' | 'B', slotId: string } | null>(null);
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -147,7 +152,7 @@ export default function MatchroomDetails() {
     };
 
 
-    const handleRequestJoin = async (role?: string) => {
+    const handleRequestJoin = async (team?: string) => {
         if (!room || !user || !id) return;
 
         // BUSY CHECK
@@ -157,12 +162,27 @@ export default function MatchroomDetails() {
             return;
         }
 
+        // Determine Role from Profile
+        let gameplayRole = 'Flex';
+        if (profile) {
+            const game = (room.game || '').toLowerCase();
+            if (game === 'cs2') {
+                gameplayRole = profile.cs2Role || 'Flex';
+                // Normalize specific roles for cleaner UI
+                if (gameplayRole === 'AW Per') gameplayRole = 'AWPer';
+                if (gameplayRole === 'In-Game Leader (IGL)') gameplayRole = 'IGL';
+            }
+            else if (game === 'fc26' || game === 'fc25') gameplayRole = profile.fcTeam || 'Flex';
+            else if (game === 'tekken8') gameplayRole = profile.tekkenFavorites?.[0] || 'Flex';
+            else if (game === 'futsal') gameplayRole = profile.futsalPosition || 'Flex';
+            else if (game === 'indoor_cricket') gameplayRole = profile.indoorCricketRole || 'Flex';
+        }
         setJoining(true);
         try {
             const res = await requestJoinMatchroom(room, {
                 uid: user.uid,
-                username: user.displayName || 'Player',
-            }, role || 'Flex');
+                username: profile?.username || user.displayName || 'Player',
+            }, gameplayRole, team || 'Any'); // Ensure team is never undefined
 
             if (res.ok) {
                 Alert.alert("Request Sent", "Your request to join has been sent to the host.");
@@ -337,6 +357,151 @@ export default function MatchroomDetails() {
         );
     };
 
+    const handleTransferCaptain = async (team: 'A' | 'B', newCaptainUid: string, teammateName: string) => {
+        if (!user || !id || !room) return;
+
+        Alert.alert(
+            "Transfer Captaincy",
+            `Are you sure you want to make ${teammateName} the captain of Team ${team}? You will lose your captain powers for this team.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Transfer",
+                    onPress: async () => {
+                        setJoining(true); // Reuse loading state
+                        try {
+                            const res = await transferMatchroomCaptain({
+                                matchroomId: id as string,
+                                team,
+                                newCaptainUid
+                            });
+                            if (res.ok) {
+                                Alert.alert("Success", res.message);
+                                fetchRoom();
+                            } else {
+                                Alert.alert("Error", res.message || "Transfer failed");
+                            }
+                        } catch (e) {
+                            Logger.error("TransferCaptain", "Error", e);
+                        } finally {
+                            setJoining(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const fetchFriends = async () => {
+        if (!user) return;
+        setLoadingFriends(true);
+        try {
+            const friendsRef = collection(db, 'users', user.uid, 'friends');
+            const snap = await getDocs(friendsRef);
+            const friendsList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setFriends(friendsList);
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Error fetching friends", e);
+        } finally {
+            setLoadingFriends(false);
+        }
+    };
+
+    const handleInvitePress = (team: 'A' | 'B', slotId: string) => {
+        setInvitingSlot({ team, slotId });
+        setShowInviteModal(true);
+        fetchFriends();
+    };
+
+    const handleSendInvite = async (friend: any) => {
+        if (!invitingSlot || !id || !room) return;
+
+        setJoining(true); // Reuse loading state for invite progress
+        try {
+            const res = await inviteToMatchroom({
+                matchroomId: id as string,
+                toUid: friend.uid,
+                team: invitingSlot.team,
+                slotId: invitingSlot.slotId,
+                role: 'Flex', // Default, will pull from their profile on join
+                fromUsername: profile?.username || user?.displayName || 'Captain'
+            });
+
+            if (res.ok) {
+                Alert.alert("Invitation Sent", `Sent invitation to ${friend.username}`);
+                setShowInviteModal(false);
+            } else {
+                Alert.alert("Error", res.message || "Failed to send invitation");
+            }
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Error sending invite", e);
+        } finally {
+            setJoining(false);
+        }
+    };
+
+
+    const handleKick = async (playerUid: string, playerName: string) => {
+        if (!id || !user || !room) return;
+
+        Alert.alert(
+            "Kick Player",
+            `Are you sure you want to remove ${playerName} from the matchroom?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Kick",
+                    style: "destructive",
+                    onPress: async () => {
+                        setJoining(true);
+                        try {
+                            const res = await kickFromMatchroom({
+                                matchroomId: id as string,
+                                playerUid
+                            });
+                            if (res.ok) {
+                                Alert.alert("Success", "Player removed.");
+                                fetchRoom();
+                            } else {
+                                Alert.alert("Error", res.message || "Kick failed");
+                            }
+                        } catch (e) {
+                            Logger.error("MatchroomDetails", "Kick error", e);
+                        } finally {
+                            setJoining(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+
+    const handleManagePlayer = (team: 'A' | 'B', playerUid: string, playerName: string) => {
+        if (!id || !user || !room) return;
+
+        const isCurrentCaptain = team === 'A' ? room.captainUidA === playerUid : room.captainUidB === playerUid;
+
+        Alert.alert(
+            "Manage Player",
+            `Choose an action for ${playerName}`,
+            [
+                { text: "Cancel", style: "cancel" },
+                // Only show "Make Captain" if they aren't already the captain of that team
+                ...(!isCurrentCaptain ? [{
+                    text: "Make Captain",
+                    onPress: () => handleTransferCaptain(team, playerUid, playerName)
+                }] : []),
+                {
+                    text: "Kick Player",
+                    style: "destructive",
+                    onPress: () => handleKick(playerUid, playerName)
+                }
+            ]
+        );
+    };
+
+
     const isHost = useMemo(() => user?.uid === room?.hostUid, [user?.uid, room?.hostUid]);
     const playersArr = useMemo(() => room?.players || [], [room?.players]);
     const isJoined = useMemo(() => playersArr.some((p: any) => p.uid === user?.uid), [playersArr, user?.uid]);
@@ -508,45 +673,192 @@ export default function MatchroomDetails() {
                 </View>
 
                 {/* Squad Section */}
-                <Text style={styles.sectionTitle}>
-                    Squad ({room.players?.length || 0}/{room.maxPlayers})
-                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md }}>
+                    <Text style={styles.sectionTitle}>
+                        {room.maxPlayers === 10 ? 'Teams' : `Squad (${room.players?.length || 0}/${room.maxPlayers})`}
+                    </Text>
+                    {room.maxPlayers === 10 && (
+                        <Text style={[styles.dateText, { fontSize: 12 }]}>
+                            {room.players?.length || 0}/10 Players
+                        </Text>
+                    )}
+                </View>
 
-                <View style={styles.playersContainer}>
-                    {(room.players || []).map((player) => (
-                        <View key={player.uid} style={styles.playerRow}>
-                            <View style={styles.avatar}>
-                                <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+                {room.maxPlayers === 10 ? (
+                    <View style={[styles.teamsWrapper, { flexDirection: width < 600 ? 'column' : 'row' }]}>
+                        {/* Team A */}
+                        <View style={[styles.teamContainer, { flex: width < 600 ? 0 : 1, width: width < 600 ? '100%' : 'auto' }]}>
+                            <View style={styles.teamTitleContainer}>
+                                <Text style={styles.teamTitle}>TEAM A</Text>
                             </View>
-                            <View style={styles.playerInfo}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    <Text style={styles.playerName}>{player.username}</Text>
-                                    {player.uid === room.hostUid && (
-                                        <View style={styles.hostBadge}>
-                                            <Text style={styles.hostText}>HOST</Text>
+                            {(room.slotsA || []).map((slot, idx) => (
+                                <View key={slot.slotId || `A${idx}`} style={styles.slotRow}>
+                                    <View style={styles.slotAvatar}>
+                                        <Text style={styles.slotAvatarText}>
+                                            {slot.user ? slot.user.username.charAt(0).toUpperCase() : (idx + 1)}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.slotInfo}
+                                        disabled={!slot.user || slot.user.uid === user?.uid || (room.captainUidA !== user?.uid && !isHost)}
+                                        onPress={() => slot.user && handleManagePlayer('A', slot.user.uid, slot.user.username)}
+                                    >
+                                        {slot.user ? (
+                                            <View>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                        <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
+                                                        {room.captainUidA === slot.user.uid && (
+                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
+                                                        )}
+                                                    </View>
+                                                    {(room.captainUidA === user?.uid || isHost) && slot.user.uid !== user?.uid && (
+                                                        <TouchableOpacity
+                                                            onPress={() => handleManagePlayer('A', slot.user!.uid, slot.user!.username)}
+                                                            style={{ padding: 4 }}
+                                                        >
+                                                            <MaterialIcons name="more-vert" size={16} color={COLORS.muted} />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </View>
+                                                {/* Show specific gameplay role if not empty, otherwise default */}
+                                                <Text style={styles.slotRoleName}>
+                                                    {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
+                                                </Text>
+                                            </View>
+                                        ) : (
+                                            <Text style={styles.emptySlotName}>Open Slot</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                    {!slot.user && (
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            {room.captainUidA === user?.uid && (
+                                                <TouchableOpacity
+                                                    style={styles.inviteSlotButton}
+                                                    onPress={() => handleInvitePress('A', slot.slotId)}
+                                                >
+                                                    <Text style={styles.inviteSlotText}>Invite</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {!isJoined && canJoin && (
+                                                <TouchableOpacity
+                                                    style={styles.joinSlotButton}
+                                                    onPress={() => handleRequestJoin(`Team A`)}
+                                                >
+                                                    <Text style={styles.joinSlotText}>Join</Text>
+                                                </TouchableOpacity>
+                                            )}
                                         </View>
                                     )}
                                 </View>
-                                {player.role && <Text style={styles.playerRole}>{player.role}</Text>}
-                            </View>
-
-                            {/* Skill Badge */}
-                            {playerRatings[player.uid] && (
-                                <View style={{ marginRight: SPACING.sm }}>
-                                    <SkillBadge
-                                        tier={playerRatings[player.uid]!.tier}
-                                        rating={playerRatings[player.uid]!.rating}
-                                        size="compact"
-                                    />
-                                </View>
-                            )}
-
-                            {player.uid === user?.uid && (
-                                <MaterialIcons name="person" size={16} color={COLORS.textSecondary} />
-                            )}
+                            ))}
                         </View>
-                    ))}
-                </View>
+
+                        {/* Team B */}
+                        <View style={[styles.teamContainer, { flex: width < 600 ? 0 : 1, width: width < 600 ? '100%' : 'auto' }]}>
+                            <View style={styles.teamTitleContainer}>
+                                <Text style={styles.teamTitle}>TEAM B</Text>
+                            </View>
+                            {(room.slotsB || []).map((slot, idx) => (
+                                <View key={slot.slotId || `B${idx}`} style={styles.slotRow}>
+                                    <View style={styles.slotAvatar}>
+                                        <Text style={styles.slotAvatarText}>
+                                            {slot.user ? slot.user.username.charAt(0).toUpperCase() : (idx + 1)}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.slotInfo}
+                                        disabled={!slot.user || slot.user.uid === user?.uid || (room.captainUidB !== user?.uid && !isHost)}
+                                        onPress={() => slot.user && handleManagePlayer('B', slot.user.uid, slot.user.username)}
+                                    >
+                                        {slot.user ? (
+                                            <View>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                                        <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
+                                                        {room.captainUidB === slot.user.uid && (
+                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
+                                                        )}
+                                                    </View>
+                                                    {(room.captainUidB === user?.uid || isHost) && slot.user.uid !== user?.uid && (
+                                                        <TouchableOpacity
+                                                            onPress={() => handleManagePlayer('B', slot.user!.uid, slot.user!.username)}
+                                                            style={{ padding: 4 }}
+                                                        >
+                                                            <MaterialIcons name="more-vert" size={16} color={COLORS.muted} />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </View>
+                                                {/* Show specific gameplay role */}
+                                                <Text style={styles.slotRoleName}>
+                                                    {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
+                                                </Text>
+                                            </View>
+                                        ) : (
+                                            <Text style={styles.emptySlotName}>Open Slot</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                    {!slot.user && (
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            {room.captainUidB === user?.uid && (
+                                                <TouchableOpacity
+                                                    style={styles.inviteSlotButton}
+                                                    onPress={() => handleInvitePress('B', slot.slotId)}
+                                                >
+                                                    <Text style={styles.inviteSlotText}>Invite</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {!isJoined && canJoin && (
+                                                <TouchableOpacity
+                                                    style={styles.joinSlotButton}
+                                                    onPress={() => handleRequestJoin(`Team B`)}
+                                                >
+                                                    <Text style={styles.joinSlotText}>Join</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    )}
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                ) : (
+                    <View style={styles.playersContainer}>
+                        {(room.players || []).map((player) => (
+                            <View key={player.uid} style={styles.playerRow}>
+                                <View style={styles.avatar}>
+                                    <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+                                </View>
+                                <View style={styles.playerInfo}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Text style={styles.playerName}>{player.username}</Text>
+                                        {player.uid === room.hostUid && (
+                                            <View style={styles.hostBadge}>
+                                                <Text style={styles.hostText}>HOST</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                    {player.role && <Text style={styles.playerRole}>{player.role}</Text>}
+                                </View>
+
+                                {/* Skill Badge */}
+                                {playerRatings[player.uid] && (
+                                    <View style={{ marginRight: SPACING.sm }}>
+                                        <SkillBadge
+                                            tier={playerRatings[player.uid]!.tier}
+                                            rating={playerRatings[player.uid]!.rating}
+                                            size="compact"
+                                        />
+                                    </View>
+                                )}
+
+                                {player.uid === user?.uid && (
+                                    <MaterialIcons name="person" size={16} color={COLORS.textSecondary} />
+                                )}
+                            </View>
+                        ))}
+                    </View>
+                )}
             </ScrollView>
 
             {/* Footer Actions */}
@@ -665,6 +977,62 @@ export default function MatchroomDetails() {
                 )}
             </View>
 
-        </SafeAreaView >
+            {/* Invite Friends Modal */}
+            <Modal
+                visible={showInviteModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowInviteModal(false)}
+            >
+                <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => setShowInviteModal(false)}
+                >
+                    <Pressable style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Invite Teammate</Text>
+                            <TouchableOpacity onPress={() => setShowInviteModal(false)}>
+                                <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {loadingFriends ? (
+                            <View style={{ padding: 40, alignItems: 'center' }}>
+                                <ActivityIndicator color={COLORS.accent} />
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={friends}
+                                keyExtractor={(item: any) => item.uid || item.id}
+                                ListEmptyComponent={
+                                    <View style={styles.friendListEmpty}>
+                                        <MaterialIcons name="person-add-disabled" size={48} color={COLORS.overlayMedium} />
+                                        <Text style={styles.emptyModalText}>No friends found to invite.</Text>
+                                    </View>
+                                }
+                                renderItem={({ item }: { item: any }) => (
+                                    <View style={styles.friendItem}>
+                                        <View style={styles.friendAvatar}>
+                                            <Text style={[styles.avatarText, { color: COLORS.accent }]}>
+                                                {item.username?.charAt(0).toUpperCase()}
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.friendName}>{item.username}</Text>
+                                        <TouchableOpacity
+                                            style={styles.sendInviteButton}
+                                            onPress={() => handleSendInvite(item)}
+                                            disabled={joining}
+                                        >
+                                            <Text style={styles.sendInviteText}>Invite</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                contentContainerStyle={{ paddingVertical: 16 }}
+                            />
+                        )}
+                    </Pressable>
+                </Pressable>
+            </Modal>
+        </SafeAreaView>
     );
 }

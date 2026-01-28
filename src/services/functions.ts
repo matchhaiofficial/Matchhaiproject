@@ -1017,6 +1017,7 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
             const requesterUid = notifData.fromUid;
             const requesterUsername = notifData.fromUsername;
             const role = notifData.meta?.role || 'Flex';
+            const targetTeam = notifData.meta?.targetTeam || role; // Fallback to role if targetTeam not set (legacy)
 
             const currentPlayers = matchroomData.currentPlayers || 0;
             const maxPlayers = matchroomData.maxPlayers || 10;
@@ -1045,6 +1046,43 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
                 playerUids: arrayUnion(requesterUid),
                 updatedAt: serverTimestamp()
             };
+
+            // Handle 10-player Slot Assignment
+            if (maxPlayers === 10) {
+                const slotsA = matchroomData.slotsA || [];
+                const slotsB = matchroomData.slotsB || [];
+
+                if (targetTeam === 'Team A' || targetTeam === 'A') {
+                    const slotIdx = slotsA.findIndex((s: any) => !s.user);
+                    if (slotIdx !== -1) {
+                        slotsA[slotIdx] = {
+                            ...slotsA[slotIdx],
+                            uid: requesterUid,
+                            user: { uid: requesterUid, username: requesterUsername },
+                            status: 'confirmed',
+                            role: role // Store Gameplay Role in Slot
+                        };
+                        updateData.slotsA = slotsA;
+                    }
+                } else if (targetTeam === 'Team B' || targetTeam === 'B') {
+                    const slotIdx = slotsB.findIndex((s: any) => !s.user);
+                    if (slotIdx !== -1) {
+                        slotsB[slotIdx] = {
+                            ...slotsB[slotIdx],
+                            uid: requesterUid,
+                            user: { uid: requesterUid, username: requesterUsername },
+                            status: 'confirmed',
+                            role: role // Store Gameplay Role in Slot
+                        };
+                        updateData.slotsB = slotsB;
+
+                        // Auto-assign Team B captain if not set
+                        if (!matchroomData.captainUidB) {
+                            updateData.captainUidB = requesterUid;
+                        }
+                    }
+                }
+            }
 
             if (willBeFull) {
                 updateData.status = 'locked';
@@ -1098,5 +1136,301 @@ export const cancelUserPendingMatchroomRequests = async (uid: string): Promise<S
     } catch (error: any) {
         Logger.error('functions', 'cancelUserPendingMatchroomRequests error', error);
         return { ok: false, message: error.message || 'Failed to cancel pending requests.' };
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Matchroom Captaincy Transfer
+// ----------------------------------------------------------------------------
+
+export const transferMatchroomCaptain = async (data: {
+    matchroomId: string;
+    team: 'A' | 'B';
+    newCaptainUid: string
+}): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { matchroomId, team, newCaptainUid } = data;
+        const matchroomRef = doc(db, 'matchrooms', matchroomId);
+
+        return await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(matchroomRef);
+            if (!snap.exists()) throw new Error("Matchroom not found");
+            const matchroomData = snap.data();
+
+            const currentCaptainUid = team === 'A' ? matchroomData.captainUidA : matchroomData.captainUidB;
+
+            const isHost = matchroomData.hostUid === currentUser.uid;
+
+            if (currentCaptainUid !== currentUser.uid && !isHost) {
+                throw new Error("Only the current captain or the host can transfer leadership.");
+            }
+
+            // Verify new captain is in the same team
+            const slots = team === 'A' ? matchroomData.slotsA : matchroomData.slotsB;
+            const isMember = slots.some((s: any) => s.user?.uid === newCaptainUid);
+
+            if (!isMember) {
+                throw new Error("Target player must be in your team to become captain.");
+            }
+
+            const updateData: any = {};
+            if (team === 'A') {
+                updateData.captainUidA = newCaptainUid;
+                // Important: Also update hostUid if it was Team A captain (legacy compatibility)
+                if (matchroomData.hostUid === currentUser.uid) {
+                    updateData.hostUid = newCaptainUid;
+                }
+            } else {
+                updateData.captainUidB = newCaptainUid;
+            }
+
+            // Captaincy transition is now handled solely by captainUidA/B fields.
+            // Gameplay roles (AWPer, etc.) are preserved.
+            const updatedSlots = slots; // Preserve original roles
+
+            if (team === 'A') updateData.slotsA = updatedSlots;
+            else updateData.slotsB = updatedSlots;
+
+            transaction.update(matchroomRef, {
+                ...updateData,
+                updatedAt: serverTimestamp()
+            });
+
+            return { ok: true, message: `Captaincy successfully transferred to ${team} teammate.` };
+        });
+    } catch (error: any) {
+        Logger.error('functions', 'transferMatchroomCaptain error', error);
+        return { ok: false, message: error.message || 'Failed to transfer captaincy.' };
+    }
+};
+
+// ----------------------------------------------------------------------------
+// Matchroom Invitations
+// ----------------------------------------------------------------------------
+
+export const inviteToMatchroom = async (data: {
+    matchroomId: string;
+    toUid: string;
+    team: 'A' | 'B';
+    slotId: string;
+    role?: string;
+    fromUsername?: string;
+}): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { matchroomId, toUid, team, slotId, role } = data;
+
+        // 1. Verify matchroom exists
+        const matchroomRef = doc(db, 'matchrooms', matchroomId);
+        const matchroomSnap = await getDoc(matchroomRef);
+        if (!matchroomSnap.exists()) throw new Error("Matchroom not found");
+        const matchroomData = matchroomSnap.data();
+
+        // 2. Verify inviting user is the captain of the specific team
+        const captainUid = team === 'A' ? matchroomData.captainUidA : matchroomData.captainUidB;
+        if (captainUid !== currentUser.uid) {
+            throw new Error(`Only the captain of Team ${team} can send invitations for this team.`);
+        }
+
+        // 3. Verify target is not already in the room
+        if ((matchroomData.playerUids || []).includes(toUid)) {
+            throw new Error("User is already in this matchroom.");
+        }
+
+        // 4. Create Notification
+        const notificationId = `match_invite_${matchroomId}_${toUid}_${slotId}`;
+        const notifRef = doc(db, 'notifications', notificationId);
+
+        await setDoc(notifRef, {
+            type: 'match_seat_invitation',
+            toUid,
+            fromUid: currentUser.uid,
+            fromUsername: data.fromUsername || currentUser.displayName || 'Captain',
+            status: 'pending',
+            createdAt: serverTimestamp(),
+            expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 48 hours
+            meta: {
+                matchroomId,
+                matchroomTitle: matchroomData.title || 'Matchroom',
+                team,
+                slotId,
+                role: role || 'Flex',
+                game: matchroomData.game || 'Unknown'
+            }
+        });
+
+        return { ok: true, message: "Invitation sent successfully." };
+
+    } catch (error: any) {
+        Logger.error('functions', 'inviteToMatchroom error', error);
+        return { ok: false, message: error.message || 'Failed to send invitation.' };
+    }
+};
+
+export const respondToMatchroomInvite = async (data: {
+    notificationId: string;
+    decision: 'accept' | 'decline';
+}): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { notificationId, decision } = data;
+        const notifRef = doc(db, 'notifications', notificationId);
+
+        return await runTransaction(db, async (transaction) => {
+            const notifSnap = await transaction.get(notifRef);
+            if (!notifSnap.exists()) throw new Error("Notification not found");
+            const notifData = notifSnap.data();
+
+            if (notifData.status !== 'pending') throw new Error("Invitation already handled.");
+
+            if (decision === 'decline') {
+                transaction.update(notifRef, { status: 'declined' });
+                return { ok: true };
+            }
+
+            // Fetch User Profile for correct Username
+            const userProfileRef = doc(db, 'users', currentUser.uid);
+            const userProfileSnap = await transaction.get(userProfileRef);
+            const userProfile = userProfileSnap.data();
+            const username = userProfile?.username || currentUser.displayName || 'Player';
+            const { matchroomId, team, slotId, role } = notifData.meta;
+
+            const roomRef = doc(db, 'matchrooms', matchroomId);
+            const roomSnap = await transaction.get(roomRef);
+            if (!roomSnap.exists()) throw new Error("Matchroom not found.");
+
+            const roomData = roomSnap.data();
+
+            // 1. Verify user is not already in the room
+            if ((roomData.playerUids || []).includes(currentUser.uid)) {
+                throw new Error("You are already in this matchroom.");
+            }
+
+            // 2. Check slot availability
+            const slots = team === 'A' ? (roomData.slotsA || []) : (roomData.slotsB || []);
+            const slotIdx = slots.findIndex((s: any) => s.slotId === slotId);
+            if (slotIdx === -1) throw new Error("Target slot not found.");
+            if (slots[slotIdx].user || slots[slotIdx].uid) throw new Error("This slot is already taken.");
+
+            // 3. Update Slot
+            slots[slotIdx] = {
+                ...slots[slotIdx],
+                uid: currentUser.uid,
+                user: {
+                    uid: currentUser.uid,
+                    username: username,
+                },
+                status: 'confirmed',
+                role: role || 'Flex'
+            };
+
+            const updates: any = {
+                [team === 'A' ? 'slotsA' : 'slotsB']: slots,
+                playerUids: [...(roomData.playerUids || []), currentUser.uid],
+                players: [...(roomData.players || []), {
+                    uid: currentUser.uid,
+                    username: username,
+                    joinedAt: new Date(),
+                    role: role || 'Flex'
+                }],
+                currentPlayers: (roomData.currentPlayers || 0) + 1,
+            };
+
+            transaction.update(roomRef, updates);
+            transaction.update(notifRef, { status: 'accepted' });
+
+            return { ok: true };
+        });
+
+    } catch (error: any) {
+        Logger.error('functions', 'respondToMatchroomInvite error', error);
+        return { ok: false, message: error.message || 'Failed to respond.' };
+    }
+};
+
+export const kickFromMatchroom = async (data: {
+    matchroomId: string;
+    playerUid: string;
+}): Promise<ServerResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error("Not authenticated");
+
+        const { matchroomId, playerUid } = data;
+        if (playerUid === currentUser.uid) throw new Error("You cannot kick yourself. Please leave instead.");
+
+        const roomRef = doc(db, 'matchrooms', matchroomId);
+
+        return await runTransaction(db, async (transaction) => {
+            const roomSnap = await transaction.get(roomRef);
+            if (!roomSnap.exists()) throw new Error("Matchroom not found.");
+            const roomData = roomSnap.data();
+
+            // 1. Permission Check: Caller must be Host or Captain of the target's team
+            const isHost = roomData.hostUid === currentUser.uid;
+
+            const slotsA = roomData.slotsA || [];
+            const slotsB = roomData.slotsB || [];
+
+            const inTeamA = slotsA.some((s: any) => s.uid === playerUid);
+            const inTeamB = slotsB.some((s: any) => s.uid === playerUid);
+
+            const isCaptainA = roomData.captainUidA === currentUser.uid;
+            const isCaptainB = roomData.captainUidB === currentUser.uid;
+
+            const canKick = isHost || (inTeamA && isCaptainA) || (inTeamB && isCaptainB);
+
+            if (!canKick) {
+                throw new Error("You do not have permission to kick this player.");
+            }
+
+            // 2. Remove from player lists
+            const updatedPlayers = (roomData.players || []).filter((p: any) => p.uid !== playerUid);
+            const updatedUids = (roomData.playerUids || []).filter((uid: string) => uid !== playerUid);
+
+            // 3. Re-open slot
+            const releaseSlot = (slots: any[]) => slots.map(s => {
+                if (s.uid === playerUid || s.reservedForUid === playerUid) {
+                    return {
+                        slotId: s.slotId,
+                        status: 'open',
+                        role: s.role // Keep structural role
+                    };
+                }
+                return s;
+            });
+
+            const updatedSlotsA = releaseSlot(slotsA);
+            const updatedSlotsB = releaseSlot(slotsB);
+
+            // 4. Update Room
+            const updates: any = {
+                players: updatedPlayers,
+                playerUids: updatedUids,
+                currentPlayers: updatedPlayers.length,
+                slotsA: updatedSlotsA,
+                slotsB: updatedSlotsB,
+                updatedAt: serverTimestamp()
+            };
+
+            // If kicked player was a captain, remove that too
+            if (roomData.captainUidA === playerUid) updates.captainUidA = null;
+            if (roomData.captainUidB === playerUid) updates.captainUidB = null;
+
+            transaction.update(roomRef, updates);
+
+            return { ok: true, message: "Player kicked successfully." };
+        });
+
+    } catch (error: any) {
+        Logger.error('functions', 'kickFromMatchroom error', error);
+        return { ok: false, message: error.message || 'Failed to kick player.' };
     }
 };
