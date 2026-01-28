@@ -1,13 +1,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, PanResponder, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
-import { respondFriendRequest, respondToJoinRequest, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
+import { respondFriendRequest, respondToJoinRequest, respondToMatchroomInvite, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
@@ -168,27 +168,42 @@ export default function Inbox() {
         }
     };
 
-    const handleSeatInvitation = async (notifId: string, matchroomId: string, intentId: string, side: string, role: string, decision: 'accept' | 'decline') => {
+    const handleSeatInvitation = async (notifId: string, matchroomId: string, intentId: string | undefined, side: string, role: string, decision: 'accept' | 'decline') => {
         if (processing) return;
         setProcessing(notifId);
         try {
             if (decision === 'accept') {
-                // Find the slotId for this user in the intent
-                const intentSnap = await getDoc(doc(db, "booking_intents", intentId));
-                if (intentSnap.exists()) {
-                    const data = intentSnap.data();
-                    const slotIds = data.selectedSlots as string[];
-                    const invitees = data.invitees as any[];
-                    const myIdx = invitees.findIndex(i => i.uid === user?.uid);
-                    if (myIdx !== -1) {
-                        const mySlotId = slotIds[myIdx];
-                        const res = await claimSeatTransaction(matchroomId, intentId, mySlotId);
-                        if (!res.ok) {
-                            alert(res.message);
-                            setProcessing(null);
-                            return;
+                if (intentId) {
+                    // Booking Intent Flow (Legacy)
+                    const intentSnap = await getDoc(doc(db, "booking_intents", intentId));
+                    if (intentSnap.exists()) {
+                        const data = intentSnap.data();
+                        const slotIds = data.selectedSlots as string[];
+                        const invitees = data.invitees as any[];
+                        const myIdx = invitees.findIndex(i => i.uid === user?.uid);
+                        if (myIdx !== -1) {
+                            const mySlotId = slotIds[myIdx];
+                            const res = await claimSeatTransaction(matchroomId, intentId, mySlotId);
+                            if (!res.ok) {
+                                alert(res.message);
+                                setProcessing(null);
+                                return;
+                            }
                         }
                     }
+                } else {
+                    // Direct Captain Invitation Flow (New)
+                    const res = await respondToMatchroomInvite({ notificationId: notifId, decision: 'accept' });
+                    if (!res.ok) {
+                        alert(res.message || 'Failed to join seat.');
+                        setProcessing(null);
+                        return;
+                    }
+                }
+            } else if (decision === 'decline') {
+                // Handle decline for both types
+                if (!intentId) {
+                    await respondToMatchroomInvite({ notificationId: notifId, decision: 'decline' });
                 }
             }
 
@@ -560,7 +575,7 @@ export default function Inbox() {
                                 else if (isMatchJoinRequest) handleMatchJoinResponse(item.id, 'accept');
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'accept');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'approved');
-                                else if (isSeatInv) handleSeatInvitation(item.id, item.meta!.matchroomId!, item.meta!.intentId!, item.meta!.side!, item.meta!.role!, 'accept');
+                                else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'accept');
                             }}
                             style={styles.acceptButton}
                         >
@@ -581,7 +596,7 @@ export default function Inbox() {
                                 else if (isMatchJoinRequest) handleMatchJoinResponse(item.id, 'reject');
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'decline');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'rejected');
-                                else if (isSeatInv) handleSeatInvitation(item.id, item.meta!.matchroomId!, item.meta!.intentId!, item.meta!.side!, item.meta!.role!, 'decline');
+                                else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'decline');
                             }}
                             style={styles.declineButton}
                         >

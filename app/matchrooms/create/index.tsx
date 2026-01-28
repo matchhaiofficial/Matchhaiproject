@@ -636,7 +636,7 @@ export default function CreateMatchroom() {
             // Phase 1 & 2: Normal matchroom creation (zone mode)
             const matchroomData = {
                 hostUid: user.uid,
-                hostName: userProfile.displayName || userProfile.username || 'Player',
+                hostName: userProfile.username || userProfile.displayName || 'Player',
                 game: selectedGame!,
                 title: formData.title.trim(),
                 description: formData.description?.trim() || '',
@@ -699,6 +699,15 @@ export default function CreateMatchroom() {
                     gameKey: selectedGame,
                     answers: hostSkillAnswers || {},
                 },
+                hostRole: (() => {
+                    const game = selectedGame?.toLowerCase();
+                    if (game === 'cs2') return userProfile.cs2Role || 'Flex';
+                    if (game === 'fc26' || game === 'fc25') return userProfile.fcTeam || 'Flex';
+                    if (game === 'tekken8') return userProfile.tekkenFavorites?.[0] || 'Flex';
+                    if (game === 'futsal') return userProfile.futsalPosition || 'Flex';
+                    if (game === 'indoor_cricket') return userProfile.indoorCricketRole || 'Flex';
+                    return 'Flex';
+                })(),
 
                 playstyle: formData.playstyle || null,
                 rankRequirement: formData.rankRequirement || null,
