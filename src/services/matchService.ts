@@ -83,6 +83,7 @@ export interface Matchroom {
     skillLevel?: string; // "Any" | "FACEIT 1-3" etc
     hostSkillScore?: number | null; // 0-100 normalized score
     hostSkillTier?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | 'Any';
+    hostRole?: string;
     hostSkillContext?: {
         gameKey: string;
         answers: Record<string, any>;
@@ -142,9 +143,44 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             role: 'Host'
         }];
 
+        // Initialize 5v5 Slots if it's a 10 player room
+        let slotsA = roomData.slotsA || [];
+        let slotsB = roomData.slotsB || [];
+        let captainUidA = roomData.captainUidA || roomData.hostUid;
+
+        if (roomData.maxPlayers === 10 && (!slotsA.length || !slotsB.length)) {
+            // Create 5 slots for Team A
+            slotsA = Array.from({ length: 5 }, (_, i) => ({
+                slotId: `A${i + 1}`,
+                status: 'open' as const,
+                role: 'Player'
+            }));
+            // Create 5 slots for Team B
+            slotsB = Array.from({ length: 5 }, (_, i) => ({
+                slotId: `B${i + 1}`,
+                status: 'open' as const,
+                role: 'Player'
+            }));
+
+            // Assign Host to first slot of Team A
+            slotsA[0] = {
+                slotId: 'A1',
+                uid: roomData.hostUid,
+                user: {
+                    uid: roomData.hostUid,
+                    username: roomData.hostName,
+                },
+                status: 'confirmed' as const,
+                role: roomData.hostRole || 'Captain'
+            };
+        }
+
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...roomData,
             players,
+            slotsA,
+            slotsB,
+            captainUidA,
             currentPlayers: players.length,
             playerUids: roomData.playerUids || [roomData.hostUid],
             createdAt: serverTimestamp(),
@@ -280,7 +316,8 @@ export async function isUserInActiveMatchroom(uid: string): Promise<{ inRoom: bo
 export async function requestJoinMatchroom(
     room: Matchroom,
     user: { uid: string; username: string },
-    role?: string
+    role?: string,
+    targetTeam?: string
 ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     try {
         const roomId = room.id;
@@ -309,7 +346,8 @@ export async function requestJoinMatchroom(
                 matchroomId: roomId,
                 matchroomTitle: room.title,
                 game: room.game,
-                role: role || 'Flex'
+                role: role || 'Flex',
+                targetTeam: targetTeam || (role && role.startsWith('Team') ? role : 'Any')
             }
         });
 
