@@ -156,6 +156,7 @@ export default function AdminRegisterStep3() {
             ...(step1.type === 'gaming' || step1.type === 'hybrid' ? [
               { label: 'PC Setup', key: 'supportsCs2', icon: 'computer' },
               { label: 'Console', key: 'supportsFc25', icon: 'gamepad' },
+              { label: 'Tekken 8', key: 'supportsTekken8', icon: 'sports-mma' },
             ] : []),
             ...(step1.type === 'sports' || step1.type === 'hybrid' ? [
               { label: 'Futsal', key: 'supportsFutsal', icon: 'sports-soccer' },
@@ -282,6 +283,53 @@ export default function AdminRegisterStep3() {
                 </View>
               </View>
             </View>
+            <View style={styles.fieldGroup}>
+              <Text style={{ color: COLORS.accent, fontWeight: '600', marginBottom: 8 }}>Xbox</Text>
+              <View style={{ marginBottom: 8 }}>
+                <Text style={styles.label}>Total Units</Text>
+                <View style={styles.inputBox}>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={COLORS.muted}
+                    value={activeBranch.pricing.console?.xbox?.count || ''}
+                    onChangeText={(v) => updatePricing('console', 'xbox', 'count', v)}
+                    selectionColor={COLORS.accent}
+                  />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Price (1v1)</Text>
+                  <View style={styles.inputBox}>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor={COLORS.muted}
+                      value={activeBranch.pricing.console?.xbox?.price1v1 || ''}
+                      onChangeText={(v) => updatePricing('console', 'xbox', 'price1v1', v)}
+                      selectionColor={COLORS.accent}
+                    />
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Price (2v2)</Text>
+                  <View style={styles.inputBox}>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor={COLORS.muted}
+                      value={activeBranch.pricing.console?.xbox?.price2v2 || ''}
+                      onChangeText={(v) => updatePricing('console', 'xbox', 'price2v2', v)}
+                      selectionColor={COLORS.accent}
+                    />
+                  </View>
+                </View>
+              </View>
+            </View>
           </View>
         )}
 
@@ -343,8 +391,8 @@ export default function AdminRegisterStep3() {
                         keyboardType="numeric"
                         placeholder="0"
                         placeholderTextColor={COLORS.muted}
-                        value={activeBranch.pricing.indoorCricket?.[type.value]?.count || ''}
-                        onChangeText={(v) => updatePricing('indoorCricket', type.value, 'count', v)}
+                        value={activeBranch.pricing.indoor_cricket?.[type.value]?.count || ''}
+                        onChangeText={(v) => updatePricing('indoor_cricket', type.value, 'count', v)}
                         selectionColor={COLORS.accent}
                       />
                     </View>
@@ -357,8 +405,8 @@ export default function AdminRegisterStep3() {
                         keyboardType="numeric"
                         placeholder="0"
                         placeholderTextColor={COLORS.muted}
-                        value={activeBranch.pricing.indoorCricket?.[type.value]?.price || ''}
-                        onChangeText={(v) => updatePricing('indoorCricket', type.value, 'price', v)}
+                        value={activeBranch.pricing.indoor_cricket?.[type.value]?.price || ''}
+                        onChangeText={(v) => updatePricing('indoor_cricket', type.value, 'price', v)}
                         selectionColor={COLORS.accent}
                       />
                     </View>

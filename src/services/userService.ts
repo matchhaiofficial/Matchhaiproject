@@ -443,6 +443,45 @@ export interface UserProfile {
   restrictInvitesToFriends?: boolean;
 }
 
+const SKILL_THRESHOLDS = {
+  BEGINNER: 30,
+  INTERMEDIATE: 60,
+  ADVANCED: 80,
+};
+
+function clampSkillRating(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getTierFromRatingLocal(rating: number) {
+  if (rating <= SKILL_THRESHOLDS.BEGINNER) return "Beginner";
+  if (rating <= SKILL_THRESHOLDS.INTERMEDIATE) return "Intermediate";
+  if (rating <= SKILL_THRESHOLDS.ADVANCED) return "Advanced";
+  return "Pro";
+}
+
+function normalizeSkillScores(
+  skillScores?: UserProfile["skillScores"]
+): UserProfile["skillScores"] | undefined {
+  if (!skillScores) return undefined;
+
+  const normalized: Record<string, any> = {};
+  Object.entries(skillScores).forEach(([key, score]) => {
+    if (!score) return;
+    if (typeof (score as any).rating !== "number") {
+      normalized[key] = score;
+      return;
+    }
+    const rating = clampSkillRating((score as any).rating);
+    normalized[key] = {
+      ...score,
+      rating,
+      tier: getTierFromRatingLocal(rating),
+    };
+  });
+
+  return normalized as UserProfile["skillScores"];
+}
 
 /**
  * Get a user's profile by their UID.
@@ -511,7 +550,7 @@ export async function getUserProfile(
       psnStats: data.psnStats ?? undefined,
 
       // Skill Scores
-      skillScores: data.skillScores ?? undefined,
+      skillScores: normalizeSkillScores(data.skillScores) ?? undefined,
 
       // Team references
       teamsByGame: data.teamsByGame ?? undefined,
@@ -563,6 +602,51 @@ export const getUserSportProfile = (profile: UserProfile, gameKey: string) => {
       return {
         role: profile.pickleballRole,
       };
+    default:
+      return null;
+  }
+};
+
+export const getUserSportRoleLabel = (profile: UserProfile, gameKey: string): string | null => {
+  const sportProfile: any = getUserSportProfile(profile, gameKey);
+  if (!sportProfile) return null;
+
+  switch (gameKey) {
+    case 'cs2': {
+      const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
+      if (role) return role;
+      const level = sportProfile.skillLevel;
+      if (typeof level === 'number' && level > 0) return `FACEIT Lv ${level}`;
+      return null;
+    }
+    case 'fc25':
+    case 'fc26': {
+      const team = typeof sportProfile.team === 'string' ? sportProfile.team.trim() : '';
+      const formation = typeof sportProfile.formation === 'string' ? sportProfile.formation.trim() : '';
+      if (team && formation) return `${team} (${formation})`;
+      if (team) return team;
+      if (formation) return formation;
+      return null;
+    }
+    case 'tekken8': {
+      const favorites = Array.isArray(sportProfile.favorites) ? sportProfile.favorites.filter(Boolean) : [];
+      if (favorites.length === 0) return null;
+      if (favorites.length === 1) return String(favorites[0]);
+      return `${favorites[0]} +${favorites.length - 1}`;
+    }
+    case 'futsal': {
+      const position = typeof sportProfile.position === 'string' ? sportProfile.position.trim() : '';
+      return position || null;
+    }
+    case 'indoor_cricket': {
+      const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
+      return role || null;
+    }
+    case 'padel':
+    case 'pickleball': {
+      const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
+      return role || null;
+    }
     default:
       return null;
   }

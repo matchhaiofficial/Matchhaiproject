@@ -79,6 +79,8 @@ export interface Matchroom {
 
     // Game-Specific Dynamic Fields (Phase 1)
     format?: string; // e.g., "5v5", "FT5", "6-a-side"
+    seriesType?: string | null;
+    durationHours?: number | null;
     selectedMaps?: string[]; // CS2
     skillLevel?: string; // "Any" | "FACEIT 1-3" etc
     hostSkillScore?: number | null; // 0-100 normalized score
@@ -126,6 +128,12 @@ export interface Matchroom {
     isLocked?: boolean; // Explicitly locked
     lockedAt?: any; // When the room was locked
     zoneAdminApproved?: boolean;
+
+    // Payment placeholder (production)
+    paymentStatus?: 'paid' | 'unpaid';
+    paymentAmount?: number;
+    paymentReservedSlots?: number;
+    paymentCurrency?: string;
     resultVerification?: {
         status: 'pending' | 'participant_vote' | 'admin_review' | 'resolved';
         votes?: Record<string, string>;
@@ -133,6 +141,70 @@ export interface Matchroom {
 }
 
 const COLLECTION_NAME = "matchrooms";
+
+function parseFormatExtras(format?: string) {
+    if (!format) return null;
+    const match = format.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    if (!match) return null;
+
+    const baseFormat = match[1].trim();
+    const extraRaw = match[2].trim();
+    const extra = extraRaw.toLowerCase();
+
+    let seriesType: string | null = null;
+    let durationHours: number | null = null;
+    let overs: number | null = null;
+
+    const boMatch = extra.match(/(?:bo|best of)\s*(\d+)/);
+    if (boMatch) seriesType = `BO${boMatch[1]}`;
+
+    const hoursMatch = extra.match(/(\d+(?:\.\d+)?)\s*h/);
+    if (hoursMatch) durationHours = Number(hoursMatch[1]);
+
+    const oversMatch = extra.match(/(\d+)\s*overs?/);
+    if (oversMatch) overs = Number(oversMatch[1]);
+
+    return { baseFormat, seriesType, durationHours, overs };
+}
+
+async function backfillStructuredFormat(room: Matchroom) {
+    if (!room?.id || !room.format) return room;
+    if (room.seriesType || room.durationHours != null || room.overs != null) return room;
+
+    const parsed = parseFormatExtras(room.format);
+    if (!parsed) return room;
+
+    const hasStructured = !!parsed.seriesType || parsed.durationHours != null || parsed.overs != null;
+    if (!hasStructured) return room;
+
+    const updates: any = {};
+    if (parsed.baseFormat && parsed.baseFormat !== room.format) {
+        updates.format = parsed.baseFormat;
+        room.format = parsed.baseFormat;
+    }
+    if (parsed.seriesType) {
+        updates.seriesType = parsed.seriesType;
+        room.seriesType = parsed.seriesType;
+    }
+    if (parsed.durationHours != null) {
+        updates.durationHours = parsed.durationHours;
+        room.durationHours = parsed.durationHours;
+    }
+    if (parsed.overs != null) {
+        updates.overs = parsed.overs;
+        room.overs = parsed.overs;
+    }
+
+    if (Object.keys(updates).length > 0) {
+        try {
+            await updateDoc(doc(db, COLLECTION_NAME, room.id), updates);
+        } catch (error) {
+            Logger.warn("matchService", "Failed to backfill structured format", { roomId: room.id, error });
+        }
+    }
+
+    return room;
+}
 
 export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     try {
@@ -205,6 +277,7 @@ export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: 
         );
         const snapshot = await getDocs(q);
         const rooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom));
+        await Promise.allSettled(rooms.map(room => backfillStructuredFormat(room)));
         return { ok: true, data: rooms };
     } catch (error) {
         Logger.error("matchService", "Error fetching matchrooms", error);
@@ -217,7 +290,9 @@ export async function getMatchroom(id: string): Promise<{ ok: true; data: Matchr
         const docRef = doc(db, COLLECTION_NAME, id);
         const snapshot = await getDoc(docRef);
         if (snapshot.exists()) {
-            return { ok: true, data: { id: snapshot.id, ...snapshot.data() } as Matchroom };
+            const room = { id: snapshot.id, ...snapshot.data() } as Matchroom;
+            await backfillStructuredFormat(room);
+            return { ok: true, data: room };
         }
         return { ok: false, message: "Matchroom not found" };
     } catch (error) {

@@ -12,6 +12,8 @@ import { UserProfile } from '../../../../src/services/userService';
 import { COLORS } from '../../../../src/theme';
 import styles from './SkillBracketSection.styles';
 
+const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+
 export type SkillChangeParams = {
     score: number | null;
     tier: SkillTier | 'Any' | null;
@@ -127,9 +129,9 @@ export default function SkillBracketSection({
             try {
                 const skill = await initializeSkillIfMissing(userProfile.uid, gameKey as any, userProfile);
                 if (skill) {
-                    setLocalSkill(skill);
+                    setLocalSkill({ ...skill, rating: clampRating(skill.rating) });
                     if (valueTier === null) {
-                        onChange({ score: skill.rating, tier: skill.tier });
+                        onChange({ score: clampRating(skill.rating), tier: skill.tier });
                     }
                 } else {
                     setLocalSkill(null);
@@ -150,19 +152,20 @@ export default function SkillBracketSection({
         try {
             const res = await saveSelfAssessment(userProfile.uid, gameKey as any, answers);
             if (res.ok && res.rating !== undefined && res.tier) {
+                const normalizedRating = clampRating(res.rating);
                 const newSkill: GameSkillScore = {
-                    rating: res.rating,
+                    rating: normalizedRating,
                     tier: res.tier,
                     matchesPlayed: 0,
                     wins: 0,
                     losses: 0,
                     initialSource: 'questionnaire',
-                    initialRating: res.rating,
+                    initialRating: normalizedRating,
                     lastMatchDate: null,
                     lastUpdated: new Date()
                 };
                 setLocalSkill(newSkill);
-                onChange({ score: res.rating, tier: res.tier });
+                onChange({ score: normalizedRating, tier: res.tier });
             }
         } catch (err) {
             console.error("Calibration save failed", err);
@@ -193,7 +196,7 @@ export default function SkillBracketSection({
                     <View style={styles.skillBadge}>
                         <View>
                             <Text style={styles.skillBadgeText}>{localSkill.tier}</Text>
-                            <Text style={styles.skillBadgeRating}>MatchHai Score: {localSkill.rating}/100</Text>
+                            <Text style={styles.skillBadgeRating}>MatchHai Score: {clampRating(localSkill.rating)}/100</Text>
                         </View>
                         <MaterialIcons name="check-circle" size={24} color={COLORS.accent} />
                     </View>

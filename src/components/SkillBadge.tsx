@@ -76,6 +76,8 @@ export default function SkillBadge({
 
     const iconSize = size === 'compact' ? 14 : size === 'large' ? 20 : 16;
     const isCompact = size === 'compact';
+    const normalizedRating =
+        typeof rating === 'number' ? Math.max(0, Math.min(100, Math.round(rating))) : undefined;
 
     return (
         <View style={[styles.container, tierStyle, containerSizeStyle, style]}>
@@ -90,13 +92,13 @@ export default function SkillBadge({
                     {tier.toUpperCase()}
                 </Text>
             )}
-            {showRating && rating !== undefined && (
+            {showRating && normalizedRating !== undefined && (
                 <Text style={[
                     styles.rating,
                     ratingSizeStyle,
                     isCompact && { color: config.color, fontFamily: FONTS.interSemiBold, marginLeft: 2 }
                 ]}>
-                    {isCompact ? rating : `(${rating})`}
+                    {isCompact ? normalizedRating : `(${normalizedRating})`}
                 </Text>
             )}
         </View>
