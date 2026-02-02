@@ -148,15 +148,18 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
         let slotsB = roomData.slotsB || [];
         let captainUidA = roomData.captainUidA || roomData.hostUid;
 
-        if (roomData.maxPlayers === 10 && (!slotsA.length || !slotsB.length)) {
-            // Create 5 slots for Team A
-            slotsA = Array.from({ length: 5 }, (_, i) => ({
+        // Generic Slot Initialization for ANY even-numbered team game
+        if ((!slotsA.length || !slotsB.length) && roomData.maxPlayers && roomData.maxPlayers % 2 === 0) {
+            const teamSize = roomData.maxPlayers / 2;
+
+            // Create slots for Team A
+            slotsA = Array.from({ length: teamSize }, (_, i) => ({
                 slotId: `A${i + 1}`,
                 status: 'open' as const,
                 role: 'Player'
             }));
-            // Create 5 slots for Team B
-            slotsB = Array.from({ length: 5 }, (_, i) => ({
+            // Create slots for Team B
+            slotsB = Array.from({ length: teamSize }, (_, i) => ({
                 slotId: `B${i + 1}`,
                 status: 'open' as const,
                 role: 'Player'
@@ -317,13 +320,15 @@ export async function requestJoinMatchroom(
     room: Matchroom,
     user: { uid: string; username: string },
     role?: string,
-    targetTeam?: string
+    targetTeam?: string,
+    slotId?: string // NEW: Optional slot targeting
 ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     try {
         const roomId = room.id;
         if (!roomId) throw "Matchroom ID missing";
 
         // Idempotency: Use deterministic ID to prevent duplicate pending requests
+        // If slot-specific, maybe uniqueness changes? For now, keep one request per user per room to avoid spam.
         const requestId = `match_join_request_${roomId}_${user.uid}`;
         const notifRef = doc(db, 'notifications', requestId);
 
@@ -347,11 +352,12 @@ export async function requestJoinMatchroom(
                 matchroomTitle: room.title,
                 game: room.game,
                 role: role || 'Flex',
-                targetTeam: targetTeam || (role && role.startsWith('Team') ? role : 'Any')
+                targetTeam: targetTeam || (role && role.startsWith('Team') ? role : 'Any'),
+                slotId: slotId || null // NEW
             }
         });
 
-        Logger.info("matchService", "Join request sent", { roomId, uid: user.uid });
+        Logger.info("matchService", "Join request sent", { roomId, uid: user.uid, slotId });
         return { ok: true, id: requestId };
     } catch (error) {
         Logger.error("matchService", "Error requesting to join", error);
