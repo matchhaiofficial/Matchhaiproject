@@ -62,7 +62,7 @@ export default function GameSelector({ selectedGame, onSelectGame, userProfile }
                     </Text>
                     <TouchableOpacity
                         style={styles.actionButton}
-                        onPress={() => router.push('/profile')}
+                        onPress={() => router.push('/(player)/(tabs)/profile')}
                     >
                         <MaterialIcons name="add-circle" size={20} color={COLORS.background} />
                         <Text style={styles.actionButtonText}>

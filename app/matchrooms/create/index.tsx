@@ -1,7 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -18,13 +17,14 @@ import {
 import { db } from '../../../src/config/firebaseConfig';
 import { useAuth } from '../../../src/context/AuthContext';
 import { createMatchroom } from '../../../src/services/matchService';
-import { calculateInitialRating, GameKey, getTierFromRating, SkillTier } from '../../../src/services/skillRatingService';
+import { SkillTier } from '../../../src/services/skillRatingService';
 import type { Team } from '../../../src/services/teamService';
-import { getUserTeamsForGame } from '../../../src/services/teamService';
+import { getTeamById, getUserTeamsForGame } from '../../../src/services/teamService';
 import type { UserProfile } from '../../../src/services/userService';
-import { getUserProfile } from '../../../src/services/userService';
-import type { BookingRequest } from '../../../src/services/zoneService';
-import { createBookingRequest } from '../../../src/services/zoneService';
+import { getUserProfile, getUserSportRoleLabel } from '../../../src/services/userService';
+import type { Zone } from '../../../src/services/zoneService';
+import type { BookingRequest } from '../../../src/services/bookingRequestService';
+import { createBookingRequest } from '../../../src/services/bookingRequestService';
 import { COLORS, FONTS } from '../../../src/theme';
 
 import Logger from '../../../src/utils/logger';
@@ -48,6 +48,7 @@ export default function CreateMatchroom() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
+    const [titleTouched, setTitleTouched] = useState(false);
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [hostRole, setHostRole] = useState<string | null>(null);
 
@@ -61,6 +62,9 @@ export default function CreateMatchroom() {
     const [teamMode, setTeamMode] = useState<'solo' | 'team'>('solo');
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reservedSlots, setReservedSlots] = useState(1);
+    const [selectedTeamMemberUids, setSelectedTeamMemberUids] = useState<string[]>([]);
+    const [selectedTeamDetails, setSelectedTeamDetails] = useState<Team | null>(null);
+    const [memberSportRoleByUid, setMemberSportRoleByUid] = useState<Record<string, string | null>>({});
 
     // Phase 3: Location Mode State
     const [locationMode, setLocationMode] = useState<'zone' | 'broadcast'>('zone');
@@ -69,10 +73,12 @@ export default function CreateMatchroom() {
     // Phase 3: Zone Selection State (pre-fill from params if coming from venue)
     const [selectedZoneId, setSelectedZoneId] = useState<string | null>(params.zoneId || null);
     const [selectedZoneName, setSelectedZoneName] = useState<string | null>(params.zoneName || null);
+    const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
 
     // Phase 4: CS2 & FC25/26 Specific State
     const [zoneRate, setZoneRate] = useState<number>(0);
-    const [ps5Rate, setPs5Rate] = useState<number>(0);
+    const [zoneRateOptions, setZoneRateOptions] = useState<Array<{ key: string; label: string; price: number }>>([]);
+    const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
     const [seriesType, setSeriesType] = useState<'BO1' | 'BO3' | 'BO5' | 'BO10' | 'BO7' | 'BO20' | 'BO40'>('BO1');
     const [duration, setDuration] = useState<number>(1); // Duration in hours (for Futsal)
 
@@ -111,19 +117,19 @@ export default function CreateMatchroom() {
             // Price per player is simply the zone rate * hours (assuming rate is per PC/player)
             const pricePerPlayer = zoneRate * hours;
             setFormData(prev => ({ ...prev, pricePerPlayer }));
-        } else if ((selectedGame === 'fc26') && ps5Rate > 0) {
+        } else if ((selectedGame === 'fc26') && zoneRate > 0) {
             // FC Logic: BO3 = 1hr, BO5 = 2hr, BO10 = 3hr
             const hoursMap: Record<string, number> = { BO1: 0.5, BO3: 1, BO5: 2, BO10: 3 };
             const hours = hoursMap[seriesType] || 1;
 
             // Calculate Total Cost for the console/setup
-            const totalConsoleCost = ps5Rate * hours;
+            const totalConsoleCost = zoneRate * hours;
 
             // Calculate Price Per Player based on Format
             let pricePerPlayer = 0;
             if (formData.format === '1v1') {
                 // 1v1 = 2 players sharing the cost (or paying for their share of the console time)
-                // Assuming ps5Rate is per console.
+                // Assuming zoneRate is per console.
                 pricePerPlayer = totalConsoleCost / 2;
             } else if (formData.format === '2v2') {
                 // 2v2 = 4 players.
@@ -134,13 +140,13 @@ export default function CreateMatchroom() {
             }
 
             setFormData(prev => ({ ...prev, pricePerPlayer }));
-        } else if (selectedGame === 'tekken8' && ps5Rate > 0) {
+        } else if (selectedGame === 'tekken8' && zoneRate > 0) {
             // Tekken 8 Logic: BO7 = 1hr, BO20 = 2hr, BO40 = 3hr
             const hoursMap: Record<string, number> = { BO7: 1, BO20: 2, BO40: 3 };
             const hours = hoursMap[seriesType] || 1;
 
             // Calculate Total Cost for the console/setup
-            const totalConsoleCost = ps5Rate * hours;
+            const totalConsoleCost = zoneRate * hours;
 
             // Calculate Price Per Player based on Format
             let pricePerPlayer = 0;
@@ -196,37 +202,236 @@ export default function CreateMatchroom() {
             const pricePerPlayer = totalCourtCost / players;
             setFormData(prev => ({ ...prev, pricePerPlayer: Math.ceil(pricePerPlayer) }));
         }
-    }, [selectedGame, zoneRate, ps5Rate, seriesType, formData.format, duration, formData.maxPlayers, formData.overs, formData.seriesType]);
+    }, [selectedGame, zoneRate, seriesType, formData.format, duration, formData.maxPlayers, formData.overs, formData.seriesType]);
 
-    // FC26 & Tekken 8 & Futsal & Indoor Cricket & Padel: Update title based on format
+    const captainedTeams = useMemo(() => {
+        if (!user?.uid) return [];
+        return (teams || []).filter(t => t.captainUid === user.uid);
+    }, [teams, user?.uid]);
+
+    const isCaptainForGame = captainedTeams.length > 0;
+
+    const selectedTeam = useMemo(() => {
+        if (!selectedTeamId) return null;
+        return (teams || []).find(t => t.id === selectedTeamId) || null;
+    }, [teams, selectedTeamId]);
+
+    const resolvedTeam = selectedTeamDetails || selectedTeam;
+
+    const selectableTeamMembers = useMemo(() => {
+        if (!resolvedTeam) return [];
+        const members = resolvedTeam.members || [];
+        if (members.length > 0) {
+            return members.filter(m => m.uid !== resolvedTeam.captainUid);
+        }
+        return (resolvedTeam.memberUids || [])
+            .filter(uid => uid !== resolvedTeam.captainUid)
+            .map(uid => ({ uid, username: uid.slice(0, 6) + '…', role: 'member' as const, joinedAt: null }));
+    }, [resolvedTeam]);
+
     useEffect(() => {
-        if (selectedGame === 'fc26' || selectedGame === 'tekken8') {
-            if (formData.format === '1v1') {
-                setFormData(prev => ({ ...prev, title: '1v1 Competitive', maxPlayers: 2 }));
-            } else if (formData.format === '2v2') {
-                setFormData(prev => ({ ...prev, title: '2v2 Competitive', maxPlayers: 4 }));
+        setMemberSportRoleByUid({});
+    }, [selectedGame]);
+
+    useEffect(() => {
+        if (!resolvedTeam || !selectedGame) return;
+
+        const memberUids = Array.from(new Set([
+            resolvedTeam.captainUid,
+            ...((resolvedTeam.members || []).map(m => m.uid)),
+        ].filter(Boolean)));
+
+        const missingUids = memberUids.filter(uid => !(uid in memberSportRoleByUid));
+        if (missingUids.length === 0) return;
+
+        let cancelled = false;
+
+        const fetchRoles = async () => {
+            const entries = await Promise.all(
+                missingUids.map(async (uid) => {
+                    if (uid === user?.uid && userProfile) {
+                        return [uid, getUserSportRoleLabel(userProfile, selectedGame)] as const;
+                    }
+
+                    const res = await getUserProfile(uid);
+                    if (!res.ok) return [uid, null] as const;
+                    return [uid, getUserSportRoleLabel(res.data, selectedGame)] as const;
+                })
+            );
+
+            if (cancelled) return;
+
+            setMemberSportRoleByUid((prev) => {
+                const next = { ...prev };
+                entries.forEach(([uid, label]) => {
+                    next[uid] = label;
+                });
+                return next;
+            });
+        };
+
+        fetchRoles();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [resolvedTeam, selectedGame, memberSportRoleByUid, user?.uid, userProfile]);
+
+    useEffect(() => {
+        if (!isCaptainForGame && teamMode !== 'solo') {
+            setTeamMode('solo');
+            setSelectedTeamId(null);
+            setReservedSlots(1);
+            setSelectedTeamMemberUids([]);
+        }
+
+        if (isCaptainForGame && !selectedTeamId) {
+            setSelectedTeamId(captainedTeams[0]?.id || null);
+        }
+    }, [isCaptainForGame, teamMode, selectedTeamId, captainedTeams]);
+
+    useEffect(() => {
+        setSelectedTeamMemberUids([]);
+    }, [selectedTeamId]);
+
+    useEffect(() => {
+        if (teamMode !== 'team') return;
+        if (!resolvedTeam) return;
+        const limit = Math.max(0, reservedSlots - 1);
+        if (limit === 0) {
+            setSelectedTeamMemberUids([]);
+            return;
+        }
+        setSelectedTeamMemberUids((prev) => {
+            const current = [...prev];
+            const available = selectableTeamMembers.map(m => m.uid);
+            const filtered = current.filter(uid => available.includes(uid));
+            if (filtered.length >= limit) return filtered.slice(0, limit);
+            const needed = limit - filtered.length;
+            const toAdd = available.filter(uid => !filtered.includes(uid)).slice(0, needed);
+            return [...filtered, ...toAdd];
+        });
+    }, [teamMode, reservedSlots, selectableTeamMembers, resolvedTeam]);
+
+    useEffect(() => {
+        if (!selectedTeamId) {
+            setSelectedTeamDetails(null);
+            return;
+        }
+        const localTeam = teams.find(t => t.id === selectedTeamId);
+        if (localTeam?.members && localTeam.members.length > 0) {
+            setSelectedTeamDetails(localTeam);
+            return;
+        }
+        const fetchTeam = async () => {
+            const res = await getTeamById(selectedTeamId);
+            if (res.ok && res.data) {
+                setSelectedTeamDetails(res.data);
+                setTeams(prev => prev.map(t => t.id === selectedTeamId ? res.data! : t));
             }
+        };
+        fetchTeam();
+    }, [selectedTeamId, teams]);
+
+    const minLeadDays = teamMode === 'team' ? 2 : 3;
+    const minAllowedDate = (() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() + minLeadDays);
+        return d;
+    })();
+
+    const isDateAllowed = (() => {
+        if (!formData.date) return false;
+        const dateObj = new Date(`${formData.date}T00:00`);
+        if (isNaN(dateObj.getTime())) return false;
+        return dateObj.getTime() >= minAllowedDate.getTime();
+    })();
+
+    useEffect(() => {
+        if (!formData.date) return;
+        if (!isDateAllowed) {
+            setFormData(prev => ({ ...prev, date: '' }));
+        }
+    }, [teamMode]);
+
+    useEffect(() => {
+        if (!selectedZone || !selectedGame) {
+            setZoneRateOptions([]);
+            setSelectedZoneRateKey(null);
+            setZoneRate(0);
+            return;
+        }
+
+        const pricing: any = selectedZone.pricing || (selectedZone.branches?.[0] as any)?.pricing || {};
+        const options: Array<{ key: string; label: string; price: number }> = [];
+
+        const formatLabel = formData.format === '2v2' ? '2v2' : '1v1';
+        const priceKey = formData.format === '2v2' ? 'price2v2' : 'price1v1';
+        const otherPriceKey = priceKey === 'price1v1' ? 'price2v2' : 'price1v1';
+
+        const addOption = (key: string, label: string, price?: number) => {
+            if (typeof price === 'number' && price > 0) {
+                options.push({ key, label: `${label} • ₨${price}/hr`, price });
+            }
+        };
+
+        if (selectedGame === 'cs2') {
+            const pc = pricing.pc || {};
+            addOption('pc:regular', 'Regular', pc?.regular?.price);
+            addOption('pc:premium', 'Premium', pc?.premium?.price);
+            addOption('pc:elite', 'Elite', pc?.elite?.price);
+        } else if (selectedGame === 'fc26' || selectedGame === 'tekken8') {
+            const console = pricing.console || {};
+            const ps5 = console.ps5 || {};
+            const xbox = console.xbox || {};
+            const ps5Price = (ps5?.[priceKey] || ps5?.[otherPriceKey]) as number | undefined;
+            const xboxPrice = (xbox?.[priceKey] || xbox?.[otherPriceKey]) as number | undefined;
+            addOption('console:ps5', `PS5 (${formatLabel})`, ps5Price);
+            addOption('console:xbox', `Xbox (${formatLabel})`, xboxPrice);
         } else if (selectedGame === 'futsal') {
-            if (formData.format === '5v5') {
-                setFormData(prev => ({ ...prev, title: '5v5 Futsal Match', maxPlayers: 10, formation: '2-2 (Diamond)' }));
-            } else if (formData.format === '6v6') {
-                setFormData(prev => ({ ...prev, title: '6v6 Futsal Match', maxPlayers: 12, formation: '2-2-1' }));
-            }
+            Object.entries(pricing.futsal || {}).forEach(([key, val]: any) => {
+                const label = String(key).replace(/[-_]/g, ' ');
+                addOption(`futsal:${key}`, label, val?.price);
+            });
         } else if (selectedGame === 'indoor_cricket') {
-            if (formData.format === '8-a-side') {
-                setFormData(prev => ({ ...prev, title: '8-a-side Indoor Cricket', maxPlayers: 16 }));
-            }
+            const cricket = pricing.indoorCricket || pricing.indoor_cricket || {};
+            Object.entries(cricket || {}).forEach(([key, val]: any) => {
+                const label = String(key).replace(/[-_]/g, ' ');
+                addOption(`cricket:${key}`, label, val?.price);
+            });
         } else if (selectedGame === 'padel') {
-            // Padel is always 2v2
-            setFormData(prev => ({ ...prev, title: '2v2 Padel Match', maxPlayers: 4, format: '2v2' }));
+            Object.entries(pricing.padel || {}).forEach(([key, val]: any) => {
+                const label = String(key).replace(/[-_]/g, ' ');
+                addOption(`padel:${key}`, label, val?.price);
+            });
         } else if (selectedGame === 'pickleball') {
-            if (formData.format === '1v1') {
-                setFormData(prev => ({ ...prev, title: '1v1 Pickleball Match', maxPlayers: 2 }));
-            } else if (formData.format === '2v2') {
-                setFormData(prev => ({ ...prev, title: '2v2 Pickleball Match', maxPlayers: 4 }));
+            Object.entries(pricing.pickleball || {}).forEach(([key, val]: any) => {
+                const label = String(key).replace(/[-_]/g, ' ');
+                addOption(`pickleball:${key}`, label, val?.price);
+            });
+        }
+
+        setZoneRateOptions(options);
+        if (options.length === 0) {
+            setSelectedZoneRateKey(null);
+            setZoneRate(0);
+            return;
+        }
+
+        if (selectedZoneRateKey) {
+            const match = options.find(opt => opt.key === selectedZoneRateKey);
+            if (match) {
+                setZoneRate(match.price);
+                return;
             }
         }
-    }, [formData.format, selectedGame]);
+
+        setSelectedZoneRateKey(null);
+        setZoneRate(0);
+    }, [selectedZone, selectedGame, formData.format, selectedZoneRateKey]);
+
+    // Format-specific defaults are now applied in handleFieldChange to avoid duplicated effects
 
     useEffect(() => {
         loadUserProfile();
@@ -353,56 +558,78 @@ export default function CreateMatchroom() {
         }
     };
 
+    const applyFormatDefaults = (gameKey: string, format: string) => {
+        if (!gameKey || !format) return;
+        if (gameKey === 'fc26' || gameKey === 'tekken8') {
+            const nextMax = format === '2v2' ? 4 : 2;
+            setFormData(prev => ({
+                ...prev,
+                maxPlayers: nextMax,
+                ...(titleTouched ? {} : { title: format === '2v2' ? '2v2 Competitive' : '1v1 Competitive' })
+            }));
+            return;
+        }
+        if (gameKey === 'futsal') {
+            if (format === '5v5') {
+                setFormData(prev => ({
+                    ...prev,
+                    maxPlayers: 10,
+                    formation: prev.formation || '2-2 (Diamond)',
+                    ...(titleTouched ? {} : { title: '5v5 Futsal Match' })
+                }));
+            } else if (format === '6v6') {
+                setFormData(prev => ({
+                    ...prev,
+                    maxPlayers: 12,
+                    formation: prev.formation || '2-2-1',
+                    ...(titleTouched ? {} : { title: '6v6 Futsal Match' })
+                }));
+            }
+            return;
+        }
+        if (gameKey === 'indoor_cricket') {
+            if (format === '8-a-side') {
+                setFormData(prev => ({
+                    ...prev,
+                    maxPlayers: 16,
+                    ...(titleTouched ? {} : { title: '8-a-side Indoor Cricket' })
+                }));
+            }
+            return;
+        }
+        if (gameKey === 'padel') {
+            setFormData(prev => ({
+                ...prev,
+                maxPlayers: 4,
+                format: '2v2',
+                ...(titleTouched ? {} : { title: '2v2 Padel Match' })
+            }));
+            return;
+        }
+        if (gameKey === 'pickleball') {
+            const nextMax = format === '2v2' ? 4 : 2;
+            setFormData(prev => ({
+                ...prev,
+                maxPlayers: nextMax,
+                ...(titleTouched ? {} : { title: format === '2v2' ? '2v2 Pickleball Match' : '1v1 Pickleball Match' })
+            }));
+            return;
+        }
+    };
+
     const handleFieldChange = (field: string, value: any) => {
+        if (field === 'title') setTitleTouched(true);
         setFormData(prev => ({ ...prev, [field]: value }));
+        if (field === 'format' && selectedGame) {
+            applyFormatDefaults(selectedGame, value);
+        }
     };
 
     const handleGameSelect = async (gameKey: string) => {
         setSelectedGame(gameKey);
 
         // Auto-Initialize Skill Score if missing
-        if (user && userProfile && !userProfile.skillScores?.[gameKey as GameKey]) {
-            try {
-                const { rating, source } = calculateInitialRating(gameKey as GameKey, userProfile);
-                const tier = getTierFromRating(rating);
-
-                const newScore = {
-                    rating,
-                    tier,
-                    matchesPlayed: 0,
-                    wins: 0,
-                    losses: 0,
-                    initialSource: source,
-                    initialRating: rating,
-                    lastMatchDate: null,
-                    lastUpdated: new Date() // will be converted to Timestamp by Firestore if directly passed, strictly we use serverTimestamp() for field but here we construct object
-                };
-
-                // Update Firestore
-                await updateDoc(doc(db, "users", user.uid), {
-                    [`skillScores.${gameKey}`]: {
-                        ...newScore,
-                        lastUpdated: serverTimestamp() // Use server timestamp for DB
-                    }
-                });
-
-                // Update local state to reflect change immediately (so badge might appear if we showed it)
-                setUserProfile(prev => {
-                    if (!prev) return null;
-                    return {
-                        ...prev,
-                        skillScores: {
-                            ...prev.skillScores,
-                            [gameKey as GameKey]: { ...newScore, lastUpdated: new Date() }
-                        }
-                    };
-                });
-
-                Logger.info('CreateMatchroom', `Auto-initialized skill score for ${gameKey}`, { rating, tier });
-            } catch (err) {
-                Logger.error('CreateMatchroom', 'Failed to auto-init skill score', err);
-            }
-        }
+        // Skill initialization is handled by SkillBracketSection; avoid side-effect writes here
 
         // Reset game-specific fields when changing game
         setFormData(prev => ({
@@ -428,6 +655,7 @@ export default function CreateMatchroom() {
             seriesType: '',
         }));
         setDuration(1); // Reset duration
+        setTitleTouched(false);
 
         // Phase 2: Load teams for this game
         if (user) {
@@ -438,6 +666,7 @@ export default function CreateMatchroom() {
                 setTeamMode('solo');
                 setSelectedTeamId(null);
                 setReservedSlots(1);
+                setSelectedTeamMemberUids([]);
             }
         }
 
@@ -468,6 +697,7 @@ export default function CreateMatchroom() {
                 maxPlayers: 10,
                 skillLevel: skillLevel,
             }));
+            setSeriesType('BO1'); // Default series type for CS2
             // Initialize host role from profile
             if (userProfile?.cs2Role) {
                 setHostRole(userProfile.cs2Role);
@@ -563,16 +793,48 @@ export default function CreateMatchroom() {
         }
         if (!formData.format) {
             Alert.alert('Missing Format', 'Please select a match format');
-            Alert.alert('Missing Format', 'Please select a match format');
             return false;
         }
         if (!formData.date || !formData.time) {
             Alert.alert('Missing Date/Time', 'Please enter date and time');
             return false;
         }
+        if (!isDateAllowed) {
+            const label = teamMode === 'team' ? 'captains' : 'solo players';
+            Alert.alert('Date Too Soon', `Earliest date for ${label} is ${minAllowedDate.toLocaleDateString()}.`);
+            return false;
+        }
+        if (teamMode === 'team') {
+            if (!isCaptainForGame) {
+                Alert.alert('Not Authorized', 'Only team captains can book multiple reserved slots.');
+                return false;
+            }
+            if (!selectedTeamId) {
+                Alert.alert('Missing Team', 'Please select your team.');
+                return false;
+            }
+            if (reservedSlots < 2 || reservedSlots > 5) {
+                Alert.alert('Invalid Slots', 'Reserved slots must be between 2 and 5.');
+                return false;
+            }
+            const needed = Math.max(0, reservedSlots - 1);
+            if (selectedTeamMemberUids.length !== needed) {
+                Alert.alert('Select Players', `Please select ${needed} player${needed === 1 ? '' : 's'} from your team.`);
+                return false;
+            }
+        }
         // Phase 3: Zone validation
         if (locationMode === 'zone' && !selectedZoneId) {
             Alert.alert('Missing Zone', 'Please select a zone to host the match');
+            return false;
+        }
+        if (
+            locationMode === 'zone' &&
+            selectedZoneId &&
+            zoneRateOptions.length > 0 &&
+            !selectedZoneRateKey
+        ) {
+            Alert.alert('Missing Rate Type', 'Please select a rate type to calculate price per player.');
             return false;
         }
         // Phase 3: Broadcast validation
@@ -583,11 +845,34 @@ export default function CreateMatchroom() {
         return true;
     };
 
+    const promptPaymentChoice = async (amountDue: number) => {
+        return await new Promise<'paid' | 'unpaid' | 'cancel'>((resolve) => {
+            Alert.alert(
+                'Payment Required',
+                `To send this request to the admin, payment is required.\n\nAmount (placeholder): ₨ ${amountDue}\n\nChoose an option:`,
+                [
+                    { text: 'Cancel', style: 'cancel', onPress: () => resolve('cancel') },
+                    { text: 'Create Pending', onPress: () => resolve('unpaid') },
+                    { text: 'Pay Now (Placeholder)', onPress: () => resolve('paid') },
+                ]
+            );
+        });
+    };
+
     const handleSubmit = async () => {
         if (!validateForm() || !user || !userProfile) return;
 
         setSubmitting(true);
         try {
+            const seatsPaid = teamMode === 'team' ? reservedSlots : 1;
+            const amountDue = Math.ceil((formData.pricePerPlayer || 0) * seatsPaid);
+            const paymentChoice = await promptPaymentChoice(amountDue);
+            if (paymentChoice === 'cancel') {
+                setSubmitting(false);
+                return;
+            }
+            const paymentStatus = paymentChoice;
+
             // Phase 3: If broadcast mode, create booking request instead of matchroom
             if (locationMode === 'broadcast') {
                 const requestData: Omit<BookingRequest, 'id' | 'createdAt' | 'status'> = {
@@ -598,6 +883,12 @@ export default function CreateMatchroom() {
                     description: formData.description?.trim() || '',
                     maxPlayers: formData.maxPlayers,
                     format: formData.format,
+                    seriesType: (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8')
+                        ? seriesType
+                        : (selectedGame === 'padel' || selectedGame === 'pickleball')
+                            ? formData.seriesType || null
+                            : null,
+                    durationHours: selectedGame === 'futsal' ? duration : null,
                     selectedMaps: formData.selectedMaps || [],
 
                     // Skill Info
@@ -609,21 +900,33 @@ export default function CreateMatchroom() {
                         answers: hostSkillAnswers || {},
                     },
 
+                    overs: formData.overs || null,
                     teamMode: teamMode,
                     teamId: teamMode === 'team' ? (selectedTeamId || null) : null,
                     reservedSlots: teamMode === 'team' ? reservedSlots : 1,
+                    preferredDate: formData.date || undefined,
+                    preferredTime: formData.time || undefined,
+                    flexibilityWindow: 'Exact time',
                     preferredAreas: broadcastAreas.length > 0 ? broadcastAreas : (userProfile.areasPreferred || []),
                     budgetPerPlayer: formData.pricePerPlayer || 0,
                     currency: 'PKR',
-                    // TODO: Add date/time to BookingRequest interface if needed, or put in description
+
+                    paymentStatus,
+                    paymentAmount: amountDue,
+                    paymentReservedSlots: seatsPaid,
                 };
 
-                const result = await createBookingRequest(requestData);
+                const result = await createBookingRequest(
+                    requestData,
+                    { status: paymentStatus === 'paid' ? 'open' : 'pending_payment' }
+                );
 
                 if (result.ok) {
                     Alert.alert(
-                        'Broadcast Sent!',
-                        'Zone admins in your preferred areas will send you offers. Check "My Requests" to view offers.',
+                        paymentStatus === 'paid' ? 'Broadcast Sent!' : 'Request Created (Pending Payment)',
+                        paymentStatus === 'paid'
+                            ? 'Zone admins in your preferred areas will send you offers. Check "My Requests" to view offers.'
+                            : 'This request is pending payment and has not been sent to admins yet (placeholder).',
                         [{ text: 'OK', onPress: () => router.back() }]
                     );
                 } else {
@@ -641,6 +944,12 @@ export default function CreateMatchroom() {
                 title: formData.title.trim(),
                 description: formData.description?.trim() || '',
                 maxPlayers: formData.maxPlayers,
+                status: 'open' as const,
+                isLocked: paymentStatus === 'unpaid',
+                paymentStatus,
+                paymentAmount: amountDue,
+                paymentReservedSlots: seatsPaid,
+                paymentCurrency: 'PKR',
                 pricing: {
                     perPlayer: formData.pricePerPlayer || 0,
                     currency: 'PKR',
@@ -681,14 +990,14 @@ export default function CreateMatchroom() {
                 // Tekken characters
                 tekkenCharacters: selectedGame === 'tekken8' ? formData.tekkenCharacters : undefined,
 
-                // Game-specific fields
-                format: (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8')
-                    ? `${formData.format} (${seriesType})`
-                    : (selectedGame === 'futsal'
-                        ? `${formData.format} (${duration}h)`
-                        : (selectedGame === 'indoor_cricket'
-                            ? `${formData.format} (${formData.overs} overs)`
-                            : formData.format)),
+                // Game-specific fields (structured)
+                format: formData.format,
+                seriesType: (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8')
+                    ? seriesType
+                    : (selectedGame === 'padel' || selectedGame === 'pickleball')
+                        ? formData.seriesType || null
+                        : null,
+                durationHours: selectedGame === 'futsal' ? duration : null,
                 selectedMaps: formData.selectedMaps || [],
 
                 // Skill System
@@ -699,15 +1008,7 @@ export default function CreateMatchroom() {
                     gameKey: selectedGame,
                     answers: hostSkillAnswers || {},
                 },
-                hostRole: (() => {
-                    const game = selectedGame?.toLowerCase();
-                    if (game === 'cs2') return userProfile.cs2Role || 'Flex';
-                    if (game === 'fc26' || game === 'fc25') return userProfile.fcTeam || 'Flex';
-                    if (game === 'tekken8') return userProfile.tekkenFavorites?.[0] || 'Flex';
-                    if (game === 'futsal') return userProfile.futsalPosition || 'Flex';
-                    if (game === 'indoor_cricket') return userProfile.indoorCricketRole || 'Flex';
-                    return 'Flex';
-                })(),
+                hostRole: hostRole || 'Flex',
 
                 playstyle: formData.playstyle || null,
                 rankRequirement: formData.rankRequirement || null,
@@ -729,11 +1030,24 @@ export default function CreateMatchroom() {
                 teamId: teamMode === 'team' ? (selectedTeamId || null) : null,
                 teamName: teamMode === 'team' ? (teams.find((t: Team) => t.id === selectedTeamId)?.name || null) : null,
                 reservedSlots: teamMode === 'team' ? reservedSlots : 1,
-                assignedTeamMembers: (teamMode === 'team' && selectedTeamId) ?
-                    (teams.find((t: Team) => t.id === selectedTeamId)?.memberUids || []).slice(0, reservedSlots).map((uid: string) => ({
-                        uid,
-                        username: 'Team Member', // TODO: Fetch actual usernames
-                    })) : [],
+                assignedTeamMembers: (teamMode === 'team' && resolvedTeam) ?
+                    ([
+                        {
+                            uid: resolvedTeam.captainUid,
+                            username: resolvedTeam.captainUsername || userProfile.username || userProfile.displayName || 'Captain',
+                            role: memberSportRoleByUid[resolvedTeam.captainUid]
+                                ? `Captain • ${memberSportRoleByUid[resolvedTeam.captainUid]}`
+                                : 'Captain',
+                        },
+                        ...selectedTeamMemberUids.map((uid) => {
+                            const m = selectableTeamMembers.find(x => x.uid === uid);
+                            return {
+                                uid,
+                                username: m?.username || 'Team Member',
+                                role: memberSportRoleByUid[uid] || 'Player',
+                            };
+                        })
+                    ].slice(0, reservedSlots)) : [],
 
                 // Required roles (optional)
                 requiredRoles: [],
@@ -756,7 +1070,9 @@ export default function CreateMatchroom() {
             if (result.ok) {
                 Alert.alert(
                     'Success!',
-                    'Your matchroom has been created',
+                    paymentStatus === 'paid'
+                        ? 'Your matchroom has been created'
+                        : 'Your matchroom is pending payment (placeholder) and is locked until paid.',
                     [
                         {
                             text: 'View Match',
@@ -788,7 +1104,13 @@ export default function CreateMatchroom() {
     const canSubmit = (
         selectedGame &&
         formData.title &&
-        (locationMode === 'broadcast' || selectedZoneId)
+        formData.format &&
+        formData.date &&
+        formData.time &&
+        isDateAllowed &&
+        (locationMode === 'broadcast' || selectedZoneId) &&
+        (locationMode === 'broadcast' || zoneRateOptions.length === 0 || !!selectedZoneRateKey) &&
+        (teamMode !== 'team' || (!!selectedTeamId && selectedTeamMemberUids.length === Math.max(0, reservedSlots - 1)))
     );
 
     return (
@@ -833,7 +1155,146 @@ export default function CreateMatchroom() {
                                 formData={formData}
                                 onChange={handleFieldChange}
                                 selectedGame={selectedGame || undefined}
+                                minimumDate={minAllowedDate}
+                                dateHelperText={teamMode === 'team'
+                                    ? `Captain booking: earliest allowed date is ${minAllowedDate.toLocaleDateString()}`
+                                    : `Solo booking: earliest allowed date is ${minAllowedDate.toLocaleDateString()}`}
                             />
+
+                            {/* Captain-only Booking Options */}
+                            {isCaptainForGame && (
+                                <View style={styles.section}>
+                                    <Text style={styles.sectionLabel}>
+                                        Booking Type<Text style={styles.requiredAsterisk}>*</Text>
+                                    </Text>
+                                    <View style={styles.chipRow}>
+                                        {(['solo', 'team'] as const).map((mode) => {
+                                            const isActive = teamMode === mode;
+                                            const label = mode === 'solo' ? 'Solo (1 slot)' : 'Captain (2-5 slots)';
+                                            return (
+                                                <Pressable
+                                                    key={mode}
+                                                    style={({ pressed }) => [
+                                                        styles.optionChip,
+                                                        isActive && styles.optionChipActive,
+                                                        pressed && { opacity: 0.9 }
+                                                    ]}
+                                                    onPress={() => {
+                                                        setTeamMode(mode);
+                                                        if (mode === 'solo') {
+                                                            setReservedSlots(1);
+                                                            setSelectedTeamId(null);
+                                                            setSelectedTeamMemberUids([]);
+                                                        } else {
+                                                            if (reservedSlots < 2) setReservedSlots(2);
+                                                            if (!selectedTeamId && captainedTeams[0]?.id) setSelectedTeamId(captainedTeams[0].id);
+                                                        }
+                                                    }}
+                                                >
+                                                    <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
+                                                        {label}
+                                                    </Text>
+                                                </Pressable>
+                                            );
+                                        })}
+                                    </View>
+
+                                    {teamMode === 'team' && (
+                                        <>
+                                            <View style={[styles.section, { marginBottom: 0, marginTop: 12 }]}>
+                                                <Text style={styles.sectionLabel}>
+                                                    Reserved Slots<Text style={styles.requiredAsterisk}>*</Text>
+                                                </Text>
+                                                <View style={styles.chipRow}>
+                                                    {[2, 3, 4, 5].map((count) => {
+                                                        const isActive = reservedSlots === count;
+                                                        return (
+                                                            <Pressable
+                                                                key={count}
+                                                                style={({ pressed }) => [
+                                                                    styles.optionChip,
+                                                                    isActive && styles.optionChipActive,
+                                                                    pressed && { opacity: 0.9 }
+                                                                ]}
+                                                                onPress={() => {
+                                                                    setReservedSlots(count);
+                                                                    setSelectedTeamMemberUids([]);
+                                                                }}
+                                                            >
+                                                                <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
+                                                                    {count}
+                                                                </Text>
+                                                            </Pressable>
+                                                        );
+                                                    })}
+                                                </View>
+                                                <Text style={[styles.helperTextTiny, styles.marginTop8]}>
+                                                    Captain counts as 1 slot. Select {Math.max(0, reservedSlots - 1)} teammate{reservedSlots - 1 === 1 ? '' : 's'} below.
+                                                </Text>
+                                            </View>
+
+                                            {resolvedTeam && (
+                                                <View style={[styles.section, { marginBottom: 0, marginTop: 12 }]}>
+                                                    <Text style={styles.sectionLabel}>
+                                                        Select Players<Text style={styles.requiredAsterisk}>*</Text>
+                                                    </Text>
+                                                    {selectableTeamMembers.length === 0 ? (
+                                                        <View style={styles.emptyContainer}>
+                                                            <Text style={styles.emptyTitle}>No teammates found</Text>
+                                                            <Text style={styles.emptySubtitle}>Invite teammates to your team first.</Text>
+                                                        </View>
+                                                    ) : (
+                                                        <View style={styles.memberGrid}>
+                                                            {selectableTeamMembers.map((m) => {
+                                                                const isActive = selectedTeamMemberUids.includes(m.uid);
+                                                                const limit = Math.max(0, reservedSlots - 1);
+                                                                const disabled = !isActive && selectedTeamMemberUids.length >= limit;
+                                                                return (
+                                                                    <Pressable
+                                                                        key={m.uid}
+                                                                        style={({ pressed }) => [
+                                                                            styles.memberCard,
+                                                                            isActive && styles.memberCardSelected,
+                                                                            disabled && { opacity: 0.5 },
+                                                                            pressed && { opacity: 0.9 }
+                                                                        ]}
+                                                                        onPress={() => {
+                                                                            if (disabled) return;
+                                                                            setSelectedTeamMemberUids((prev) => {
+                                                                                if (prev.includes(m.uid)) return prev.filter(x => x !== m.uid);
+                                                                                return [...prev, m.uid];
+                                                                            });
+                                                                        }}
+                                                                    >
+                                                                        <View style={styles.memberAvatar}>
+                                                                            <Text style={styles.memberAvatarText}>
+                                                                                {m.username?.charAt(0).toUpperCase() || 'P'}
+                                                                            </Text>
+                                                                        </View>
+                                                                        <View style={styles.memberInfo}>
+                                                                            <Text style={styles.memberName} numberOfLines={1}>
+                                                                                {m.username}
+                                                                            </Text>
+                                                                            <View style={styles.memberRoleBadge}>
+                                                                                <Text style={styles.memberRoleText} numberOfLines={1} ellipsizeMode="tail">
+                                                                                    {memberSportRoleByUid[m.uid] || 'Player'}
+                                                                                </Text>
+                                                                            </View>
+                                                                        </View>
+                                                                    </Pressable>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                    )}
+                                                    <Text style={[styles.helperTextTiny, styles.marginTop8]}>
+                                                        Placeholder: captain pays for {reservedSlots} booked seats.
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </>
+                                    )}
+                                </View>
+                            )}
 
                             {/* Game-Specific Dynamic Fields */}
                             <GameDynamicFields
@@ -873,19 +1334,58 @@ export default function CreateMatchroom() {
                                     <ZonePicker
                                         gameKey={selectedGame}
                                         selectedZoneId={selectedZoneId}
-                                        onZoneSelect={(zoneId, zoneName, hourlyRate, ps5HourlyRate) => {
-                                            setSelectedZoneId(zoneId);
-                                            setSelectedZoneName(zoneName);
-                                            setZoneRate(hourlyRate);
-                                            setPs5Rate(ps5HourlyRate || 0);
+                                        onZoneSelect={(zone) => {
+                                            setSelectedZoneId(zone.id || null);
+                                            setSelectedZoneName(zone.venueBrandName || null);
+                                            setSelectedZone(zone);
+                                            setSelectedZoneRateKey(null);
+                                            setZoneRate(0);
                                         }}
                                         userPreferredAreas={userProfile?.areasPreferred}
                                     />
 
+                                    {selectedZoneId && zoneRateOptions.length > 0 && (
+                                        <View style={styles.section}>
+                                            <Text style={styles.sectionLabel}>
+                                                Select Rate Type<Text style={styles.requiredAsterisk}>*</Text>
+                                            </Text>
+                                            <View style={styles.chipRow}>
+                                                {zoneRateOptions.map((opt) => {
+                                                    const isActive = selectedZoneRateKey === opt.key;
+                                                    return (
+                                                        <Pressable
+                                                            key={opt.key}
+                                                            style={({ pressed }) => [
+                                                                styles.optionChip,
+                                                                isActive && styles.optionChipActive,
+                                                                pressed && { opacity: 0.9 }
+                                                            ]}
+                                                            onPress={() => {
+                                                                setSelectedZoneRateKey(opt.key);
+                                                                setZoneRate(opt.price);
+                                                            }}
+                                                        >
+                                                            <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
+                                                                {opt.label}
+                                                            </Text>
+                                                        </Pressable>
+                                                    );
+                                                })}
+                                            </View>
+                                            {!selectedZoneRateKey && (
+                                                <Text style={[styles.helperText, styles.marginTop8]}>
+                                                    Pick a rate to calculate per-person pricing.
+                                                </Text>
+                                            )}
+                                        </View>
+                                    )}
+
                                     {/* Series Type Selector (CS2 & FC & Tekken) */}
                                     {(selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8') && selectedZoneId && (
                                         <View style={styles.section}>
-                                            <Text style={styles.sectionLabel}>Series Type</Text>
+                                            <Text style={styles.sectionLabel}>
+                                                Series Type<Text style={styles.requiredAsterisk}>*</Text>
+                                            </Text>
                                             <View style={[styles.row, styles.gap8]}>
                                                 {(selectedGame === 'cs2'
                                                     ? ['BO1', 'BO3', 'BO5'] as const
@@ -928,7 +1428,9 @@ export default function CreateMatchroom() {
                                     {/* Booking Duration Selector (Futsal) */}
                                     {selectedGame === 'futsal' && selectedZoneId && (
                                         <View style={styles.section}>
-                                            <Text style={styles.sectionLabel}>Booking Duration</Text>
+                                            <Text style={styles.sectionLabel}>
+                                                Booking Duration<Text style={styles.requiredAsterisk}>*</Text>
+                                            </Text>
                                             <View style={{ flexDirection: 'row', gap: 8 }}>
                                                 {[1, 1.5, 2].map((d) => (
                                                     <Pressable
@@ -973,7 +1475,9 @@ export default function CreateMatchroom() {
                             {/* Series Type (Padel & Pickleball) */}
                             {(selectedGame === 'padel' || selectedGame === 'pickleball') && (
                                 <View style={styles.section}>
-                                    <Text style={styles.sectionLabel}>Series Type</Text>
+                                    <Text style={styles.sectionLabel}>
+                                        Series Type<Text style={styles.requiredAsterisk}>*</Text>
+                                    </Text>
                                     <View style={styles.chipRow}>
                                         {['BO3', 'BO5', 'BO10'].map((series) => {
                                             const isActive = formData.seriesType === series;
@@ -1004,7 +1508,7 @@ export default function CreateMatchroom() {
                                 <Text style={styles.sectionLabel}>Price Per Player (₨)</Text>
                                 <View style={[styles.inputBox, { flexDirection: 'row', alignItems: 'center' }]}>
                                     <TextInput
-                                        style={[styles.input, { flex: 1 }, (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8' || selectedGame === 'futsal' || selectedGame === 'indoorCricket' || selectedGame === 'padel' || selectedGame === 'pickleball') && { color: COLORS.muted }]}
+                                        style={[styles.input, { flex: 1 }, (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8' || selectedGame === 'futsal' || selectedGame === 'indoor_cricket' || selectedGame === 'padel' || selectedGame === 'pickleball') && { color: COLORS.muted }]}
                                         placeholder="e.g., 500 (or leave empty for free)"
                                         placeholderTextColor="#757575"
                                         value={formData.pricePerPlayer ? String(formData.pricePerPlayer) : ''}
@@ -1015,16 +1519,16 @@ export default function CreateMatchroom() {
                                             selectedGame !== 'fc26' &&
                                             selectedGame !== 'tekken8' &&
                                             selectedGame !== 'futsal' &&
-                                            selectedGame !== 'indoorCricket' &&
+                                            selectedGame !== 'indoor_cricket' &&
                                             selectedGame !== 'padel' &&
                                             selectedGame !== 'pickleball'
                                         }
                                     />
-                                    {(selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8' || selectedGame === 'futsal' || selectedGame === 'indoorCricket' || selectedGame === 'padel' || selectedGame === 'pickleball') && (
+                                    {(selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8' || selectedGame === 'futsal' || selectedGame === 'indoor_cricket' || selectedGame === 'padel' || selectedGame === 'pickleball') && (
                                         <MaterialIcons name="lock" size={16} color={COLORS.muted} style={{ marginLeft: 8 }} />
                                     )}
                                 </View>
-                                {(selectedGame === 'futsal' || selectedGame === 'indoorCricket') && (
+                                {(selectedGame === 'futsal' || selectedGame === 'indoor_cricket') && (
                                     <Text style={{ color: COLORS.muted, fontSize: 11, marginTop: 4, marginLeft: 4 }}>
                                         Calculated based on zone rate & duration
                                     </Text>

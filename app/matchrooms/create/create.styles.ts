@@ -43,6 +43,9 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.label - 1,
         marginBottom: SPACING.sm,
     },
+    requiredAsterisk: {
+        color: COLORS.error,
+    },
 
     // Game cards
     gameGrid: {
@@ -457,6 +460,64 @@ export default StyleSheet.create({
     zonePriceWrapper: {
         alignItems: 'flex-end',
         minWidth: 80,
+    },
+    memberGrid: {
+        width: '100%',
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SPACING.md,
+    },
+    memberCard: {
+        width: '47.5%',
+        backgroundColor: COLORS.cardDark,
+        borderRadius: RADII.lg,
+        padding: SPACING.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        ...SHADOWS.cardSoft,
+    },
+    memberCardSelected: {
+        borderColor: COLORS.accent,
+        backgroundColor: `${COLORS.accent}12`,
+    },
+    memberAvatar: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: COLORS.surfaceHighlight,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: COLORS.accent,
+    },
+    memberAvatarText: {
+        fontSize: TEXT_SIZES.lg,
+        fontWeight: '700',
+        color: COLORS.text,
+    },
+    memberInfo: {
+        flex: 1,
+        gap: 4,
+    },
+    memberName: {
+        fontSize: TEXT_SIZES.label,
+        color: COLORS.text,
+        fontWeight: '600',
+    },
+    memberRoleBadge: {
+        alignSelf: 'flex-start',
+    },
+    memberRoleText: {
+        fontSize: TEXT_SIZES.xs,
+        color: COLORS.accent,
+        backgroundColor: `${COLORS.accent}15`,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: RADII.xs,
+        overflow: 'hidden',
     },
     marginTop12: {
         marginTop: 12,

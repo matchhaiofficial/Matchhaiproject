@@ -146,6 +146,23 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
             {/* Row 4: Roles & Price */}
             <View style={styles.nearbyBottomRow}>
                 <View style={styles.roleRow}>
+                    {(() => {
+                        const series = (room as any).seriesType;
+                        const overs = (room as any).overs;
+                        const durationHours = (room as any).durationHours;
+                        if (tagsToShow.length === 0 && room.format) {
+                            let label = room.format;
+                            if (series) label = `${label} (${series})`;
+                            else if (overs) label = `${label} (${overs} overs)`;
+                            else if (durationHours) label = `${label} (${durationHours}h)`;
+                            return (
+                                <View style={styles.skillTag}>
+                                    <Text style={styles.skillText}>{label}</Text>
+                                </View>
+                            );
+                        }
+                        return null;
+                    })()}
                     {tagsToShow.map((tag, index) => (
                         <View key={index} style={isSkillTag ? styles.skillTag : styles.roleTag}>
                             <Text style={isSkillTag ? styles.skillText : styles.roleText}>{tag}</Text>
@@ -153,12 +170,6 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     ))}
                     {remainingCount > 0 && (
                         <Text style={styles.moreRolesText}>+{remainingCount}</Text>
-                    )}
-                    {/* If no tags, maybe show format? */}
-                    {tagsToShow.length === 0 && room.format && (
-                        <View style={styles.skillTag}>
-                            <Text style={styles.skillText}>{room.format}</Text>
-                        </View>
                     )}
                 </View>
                 <View style={styles.priceTagContainer}>

@@ -7,17 +7,20 @@ interface BasicFieldsProps {
     formData: Record<string, any>;
     onChange: (field: string, value: any) => void;
     selectedGame?: string;
+    minimumDate?: Date;
+    dateHelperText?: string;
 }
 
-export default function BasicFields({ formData, onChange, selectedGame }: BasicFieldsProps) {
+export default function BasicFields({ formData, onChange, selectedGame, minimumDate, dateHelperText }: BasicFieldsProps) {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
 
-    // Helper to parse date string DD/MM/YYYY to Date object
+    // Helper to parse ISO date string YYYY-MM-DD to Date object
     const parseDate = (dateStr: string) => {
         if (!dateStr) return new Date();
-        const [day, month, year] = dateStr.split('/').map(Number);
-        return new Date(year, month - 1, day);
+        // Expect ISO format; fallback to current date if invalid
+        const parsed = new Date(`${dateStr}T00:00`);
+        return isNaN(parsed.getTime()) ? new Date() : parsed;
     };
 
     // Helper to parse time string HH:MM to Date object
@@ -45,7 +48,8 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
             const day = String(selectedDate.getDate()).padStart(2, '0');
             const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
             const year = selectedDate.getFullYear();
-            onChange('date', `${day}/${month}/${year}`);
+            const iso = `${year}-${month}-${day}`;
+            onChange('date', iso);
         }
     };
 
@@ -63,7 +67,9 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
         <>
             {/* Title */}
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Match Title</Text>
+                <Text style={styles.sectionLabel}>
+                    Match Title<Text style={styles.requiredAsterisk}>*</Text>
+                </Text>
                 <View style={styles.inputBox}>
                     <TextInput
                         style={styles.input}
@@ -93,7 +99,9 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
 
             {/* Date and Time (CS2 & Others) */}
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Date & Time</Text>
+                <Text style={styles.sectionLabel}>
+                    Date & Time<Text style={styles.requiredAsterisk}>*</Text>
+                </Text>
                 <View style={styles.tabContainer}>
                     <View style={[styles.inputBox, styles.flex1]}>
                         <Pressable
@@ -101,7 +109,12 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
                             style={styles.flex1Center}
                         >
                             <Text style={[styles.input, !formData.date && styles.mutedText]}>
-                                {formData.date || 'DD/MM/YYYY'}
+                                {formData.date
+                                    ? (() => {
+                                        const [y, m, d] = formData.date.split('-');
+                                        return d && m && y ? `${d}/${m}/${y}` : formData.date;
+                                    })()
+                                    : 'DD/MM/YYYY'}
                             </Text>
                         </Pressable>
                     </View>
@@ -116,6 +129,9 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
                         </Pressable>
                     </View>
                 </View>
+                {!!dateHelperText && (
+                    <Text style={styles.helperTextTiny}>{dateHelperText}</Text>
+                )}
             </View>
 
             {showDatePicker && (
@@ -124,7 +140,7 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
                     mode="date"
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                     onChange={handleDateChange}
-                    minimumDate={new Date()}
+                    minimumDate={minimumDate || new Date()}
                 />
             )}
 
@@ -141,7 +157,9 @@ export default function BasicFields({ formData, onChange, selectedGame }: BasicF
             {/* Max Players - Hidden for CS2 & FC26 */}
             {selectedGame !== 'cs2' && selectedGame !== 'fc26' && (
                 <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Max Players</Text>
+                    <Text style={styles.sectionLabel}>
+                        Max Players<Text style={styles.requiredAsterisk}>*</Text>
+                    </Text>
                     <View style={styles.inputBox}>
                         <TextInput
                             style={styles.input}

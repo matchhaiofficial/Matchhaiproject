@@ -24,8 +24,19 @@ export interface BookingRequest {
     // Match details
     maxPlayers: number;
     format?: string;
+    seriesType?: string | null;
+    durationHours?: number | null;
     selectedMaps?: string[];
     skillLevel?: string;
+    overs?: string | null;
+
+    // Skill Info (placeholder for routing / matching)
+    hostSkillScore?: number | null;
+    hostSkillTier?: string | null;
+    hostSkillContext?: {
+        gameKey: string;
+        answers: Record<string, any>;
+    };
 
     // Team details (if team mode)
     teamMode: 'team' | 'solo';
@@ -45,8 +56,13 @@ export interface BookingRequest {
     currency: string;
 
     // Status
-    status: 'open' | 'accepted' | 'expired' | 'cancelled';
+    status: 'open' | 'pending_payment' | 'accepted' | 'expired' | 'cancelled';
     acceptedOfferId?: string;
+
+    // Payment placeholder (production)
+    paymentStatus?: 'paid' | 'unpaid';
+    paymentAmount?: number;
+    paymentReservedSlots?: number;
 
     createdAt: any;
     expiresAt?: any;
@@ -81,12 +97,13 @@ export interface ZoneOffer {
  * Create a new booking request (broadcast mode)
  */
 export const createBookingRequest = async (
-    data: Omit<BookingRequest, 'id' | 'createdAt' | 'status'>
+    data: Omit<BookingRequest, 'id' | 'createdAt' | 'status'>,
+    options?: { status?: BookingRequest['status'] }
 ): Promise<{ ok: boolean; id?: string; message?: string }> => {
     try {
         const requestData = {
             ...data,
-            status: 'open' as const,
+            status: (options?.status || 'open') as BookingRequest['status'],
             createdAt: serverTimestamp(),
             expiresAt: serverTimestamp(), // TODO: Add 24hrs or configurable expiry
         };

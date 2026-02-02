@@ -9,7 +9,7 @@ import styles from '../create.styles';
 interface ZonePickerProps {
     gameKey: string | null;
     selectedZoneId?: string | null;
-    onZoneSelect: (zoneId: string, zoneName: string, hourlyRate: number, ps5HourlyRate?: number) => void;
+    onZoneSelect: (zone: Zone) => void;
     userPreferredAreas?: string[];
 }
 
@@ -59,6 +59,48 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
         return true;
     });
 
+    const getStartingPrice = (zone: Zone) => {
+        const pricing: any = zone.pricing || (zone.branches?.[0] as any)?.pricing;
+        if (!pricing) return null;
+
+        const prices: number[] = [];
+
+        if (gameKey === 'cs2') {
+            const pc: any = pricing.pc || {};
+            (['regular', 'premium', 'elite'] as const).forEach((key) => {
+                const price = pc?.[key]?.price;
+                if (typeof price === 'number' && price > 0) prices.push(price);
+            });
+        } else if (gameKey === 'fc26' || gameKey === 'tekken8' || gameKey === 'fc25') {
+            const consolePricing: any = pricing.console || {};
+            const ps5: any = consolePricing.ps5 || null;
+            const xbox: any = consolePricing.xbox || null;
+            [ps5?.price1v1, ps5?.price2v2, xbox?.price1v1, xbox?.price2v2].forEach((price) => {
+                if (typeof price === 'number' && price > 0) prices.push(price);
+            });
+        } else if (gameKey === 'futsal') {
+            Object.values(pricing.futsal || {}).forEach((entry: any) => {
+                if (typeof entry?.price === 'number' && entry.price > 0) prices.push(entry.price);
+            });
+        } else if (gameKey === 'indoor_cricket') {
+            const cricket = pricing.indoorCricket || pricing.indoor_cricket || (pricing as any).indoor_cricket || {};
+            Object.values(cricket).forEach((entry: any) => {
+                if (typeof entry?.price === 'number' && entry.price > 0) prices.push(entry.price);
+            });
+        } else if (gameKey === 'padel') {
+            Object.values(pricing.padel || {}).forEach((entry: any) => {
+                if (typeof entry?.price === 'number' && entry.price > 0) prices.push(entry.price);
+            });
+        } else if (gameKey === 'pickleball') {
+            Object.values(pricing.pickleball || {}).forEach((entry: any) => {
+                if (typeof entry?.price === 'number' && entry.price > 0) prices.push(entry.price);
+            });
+        }
+
+        if (prices.length === 0) return null;
+        return Math.min(...prices);
+    };
+
     if (!gameKey) {
         return null;
     }
@@ -66,7 +108,9 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
     if (loading) {
         return (
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Select Zone</Text>
+                <Text style={styles.sectionLabel}>
+                    Select Zone<Text style={styles.requiredAsterisk}>*</Text>
+                </Text>
                 <ActivityIndicator color={COLORS.accent} style={styles.marginTop12} />
             </View>
         );
@@ -74,7 +118,9 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
 
     return (
         <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Select Zone</Text>
+            <Text style={styles.sectionLabel}>
+                Select Zone<Text style={styles.requiredAsterisk}>*</Text>
+            </Text>
 
             {/* Search Input */}
             <View style={[styles.inputBox, { marginBottom: 12, flexDirection: 'row', alignItems: 'center' }]}>
@@ -104,7 +150,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                     styles.zoneCard,
                                     isSelected && styles.zoneCardActive,
                                 ]}
-                                onPress={() => onZoneSelect(zone.id, zone.venueBrandName, zone.hourlyRate || 0, zone.ps5HourlyRate)}
+                                onPress={() => onZoneSelect(zone)}
                             >
                                 <View style={styles.zoneInfoWrapper}>
                                     <Text style={styles.zoneName} numberOfLines={1} ellipsizeMode="tail">
@@ -115,13 +161,16 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                     </Text>
                                 </View>
                                 <View style={styles.zonePriceWrapper}>
-                                    {zone.effectiveRateLabel ? (
-                                        <Text style={styles.zonePrice}>
-                                            {zone.effectiveRateLabel}
-                                        </Text>
-                                    ) : (
-                                        <Text style={styles.zoneDetail}>Rate TBD</Text>
-                                    )}
+                                    {(() => {
+                                        const startPrice = getStartingPrice(zone);
+                                        return startPrice ? (
+                                            <Text style={styles.zonePrice}>
+                                                {`From ₨ ${startPrice}/hr`}
+                                            </Text>
+                                        ) : (
+                                            <Text style={styles.zoneDetail}>Rate TBD</Text>
+                                        );
+                                    })()}
                                     {isSelected && (
                                         <MaterialIcons name="check-circle" size={16} color={COLORS.accent} style={styles.marginTop4} />
                                     )}

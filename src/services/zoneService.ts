@@ -17,38 +17,7 @@ import type {
   ZoneStep1Data,
 } from "../store/zoneOnboardingStore";
 import Logger from "../utils/logger";
-import { SkillTier } from "./skillRatingService";
 import { normalizePhoneForSave } from "./userService";
-
-// BookingRequest interface for representing incoming booking requests
-export interface BookingRequest {
-  id: string;
-  userId: string;
-  userName: string;
-  gameKey: string;
-  title: string;
-  description: string;
-  maxPlayers: number;
-  format: string;
-  selectedMaps: string[];
-  skillLevel: string;
-  hostSkillScore?: number | null;
-  hostSkillTier?: SkillTier | 'Any';
-  hostSkillContext?: {
-    gameKey: string;
-    answers: Record<string, any>;
-  };
-  teamMode: 'solo' | 'team';
-  role?: 'player' | 'zone-admin' | 'super-admin';
-  teamId: string | null;
-  reservedSlots: number;
-
-  preferredAreas: string[];
-  budgetPerPlayer: number;
-  currency: string;
-  status: 'pending' | 'fulfilled';
-  createdAt: any;
-}
 
 export interface EffectiveRateResult {
   rate: number | null;
@@ -108,8 +77,10 @@ export async function saveZoneRegistration(
     // Aggregate capacity (sum of all branches)
     const capacity = {
       pcSeats: branches.reduce((sum, b) => sum + (toIntOrNull(b.pricing.pc?.regular?.count) || 0) + (toIntOrNull(b.pricing.pc?.premium?.count) || 0) + (toIntOrNull(b.pricing.pc?.elite?.count) || 0), 0),
-      consoleSeats: branches.reduce((sum, b) => sum + (toIntOrNull(b.pricing.console?.ps5?.count) || 0), 0),
-      consolePlatform: branches.some(b => b.pricing.console?.ps5) ? 'ps5' : null,
+      consoleSeats: branches.reduce((sum, b) => sum + (toIntOrNull(b.pricing.console?.ps5?.count) || 0) + (toIntOrNull(b.pricing.console?.xbox?.count) || 0), 0),
+      consolePlatform: branches.some(b => b.pricing.console?.ps5) && branches.some(b => b.pricing.console?.xbox)
+        ? 'mixed'
+        : (branches.some(b => b.pricing.console?.ps5) ? 'ps5' : (branches.some(b => b.pricing.console?.xbox) ? 'xbox' : null)),
 
       futsalCourts: branches.reduce((sum, b) => sum + Object.values(b.pricing.futsal || {}).reduce((s, v: any) => s + (toIntOrNull(v.count) || 0), 0), 0),
       futsalCourtType: null, // Legacy
@@ -152,6 +123,11 @@ export async function saveZoneRegistration(
             count: toIntOrNull(b.pricing.console.ps5.count) || 0,
             price1v1: toIntOrNull(b.pricing.console.ps5.price1v1) || 0,
             price2v2: toIntOrNull(b.pricing.console.ps5.price2v2) || 0
+          } : null,
+          xbox: b.pricing.console.xbox ? {
+            count: toIntOrNull(b.pricing.console.xbox.count) || 0,
+            price1v1: toIntOrNull(b.pricing.console.xbox.price1v1) || 0,
+            price2v2: toIntOrNull(b.pricing.console.xbox.price2v2) || 0
           } : null
         } : null,
         // Sports maps (dynamic keys)
@@ -212,93 +188,6 @@ export async function saveZoneRegistration(
 }
 
 /**
- * Fetch booking requests that match the zone's supported games.
- * Only returns requests with status 'pending'.
- */
-export async function getBookingRequests(
-  supportedGames: string[]
-): Promise<{ ok: true; data: BookingRequest[] } | { ok: false; message: string }> {
-  try {
-    if (!supportedGames || supportedGames.length === 0) {
-      return { ok: true, data: [] };
-    }
-
-    // Removed orderBy to avoid index issues - sorting in memory instead
-    const q = query(
-      collection(db, "booking_requests"),
-      where("gameKey", "in", supportedGames),
-      where("status", "==", "pending")
-    );
-
-    const snapshot = await getDocs(q);
-    const requests = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as BookingRequest[];
-
-    // Sort in memory by createdAt descending
-    requests.sort((a, b) => {
-      const aTime = a.createdAt?.seconds || 0;
-      const bTime = b.createdAt?.seconds || 0;
-      return bTime - aTime;
-    });
-
-    Logger.info("zoneService", "Fetched booking requests", { count: requests.length });
-    return { ok: true, data: requests };
-  } catch (error) {
-    Logger.error("zoneService", "Error fetching booking requests", error);
-    return { ok: false, message: "Failed to fetch booking requests" };
-  }
-}
-
-/**
- * Create a new booking request.
- */
-export async function createBookingRequest(
-  requestData: Omit<BookingRequest, 'id' | 'createdAt' | 'status'>
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
-  try {
-    const docRef = await addDoc(collection(db, "booking_requests"), {
-      ...requestData,
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
-
-    Logger.info("zoneService", "Created booking request", { id: docRef.id });
-    return { ok: true, id: docRef.id };
-  } catch (error) {
-    Logger.error("zoneService", "Error creating booking request", error);
-    return { ok: false, message: "Failed to create booking request" };
-  }
-}
-
-/**
- * Send a booking offer from a zone to a user's booking request.
- */
-export async function sendBookingOffer(offer: {
-  requestId: string;
-  zoneId: string;
-  branchId: string;
-  zoneName: string;
-  branchName: string;
-  price: number;
-  status: 'pending' | 'accepted' | 'rejected';
-}): Promise<{ ok: true } | { ok: false; message: string }> {
-  try {
-    await addDoc(collection(db, "booking_offers"), {
-      ...offer,
-      createdAt: serverTimestamp(),
-    });
-
-    Logger.info("zoneService", "Sent booking offer", { requestId: offer.requestId });
-    return { ok: true };
-  } catch (error) {
-    Logger.error("zoneService", "Error sending booking offer", error);
-    return { ok: false, message: "Failed to send booking offer" };
-  }
-}
-
-/**
  * Zone interface for displaying zone info
  */
 export interface Zone {
@@ -345,6 +234,11 @@ export interface Zone {
         count: number;
         price1v1: number; // 2 controllers
         price2v2: number; // 4 controllers
+      };
+      xbox?: {
+        count: number;
+        price1v1: number;
+        price2v2: number;
       };
     };
 
@@ -473,8 +367,11 @@ export function deriveZoneRate(zone: Zone, gameKey: string): EffectiveRateResult
     case 'tekken8':
       // Prefer price1v1, fallback to price2v2 or any other field starting with 'price'
       const consolePs5 = p.console?.ps5 as any;
-      rate = consolePs5?.price1v1 || consolePs5?.price || consolePs5?.price2v2 || null;
-      if (rate) label = `${rate} PKR/hr (PS5)`;
+      const consoleXbox = p.console?.xbox as any;
+      const ps5Rate = consolePs5?.price1v1 || consolePs5?.price || consolePs5?.price2v2 || null;
+      const xboxRate = consoleXbox?.price1v1 || consoleXbox?.price || consoleXbox?.price2v2 || null;
+      rate = ps5Rate || xboxRate || null;
+      if (rate) label = `${rate} PKR/hr (${ps5Rate ? 'PS5' : 'Xbox'})`;
       break;
 
     case 'futsal':
