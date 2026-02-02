@@ -59,6 +59,10 @@ function clamp(num: number, min: number, max: number) {
     return Math.min(Math.max(num, min), max);
 }
 
+function clampRating(value: number) {
+    return clamp(value, 0, 100);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // INITIAL RATING CALCULATION (0-100)
 // ═══════════════════════════════════════════════════════════════
@@ -164,10 +168,11 @@ export function calculateScoreFromAnswers(
             // The threshold.rating in config is expected to be 0-100 now. 
             // If the existing config uses old values, we might need to interpret specifically.
             // As per instruction, we use the config's mapping.
+            const normalizedRating = clampRating(thresh.rating);
             return {
-                rating: thresh.rating,
+                rating: normalizedRating,
                 // We re-calculate tier to ensure consistency with our new global logic
-                tier: getTierFromRating(thresh.rating)
+                tier: getTierFromRating(normalizedRating)
             };
         }
     }
@@ -189,16 +194,17 @@ export async function saveSelfAssessment(
         const result = calculateScoreFromAnswers(gameKey, answers);
         if (!result) return { ok: false };
 
-        const { rating, tier } = result;
+        const normalizedRating = clampRating(result.rating);
+        const normalizedTier = getTierFromRating(normalizedRating);
 
         const skillScore: GameSkillScore = {
-            rating,
-            tier,
+            rating: normalizedRating,
+            tier: normalizedTier,
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
             initialSource: 'questionnaire',
-            initialRating: rating,
+            initialRating: normalizedRating,
             lastMatchDate: null,
             lastUpdated: serverTimestamp(),
         };
@@ -208,7 +214,7 @@ export async function saveSelfAssessment(
             [`skillScores.${gameKey}`]: skillScore
         });
 
-        return { ok: true, rating, tier };
+        return { ok: true, rating: normalizedRating, tier: normalizedTier };
 
     } catch (error) {
         console.error('[skillRatingService] saveSelfAssessment error:', error);
@@ -233,6 +239,7 @@ export async function initializeSkillIfMissing(
 
     // Attempt to calculate from external data
     const { rating, source } = calculateInitialRating(gameKey, userProfile);
+    const normalizedRating = clampRating(rating);
 
     // If source is 'questionnaire', it means we found no external data.
     // In that case, we DO NOT auto-save a default 45. We return null so the UI prompts the user.
@@ -241,15 +248,15 @@ export async function initializeSkillIfMissing(
     }
 
     // If we have real external data (FACEIT/Steam), we auto-save it.
-    const tier = getTierFromRating(rating);
+    const tier = getTierFromRating(normalizedRating);
     const newScore: GameSkillScore = {
-        rating,
+        rating: normalizedRating,
         tier,
         matchesPlayed: 0,
         wins: 0,
         losses: 0,
         initialSource: source,
-        initialRating: rating,
+        initialRating: normalizedRating,
         lastMatchDate: null,
         lastUpdated: serverTimestamp(),
     };
@@ -346,7 +353,10 @@ export const applyMatchResult = async (
             // Just cast to any for dynamic property access to avoid TS complexity here
             const scores = p.skillScores as any;
             const s = scores[gameKey];
-            return s?.rating || 45;
+            if (typeof s?.rating === 'number') {
+                return clampRating(s.rating);
+            }
+            return 45;
         };
 
         // Calculate Team Averages

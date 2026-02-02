@@ -28,6 +28,9 @@ import Logger from "../../src/utils/logger";
 import { isRoomExpired, isRoomLocked } from "../../src/utils/matchroomLifecycle";
 import styles from "./detail.styles";
 
+const DEFAULT_SKILL_RATING = 45;
+const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+
 export default function MatchroomDetails() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
@@ -129,7 +132,12 @@ export default function MatchroomDetails() {
                 try {
                     const uDoc = await getDoc(doc(db, "users", p.uid));
                     if (uDoc.exists()) {
-                        ratings[p.uid] = uDoc.data().skillScores?.[room.game] || null;
+                        const rawScore = uDoc.data().skillScores?.[room.game] as GameSkillScore | undefined;
+                        if (rawScore && typeof rawScore.rating === 'number') {
+                            ratings[p.uid] = { ...rawScore, rating: clampRating(rawScore.rating) };
+                        } else {
+                            ratings[p.uid] = rawScore || null;
+                        }
                     }
                 } catch (e) {
                     console.error("Failed to fetch rating for", p.username);
@@ -237,14 +245,18 @@ export default function MatchroomDetails() {
                     if (uDoc.exists()) {
                         const uData = uDoc.data();
                         const gameScore = uData.skillScores?.[room.game];
-                        // Default to 1000 or beginner rating if no score found
-                        ratingsSnapshot[p.uid] = gameScore?.rating || 1000;
+                        // Default to mid rating if no score found
+                        if (typeof gameScore?.rating === 'number') {
+                            ratingsSnapshot[p.uid] = clampRating(gameScore.rating);
+                        } else {
+                            ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
+                        }
                     } else {
-                        ratingsSnapshot[p.uid] = 1000;
+                        ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
                     }
                 } catch (err) {
                     console.error("Error fetching user rating", err);
-                    ratingsSnapshot[p.uid] = 1000;
+                    ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
                 }
             }));
 
@@ -642,7 +654,15 @@ export default function MatchroomDetails() {
 
                                     // Legacy Fallback for Duration
                                     if (!duration) {
-                                        if (room.format?.includes('BO1')) duration = 60;
+                                        const series = (room as any).seriesType;
+                                        if (series === 'BO1') duration = 60;
+                                        else if (series === 'BO3') duration = (room.game === 'fc26') ? 60 : 180;
+                                        else if (series === 'BO5') duration = (room.game === 'fc26') ? 120 : 300;
+                                        else if (series === 'BO7') duration = 60; // Tekken
+                                        else if (series === 'BO20') duration = 120;
+                                        else if (series === 'BO40') duration = 180;
+                                        else if ((room as any).durationHours) duration = (room as any).durationHours * 60;
+                                        else if (room.format?.includes('BO1')) duration = 60;
                                         else if (room.format?.includes('BO3')) duration = (room.game === 'fc26') ? 60 : 180;
                                         else if (room.format?.includes('BO5')) duration = (room.game === 'fc26') ? 120 : 300;
                                         else if (room.format?.includes('BO7')) duration = 60; // Tekken

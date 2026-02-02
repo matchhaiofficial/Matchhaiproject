@@ -11,14 +11,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { acceptBookingOffer, getBookingOffers } from "../../src/services/matchService";
-import { BookingOffer } from "../../src/services/zoneService";
+import { acceptOffer, getOffersForRequest, ZoneOffer } from "../../src/services/bookingRequestService";
 import { COLORS } from "../../src/theme";
 
 export default function OffersScreen() {
     const { requestId } = useLocalSearchParams();
     const router = useRouter();
-    const [offers, setOffers] = useState<BookingOffer[]>([]);
+    const [offers, setOffers] = useState<ZoneOffer[]>([]);
     const [loading, setLoading] = useState(true);
     const [accepting, setAccepting] = useState(false);
 
@@ -31,17 +30,17 @@ export default function OffersScreen() {
     const fetchOffers = async () => {
         if (!requestId || typeof requestId !== 'string') return;
         setLoading(true);
-        const res = await getBookingOffers(requestId);
+        const res = await getOffersForRequest(requestId);
         if (res.ok && res.data) {
             setOffers(res.data);
         }
         setLoading(false);
     };
 
-    const handleAccept = async (offer: BookingOffer) => {
+    const handleAccept = async (offer: ZoneOffer) => {
         if (!offer.id) return;
         setAccepting(true);
-        const res = await acceptBookingOffer(offer.id);
+        const res = await acceptOffer(offer.id, offer.requestId);
         setAccepting(false);
 
         if (res.ok) {
@@ -54,7 +53,7 @@ export default function OffersScreen() {
         }
     };
 
-    const renderItem = ({ item }: { item: BookingOffer }) => (
+    const renderItem = ({ item }: { item: ZoneOffer }) => (
         <View style={{
             backgroundColor: COLORS.cardBackground,
             borderRadius: 12,
@@ -65,7 +64,7 @@ export default function OffersScreen() {
         }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
                 <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: 'bold' }}>{item.zoneName}</Text>
-                <Text style={{ color: COLORS.accent, fontWeight: 'bold', fontSize: 16 }}>{item.price} PKR</Text>
+                <Text style={{ color: COLORS.accent, fontWeight: 'bold', fontSize: 16 }}>{item.pricePerPlayer} PKR</Text>
             </View>
             <Text style={{ color: COLORS.muted, marginBottom: 12 }}>{item.branchName}</Text>
 
