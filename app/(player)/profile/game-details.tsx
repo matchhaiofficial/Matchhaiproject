@@ -54,6 +54,17 @@ const TIER_CONFIG: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; c
 };
 
 const DEFAULT_TIER = TIER_CONFIG.Beginner;
+const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+
+const normalizeSkillScores = (scores: Record<string, GameSkillScore>) => {
+    const normalized: Record<string, GameSkillScore> = {};
+    Object.entries(scores || {}).forEach(([key, score]) => {
+        if (!score || typeof score.rating !== 'number') return;
+        const rating = clampRating(score.rating);
+        normalized[key] = { ...score, rating, tier: getTierFromRating(rating) };
+    });
+    return normalized;
+};
 
 export default function GameDetails() {
     const { user } = useAuth();
@@ -115,7 +126,7 @@ export default function GameDetails() {
                     setPsnStats(data.psnStats || null);
                     setTekkenSkillScore(data.tekkenSkillScore || null);
                     setTekkenBracket(data.tekkenSkillBracket || null);
-                    setSkillScores(data.skillScores || {});
+                    setSkillScores(normalizeSkillScores(data.skillScores || {}));
 
                     // Initialize Game State
                     switch (gameId) {
@@ -240,7 +251,7 @@ export default function GameDetails() {
                         const initial = calculateInitialRating(gameId as GameKey, tempProfile);
                         if (initial && initial.source !== 'questionnaire') {
                             // Valid external source found. Construct FULL Object.
-                            const rating = initial.rating;
+                            const rating = clampRating(initial.rating);
                             const tier = getTierFromRating(rating);
 
                             const newScore: GameSkillScore = {
@@ -293,14 +304,15 @@ export default function GameDetails() {
 
     const handleAssessmentSuccess = (rating: number) => {
         // Create full object for optimistic and persistent update
+        const normalizedRating = clampRating(rating);
         const newScore: GameSkillScore = {
-            rating,
-            tier: getTierFromRating(rating),
+            rating: normalizedRating,
+            tier: getTierFromRating(normalizedRating),
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
             initialSource: 'questionnaire',
-            initialRating: rating,
+            initialRating: normalizedRating,
             lastMatchDate: null,
             lastUpdated: new Date()
         };
@@ -503,7 +515,7 @@ export default function GameDetails() {
                                     </View>
                                     <View>
                                         <Text style={{ fontSize: 32, fontWeight: 'bold', color: COLORS.text, lineHeight: 38 }}>
-                                            {skillScores[gameId].rating}
+                                            {clampRating(skillScores[gameId].rating)}
                                         </Text>
                                         <Text style={{
                                             fontSize: 14,

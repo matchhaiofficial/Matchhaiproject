@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { createBookingRequest } from "../../src/services/matchService";
+import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { COLORS } from "../../src/theme";
 
 export default function FindMatch() {
@@ -27,14 +27,31 @@ export default function FindMatch() {
         if (!user) return;
         setSubmitting(true);
 
+        const gameKeyMap: Record<string, string> = {
+            "CS2": "cs2",
+            "FC25": "fc26",
+            "Tekken 8": "tekken8",
+            "Futsal": "futsal",
+            "Indoor Cricket": "indoor_cricket",
+            "Padel": "padel",
+        };
+        const gameKey = gameKeyMap[game] || "cs2";
+
         const res = await createBookingRequest({
             userId: user.uid,
             userName: user.displayName || "Player",
-            game,
-            time,
-            location: {
-                areaLabels: [area],
-            },
+            gameKey,
+            title: `${game} Request`,
+            description: "",
+            maxPlayers: 10,
+            format: undefined,
+            teamMode: "solo",
+            flexibilityWindow: "Exact time",
+            preferredDate: new Date(time),
+            preferredTime: new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            preferredAreas: [area],
+            budgetPerPlayer: 0,
+            currency: "PKR",
         });
 
         setSubmitting(false);

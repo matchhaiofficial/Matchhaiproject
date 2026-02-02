@@ -212,6 +212,12 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         fetchRooms();
     };
 
+    const getRoomOvers = (room: Matchroom) => {
+        if (room.overs != null) return String(room.overs);
+        const match = room.format?.match(/(\d+)\s*overs?/i);
+        return match ? match[1] : null;
+    };
+
     const filteredRooms = useMemo(() => {
         return rooms.filter((room: Matchroom) => {
             // Filter out expired rooms
@@ -250,7 +256,17 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
             }
 
             if (selectedSeries !== 'Any') {
-                if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
+                const series = (room as any).seriesType;
+                if (series) {
+                    if (!String(series).toUpperCase().includes(selectedSeries)) return false;
+                } else {
+                    if (!room.format?.toUpperCase().includes(selectedSeries)) return false;
+                }
+            }
+
+            if (selectedOvers !== 'Any') {
+                const overs = getRoomOvers(room);
+                if (!overs || overs !== selectedOvers) return false;
             }
 
             if (selectedLocation !== 'Any') {
@@ -270,7 +286,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
 
             return true;
         });
-    }, [rooms, searchQuery, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedLocation, selectedSkillLevel, selectedTimeline]);
+    }, [rooms, searchQuery, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedOvers, selectedLocation, selectedSkillLevel, selectedTimeline]);
 
     // Get contextual options based on selected game
     const getFormatOptions = () => {

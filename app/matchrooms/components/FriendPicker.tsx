@@ -30,6 +30,7 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedFriend, setSelectedFriend] = useState<{ uid: string; username: string; skillScore?: number } | null>(null);
     const [selectedRole, setSelectedRole] = useState<string | null>(null);
+    const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
     useEffect(() => {
         if (visible && user) {
@@ -54,7 +55,7 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
                     if (profileRes.ok) {
                         const skillScores = profileRes.data.skillScores as any;
                         const skillData = skillScores?.[game];
-                        if (skillData) score = skillData.rating || 50;
+                        if (skillData && typeof skillData.rating === 'number') score = clampRating(skillData.rating);
                     }
                     return { ...f, skillScore: score };
                 }));

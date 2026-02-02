@@ -71,7 +71,10 @@ export default function GameDynamicFields({
         if (!options) return null;
         return (
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>{label}</Text>
+                <Text style={styles.sectionLabel}>
+                    {label}
+                    {(fieldKey === 'format') && <Text style={styles.requiredAsterisk}>*</Text>}
+                </Text>
                 <View style={styles.chipRow}>
                     {options.map((opt) => {
                         const isSelected = multiSelect
@@ -516,7 +519,9 @@ export default function GameDynamicFields({
         return (
             <>
                 <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Format</Text>
+                    <Text style={styles.sectionLabel}>
+                        Format<Text style={styles.requiredAsterisk}>*</Text>
+                    </Text>
                     <View style={[styles.chipRow, { justifyContent: 'flex-start' }]}>
                         <View style={[styles.optionChip, styles.optionChipActive]}>
                             <Text
