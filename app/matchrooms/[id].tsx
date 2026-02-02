@@ -38,7 +38,8 @@ export default function MatchroomDetails() {
     const [loading, setLoading] = useState(true);
     const [joining, setJoining] = useState(false);
     const [starting, setStarting] = useState(false);
-    const [isRequested, setIsRequested] = useState(false);
+    const [requestedSlots, setRequestedSlots] = useState<Map<string, string>>(new Map());
+    const [genericRequestStatus, setGenericRequestStatus] = useState<string | null>(null);
     const [requestLoading, setRequestLoading] = useState(false);
 
     // Role Selection State
@@ -78,16 +79,24 @@ export default function MatchroomDetails() {
                 collection(db, "notifications"),
                 where("fromUid", "==", user.uid),
                 where("type", "==", "match_join_request"),
-                where("status", "==", "pending")
+                where("status", "in", ["pending", "rejected"])
             );
             const snap = await getDocs(q);
-            let requested = false;
+            const slots = new Map<string, string>();
+            let genericStatus: string | null = null;
+
             snap.forEach(doc => {
-                if (doc.data().meta?.matchroomId === id) {
-                    requested = true;
+                const data = doc.data();
+                if (data.meta?.matchroomId === id) {
+                    if (data.meta.slotId) {
+                        slots.set(data.meta.slotId, data.status);
+                    } else {
+                        genericStatus = data.status;
+                    }
                 }
             });
-            setIsRequested(requested);
+            setRequestedSlots(slots);
+            setGenericRequestStatus(genericStatus);
         } catch (e) {
             Logger.error("MatchroomDetails", "Error checking request status", e);
         }
@@ -139,7 +148,8 @@ export default function MatchroomDetails() {
         try {
             const res = await cancelMatchJoinRequest(id as string, user.uid);
             if (res.ok) {
-                setIsRequested(false);
+                setRequestedSlots(new Map());
+                setGenericRequestStatus(null);
                 Alert.alert("Cancelled", "Join request removed.");
             } else {
                 Alert.alert("Error", res.message || "Failed to cancel request.");
@@ -152,7 +162,7 @@ export default function MatchroomDetails() {
     };
 
 
-    const handleRequestJoin = async (team?: string) => {
+    const handleRequestJoin = async (team?: string, slotId?: string) => {
         if (!room || !user || !id) return;
 
         // BUSY CHECK
@@ -182,11 +192,16 @@ export default function MatchroomDetails() {
             const res = await requestJoinMatchroom(room, {
                 uid: user.uid,
                 username: profile?.username || user.displayName || 'Player',
-            }, gameplayRole, team || 'Any'); // Ensure team is never undefined
+            }, gameplayRole, team || 'Any', slotId); // NEW: pass slotId
 
             if (res.ok) {
                 Alert.alert("Request Sent", "Your request to join has been sent to the host.");
-                setIsRequested(true);
+                // Optimistic update
+                if (slotId) {
+                    setRequestedSlots(prev => new Map(prev).set(slotId, 'pending'));
+                } else {
+                    setGenericRequestStatus('pending');
+                }
             } else {
                 Alert.alert("Error", res.message || "Failed to send request.");
             }
@@ -675,16 +690,16 @@ export default function MatchroomDetails() {
                 {/* Squad Section */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md }}>
                     <Text style={styles.sectionTitle}>
-                        {room.maxPlayers === 10 ? 'Teams' : `Squad (${room.players?.length || 0}/${room.maxPlayers})`}
+                        {(room.slotsA?.length || 0) > 0 ? 'Teams' : `Squad (${room.players?.length || 0}/${room.maxPlayers})`}
                     </Text>
-                    {room.maxPlayers === 10 && (
+                    {(room.slotsA?.length || 0) > 0 && (
                         <Text style={[styles.dateText, { fontSize: 12 }]}>
-                            {room.players?.length || 0}/10 Players
+                            {room.players?.length || 0}/{room.maxPlayers} Players
                         </Text>
                     )}
                 </View>
 
-                {room.maxPlayers === 10 ? (
+                {(room.slotsA?.length || 0) > 0 ? (
                     <View style={[styles.teamsWrapper, { flexDirection: width < 600 ? 'column' : 'row' }]}>
                         {/* Team A */}
                         <View style={[styles.teamContainer, { flex: width < 600 ? 0 : 1, width: width < 600 ? '100%' : 'auto' }]}>
@@ -741,12 +756,42 @@ export default function MatchroomDetails() {
                                                 </TouchableOpacity>
                                             )}
                                             {!isJoined && canJoin && (
-                                                <TouchableOpacity
-                                                    style={styles.joinSlotButton}
-                                                    onPress={() => handleRequestJoin(`Team A`)}
-                                                >
-                                                    <Text style={styles.joinSlotText}>Join</Text>
-                                                </TouchableOpacity>
+                                                (() => {
+                                                    const status = requestedSlots.get(slot.slotId);
+                                                    if (status === 'pending') {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={[styles.joinSlotButton, { backgroundColor: COLORS.muted }]}
+                                                                onPress={() => Alert.alert("Cancel Request?", "Do you want to cancel your request for this slot?", [
+                                                                    { text: "No", style: "cancel" },
+                                                                    { text: "Yes, Cancel", style: "destructive", onPress: handleCancelRequest }
+                                                                ])}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Requested</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    } else if (status === 'rejected') {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={[styles.joinSlotButton, { backgroundColor: COLORS.error }]}
+                                                                onPress={() => Alert.alert("Request Rejected", "The host has rejected your request for this slot.", [
+                                                                    { text: "Dismiss", onPress: handleCancelRequest }
+                                                                ])}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Rejected</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    } else {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={styles.joinSlotButton}
+                                                                onPress={() => handleRequestJoin(`Team A`, slot.slotId)}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Join</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    }
+                                                })()
                                             )}
                                         </View>
                                     )}
@@ -809,12 +854,42 @@ export default function MatchroomDetails() {
                                                 </TouchableOpacity>
                                             )}
                                             {!isJoined && canJoin && (
-                                                <TouchableOpacity
-                                                    style={styles.joinSlotButton}
-                                                    onPress={() => handleRequestJoin(`Team B`)}
-                                                >
-                                                    <Text style={styles.joinSlotText}>Join</Text>
-                                                </TouchableOpacity>
+                                                (() => {
+                                                    const status = requestedSlots.get(slot.slotId);
+                                                    if (status === 'pending') {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={[styles.joinSlotButton, { backgroundColor: COLORS.muted }]}
+                                                                onPress={() => Alert.alert("Cancel Request?", "Do you want to cancel your request for this slot?", [
+                                                                    { text: "No", style: "cancel" },
+                                                                    { text: "Yes, Cancel", style: "destructive", onPress: handleCancelRequest }
+                                                                ])}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Requested</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    } else if (status === 'rejected') {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={[styles.joinSlotButton, { backgroundColor: COLORS.error }]}
+                                                                onPress={() => Alert.alert("Request Rejected", "The host has rejected your request for this slot.", [
+                                                                    { text: "Dismiss", onPress: handleCancelRequest }
+                                                                ])}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Rejected</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    } else {
+                                                        return (
+                                                            <TouchableOpacity
+                                                                style={styles.joinSlotButton}
+                                                                onPress={() => handleRequestJoin(`Team B`, slot.slotId)}
+                                                            >
+                                                                <Text style={styles.joinSlotText}>Join</Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    }
+                                                })()
                                             )}
                                         </View>
                                     )}
@@ -859,11 +934,11 @@ export default function MatchroomDetails() {
                         ))}
                     </View>
                 )}
+
             </ScrollView>
 
             {/* Footer Actions */}
             <View style={styles.footer}>
-                {/* Expired state - show message only */}
                 {isExpired ? (
                     <View style={[styles.fullButton, styles.expiredBanner]}>
                         <Text style={styles.fullText}>Matchroom Expired</Text>
@@ -880,29 +955,33 @@ export default function MatchroomDetails() {
                             ) : null}
 
                             <View style={{ marginTop: SPACING.xs }}>
-                                {isRequested ? (
-                                    <TouchableOpacity
-                                        onPress={handleCancelRequest}
-                                        disabled={requestLoading}
-                                        style={styles.cancelRequestButton}
-                                    >
-                                        {requestLoading ? (
-                                            <ActivityIndicator color={COLORS.error} />
-                                        ) : (
-                                            <Text style={styles.cancelRequestButtonText}>Cancel Join Request</Text>
-                                        )}
-                                    </TouchableOpacity>
+                                {requestedSlots.size > 0 || genericRequestStatus ? (
+                                    <View>
+                                        <Text style={{ textAlign: 'center', color: COLORS.muted, marginBottom: 8 }}>
+                                            {genericRequestStatus === 'rejected' || Array.from(requestedSlots.values()).includes('rejected')
+                                                ? "Some requests were rejected."
+                                                : (requestedSlots.size > 0
+                                                    ? `You have requested ${requestedSlots.size} slot${requestedSlots.size > 1 ? 's' : ''}.`
+                                                    : 'Request Sent. Waiting for host approval.')}
+                                        </Text>
+                                        <TouchableOpacity
+                                            onPress={handleCancelRequest}
+                                            disabled={requestLoading}
+                                            style={styles.cancelRequestButton}
+                                        >
+                                            {requestLoading ? (
+                                                <ActivityIndicator color={COLORS.error} />
+                                            ) : (
+                                                <Text style={styles.cancelRequestButtonText}>Cancel Request</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
                                 ) : (
                                     <TouchableOpacity
-                                        onPress={() => handleRequestJoin()}
-                                        disabled={joining}
                                         style={styles.getRequestButton}
+                                        onPress={() => handleRequestJoin()}
                                     >
-                                        {joining ? (
-                                            <ActivityIndicator color="#fff" />
-                                        ) : (
-                                            <Text style={styles.getRequestButtonText}>Request to Join</Text>
-                                        )}
+                                        <Text style={styles.getRequestButtonText}>Request to Join</Text>
                                     </TouchableOpacity>
                                 )}
                             </View>
