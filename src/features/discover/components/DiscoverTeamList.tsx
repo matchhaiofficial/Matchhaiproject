@@ -273,7 +273,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
 
         // Game filter
         if (selectedGame !== 'all') {
-            if ((t.game || '').toLowerCase() !== normalizeGameKey(selectedGame).toLowerCase()) return false;
+            if ((t.game || '').toLowerCase() !== normalizeGameKey(selectedGame)?.toLowerCase()) return false;
         }
 
         if (mode === 'discover') {
