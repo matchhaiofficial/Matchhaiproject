@@ -628,6 +628,16 @@ export default function CreateMatchroom() {
     const handleGameSelect = async (gameKey: string) => {
         setSelectedGame(gameKey);
 
+        // Auto-initialize hostRole from profile
+        if (userProfile) {
+            const role = getUserSportRoleLabel(userProfile, gameKey);
+            if (role) {
+                setHostRole(role);
+            } else {
+                setHostRole('Flex');
+            }
+        }
+
         // Auto-Initialize Skill Score if missing
         // Skill initialization is handled by SkillBracketSection; avoid side-effect writes here
 
