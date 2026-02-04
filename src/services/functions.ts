@@ -1047,11 +1047,11 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
                 updatedAt: serverTimestamp()
             };
 
-            // Handle 10-player Slot Assignment
-            if (maxPlayers === 10) {
-                const slotsA = matchroomData.slotsA || [];
-                const slotsB = matchroomData.slotsB || [];
+            // Handle Slot Assignment (Generic)
+            const slotsA = matchroomData.slotsA || [];
+            const slotsB = matchroomData.slotsB || [];
 
+            if (slotsA.length > 0 || slotsB.length > 0) {
                 if (targetTeam === 'Team A' || targetTeam === 'A') {
                     const slotIdx = slotsA.findIndex((s: any) => !s.user);
                     if (slotIdx !== -1) {
