@@ -22,6 +22,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
 import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
+import { getUserSportRoleLabel } from "../../src/services/userService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -180,23 +181,27 @@ export default function MatchroomDetails() {
             return;
         }
 
-        // Determine Role from Profile
-        let gameplayRole = 'Flex';
-        if (profile) {
-            const game = (room.game || '').toLowerCase();
-            if (game === 'cs2') {
-                gameplayRole = profile.cs2Role || 'Flex';
-                // Normalize specific roles for cleaner UI
+        setJoining(true);
+        try {
+            // Determine Role from Profile - Ensure we have latest profile
+            let currentProfile = profile;
+            if (!currentProfile && user) {
+                const { getUserProfile } = await import('../../src/services/userService');
+                const res = await getUserProfile(user.uid);
+                if (res.ok) {
+                    currentProfile = res.data;
+                    setProfile(res.data);
+                }
+            }
+
+            let gameplayRole = 'Flex';
+            if (currentProfile) {
+                gameplayRole = getUserSportRoleLabel(currentProfile, room.game) || 'Flex';
+                // Specific normalization for CS2 common typo/lengthy labels if needed
                 if (gameplayRole === 'AW Per') gameplayRole = 'AWPer';
                 if (gameplayRole === 'In-Game Leader (IGL)') gameplayRole = 'IGL';
             }
-            else if (game === 'fc26' || game === 'fc25') gameplayRole = profile.fcTeam || 'Flex';
-            else if (game === 'tekken8') gameplayRole = profile.tekkenFavorites?.[0] || 'Flex';
-            else if (game === 'futsal') gameplayRole = profile.futsalPosition || 'Flex';
-            else if (game === 'indoor_cricket') gameplayRole = profile.indoorCricketRole || 'Flex';
-        }
-        setJoining(true);
-        try {
+
             const res = await requestJoinMatchroom(room, {
                 uid: user.uid,
                 username: profile?.username || user.displayName || 'Player',
@@ -744,7 +749,9 @@ export default function MatchroomDetails() {
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
                                                         {room.captainUidA === slot.user.uid && (
-                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
+                                                            <View style={[styles.captainBadge, { marginLeft: 6 }]}>
+                                                                <Text style={styles.captainText}>CAPTAIN</Text>
+                                                            </View>
                                                         )}
                                                     </View>
                                                     {(room.captainUidA === user?.uid || isHost) && slot.user.uid !== user?.uid && (
@@ -756,13 +763,26 @@ export default function MatchroomDetails() {
                                                         </TouchableOpacity>
                                                     )}
                                                 </View>
-                                                {/* Show specific gameplay role if not empty, otherwise default */}
-                                                <Text style={styles.slotRoleName}>
-                                                    {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
-                                                </Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                                    <Text style={styles.slotRoleName}>
+                                                        {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
+                                                    </Text>
+                                                    {playerRatings[slot.user.uid] && (
+                                                        <View style={{ marginLeft: 8 }}>
+                                                            <SkillBadge
+                                                                tier={playerRatings[slot.user.uid]!.tier}
+                                                                rating={playerRatings[slot.user.uid]!.rating}
+                                                                size="compact"
+                                                            />
+                                                        </View>
+                                                    )}
+                                                </View>
                                             </View>
                                         ) : (
-                                            <Text style={styles.emptySlotName}>Open Slot</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <MaterialIcons name="add-circle-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 6, opacity: 0.5 }} />
+                                                <Text style={styles.emptySlotName}>Available Slot</Text>
+                                            </View>
                                         )}
                                     </TouchableOpacity>
                                     {!slot.user && (
@@ -842,7 +862,9 @@ export default function MatchroomDetails() {
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
                                                         {room.captainUidB === slot.user.uid && (
-                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
+                                                            <View style={[styles.captainBadge, { marginLeft: 6 }]}>
+                                                                <Text style={styles.captainText}>CAPTAIN</Text>
+                                                            </View>
                                                         )}
                                                     </View>
                                                     {(room.captainUidB === user?.uid || isHost) && slot.user.uid !== user?.uid && (
@@ -854,13 +876,26 @@ export default function MatchroomDetails() {
                                                         </TouchableOpacity>
                                                     )}
                                                 </View>
-                                                {/* Show specific gameplay role */}
-                                                <Text style={styles.slotRoleName}>
-                                                    {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
-                                                </Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                                    <Text style={styles.slotRoleName}>
+                                                        {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
+                                                    </Text>
+                                                    {playerRatings[slot.user.uid] && (
+                                                        <View style={{ marginLeft: 8 }}>
+                                                            <SkillBadge
+                                                                tier={playerRatings[slot.user.uid]!.tier}
+                                                                rating={playerRatings[slot.user.uid]!.rating}
+                                                                size="compact"
+                                                            />
+                                                        </View>
+                                                    )}
+                                                </View>
                                             </View>
                                         ) : (
-                                            <Text style={styles.emptySlotName}>Open Slot</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <MaterialIcons name="add-circle-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 6, opacity: 0.5 }} />
+                                                <Text style={styles.emptySlotName}>Available Slot</Text>
+                                            </View>
                                         )}
                                     </TouchableOpacity>
                                     {!slot.user && (
@@ -919,37 +954,42 @@ export default function MatchroomDetails() {
                     </View>
                 ) : (
                     <View style={styles.playersContainer}>
-                        {(room.players || []).map((player) => (
-                            <View key={player.uid} style={styles.playerRow}>
-                                <View style={styles.avatar}>
-                                    <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+                        {(room.players || []).map((player, idx) => (
+                            <View key={player.uid} style={styles.slotRow}>
+                                <View style={styles.slotAvatar}>
+                                    <Text style={styles.slotAvatarText}>{player.username.charAt(0).toUpperCase()}</Text>
                                 </View>
-                                <View style={styles.playerInfo}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                        <Text style={styles.playerName}>{player.username}</Text>
-                                        {player.uid === room.hostUid && (
-                                            <View style={styles.hostBadge}>
-                                                <Text style={styles.hostText}>HOST</Text>
+                                <View style={styles.slotInfo}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                            <Text style={styles.slotName}>{player.username}</Text>
+                                            {player.uid === room.hostUid && (
+                                                <View style={[styles.captainBadge, { marginLeft: 8 }]}>
+                                                    <Text style={styles.captainText}>HOST</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                        {player.uid === user?.uid && (
+                                            <MaterialIcons name="person" size={16} color={COLORS.accent} style={{ opacity: 0.6 }} />
+                                        )}
+                                    </View>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                        {player.role && (
+                                            <Text style={styles.slotRoleName}>
+                                                {player.role && player.role !== 'Captain' && player.role !== 'Player' && !player.role.startsWith('Team') ? player.role : 'Flex'}
+                                            </Text>
+                                        )}
+                                        {playerRatings[player.uid] && (
+                                            <View style={{ marginLeft: 8 }}>
+                                                <SkillBadge
+                                                    tier={playerRatings[player.uid]!.tier}
+                                                    rating={playerRatings[player.uid]!.rating}
+                                                    size="compact"
+                                                />
                                             </View>
                                         )}
                                     </View>
-                                    {player.role && <Text style={styles.playerRole}>{player.role}</Text>}
                                 </View>
-
-                                {/* Skill Badge */}
-                                {playerRatings[player.uid] && (
-                                    <View style={{ marginRight: SPACING.sm }}>
-                                        <SkillBadge
-                                            tier={playerRatings[player.uid]!.tier}
-                                            rating={playerRatings[player.uid]!.rating}
-                                            size="compact"
-                                        />
-                                    </View>
-                                )}
-
-                                {player.uid === user?.uid && (
-                                    <MaterialIcons name="person" size={16} color={COLORS.textSecondary} />
-                                )}
                             </View>
                         ))}
                     </View>

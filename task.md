@@ -10,6 +10,18 @@
     - [x] Remove local game chips
     - [x] Accept global `selectedGame` and `searchQuery`
     - [x] Implement contextual filters
+    - [x] Fix "Failed to backfill structured format" (permission-denied) warnings
+    - [x] Identify source in `matchService.ts`
+    - [x] Restrict `updateDoc` call to matchroom host only
+    - [x] Defensively handle `permission-denied` errors in backfill logic
+- [x] Fix Player Role Display
+    - [x] Initialize `hostRole` from profile in `create/index.tsx`
+    - [x] Correct keys and auto-selection in `RoleAutoFill.tsx`
+    - [x] Update `matchService.ts` to persist profile role for host
+    - [x] Refine `[id].tsx` to favor profile roles in UI
+- [x] Verify and Finalize
+    - [x] Perform final JSX structure check in `[id].tsx`
+    - [x] Document changes in `walkthrough.md`
 - [x] Extract `DiscoverPlayerList.tsx` from `find-players.tsx`
     - [x] Remove local chips
     - [x] Implement global filter logic
