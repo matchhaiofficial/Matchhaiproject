@@ -23,12 +23,12 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
     if (!profile) return null;
 
     // CS2 & Futsal & Indoor Cricket & Padel Specific Logic with Override
-    if (gameKey === 'cs2' || gameKey === 'futsal' || gameKey === 'indoorCricket' || gameKey === 'padel' || gameKey === 'pickleball') {
+    if (gameKey === 'cs2' || gameKey === 'futsal' || gameKey === 'indoor_cricket' || gameKey === 'padel' || gameKey === 'pickleball') {
         const hasRole = !!selectedRole;
         const showAll = isEditing || !hasRole;
         const rolesList = gameKey === 'cs2'
             ? CS2_ROLES
-            : (gameKey === 'indoorCricket'
+            : (gameKey === 'indoor_cricket'
                 ? INDOOR_CRICKET_ROLES
                 : (gameKey === 'padel'
                     ? PADEL_ROLES
@@ -86,7 +86,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
 
 
                 {/* Indoor Cricket Sub-Preferences */}
-                {gameKey === 'indoorCricket' && selectedRole && (
+                {gameKey === 'indoor_cricket' && selectedRole && (
                     <View style={{ marginTop: 16 }}>
                         {/* Batting Order & Style: For Batsman AND All-rounder */}
                         {(selectedRole === 'Batsman' || selectedRole === 'All-rounder') && (
@@ -188,7 +188,7 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
         switch (gameKey) {
             case 'futsal':
                 return profile.futsalPosition ? [profile.futsalPosition] : [];
-            case 'indoorCricket':
+            case 'indoor_cricket':
                 const roles: string[] = [];
                 if (profile.indoorCricketRole) roles.push(profile.indoorCricketRole);
                 if (profile.indoorCricketBowlingStyle) roles.push(profile.indoorCricketBowlingStyle);
