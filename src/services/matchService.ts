@@ -15,7 +15,7 @@ import {
     updateDoc,
     where
 } from "firebase/firestore";
-import { db } from "../config/firebaseConfig";
+import { auth, db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
 import { isRoomExpired, isRoomLocked } from "../utils/matchroomLifecycle";
 
@@ -197,9 +197,16 @@ async function backfillStructuredFormat(room: Matchroom) {
 
     if (Object.keys(updates).length > 0) {
         try {
-            await updateDoc(doc(db, COLLECTION_NAME, room.id), updates);
-        } catch (error) {
-            Logger.warn("matchService", "Failed to backfill structured format", { roomId: room.id, error });
+            // Only attempt DB update if the current user is the host (likely has permission)
+            const isHost = auth.currentUser?.uid === room.hostUid;
+            if (isHost) {
+                await updateDoc(doc(db, COLLECTION_NAME, room.id), updates);
+            }
+        } catch (error: any) {
+            // Only log if it's NOT a permission error (which we expect for non-hosts)
+            if (error?.code !== 'permission-denied') {
+                Logger.warn("matchService", "Failed to backfill structured format", { roomId: room.id, error });
+            }
         }
     }
 
@@ -276,8 +283,8 @@ export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: 
             limit(limitCount)
         );
         const snapshot = await getDocs(q);
-        const rooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom));
-        await Promise.allSettled(rooms.map(room => backfillStructuredFormat(room)));
+        const rooms = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom));
+        await Promise.allSettled(rooms.map((room: Matchroom) => backfillStructuredFormat(room)));
         return { ok: true, data: rooms };
     } catch (error) {
         Logger.error("matchService", "Error fetching matchrooms", error);
@@ -305,7 +312,7 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
-        return await runTransaction(db, async (transaction) => {
+        return await runTransaction(db, async (transaction: any) => {
             const snap = await transaction.get(roomRef);
             if (!snap.exists()) throw "Matchroom not found";
 
@@ -344,6 +351,7 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
             // but we can check if the count changed in a previous step or just accept the slight drift for now.
             // For now, let's just update the core fields.
 
+            // Perform update
             transaction.update(roomRef, {
                 players: updatedPlayers,
                 playerUids: updatedUids,
@@ -352,6 +360,8 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
                 slotsB: updatedSlotsB,
                 updatedAt: serverTimestamp()
             });
+
+            Logger.info("matchService", "User left matchroom", { roomId, userUid, remainingUids: updatedUids.length });
 
             return { ok: true };
         });
@@ -371,15 +381,33 @@ export async function isUserInActiveMatchroom(uid: string): Promise<{ inRoom: bo
             where("playerUids", "array-contains", uid),
             where("status", "in", ["open", "locked", "in-progress"])
         );
+
+        // Use getDocs but we'll manually verify expiry and membership
         const snap = await getDocs(q);
 
         if (!snap.empty) {
-            const room = snap.docs[0].data() as Matchroom;
-            return {
-                inRoom: true,
-                roomId: snap.docs[0].id,
-                message: `User is already in an active matchroom: ${room.title}`
-            };
+            // Find the FIRST room that is truly active and not expired
+            for (const docSnap of snap.docs) {
+                const room = { id: docSnap.id, ...docSnap.data() } as Matchroom;
+
+                // 1. Check if the room has actually expired based on time
+                if (isRoomExpired(room)) {
+                    Logger.info("matchService", "Ignoring expired room in busy check", { roomId: room.id });
+                    continue;
+                }
+
+                // 2. Double-check membership (idempotency)
+                if (!room.playerUids?.includes(uid)) {
+                    Logger.info("matchService", "Ignoring room where player is no longer in playerUids", { roomId: room.id });
+                    continue;
+                }
+
+                return {
+                    inRoom: true,
+                    roomId: docSnap.id,
+                    message: `User is already in an active matchroom: ${room.title}`
+                };
+            }
         }
         return { inRoom: false };
     } catch (error) {
@@ -567,10 +595,10 @@ export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: 
             getDocs(joinedQuery)
         ]);
 
-        const hosted = hostedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom));
+        const hosted = hostedSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom));
         const joined = joinedSnap.docs
-            .map(doc => ({ id: doc.id, ...doc.data() } as Matchroom))
-            .filter(room => room.hostUid !== uid); // Only non-hosted
+            .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
+            .filter((room: Matchroom) => room.hostUid !== uid); // Only non-hosted
 
         return { ok: true, data: { hosted, joined } };
     } catch (error) {
