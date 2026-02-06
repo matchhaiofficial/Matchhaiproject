@@ -12,10 +12,13 @@ import {
     serverTimestamp,
     setDoc,
     Timestamp,
+    updateDoc,
     where,
     writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
+import type { Matchroom } from './matchService';
+import { findUserTimeConflict } from './matchService';
 import { GAME_FORMATS } from '../constants/gameRules';
 import Logger from '../utils/logger';
 
@@ -182,7 +185,8 @@ const getRequesterSnapshot = async (uid: string, gameKey: string) => {
             roleForGame = data.cs2Role;
             break;
         case 'futsal':
-            roleForGame = data.futsalPosition;
+            const futsalPositions = Array.isArray(data.futsalPositions) ? data.futsalPositions.filter(Boolean) : [];
+            roleForGame = futsalPositions[0] || data.futsalPosition;
             break;
         case 'indoor_cricket':
             roleForGame = data.indoorCricketRole;
@@ -453,8 +457,16 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
             // Note: We await this non-transactional check inside the function block.
             await checkUserTeamLimit(requesterUid, teamData.game);
 
-            // 1. Capacity Check
-            if (teamData.memberCount >= teamData.maxMembers) {
+            const maxMembers =
+                (typeof teamData.maxMembers === 'number' && teamData.maxMembers > 0)
+                    ? teamData.maxMembers
+                    : (ROSTER_CAPS[teamData.game] || 0);
+
+            const existingMemberUids: string[] = Array.isArray(teamData.memberUids) ? teamData.memberUids : [];
+            const currentCount = Math.max(Number(teamData.memberCount || 0), existingMemberUids.length);
+
+            // 1. Capacity Check (use the strictest view of current membership)
+            if (maxMembers > 0 && currentCount >= maxMembers && !existingMemberUids.includes(requesterUid)) {
                 // Auto-reject if full
                 transaction.update(notifRef, { status: 'rejected', reason: 'team_full' });
                 throw new Error("Team is full");
@@ -462,10 +474,10 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
 
             // 2. Idempotency Check (Subcollection + Array)
             // requesterUid is already defined above
-            const memberRef = doc(db, 'teams', teamData.teamId, 'members', requesterUid);
+            const memberRef = doc(db, 'teams', teamRef.id, 'members', requesterUid);
             const memberSnap = await transaction.get(memberRef);
 
-            const isInMemberUids = (teamData.memberUids || []).includes(requesterUid);
+            const isInMemberUids = existingMemberUids.includes(requesterUid);
             const isMemberDocExists = memberSnap.exists();
 
             if (isInMemberUids && isMemberDocExists) {
@@ -491,9 +503,10 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
             }
 
             if (!isInMemberUids) {
-                // Only increment if truly adding new uid
                 updates.memberUids = arrayUnion(requesterUid);
-                updates.memberCount = increment(1);
+                // Keep memberCount consistent, but never artificially over-increment
+                const nextUidsLength = existingMemberUids.length + 1;
+                updates.memberCount = Math.max(currentCount, nextUidsLength);
             }
 
             transaction.update(teamRef, updates);
@@ -509,7 +522,7 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
                 status: 'accepted',
                 createdAt: now,
                 meta: {
-                    teamId: teamData.teamId,
+                    teamId: teamRef.id,
                     teamName: teamData.name,
                     game: teamData.game
                 }
@@ -989,6 +1002,20 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
         const { notificationId, decision } = data;
         const notifRef = doc(db, 'notifications', notificationId);
 
+        if (decision === 'accept') {
+            const preNotifSnap = await getDoc(notifRef);
+            if (preNotifSnap.exists()) {
+                const preNotifData: any = preNotifSnap.data();
+                if (preNotifData.status === 'pending' && preNotifData.meta?.matchroomId && preNotifData.fromUid) {
+                    const conflict = await checkTimeConflictForUser(preNotifData.fromUid, preNotifData.meta.matchroomId);
+                    if (conflict.conflict) {
+                        await updateDoc(notifRef, { status: 'rejected', reason: 'time_conflict', updatedAt: serverTimestamp() });
+                        return { ok: false, message: conflict.message };
+                    }
+                }
+            }
+        }
+
         const res = await runTransaction(db, async (transaction) => {
             const notifSnap = await transaction.get(notifRef);
             if (!notifSnap.exists()) throw new Error("Request not found");
@@ -1050,37 +1077,83 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
             // Handle Slot Assignment (Generic)
             const slotsA = matchroomData.slotsA || [];
             const slotsB = matchroomData.slotsB || [];
+            const requestedSlotId = notifData.meta?.slotId;
 
+            const assignToSlots = (slots: any[], slotId?: string) => {
+                let idx = -1;
+                if (slotId) {
+                    idx = slots.findIndex((s: any) => s.slotId === slotId && !s.user && !s.uid);
+                } else {
+                    idx = slots.findIndex((s: any) => !s.user && !s.uid);
+                }
+                if (idx === -1) return { slots, assigned: false };
+                const updated = [...slots];
+                updated[idx] = {
+                    ...updated[idx],
+                    uid: requesterUid,
+                    user: { uid: requesterUid, username: requesterUsername },
+                    status: 'confirmed',
+                    role: role
+                };
+                return { slots: updated, assigned: true };
+            };
+
+            let assigned = false;
             if (slotsA.length > 0 || slotsB.length > 0) {
-                if (targetTeam === 'Team A' || targetTeam === 'A') {
-                    const slotIdx = slotsA.findIndex((s: any) => !s.user);
-                    if (slotIdx !== -1) {
-                        slotsA[slotIdx] = {
-                            ...slotsA[slotIdx],
-                            uid: requesterUid,
-                            user: { uid: requesterUid, username: requesterUsername },
-                            status: 'confirmed',
-                            role: role // Store Gameplay Role in Slot
-                        };
-                        updateData.slotsA = slotsA;
-                    }
-                } else if (targetTeam === 'Team B' || targetTeam === 'B') {
-                    const slotIdx = slotsB.findIndex((s: any) => !s.user);
-                    if (slotIdx !== -1) {
-                        slotsB[slotIdx] = {
-                            ...slotsB[slotIdx],
-                            uid: requesterUid,
-                            user: { uid: requesterUid, username: requesterUsername },
-                            status: 'confirmed',
-                            role: role // Store Gameplay Role in Slot
-                        };
-                        updateData.slotsB = slotsB;
-
-                        // Auto-assign Team B captain if not set
-                        if (!matchroomData.captainUidB) {
-                            updateData.captainUidB = requesterUid;
+                if (requestedSlotId) {
+                    const resA = assignToSlots(slotsA, requestedSlotId);
+                    if (resA.assigned) {
+                        updateData.slotsA = resA.slots;
+                        assigned = true;
+                    } else {
+                        const resB = assignToSlots(slotsB, requestedSlotId);
+                        if (resB.assigned) {
+                            updateData.slotsB = resB.slots;
+                            assigned = true;
+                            if (!matchroomData.captainUidB) {
+                                updateData.captainUidB = requesterUid;
+                            }
                         }
                     }
+                }
+
+                if (!assigned) {
+                    if (targetTeam === 'Team A' || targetTeam === 'A') {
+                        const resA = assignToSlots(slotsA);
+                        if (resA.assigned) {
+                            updateData.slotsA = resA.slots;
+                            assigned = true;
+                        }
+                    } else if (targetTeam === 'Team B' || targetTeam === 'B') {
+                        const resB = assignToSlots(slotsB);
+                        if (resB.assigned) {
+                            updateData.slotsB = resB.slots;
+                            assigned = true;
+                            if (!matchroomData.captainUidB) {
+                                updateData.captainUidB = requesterUid;
+                            }
+                        }
+                    } else {
+                        const resA = assignToSlots(slotsA);
+                        if (resA.assigned) {
+                            updateData.slotsA = resA.slots;
+                            assigned = true;
+                        } else {
+                            const resB = assignToSlots(slotsB);
+                            if (resB.assigned) {
+                                updateData.slotsB = resB.slots;
+                                assigned = true;
+                                if (!matchroomData.captainUidB) {
+                                    updateData.captainUidB = requesterUid;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!assigned) {
+                    transaction.update(notifRef, { status: 'rejected', reason: 'slot_unavailable', updatedAt: serverTimestamp() });
+                    return { ok: false, message: "No available slot for this matchroom." };
                 }
             }
 
@@ -1211,6 +1284,37 @@ export const transferMatchroomCaptain = async (data: {
 // Matchroom Invitations
 // ----------------------------------------------------------------------------
 
+const checkTimeConflictForUser = async (uid: string, matchroomId: string) => {
+    const roomSnap = await getDoc(doc(db, 'matchrooms', matchroomId));
+    if (!roomSnap.exists()) return { conflict: false as const };
+    const room = { id: matchroomId, ...roomSnap.data() } as Matchroom;
+    return await findUserTimeConflict(uid, room, matchroomId);
+};
+
+const addChatParticipant = async (matchroomId: string, uid: string) => {
+    try {
+        const chatRef = doc(db, 'chatrooms', matchroomId);
+        await updateDoc(chatRef, {
+            participantUids: arrayUnion(uid),
+            updatedAt: serverTimestamp(),
+        });
+    } catch (e) {
+        Logger.warn('functions', 'addChatParticipant failed', e);
+    }
+};
+
+const removeChatParticipant = async (matchroomId: string, uid: string) => {
+    try {
+        const chatRef = doc(db, 'chatrooms', matchroomId);
+        await updateDoc(chatRef, {
+            participantUids: arrayRemove(uid),
+            updatedAt: serverTimestamp(),
+        });
+    } catch (e) {
+        Logger.warn('functions', 'removeChatParticipant failed', e);
+    }
+};
+
 export const inviteToMatchroom = async (data: {
     matchroomId: string;
     toUid: string;
@@ -1231,8 +1335,10 @@ export const inviteToMatchroom = async (data: {
         if (!matchroomSnap.exists()) throw new Error("Matchroom not found");
         const matchroomData = matchroomSnap.data();
 
-        // 2. Verify inviting user is the captain of the specific team
-        const captainUid = team === 'A' ? matchroomData.captainUidA : matchroomData.captainUidB;
+        // 2. Verify inviting user is the captain of the specific team (fallbacks for legacy rooms)
+        const captainUidA = matchroomData.captainUidA || matchroomData.hostUid;
+        const captainUidB = matchroomData.captainUidB || (matchroomData.hostUid === currentUser.uid ? matchroomData.hostUid : null);
+        const captainUid = team === 'A' ? captainUidA : captainUidB;
         if (captainUid !== currentUser.uid) {
             throw new Error(`Only the captain of Team ${team} can send invitations for this team.`);
         }
@@ -1283,7 +1389,22 @@ export const respondToMatchroomInvite = async (data: {
         const { notificationId, decision } = data;
         const notifRef = doc(db, 'notifications', notificationId);
 
-        return await runTransaction(db, async (transaction) => {
+        if (decision === 'accept') {
+            const preNotifSnap = await getDoc(notifRef);
+            if (preNotifSnap.exists()) {
+                const preNotifData: any = preNotifSnap.data();
+                const matchroomId = preNotifData?.meta?.matchroomId;
+                if (matchroomId) {
+                    const conflict = await checkTimeConflictForUser(currentUser.uid, matchroomId);
+                    if (conflict.conflict) {
+                        await updateDoc(notifRef, { status: 'declined', reason: 'time_conflict', updatedAt: serverTimestamp() });
+                        return { ok: false, message: conflict.message };
+                    }
+                }
+            }
+        }
+
+        const res = await runTransaction(db, async (transaction) => {
             const notifSnap = await transaction.get(notifRef);
             if (!notifSnap.exists()) throw new Error("Notification not found");
             const notifData = notifSnap.data();
@@ -1349,6 +1470,18 @@ export const respondToMatchroomInvite = async (data: {
             return { ok: true };
         });
 
+        if (decision === 'accept') {
+            const postNotifSnap = await getDoc(notifRef);
+            if (postNotifSnap.exists()) {
+                const postData: any = postNotifSnap.data();
+                const matchroomId = postData.meta?.matchroomId;
+                if (matchroomId) {
+                    await addChatParticipant(matchroomId, currentUser.uid);
+                }
+            }
+        }
+
+        return res;
     } catch (error: any) {
         Logger.error('functions', 'respondToMatchroomInvite error', error);
         return { ok: false, message: error.message || 'Failed to respond.' };
@@ -1368,7 +1501,7 @@ export const kickFromMatchroom = async (data: {
 
         const roomRef = doc(db, 'matchrooms', matchroomId);
 
-        return await runTransaction(db, async (transaction) => {
+        const res = await runTransaction(db, async (transaction) => {
             const roomSnap = await transaction.get(roomRef);
             if (!roomSnap.exists()) throw new Error("Matchroom not found.");
             const roomData = roomSnap.data();
@@ -1429,6 +1562,9 @@ export const kickFromMatchroom = async (data: {
             return { ok: true, message: "Player kicked successfully." };
         });
 
+        await removeChatParticipant(matchroomId, playerUid);
+
+        return res;
     } catch (error: any) {
         Logger.error('functions', 'kickFromMatchroom error', error);
         return { ok: false, message: error.message || 'Failed to kick player.' };

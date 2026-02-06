@@ -1,50 +1,50 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../theme';
 
 export default StyleSheet.create({
-    screen: {
-        flex: 1,
+    // Filters
+    filterToggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 8,
         backgroundColor: COLORS.background,
     },
-    header: {
-        padding: SPACING.screenPadding,
-        paddingBottom: SPACING.lg,
+    filterToggleText: {
+        fontFamily: FONTS.heading,
+        fontSize: 14,
+        color: COLORS.textSecondary,
+    },
+    filtersPanel: {
+        backgroundColor: COLORS.cardBackground,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
+        paddingVertical: 12,
+        paddingBottom: 20,
     },
-    headerTitle: {
-        color: COLORS.text,
+    filterSection: {
+        marginBottom: 12,
+    },
+    filterLabel: {
+        color: COLORS.textSecondary,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.heading,
-        marginBottom: SPACING.lg,
+        fontSize: 12,
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
-    searchBar: {
-        backgroundColor: COLORS.inputBackground,
-        borderRadius: RADII.md,
-        borderWidth: 1,
-        borderColor: COLORS.inputBorder,
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: SPACING.md,
-        marginVertical: SPACING.sm,
-        height: 48,
+    filterOptionsScroll: {
+        flexGrow: 0,
     },
-    searchInput: {
-        flex: 1,
-        color: COLORS.text,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.input,
-        paddingVertical: 0,
-        paddingHorizontal: SPACING.sm,
+    filterOptionsContent: {
+        flexGrow: 1,
     },
-    filterContainer: {
-        flexDirection: 'row',
-        flexWrap: 'nowrap',
-    },
-    // Chip styles matching Teams/Matchrooms
     optionChip: {
+        flex: 1,
+        minWidth: 120,
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 999,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
@@ -67,35 +67,8 @@ export default StyleSheet.create({
         color: COLORS.text,
     },
 
-    // Collapsible Filters Panel
-    filtersPanel: {
-        backgroundColor: COLORS.cardBackground,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
-        paddingVertical: 12,
-    },
-    filterSection: {
-        marginBottom: 12,
-        paddingHorizontal: 16,
-    },
-    filterLabel: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.heading,
-        fontSize: 12,
-        marginBottom: 8,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    filterOptionsScroll: {
-        flexGrow: 0,
-    },
-
-    listContent: {
-        paddingHorizontal: SPACING.screenPadding,
-        paddingBottom: 100,
-    },
+    // Results + list
     resultsCount: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingTop: SPACING.md,
         paddingBottom: SPACING.sm,
     },
@@ -103,7 +76,19 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
     },
+    listContent: {
+        alignItems: 'stretch',
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.background,
+    },
+
+    // Player Card
     playerCard: {
+        width: '100%',
         backgroundColor: COLORS.cardDark,
         borderRadius: 20,
         padding: SPACING.md,
@@ -223,6 +208,8 @@ export default StyleSheet.create({
     friendBtnText: {
         color: COLORS.success,
     },
+
+    // Empty State
     emptyState: {
         alignItems: 'center',
         marginTop: 60,
@@ -244,11 +231,5 @@ export default StyleSheet.create({
         textAlign: 'center',
         maxWidth: 300,
         lineHeight: 20,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: COLORS.background,
     },
 });

@@ -27,6 +27,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 import styles from "./game-details.styles";
 
 // FACEIT Level Icons
@@ -69,6 +70,7 @@ const normalizeSkillScores = (scores: Record<string, GameSkillScore>) => {
 export default function GameDetails() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
     const params = useLocalSearchParams();
     const gameId = params.gameId as GameKey;
 
@@ -471,13 +473,23 @@ export default function GameDetails() {
                     <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{gameName}</Text>
-                <TouchableOpacity
-                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.saveButton,
+                        saving && styles.saveButtonDisabled,
+                        pressed && !saving && styles.saveButtonPressed,
+                    ]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_game_save" });
+                        }
+                    }}
                     onPress={handleSavePress}
                     disabled={saving}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                </TouchableOpacity>
+                </Pressable>
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>

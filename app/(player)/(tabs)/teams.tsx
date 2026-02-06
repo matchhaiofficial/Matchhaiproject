@@ -14,7 +14,9 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
+import SegmentedTabs from "../../../src/components/SegmentedTabs";
 
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -30,7 +32,7 @@ const GAMES = [
     { key: 'fc26', label: 'FC26' },
     { key: 'tekken8', label: 'Tekken 8' },
     { key: 'futsal', label: 'Futsal' },
-    { key: 'indoorCricket', label: 'Cricket' },
+    { key: 'indoor_cricket', label: 'Cricket' },
     { key: 'padel', label: 'Padel' },
     { key: 'pickleball', label: 'Pickleball' },
 ];
@@ -224,7 +226,10 @@ export default function Teams() {
     const renderTeamItem = ({ item }: { item: Team }) => {
         const isMyTeam = mode === 'my';
         const isRequested = requestedTeamIds.has(item.id!);
-        const isFull = (item.memberCount || 0) >= (item.maxMembers || 0);
+        const maxMembers = item.maxMembers || 0;
+        const rawMemberCount = item.memberUids?.length ?? item.memberCount ?? 0;
+        const memberCount = maxMembers > 0 ? Math.min(rawMemberCount, maxMembers) : rawMemberCount;
+        const isFull = maxMembers > 0 ? rawMemberCount >= maxMembers : false;
 
         return (
             <Pressable
@@ -239,7 +244,7 @@ export default function Teams() {
                     <View style={styles.memberCountRow}>
                         <MaterialIcons name="people" size={12} color={COLORS.muted} />
                         <Text style={styles.memberCountText}>
-                            {item.memberCount || 0} / {item.maxMembers || 0}
+                            {memberCount} / {maxMembers}
                         </Text>
                     </View>
                 </View>
@@ -294,35 +299,32 @@ export default function Teams() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title={mode === 'my' ? 'My Teams' : 'Discover Teams'} />
+
             {/* Header Area */}
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>{mode === 'my' ? 'My Teams' : 'Discover Teams'}</Text>
 
                 {/* Mode Toggle */}
-                <View style={styles.segmentToggle}>
-                    <TouchableOpacity
-                        style={[styles.toggleButton, mode === 'my' && styles.toggleButtonActive]}
-                        onPress={() => setMode('my')}
-                    >
-                        <Text style={[styles.toggleButtonText, mode === 'my' && styles.toggleButtonTextActive]}>My Teams</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.toggleButton, mode === 'discover' && styles.toggleButtonActive]}
-                        onPress={() => setMode('discover')}
-                    >
-                        <Text style={[styles.toggleButtonText, mode === 'discover' && styles.toggleButtonTextActive]}>Discover</Text>
-                    </TouchableOpacity>
-                </View>
+                <SegmentedTabs
+                    items={[
+                        { key: 'my', label: 'My Teams' },
+                        { key: 'discover', label: 'Discover' },
+                    ]}
+                    value={mode}
+                    onChange={setMode}
+                    style={styles.segmentTabs}
+                    compact
+                />
 
                 {/* Search Bar */}
                 <View style={styles.searchBar}>
@@ -433,6 +435,6 @@ export default function Teams() {
                     <MaterialIcons name="add" size={28} color="#FFF" />
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </Screen>
     );
 }

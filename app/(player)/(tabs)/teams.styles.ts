@@ -7,7 +7,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.background,
     },
     header: {
-        padding: SPACING.screenPadding,
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
@@ -18,34 +17,9 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.heading,
         marginBottom: SPACING.lg,
     },
-    // Segment Toggle (Aligned with Dash/Matchrooms)
-    segmentToggle: {
-        flexDirection: 'row',
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 16,
-        padding: 4,
+    // Segment Toggle
+    segmentTabs: {
         marginBottom: SPACING.md,
-        height: 48,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-    },
-    toggleButton: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 12,
-    },
-    toggleButtonActive: {
-        backgroundColor: COLORS.accent,
-    },
-    toggleButtonText: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        fontFamily: FONTS.heading,
-        fontWeight: '600',
-    },
-    toggleButtonTextActive: {
-        color: '#FFF',
     },
 
     // Search Bar (matching Find Match)
@@ -119,13 +93,11 @@ export default StyleSheet.create({
     },
 
     listContent: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: 100, // Matched with matchrooms.styles
     },
 
     // Results Count
     resultsCount: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingTop: SPACING.md,
         paddingBottom: SPACING.sm,
     },

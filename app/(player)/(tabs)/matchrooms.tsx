@@ -1,4 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -9,11 +10,14 @@ import {
     ScrollView,
     Text,
     TextInput,
+    Pressable,
     TouchableOpacity,
     TouchableWithoutFeedback,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 
 import { GAME_FIELDS } from "../../../constants/matchConfig";
 import {
@@ -44,7 +48,7 @@ const GAMES = [
     { key: 'fc26', label: 'FC26' },
     { key: 'tekken8', label: 'Tekken 8' },
     { key: 'futsal', label: 'Futsal' },
-    { key: 'indoorCricket', label: 'Cricket' },
+    { key: 'indoor_cricket', label: 'Cricket' },
     { key: 'padel', label: 'Padel' },
     { key: 'pickleball', label: 'Pickleball' },
 ];
@@ -61,6 +65,8 @@ const LOCATION_OPTIONS = ['Any', ...KARACHI_AREAS.filter(a => a !== 'Other (Kara
 export default function MatchroomsIndex() {
     const { user } = useAuth();
     const router = useRouter();
+    const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
     const [rooms, setRooms] = useState<Matchroom[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -87,8 +93,15 @@ export default function MatchroomsIndex() {
 
     // Timeline filter state
     const [selectedTimeline, setSelectedTimeline] = useState<TimelineFilterKey>('any');
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const fetchRooms = async () => {
+        if (!user) {
+            setRooms([]);
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
         try {
             const res = await getMatchrooms();
             if (res.ok && res.data) {
@@ -130,7 +143,7 @@ export default function MatchroomsIndex() {
         }
         try {
             // BUSY CHECK
-            const busyCheck = await isUserInActiveMatchroom(user.uid);
+            const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
             if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
                 Alert.alert("Already Busy", busyCheck.message);
                 return;
@@ -171,6 +184,12 @@ export default function MatchroomsIndex() {
     };
 
     useEffect(() => {
+        if (!user) {
+            setRooms([]);
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
         setLoading(true);
         fetchRooms();
         fetchSocialState();
@@ -280,7 +299,7 @@ export default function MatchroomsIndex() {
         switch (selectedGame) {
             case 'cs2': return ['Any', ...CS2_ROLES];
             case 'futsal': return ['Any', ...FUTSAL_POSITIONS];
-            case 'indoorCricket': return ['Any', ...INDOOR_CRICKET_ROLES];
+            case 'indoor_cricket': return ['Any', ...INDOOR_CRICKET_ROLES];
             case 'padel': return ['Any', ...PADEL_ROLES];
             case 'pickleball': return ['Any', ...PICKLEBALL_ROLES];
             default: return [];
@@ -294,16 +313,16 @@ export default function MatchroomsIndex() {
             case 'tekken8': return ['Any', 'BO3', 'BO5', 'BO7', 'BO10'];
             case 'padel':
             case 'pickleball': return ['Any', 'BO3', 'BO5', 'BO10'];
-            case 'indoorCricket': return ['Any', 'BO3'];
+            case 'indoor_cricket': return ['Any', 'BO3'];
             case 'futsal': return [];
             default: return [];
         }
     };
 
     const hasFormatFilter = () => ['fc26', 'tekken8', 'futsal', 'pickleball'].includes(selectedGame);
-    const hasRoleFilter = () => ['cs2', 'futsal', 'indoorCricket', 'padel', 'pickleball'].includes(selectedGame);
+    const hasRoleFilter = () => ['cs2', 'futsal', 'indoor_cricket', 'padel', 'pickleball'].includes(selectedGame);
     const hasSeriesFilter = () => getSeriesOptions().length > 0;
-    const hasOversFilter = () => selectedGame === 'indoorCricket';
+    const hasOversFilter = () => selectedGame === 'indoor_cricket';
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
     const renderItem = useCallback(({ item }: { item: Matchroom }) => {
@@ -346,19 +365,20 @@ export default function MatchroomsIndex() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title="Matchrooms" />
+
             {/* Header Section (matching Find Players layout) */}
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Matchrooms</Text>
 
                 {/* Search Bar */}
                 <View style={styles.searchBar}>
@@ -491,14 +511,24 @@ export default function MatchroomsIndex() {
             />
 
             {/* Create Matchroom FAB */}
-            <View style={styles.fabWrapper}>
-                <TouchableOpacity
-                    onPress={() => router.push("/matchrooms/create" as any)}
-                    activeOpacity={0.8}
-                    style={styles.fab}
+            <View style={[styles.fabWrapper, { bottom: Math.max(insets.bottom + 16, tabBarHeight + 12) }]}>
+                <Pressable
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "matchrooms_fab_create" });
+                        }
+                    }}
+                    onPress={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "press", { tag: "matchrooms_fab_create" });
+                        }
+                        router.push("/matchrooms/create" as any);
+                    }}
+                    style={({ pressed }) => [styles.fab, pressed && { opacity: 0.88 }]}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                     <MaterialIcons name="add" size={28} color="#FFF" />
-                </TouchableOpacity>
+                </Pressable>
             </View>
 
             {/* Location Selection Modal */}
@@ -559,6 +589,6 @@ export default function MatchroomsIndex() {
                     </View>
                 </TouchableWithoutFeedback>
             </Modal>
-        </SafeAreaView>
+        </Screen>
     );
 }

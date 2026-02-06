@@ -118,11 +118,13 @@ export default function ZoneDashboard() {
         try {
             const res = await createZoneOffer({
                 requestId: selectedRequest.id!,
+                requestOwnerUid: selectedRequest.userId,
                 zoneId: zone.id,
                 branchId: 'primary', // TODO: Handle multiple branches
                 zoneName: zone.venueBrandName,
                 branchName: zone.primaryBranch.branchDisplayName || zone.venueBrandName,
-                zoneAdminId: user.uid,
+                zoneOwnerUid: user.uid,
+                zoneAdminId: user.uid, // legacy alias
                 proposedDate: selectedRequest.preferredDate || new Date(), // Default to requested date
                 proposedTime: selectedRequest.preferredTime || 'Flexible',
                 pricePerPlayer: parseInt(offerPrice),

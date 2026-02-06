@@ -9,7 +9,6 @@ export default StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
-        padding: SPACING.screenPadding,
     },
 
     // Header
@@ -171,6 +170,9 @@ export default StyleSheet.create({
     primaryButtonDisabled: {
         backgroundColor: COLORS.inputBorder,
         ...SHADOWS.cardElevated,
+    },
+    primaryButtonPressed: {
+        opacity: 0.9,
     },
     primaryButtonText: {
         color: COLORS.background,
@@ -364,6 +366,11 @@ export default StyleSheet.create({
         color: COLORS.muted,
         fontSize: 11,
     },
+    submitHintText: {
+        marginTop: 10,
+        textAlign: 'center',
+        color: COLORS.warning,
+    },
     accentText: {
         color: COLORS.accent,
     },
@@ -527,6 +534,158 @@ export default StyleSheet.create({
         fontSize: 12,
         marginBottom: 8,
         fontFamily: FONTS.body,
+    },
+    pickerOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        paddingHorizontal: SPACING.md,
+        paddingBottom: SPACING.md,
+    },
+    pickerBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+    },
+    pickerSheet: {
+        backgroundColor: COLORS.cardBackground,
+        borderTopLeftRadius: RADII.lg,
+        borderTopRightRadius: RADII.lg,
+        padding: SPACING.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        ...SHADOWS.cardElevated,
+    },
+    pickerHandle: {
+        width: 44,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: COLORS.cardBorder,
+        alignSelf: 'center',
+        marginBottom: SPACING.sm,
+    },
+    pickerHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: SPACING.sm,
+    },
+    pickerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '700',
+    },
+    pickerAction: {
+        color: COLORS.accent,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label,
+    },
+    calendarContainer: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+    },
+    calendarHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: SPACING.sm,
+    },
+    calendarNavButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: COLORS.cardDark,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+    },
+    calendarNavText: {
+        color: COLORS.text,
+        fontSize: 18,
+        fontFamily: FONTS.heading,
+    },
+    calendarTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '700',
+    },
+    weekdayRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: SPACING.xs,
+    },
+    weekdayLabel: {
+        width: '14.28%',
+        textAlign: 'center',
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+    },
+    calendarGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    dayCell: {
+        width: '14.28%',
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 4,
+        borderRadius: RADII.sm,
+    },
+    dayCellDisabled: {
+        opacity: 0.35,
+    },
+    dayCellSelected: {
+        borderWidth: 1,
+        borderColor: COLORS.accent,
+        backgroundColor: 'transparent',
+    },
+    dayText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    dayTextDisabled: {
+        color: COLORS.muted,
+    },
+    dayTextSelected: {
+        color: COLORS.text,
+        fontWeight: '700',
+    },
+    timePickerRow: {
+        flexDirection: 'row',
+        gap: SPACING.md,
+        marginTop: SPACING.sm,
+    },
+    timeColumn: {
+        flex: 1,
+        gap: SPACING.sm,
+    },
+    timeOption: {
+        paddingVertical: 10,
+        borderRadius: RADII.md,
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        alignItems: 'center',
+    },
+    timeOptionActive: {
+        backgroundColor: 'transparent',
+        borderColor: COLORS.accent,
+    },
+    timeOptionText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    timeOptionTextActive: {
+        color: COLORS.text,
+        fontWeight: '700',
     },
 });
 

@@ -183,6 +183,8 @@ export default function SkillBracketSection({
     }
 
     const tiers = ['Any', 'Beginner', 'Intermediate', 'Advanced', 'Pro'];
+    const hasAssessment = !!SKILL_ASSESSMENT_CONFIG[gameKey];
+    const selectedTier = valueTier || 'Any';
 
     return (
         <View style={styles.container}>
@@ -222,9 +224,35 @@ export default function SkillBracketSection({
                         ))}
                     </View>
                 </>
-            ) : (
-                // Case B: No Skill -> Show Calibration
+            ) : hasAssessment ? (
+                // Case B: No Skill + Assessment Available -> Show Calibration
                 <SkillCalibration gameKey={gameKey} onComplete={handleCalibrationComplete} />
+            ) : (
+                // Case C: No Skill + No Assessment -> Show manual bracket selector
+                <>
+                    <Text style={[styles.sectionLabel, { fontSize: 13, marginBottom: 8 }]}>
+                        Match Bracket
+                    </Text>
+                    <View style={styles.chipRow}>
+                        {tiers.map((t) => (
+                            <Pressable
+                                key={t}
+                                style={[
+                                    styles.optionChip,
+                                    selectedTier === t && styles.optionChipActive
+                                ]}
+                                onPress={() => onChange({ score: valueScore, tier: t as any })}
+                            >
+                                <Text style={[
+                                    styles.optionChipText,
+                                    selectedTier === t && styles.optionChipTextActive
+                                ]}>
+                                    {t}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                </>
             )}
 
             <Text style={styles.helperTiny}>

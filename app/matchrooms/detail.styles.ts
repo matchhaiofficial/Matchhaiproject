@@ -9,16 +9,10 @@ export default StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: SPACING.screenPadding,
         paddingVertical: 18,
         backgroundColor: COLORS.background,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.cardBorder,
-        elevation: 4,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -30,7 +24,6 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
     },
     content: {
-        padding: SPACING.screenPadding,
         paddingBottom: 100,
     },
 
@@ -124,6 +117,55 @@ export default StyleSheet.create({
     lockedBanner: {
         backgroundColor: COLORS.warning,
     },
+    qrCard: {
+        backgroundColor: COLORS.cardDark,
+        borderRadius: 16,
+        padding: SPACING.lg,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        marginBottom: SPACING.lg,
+    },
+    qrHeader: {
+        marginBottom: SPACING.md,
+    },
+    qrTitle: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontFamily: FONTS.heading,
+        marginBottom: 4,
+    },
+    qrSubtitle: {
+        color: COLORS.muted,
+        fontSize: 12,
+        fontFamily: FONTS.body,
+    },
+    qrBody: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.lg,
+    },
+    qrInfo: {
+        flex: 1,
+    },
+    qrCodeLabel: {
+        color: COLORS.muted,
+        fontSize: 12,
+        fontFamily: FONTS.body,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    qrCodeValue: {
+        color: COLORS.text,
+        fontSize: 20,
+        fontFamily: FONTS.heading,
+        marginTop: 4,
+        marginBottom: 6,
+    },
+    qrHint: {
+        color: COLORS.textSecondary,
+        fontSize: 11,
+        fontFamily: FONTS.body,
+    },
     bannerText: {
         color: '#FFF',
         flex: 1,
@@ -208,6 +250,8 @@ export default StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: COLORS.overlayLight,
         paddingBottom: SPACING.lg + 20,
+        zIndex: 10000,
+        elevation: 10000,
     },
     footerRow: {
         flexDirection: 'row',

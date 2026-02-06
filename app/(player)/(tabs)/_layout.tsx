@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS, FONTS } from "../../../src/theme";
 
+const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1';
+
 export default function PlayerTabsLayout() {
     const insets = useSafeAreaInsets();
     const { user, loading } = useAuth();
@@ -22,26 +24,25 @@ export default function PlayerTabsLayout() {
         <Tabs
             screenOptions={{
                 headerShown: false,
-                tabBarStyle: {
-                    position: 'absolute',
-                    backgroundColor: COLORS.cardDark,
-                    borderTopWidth: 1,
-                    borderTopColor: 'rgba(255,255,255,0.1)',
-                    height: 65 + insets.bottom,
-                    paddingBottom: insets.bottom + 8,
-                    paddingTop: 12,
-                    paddingHorizontal: 16,
-                    borderTopLeftRadius: 20,
-                    borderTopRightRadius: 20,
-                    elevation: 10,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: -4 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 8,
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                },
+                tabBarHideOnKeyboard: true,
+                tabBarStyle: HIDE_PLAYER_TAB_BAR
+                    ? { display: 'none' }
+                    : {
+                        backgroundColor: COLORS.cardDark,
+                        borderTopWidth: 1,
+                        borderTopColor: 'rgba(255,255,255,0.1)',
+                        height: 65 + insets.bottom,
+                        paddingBottom: insets.bottom + 8,
+                        paddingTop: 12,
+                        paddingHorizontal: 16,
+                        borderTopLeftRadius: 20,
+                        borderTopRightRadius: 20,
+                        elevation: 10,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: -4 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 8,
+                    },
                 tabBarActiveTintColor: COLORS.accent,
                 tabBarInactiveTintColor: COLORS.textSecondary,
                 tabBarLabelStyle: {
@@ -91,12 +92,6 @@ export default function PlayerTabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name="find-players"
-                options={{
-                    href: null,
-                }}
-            />
-            <Tabs.Screen
                 name="teams"
                 options={{
                     href: null,
@@ -129,12 +124,6 @@ export default function PlayerTabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name="find-players.styles"
-                options={{
-                    href: null,
-                }}
-            />
-            <Tabs.Screen
                 name="profile.styles"
                 options={{
                     href: null,
@@ -147,19 +136,7 @@ export default function PlayerTabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name="live.styles"
-                options={{
-                    href: null,
-                }}
-            />
-            <Tabs.Screen
                 name="discover.styles"
-                options={{
-                    href: null,
-                }}
-            />
-            <Tabs.Screen
-                name="live"
                 options={{
                     href: null,
                 }}

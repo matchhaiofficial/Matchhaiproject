@@ -4,27 +4,28 @@ import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
-    Image,
     RefreshControl,
     ScrollView,
     Text,
     TouchableOpacity,
-    View,
-    StyleSheet
+    View
 } from "react-native";
 
 import { getActiveZones, Zone } from "../../../../src/services/zoneService";
-import { COLORS, SPACING, RADII, FONTS, SHADOWS, TEXT_SIZES } from "../../../../src/theme";
+import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
-import { normalizeGameKey } from "../utils/gameKeys";
+import styles, { filterStyles } from "../styles/zones.styles";
 
 interface DiscoverZoneListProps {
     selectedGame: GameKey;
     searchQuery: string;
+    selectedVenueType: 'all' | 'zones' | 'courts';
+    edgePadding?: number;
+    bottomPadding?: number;
 }
 
-export default function DiscoverZoneList({ selectedGame, searchQuery }: DiscoverZoneListProps) {
+export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQuery, selectedVenueType, edgePadding, bottomPadding }: DiscoverZoneListProps) {
     const router = useRouter();
     const [zones, setZones] = useState<Zone[]>([]);
     const [loading, setLoading] = useState(true);
@@ -33,7 +34,6 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
     // Filter state
     const [filtersExpanded, setFiltersExpanded] = useState(true);
     const [selectedProximity, setSelectedProximity] = useState('Any');
-    const [selectedVenueType, setSelectedVenueType] = useState<'all' | 'zones' | 'courts'>('all');
     const [internalSelectedGame, setInternalSelectedGame] = useState<string>('all');
 
     // User's area/city for proximity filtering (could be from context/profile)
@@ -62,12 +62,6 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
         return [];
     };
 
-    // Reset game selection when venue type changes
-    const handleVenueTypeChange = (venueType: 'all' | 'zones' | 'courts') => {
-        setSelectedVenueType(venueType);
-        setInternalSelectedGame('all'); // Reset game filter when venue type changes
-    };
-
     const fetchZones = async () => {
         try {
             // Use internal game filter if venue type is selected, otherwise fetch all
@@ -84,6 +78,10 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
             setRefreshing(false);
         }
     };
+
+    useEffect(() => {
+        setInternalSelectedGame('all');
+    }, [selectedVenueType]);
 
     useEffect(() => {
         setLoading(true);
@@ -197,17 +195,20 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
 
     // Filter options
     const PROXIMITY_OPTIONS = ['Any', 'Same Area', 'Same City'];
-    const VENUE_TYPE_OPTIONS = [
-        { key: 'all', label: 'All Venues' },
-        { key: 'zones', label: 'Gaming Zones' },
-        { key: 'courts', label: 'Sports Courts' },
-    ];
+    const filterBleedStyle = edgePadding ? { marginHorizontal: -edgePadding, paddingHorizontal: edgePadding } : null;
+    const filterScrollStyle = edgePadding ? { marginHorizontal: -edgePadding } : null;
+    const filterContentStyle = edgePadding ? { paddingHorizontal: edgePadding } : null;
 
     // Render filter row helper (consistent with other tabs)
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
         <View style={filterStyles.filterSection}>
             <Text style={filterStyles.filterLabel}>{label}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={filterStyles.filterOptionsScroll}
+                contentContainerStyle={filterStyles.filterOptionsContent}
+            >
                 {options.map(opt => (
                     <TouchableOpacity
                         key={opt}
@@ -230,19 +231,9 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                 <TouchableOpacity
                     onPress={() => setFiltersExpanded(!filtersExpanded)}
                     activeOpacity={0.7}
-                    style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingHorizontal: 16,
-                        paddingBottom: 8,
-                        paddingTop: 8,
-                        backgroundColor: COLORS.background
-                    }}
+                    style={[filterStyles.filterToggleRow, filterBleedStyle]}
                 >
-                    <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
-                        Filters
-                    </Text>
+                    <Text style={filterStyles.filterToggleText}>Filters</Text>
                     <MaterialIcons
                         name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
                         size={20}
@@ -254,33 +245,22 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                     <View style={{ maxHeight: 350 }}>
                         <ScrollView
                             showsVerticalScrollIndicator={true}
-                            contentContainerStyle={[filterStyles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                            style={filterScrollStyle || undefined}
+                            contentContainerStyle={[filterStyles.filtersPanel, filterContentStyle || undefined]}
                         >
-                            {/* Venue Type Filter (Primary) - Always visible */}
-                            <View style={filterStyles.filterSection}>
-                                <Text style={filterStyles.filterLabel}>Venue Type</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
-                                    {VENUE_TYPE_OPTIONS.map(opt => (
-                                        <TouchableOpacity
-                                            key={opt.key}
-                                            onPress={() => handleVenueTypeChange(opt.key as 'all' | 'zones' | 'courts')}
-                                            style={[filterStyles.optionChip, selectedVenueType === opt.key && filterStyles.optionChipActive]}
-                                        >
-                                            <Text style={[filterStyles.optionChipText, selectedVenueType === opt.key && filterStyles.optionChipTextActive]}>
-                                                {opt.label}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </ScrollView>
-                            </View>
+                            {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
 
-                            {/* Game Filter - Only show after venue type is selected */}
                             {selectedVenueType !== 'all' && (
                                 <View style={filterStyles.filterSection}>
                                     <Text style={filterStyles.filterLabel}>
                                         {selectedVenueType === 'zones' ? 'Game' : 'Sport'}
                                     </Text>
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={filterStyles.filterOptionsScroll}>
+                                    <ScrollView
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        style={filterStyles.filterOptionsScroll}
+                                        contentContainerStyle={filterStyles.filterOptionsContent}
+                                    >
                                         {getGamesForVenueType().map(game => (
                                             <TouchableOpacity
                                                 key={game.key}
@@ -295,8 +275,6 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                                     </ScrollView>
                                 </View>
                             )}
-
-                            {renderFilterRow('Location', PROXIMITY_OPTIONS, selectedProximity, setSelectedProximity)}
                         </ScrollView>
                     </View>
                 )}
@@ -312,7 +290,7 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
                 data={filteredZones}
                 renderItem={renderZoneItem}
                 keyExtractor={(item) => item.id}
-                contentContainerStyle={[styles.listContent]}
+                contentContainerStyle={[styles.listContent, { paddingBottom: bottomPadding ?? 24 }]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
@@ -330,159 +308,3 @@ export default function DiscoverZoneList({ selectedGame, searchQuery }: Discover
         </View>
     );
 }
-
-const styles = StyleSheet.create({
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    listContent: {
-        paddingHorizontal: SPACING.screenPadding,
-        paddingBottom: 100,
-    },
-    resultsCount: {
-        paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.md,
-        paddingBottom: SPACING.sm,
-    },
-    resultsCountText: {
-        color: COLORS.textSecondary,
-        fontSize: TEXT_SIZES.caption,
-    },
-    card: {
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: RADII.lg,
-        padding: SPACING.md,
-        marginBottom: SPACING.md,
-        ...SHADOWS.cardElevated,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: SPACING.sm,
-    },
-    cardIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: SPACING.md,
-    },
-    cardTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    cardSubtitle: {
-        color: COLORS.textSecondary,
-        fontSize: 12,
-        marginLeft: 4,
-        flex: 1,
-    },
-    priceTag: {
-        backgroundColor: 'rgba(0, 230, 118, 0.1)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: 'rgba(0, 230, 118, 0.3)',
-    },
-    priceText: {
-        color: COLORS.success,
-        fontSize: 10,
-        fontWeight: 'bold',
-    },
-    tagsRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        marginTop: 4,
-        gap: 8,
-    },
-    tag: {
-        backgroundColor: COLORS.background,
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: COLORS.divider,
-    },
-    tagText: {
-        color: COLORS.textSecondary,
-        fontSize: 10,
-        fontFamily: FONTS.body,
-    },
-    emptyState: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingTop: 60,
-    },
-    emptyIcon: {
-        marginBottom: SPACING.md,
-        opacity: 0.5,
-    },
-    emptyTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: 18,
-        marginBottom: SPACING.sm,
-    },
-    emptySubtitle: {
-        color: COLORS.muted,
-        textAlign: 'center',
-    },
-});
-
-// Filter styles (consistent with other tabs)
-const filterStyles = StyleSheet.create({
-    filtersPanel: {
-        backgroundColor: COLORS.cardBackground,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
-        paddingVertical: 12,
-    },
-    filterSection: {
-        marginBottom: 12,
-        paddingHorizontal: 16,
-    },
-    filterLabel: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.heading,
-        fontSize: 12,
-        marginBottom: 8,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    filterOptionsScroll: {
-        flexGrow: 0,
-    },
-    optionChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: COLORS.inputBorder,
-        backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm - 1,
-        marginRight: SPACING.sm,
-        marginBottom: 5,
-    },
-    optionChipActive: {
-        backgroundColor: '#1e2a38',
-        borderColor: COLORS.accent,
-    },
-    optionChipText: {
-        color: COLORS.muted,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.label - 1,
-    },
-    optionChipTextActive: {
-        color: COLORS.text,
-    },
-});

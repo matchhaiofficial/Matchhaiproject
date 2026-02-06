@@ -12,7 +12,8 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 
 import { db } from "../../../src/config/firebaseConfig";
 import { Zone } from "../../../src/services/zoneService";
@@ -51,26 +52,23 @@ export default function PlayerZoneDetails() {
 
     if (loading) {
         return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.accent} />
-            </View>
+            <Screen style={styles.screen} scroll={false}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={COLORS.accent} />
+                </View>
+            </Screen>
         );
     }
 
     if (!zone) {
         return (
-            <SafeAreaView style={styles.screen}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Zone Not Found</Text>
-                </View>
+            <Screen style={styles.screen} scroll={false}>
+                <AppHeader title="Zone Not Found" onBack={() => router.back()} />
                 <View style={styles.errorContainer}>
                     <MaterialIcons name="error-outline" size={64} color={COLORS.muted} />
                     <Text style={styles.errorText}>We couldn't find the details for this zone.</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
@@ -85,30 +83,18 @@ export default function PlayerZoneDetails() {
         .map(([key]) => key.replace('supports', '').toUpperCase());
 
     return (
-        <View style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <StatusBar barStyle="light-content" />
-            <SafeAreaView edges={['top']} style={{ backgroundColor: COLORS.background }}>
-                <View style={styles.header}>
-                    <Pressable
-                        onPress={() => router.back()}
-                        style={({ pressed }) => [
-                            styles.backButton,
-                            pressed && { opacity: 0.7 }
-                        ]}
-                        android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 20 }}
-                    >
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>Zone Details</Text>
-                </View>
-            </SafeAreaView>
+            <AppHeader title="Zone Details" onBack={() => router.back()} inlineTitle />
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 {/* Visual Banner */}
                 <View style={styles.banner}>
                     <MaterialIcons name="store" size={80} color="rgba(255,255,255,0.2)" />
                     <View style={styles.bannerOverlay}>
-                        <Text style={styles.venueName}>{zone.venueBrandName}</Text>
+                        <Text style={styles.venueName} numberOfLines={1} ellipsizeMode="tail">
+                            {zone.venueBrandName}
+                        </Text>
                     </View>
                 </View>
 
@@ -198,7 +184,7 @@ export default function PlayerZoneDetails() {
                         { key: 'futsal', label: 'FUTSAL' },
                         { key: 'padel', label: 'PADEL' },
                         { key: 'pickleball', label: 'PICKLEBALL' },
-                        { key: 'indoorCricket', label: 'INDOOR CRICKET' }
+                        { key: 'indoor_cricket', label: 'INDOOR CRICKET' }
                     ].map((sport) => {
                         const pricing = (zone.pricing as any)?.[sport.key];
                         if (!pricing || Object.keys(pricing).length === 0) return null;
@@ -248,6 +234,6 @@ export default function PlayerZoneDetails() {
                     <Text style={styles.actionButtonText}>Book Now</Text>
                 </Pressable>
             </ScrollView>
-        </View>
+        </Screen>
     );
 }

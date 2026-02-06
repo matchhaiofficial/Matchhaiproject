@@ -35,6 +35,7 @@ const GAMES = [
 export default function CreateTeam() {
     const { user } = useAuth();
     const router = useRouter();
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
@@ -101,6 +102,8 @@ export default function CreateTeam() {
             setSubmitting(false);
         }
     };
+
+    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!selectedSize && !submitting;
 
     return (
         <SafeAreaView style={styles.screen}>
@@ -220,14 +223,24 @@ export default function CreateTeam() {
 
                 {/* Submit Button */}
                 <View style={styles.buttonWrapper}>
-                    <TouchableOpacity
+                    <Pressable
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", {
+                                    tag: "team_create_submit",
+                                    canSubmit,
+                                    submitting,
+                                });
+                            }
+                        }}
                         onPress={handleSubmit}
-                        disabled={submitting}
-                        activeOpacity={0.7}
-                        style={[
+                        disabled={!canSubmit}
+                        style={({ pressed }) => [
                             styles.primaryButton,
-                            submitting && styles.primaryButtonDisabled
+                            !canSubmit && styles.primaryButtonDisabled,
+                            pressed && canSubmit && styles.primaryButtonPressed,
                         ]}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
                             <ActivityIndicator color="#FFF" />
@@ -236,7 +249,7 @@ export default function CreateTeam() {
                                 Create Team
                             </Text>
                         )}
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
             </KeyboardAvoidingView>
         </SafeAreaView>

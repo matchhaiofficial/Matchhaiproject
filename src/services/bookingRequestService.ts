@@ -4,7 +4,6 @@ import {
     collection,
     doc,
     getDocs,
-    orderBy,
     query,
     serverTimestamp,
     updateDoc,
@@ -71,9 +70,11 @@ export interface BookingRequest {
 export interface ZoneOffer {
     id?: string;
     requestId: string;
+    requestOwnerUid: string;
     zoneId: string;
     zoneName: string;
-    zoneAdminId: string;
+    zoneOwnerUid: string;
+    zoneAdminId?: string; // legacy alias (kept for backward compatibility)
     branchId?: string;
     branchName?: string;
 
@@ -91,7 +92,49 @@ export interface ZoneOffer {
     status: 'pending' | 'accepted' | 'rejected';
 
     createdAt: any;
+    updatedAt?: any;
 }
+
+const toMillis = (value: any) => {
+    if (!value) return 0;
+    if (typeof value?.toMillis === 'function') return value.toMillis();
+    if (typeof value?.seconds === 'number') return value.seconds * 1000;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number') return value;
+    return 0;
+};
+
+const normalizeZoneOffer = (id: string, data: any): ZoneOffer => {
+    const zoneOwnerUid = data.zoneOwnerUid || data.zoneAdminId || '';
+    return {
+        id,
+        requestId: data.requestId,
+        requestOwnerUid: data.requestOwnerUid || '',
+        zoneId: data.zoneId,
+        zoneName: data.zoneName,
+        zoneOwnerUid,
+        zoneAdminId: data.zoneAdminId || zoneOwnerUid || undefined,
+        branchId: data.branchId,
+        branchName: data.branchName,
+        proposedDate: data.proposedDate,
+        proposedTime: data.proposedTime,
+        pricePerPlayer: data.pricePerPlayer,
+        currency: data.currency,
+        location: data.location,
+        message: data.message,
+        status: data.status || 'pending',
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+    };
+};
+
+const chunk = <T,>(arr: T[], size: number) => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+};
 
 /**
  * Create a new booking request (broadcast mode)
@@ -128,8 +171,7 @@ export const getRequestsForZoneAdmin = async (
         // Get all open requests
         const q = query(
             collection(db, 'booking_requests'),
-            where('status', '==', 'open'),
-            orderBy('createdAt', 'desc')
+            where('status', '==', 'open')
         );
 
         const snapshot = await getDocs(q);
@@ -159,15 +201,23 @@ export const getUserRequests = async (
     try {
         const q = query(
             collection(db, 'booking_requests'),
-            where('userId', '==', userId),
-            orderBy('createdAt', 'desc')
+            where('userId', '==', userId)
         );
 
         const snapshot = await getDocs(q);
+        const toMillis = (value: any) => {
+            if (!value) return 0;
+            if (typeof value?.toMillis === 'function') return value.toMillis();
+            if (typeof value?.seconds === 'number') return value.seconds * 1000;
+            if (value instanceof Date) return value.getTime();
+            if (typeof value === 'number') return value;
+            return 0;
+        };
+
         const requests = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data(),
-        } as BookingRequest));
+        } as BookingRequest)).sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
         return { ok: true, data: requests };
     } catch (error) {
@@ -183,13 +233,24 @@ export const createZoneOffer = async (
     data: Omit<ZoneOffer, 'id' | 'createdAt' | 'status'>
 ): Promise<{ ok: boolean; id?: string; message?: string }> => {
     try {
+        const zoneOwnerUid = data.zoneOwnerUid || data.zoneAdminId;
+        if (!zoneOwnerUid) {
+            return { ok: false, message: 'Missing zone owner for this offer' };
+        }
+        if (!data.requestOwnerUid) {
+            return { ok: false, message: 'Missing request owner for this offer' };
+        }
+
         const offerData = {
             ...data,
+            zoneOwnerUid,
+            zoneAdminId: data.zoneAdminId || zoneOwnerUid, // keep legacy field for old readers
             status: 'pending' as const,
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         };
 
-        const docRef = await addDoc(collection(db, 'zone_offers'), offerData);
+        const docRef = await addDoc(collection(db, 'booking_offers'), offerData);
         Logger.info('bookingRequestService', 'Created zone offer', { id: docRef.id });
 
         return { ok: true, id: docRef.id };
@@ -207,21 +268,75 @@ export const getOffersForRequest = async (
 ): Promise<{ ok: boolean; data?: ZoneOffer[]; message?: string }> => {
     try {
         const q = query(
-            collection(db, 'zone_offers'),
-            where('requestId', '==', requestId),
-            orderBy('createdAt', 'desc')
+            collection(db, 'booking_offers'),
+            where('requestId', '==', requestId)
         );
 
         const snapshot = await getDocs(q);
-        const offers = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-        } as ZoneOffer));
+        const offers = snapshot.docs
+            .map(docSnap => normalizeZoneOffer(docSnap.id, docSnap.data()))
+            .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
         return { ok: true, data: offers };
     } catch (error) {
         Logger.error('bookingRequestService', 'Error fetching offers', error);
         return { ok: false, message: 'Failed to fetch offers' };
+    }
+};
+
+/**
+ * Get all offers visible to a requesting player.
+ * Phase 1 contract fallback:
+ * - primary: requestOwnerUid
+ * - fallback: offers linked to player's own requestIds (legacy docs may not have requestOwnerUid)
+ */
+export const getOffersForUser = async (
+    userId: string
+): Promise<{ ok: boolean; data?: ZoneOffer[]; message?: string }> => {
+    try {
+        const offersById = new Map<string, ZoneOffer>();
+
+        const directQuery = query(
+            collection(db, 'booking_offers'),
+            where('requestOwnerUid', '==', userId)
+        );
+        const directSnap = await getDocs(directQuery);
+        directSnap.docs.forEach((docSnap) => {
+            offersById.set(docSnap.id, normalizeZoneOffer(docSnap.id, docSnap.data()));
+        });
+
+        const requestsResult = await getUserRequests(userId);
+        const requestIds = (requestsResult.ok && requestsResult.data)
+            ? requestsResult.data.map((r) => r.id).filter(Boolean) as string[]
+            : [];
+
+        if (requestIds.length > 0) {
+            const idChunks = chunk(Array.from(new Set(requestIds)), 10);
+            const chunkSnaps = await Promise.all(
+                idChunks.map((ids) => getDocs(query(
+                    collection(db, 'booking_offers'),
+                    where('requestId', 'in', ids)
+                )))
+            );
+
+            chunkSnaps.forEach((snap) => {
+                snap.docs.forEach((docSnap) => {
+                    const normalized = normalizeZoneOffer(docSnap.id, docSnap.data());
+                    if (!normalized.requestOwnerUid) {
+                        normalized.requestOwnerUid = userId;
+                    }
+                    offersById.set(docSnap.id, normalized);
+                });
+            });
+        }
+
+        const offers = Array.from(offersById.values())
+            .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+
+        return { ok: true, data: offers };
+    } catch (error) {
+        Logger.error('bookingRequestService', 'Error fetching user offers', error);
+        return { ok: false, message: 'Failed to fetch your offers' };
     }
 };
 
@@ -234,9 +349,10 @@ export const acceptOffer = async (
 ): Promise<{ ok: boolean; matchroomId?: string; message?: string }> => {
     try {
         // Update offer status
-        const offerRef = doc(db, 'zone_offers', offerId);
+        const offerRef = doc(db, 'booking_offers', offerId);
         await updateDoc(offerRef, {
             status: 'accepted',
+            updatedAt: serverTimestamp(),
         });
 
         // Update request status
@@ -244,6 +360,7 @@ export const acceptOffer = async (
         await updateDoc(requestRef, {
             status: 'accepted',
             acceptedOfferId: offerId,
+            updatedAt: serverTimestamp(),
         });
 
         // TODO: Reject all other offers for this request
@@ -252,7 +369,10 @@ export const acceptOffer = async (
             const otherOffers = offersResult.data.filter(o => o.id !== offerId);
             await Promise.all(
                 otherOffers.map(offer =>
-                    updateDoc(doc(db, 'zone_offers', offer.id!), { status: 'rejected' })
+                    updateDoc(doc(db, 'booking_offers', offer.id!), {
+                        status: 'rejected',
+                        updatedAt: serverTimestamp(),
+                    })
                 )
             );
         }

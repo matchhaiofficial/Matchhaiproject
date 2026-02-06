@@ -376,7 +376,7 @@ export default function GameDynamicFields({
     }
 
     // Indoor Cricket Fields
-    if (gameKey === 'indoorCricket') {
+    if (gameKey === 'indoor_cricket') {
         return (
             <>
                 <View style={styles.section}>

@@ -9,7 +9,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "../../../src/context/AuthContext";
 import { createBookingIntentDetailed } from "../../../src/services/bookingService";
@@ -24,6 +24,8 @@ export default function BookSlotsScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const [room, setRoom] = useState<Matchroom | null>(null);
     const [loading, setLoading] = useState(true);
@@ -361,7 +363,7 @@ export default function BookSlotsScreen() {
                 </View>
             </ScrollView>
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + 12, 24) }]}>
                 <View style={styles.priceRow}>
                     <Text style={styles.priceLabel}>Total to pay</Text>
                     <Text style={styles.priceValue}>{room.pricing?.currency} {totalPrice}</Text>
@@ -369,8 +371,15 @@ export default function BookSlotsScreen() {
 
                 <TouchableOpacity
                     style={[styles.primaryButton, selectionList.length === 0 && styles.primaryButtonDisabled]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "book_slots_proceed" });
+                        }
+                    }}
                     onPress={handleSubmitBooking}
                     disabled={submitting || selectionList.length === 0}
+                    activeOpacity={0.85}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     {submitting ? (
                         <ActivityIndicator color="#FFF" />

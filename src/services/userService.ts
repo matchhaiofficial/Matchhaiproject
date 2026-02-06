@@ -203,6 +203,19 @@ export interface OnboardingStep2Prefs {
   fcFormation: string | null;
   playsTekken: boolean;
   tekkenFavorites: string[]; // up to 3 characters
+
+  // offline sports (MVP)
+  playsFutsal?: boolean;
+  playsIndoorCricket?: boolean;
+  playsPadel?: boolean;
+  playsPickleball?: boolean;
+
+  futsalPositions?: string[]; // multi-select
+  indoorCricketRole?: string | null;
+  indoorCricketBowlingStyle?: string | null;
+  indoorCricketBattingStyle?: string | null;
+  padelRole?: string | null;
+  pickleballRole?: string | null;
 }
 
 /**
@@ -221,6 +234,10 @@ export async function saveOnboardingStep2(
   try {
     const userRef = doc(db, "users", user.uid);
 
+    const futsalPositions = Array.isArray(prefs.futsalPositions)
+      ? prefs.futsalPositions.filter(Boolean)
+      : [];
+
     await updateDoc(userRef, {
       areasPreferred: prefs.areasPreferred,
       playsCs2: prefs.playsCs2,
@@ -230,6 +247,23 @@ export async function saveOnboardingStep2(
       fcFormation: prefs.fcFormation ?? null,
       playsTekken: prefs.playsTekken,
       tekkenFavorites: prefs.tekkenFavorites,
+
+      // offline sports
+      playsFutsal: !!prefs.playsFutsal,
+      playsIndoorCricket: !!prefs.playsIndoorCricket,
+      playsPadel: !!prefs.playsPadel,
+      playsPickleball: !!prefs.playsPickleball,
+
+      futsalPositions,
+      // legacy: keep the first position for older screens
+      futsalPosition: futsalPositions[0] ?? null,
+
+      indoorCricketRole: prefs.indoorCricketRole ?? null,
+      indoorCricketBowlingStyle: prefs.indoorCricketBowlingStyle ?? null,
+      indoorCricketBattingStyle: prefs.indoorCricketBattingStyle ?? null,
+      padelRole: prefs.padelRole ?? null,
+      pickleballRole: prefs.pickleballRole ?? null,
+
       updatedAt: serverTimestamp(),
     });
 
@@ -405,6 +439,7 @@ export interface UserProfile {
 
   // Sports profiles (from step 2 if they exist)
   futsalPosition?: string;
+  futsalPositions?: string[];
   indoorCricketRole?: string;
   indoorCricketBowlingStyle?: string;
   indoorCricketBattingStyle?: string;
@@ -535,6 +570,9 @@ export async function getUserProfile(
 
       // Sports profiles
       futsalPosition: data.futsalPosition ?? undefined,
+      futsalPositions: Array.isArray(data.futsalPositions)
+        ? data.futsalPositions.filter(Boolean)
+        : (data.futsalPosition ? [data.futsalPosition] : undefined),
       indoorCricketRole: data.indoorCricketRole ?? undefined,
       indoorCricketBowlingStyle: data.indoorCricketBowlingStyle ?? undefined,
       indoorCricketBattingStyle: data.indoorCricketBattingStyle ?? undefined,
@@ -586,7 +624,7 @@ export const getUserSportProfile = (profile: UserProfile, gameKey: string) => {
       };
     case 'futsal':
       return {
-        position: profile.futsalPosition,
+        positions: profile.futsalPositions || (profile.futsalPosition ? [profile.futsalPosition] : []),
       };
     case 'indoor_cricket':
       return {
@@ -635,8 +673,10 @@ export const getUserSportRoleLabel = (profile: UserProfile, gameKey: string): st
       return `${favorites[0]} +${favorites.length - 1}`;
     }
     case 'futsal': {
-      const position = typeof sportProfile.position === 'string' ? sportProfile.position.trim() : '';
-      return position || null;
+      const positions = Array.isArray(sportProfile.positions) ? sportProfile.positions.filter(Boolean) : [];
+      if (positions.length === 0) return null;
+      if (positions.length === 1) return String(positions[0]);
+      return positions.join(", ");
     }
     case 'indoor_cricket': {
       const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';

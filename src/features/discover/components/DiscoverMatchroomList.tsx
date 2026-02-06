@@ -1,5 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
     ActivityIndicator,
@@ -13,9 +13,7 @@ import {
     TouchableOpacity,
     TouchableWithoutFeedback,
     View,
-    StyleSheet
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { GAME_FIELDS } from "../../../../constants/matchConfig";
 import {
@@ -31,7 +29,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/matchService";
-import { COLORS, FONTS } from "../../../../src/theme";
+import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { matchesTimeline } from "../../../../src/utils/timeFilters";
 import { isRoomExpired } from "../../../../src/utils/matchroomLifecycle";
@@ -39,12 +37,7 @@ import MatchroomCard from "../../../../app/matchrooms/components/MatchroomCard";
 import { GameKey } from "../types";
 import { normalizeGameKey } from "../utils/gameKeys";
 
-// Reuse styles from matchrooms.styles but import implicitly or copy relevant parts?
-// For now, let's assume we can reuse the existing styles or I'll inline/create new for specific parts.
-// Actually, I should create a local style or import. Let's import from the app folder for now to save duplication,
-// but usually feature folders should be self-contained.
-// I will copy the styles logic to avoiding deep imports of app-level styles if possible, or just use inline for the layout structure.
-import styles from "../../../../app/(player)/(tabs)/matchrooms.styles";
+import styles from "../styles/matchrooms.styles";
 
 // CS2 FACEIT skill levels
 const CS2_SKILL_LEVELS = ['Any', 'FACEIT 1-3', 'FACEIT 4-6', 'FACEIT 7-10'];
@@ -61,9 +54,11 @@ const LOCATION_OPTIONS = ['Any', ...KARACHI_AREAS.filter(a => a !== 'Other (Kara
 interface DiscoverMatchroomListProps {
     selectedGame: GameKey;
     searchQuery: string;
+    edgePadding?: number;
+    bottomPadding?: number;
 }
 
-export default function DiscoverMatchroomList({ selectedGame, searchQuery }: DiscoverMatchroomListProps) {
+export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgePadding, bottomPadding }: DiscoverMatchroomListProps) {
     const { user } = useAuth();
     const [rooms, setRooms] = useState<Matchroom[]>([]);
     const [loading, setLoading] = useState(true);
@@ -91,6 +86,12 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
     const [locationSearch, setLocationSearch] = useState('');
 
     const fetchRooms = async () => {
+        if (!user) {
+            setRooms([]);
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
         try {
             const res = await getMatchrooms();
             if (res.ok && res.data) {
@@ -132,7 +133,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         }
         try {
             // BUSY CHECK
-            const busyCheck = await isUserInActiveMatchroom(user.uid);
+            const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
             if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
                 Alert.alert("Already Busy", busyCheck.message);
                 return;
@@ -292,15 +293,8 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
     const getFormatOptions = () => {
         if (selectedGame === 'all') return [];
         const fields = GAME_FIELDS[selectedGame as keyof typeof GAME_FIELDS];
-        // Special case handling if GAME_FIELDS keys don't strictly match all normalized keys (e.g. indoor_cricket vs indoorCricket)
-        // We know GAME_FIELDS uses 'indoorCricket'.
-        // So we might need to map back if GAME_FIELDS uses distinct keys.
-        let lookupKey = selectedGame as string;
-        if (selectedGame === 'indoor_cricket') lookupKey = 'indoorCricket';
-
-        const fieldsObj = GAME_FIELDS[lookupKey as keyof typeof GAME_FIELDS];
-        if (!fieldsObj) return [];
-        return ['Any', ...(fieldsObj.formats || [])];
+        if (!fields) return [];
+        return ['Any', ...(fields.formats || [])];
     };
 
     const getRoleOptions = () => {
@@ -346,11 +340,20 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
         );
     };
 
+    const filterBleedStyle = edgePadding ? { marginHorizontal: -edgePadding, paddingHorizontal: edgePadding } : null;
+    const filterScrollStyle = edgePadding ? { marginHorizontal: -edgePadding } : null;
+    const filterContentStyle = edgePadding ? { paddingHorizontal: edgePadding } : null;
+
     // Render filter row helper
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
         <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>{label}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filterOptionsScroll}
+                contentContainerStyle={styles.filterOptionsContent}
+            >
                 {options.map(opt => (
                     <TouchableOpacity
                         key={opt}
@@ -387,19 +390,9 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                     <TouchableOpacity
                         onPress={() => setFiltersExpanded(!filtersExpanded)}
                         activeOpacity={0.7}
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            paddingHorizontal: 16,
-                            paddingBottom: 8,
-                            paddingTop: 8,
-                            backgroundColor: COLORS.background
-                        }}
+                        style={[styles.filterToggleRow, filterBleedStyle]}
                     >
-                        <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
-                            Filters
-                        </Text>
+                        <Text style={styles.filterToggleText}>Filters</Text>
                         <MaterialIcons
                             name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
                             size={20}
@@ -411,7 +404,8 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                         <View style={{ maxHeight: 300 }}>
                             <ScrollView
                                 showsVerticalScrollIndicator={true}
-                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                                style={filterScrollStyle || undefined}
+                                contentContainerStyle={[styles.filtersPanel, filterContentStyle || undefined]}
                             >
                                 {/* New universal filters */}
                                 {renderFilterRow('Skill Level', SKILL_LEVEL_OPTIONS, selectedSkillLevel, setSelectedSkillLevel)}
@@ -419,7 +413,12 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                                 {/* Timeline filter - use TIMELINE_FILTERS */}
                                 <View style={styles.filterSection}>
                                     <Text style={styles.filterLabel}>Timeline</Text>
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+                                    <ScrollView
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        style={styles.filterOptionsScroll}
+                                        contentContainerStyle={styles.filterOptionsContent}
+                                    >
                                         {TIMELINE_FILTERS.map(filter => (
                                             <TouchableOpacity
                                                 key={filter.key}
@@ -477,7 +476,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery }: Dis
                 data={filteredRooms}
                 renderItem={renderItem}
                 keyExtractor={(item) => item.id!}
-                contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
+                contentContainerStyle={[styles.listContent, { paddingBottom: bottomPadding ?? 24 }]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />

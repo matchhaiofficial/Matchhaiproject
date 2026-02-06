@@ -9,8 +9,6 @@ export default StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.md,
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
@@ -29,42 +27,12 @@ export default StyleSheet.create({
         fontWeight: '700',
     },
 
-    // Modern Tab System
-    tabContainer: {
-        flexDirection: 'row',
-        backgroundColor: COLORS.surface,
-        marginHorizontal: SPACING.screenPadding,
+    segmentTabs: {
         marginTop: SPACING.md,
-        borderRadius: RADII.md,
-        padding: 4,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-    },
-    tab: {
-        flex: 1,
-        paddingVertical: 10,
-        borderRadius: RADII.sm,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    activeTab: {
-        backgroundColor: COLORS.cardDark,
-        ...SHADOWS.cardSoft,
-    },
-    tabText: {
-        fontFamily: FONTS.body,
-        fontSize: 13,
-        color: COLORS.muted,
-        fontWeight: '600',
-    },
-    activeTabText: {
-        color: COLORS.accent,
-        fontWeight: '700',
     },
 
     // Notification List
     listContent: {
-        padding: SPACING.screenPadding,
         paddingTop: SPACING.lg,
     },
 
@@ -143,7 +111,7 @@ export default StyleSheet.create({
     },
     acceptButton: {
         flex: 1,
-        height: 40,
+        minHeight: 44,
         borderRadius: RADII.md,
         backgroundColor: COLORS.success,
         alignItems: 'center',
@@ -152,7 +120,7 @@ export default StyleSheet.create({
     },
     declineButton: {
         flex: 1,
-        height: 40,
+        minHeight: 44,
         borderRadius: RADII.md,
         backgroundColor: 'transparent',
         borderWidth: 1,
@@ -208,7 +176,8 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: SPACING.sm,
+        minHeight: 44,
+        paddingVertical: SPACING.sm - 1,
         paddingHorizontal: SPACING.lg,
         marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
