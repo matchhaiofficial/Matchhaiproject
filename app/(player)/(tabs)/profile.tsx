@@ -13,7 +13,9 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 
 import SkillBadge from "../../../src/components/SkillBadge";
 import { db } from "../../../src/config/firebaseConfig";
@@ -23,6 +25,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
+import { getUserTeams, Team } from "../../../src/services/teamService";
 import { COLORS } from "../../../src/theme";
 import styles from "./profile.styles";
 
@@ -92,9 +95,12 @@ interface FullUserProfile {
 export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const tabBarHeight = useBottomTabBarHeight();
     const [profile, setProfile] = useState<FullUserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [myTeams, setMyTeams] = useState<Team[]>([]);
+    const [loadingTeams, setLoadingTeams] = useState(false);
 
     // Prevent double fetch
     const isFetching = useRef(false);
@@ -112,12 +118,21 @@ export default function Profile() {
             if (snap.exists()) {
                 setProfile({ uid: snap.id, ...snap.data() } as FullUserProfile);
             }
+
+            setLoadingTeams(true);
+            const teamsRes = await getUserTeams(user.uid);
+            if (teamsRes.ok && teamsRes.data) {
+                setMyTeams(teamsRes.data);
+            } else {
+                setMyTeams([]);
+            }
         } catch (e) {
             console.error("[Profile] Failed to fetch profile", e);
             if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
         } finally {
             setLoading(false);
             setRefreshing(false);
+            setLoadingTeams(false);
             isFetching.current = false;
         }
     }, [user?.uid]);
@@ -243,31 +258,38 @@ export default function Profile() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
-            {/* Header */}
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Profile</Text>
-                <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
-                    <MaterialIcons name="settings" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-            </View>
+        <Screen
+            style={styles.screen}
+            scroll
+            contentStyle={[
+                styles.scrollContent,
+                { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? 24 : (tabBarHeight + 16) },
+            ]}
+            scrollProps={{
+                showsVerticalScrollIndicator: false,
+                refreshControl: <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />,
+            }}
+        >
+            <AppHeader
+                title="Profile"
+                rightAction={(
+                    <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
+                        <MaterialIcons name="settings" size={24} color={COLORS.text} />
+                    </TouchableOpacity>
+                )}
+            />
 
-            <ScrollView
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
-            >
-                {/* Profile Card */}
-                <View style={styles.profileCard}>
+            {/* Profile Card */}
+            <View style={styles.profileCard}>
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>{getInitials()}</Text>
                     </View>
@@ -454,12 +476,40 @@ export default function Profile() {
                         </TouchableOpacity>
                     </View>
                     <View style={styles.sectionPadding}>
-                        <View style={styles.emptyState}>
-                            <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
-                            <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
-                                <Text style={styles.emptyButtonText}>Create a Team</Text>
-                            </TouchableOpacity>
-                        </View>
+                        {loadingTeams ? (
+                            <View style={styles.emptyState}>
+                                <ActivityIndicator size="small" color={COLORS.accent} />
+                            </View>
+                        ) : myTeams.length > 0 ? (
+                            myTeams.slice(0, 3).map(team => {
+                                const maxMembers = team.maxMembers || 0;
+                                const rawCount = team.memberUids?.length ?? team.memberCount ?? 0;
+                                const memberCount = maxMembers > 0 ? Math.min(rawCount, maxMembers) : rawCount;
+                                return (
+                                    <TouchableOpacity
+                                        key={team.id}
+                                        style={styles.teamCard}
+                                        onPress={() => router.push(`/teams/${team.id}` as any)}
+                                    >
+                                        <View style={styles.teamIcon}>
+                                            <MaterialIcons name="groups" size={20} color={COLORS.accent} />
+                                        </View>
+                                        <View style={styles.teamInfo}>
+                                            <Text style={styles.teamName} numberOfLines={1}>{team.name}</Text>
+                                            <Text style={styles.teamGame}>{(team.game || '').toUpperCase()}</Text>
+                                            <Text style={styles.teamMembers}>{memberCount} / {maxMembers} members</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            })
+                        ) : (
+                            <View style={styles.emptyState}>
+                                <Text style={styles.emptyText}>You haven't joined any teams yet.</Text>
+                                <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/teams/create")}>
+                                    <Text style={styles.emptyButtonText}>Create a Team</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
                 </View>
 
@@ -474,7 +524,10 @@ export default function Profile() {
                     <View style={styles.sectionPadding}>
                         <View style={styles.emptyState}>
                             <Text style={styles.emptyText}>No matches played yet.</Text>
-                            <TouchableOpacity style={styles.emptyButton} onPress={() => router.push("/(player)/(tabs)/matchrooms")}>
+                            <TouchableOpacity
+                                style={styles.emptyButton}
+                                onPress={() => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: 'matchrooms', t: Date.now().toString() } } as any)}
+                            >
                                 <Text style={styles.emptyButtonText}>Find a Match</Text>
                             </TouchableOpacity>
                         </View>
@@ -486,7 +539,6 @@ export default function Profile() {
                     <MaterialIcons name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>
                 </TouchableOpacity>
-            </ScrollView>
-        </SafeAreaView>
+        </Screen>
     );
 }

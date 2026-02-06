@@ -21,6 +21,31 @@ service cloud.firestore {
       );
     }
 
+    // Helper to check if user is in chatroom participant list
+    function isChatroomParticipant(chatId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/chatrooms/$(chatId)) &&
+        get(/databases/$(database)/documents/chatrooms/$(chatId)).data.participantUids.hasAny([request.auth.uid]);
+    }
+
+    // Frontend-only mode: derive chat access from matchroom (simple fields only)
+    function isMatchroomUser(matchId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/matchrooms/$(matchId)) && (
+        get(/databases/$(database)/documents/matchrooms/$(matchId)).data.hostUid == request.auth.uid ||
+        get(/databases/$(database)/documents/matchrooms/$(matchId)).data.zoneOwnerUid == request.auth.uid ||
+        get(/databases/$(database)/documents/matchrooms/$(matchId)).data.playerUids.hasAny([request.auth.uid])
+      );
+    }
+
+    function isSelfReadReceiptUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadBy', 'updatedAt']) &&
+        request.resource.data.lastReadBy[request.auth.uid] != null;
+    }
+
+    function isDeleteForMeUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedFor', 'updatedAt']) &&
+        request.resource.data.get('deletedFor', []).hasAny([request.auth.uid]);
+    }
+
     // Users collection:
     // - Authenticated users can read any profile (for matchmaking/social)
     // - Users can only write/update their own profile
@@ -171,6 +196,24 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.hostUid == request.auth.uid;
     }
 
+    // Chatrooms (per matchroom)
+    match /chatrooms/{chatId} {
+      allow read: if isMatchroomUser(chatId) || isChatroomParticipant(chatId);
+      allow create: if isMatchroomUser(chatId);
+      allow update: if isMatchroomUser(chatId) && (
+        isSelfReadReceiptUpdate() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'updatedAt']) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantUids', 'updatedAt'])
+      );
+
+      match /messages/{messageId} {
+        allow read: if isMatchroomUser(chatId) || isChatroomParticipant(chatId);
+        allow create: if isMatchroomUser(chatId) && request.resource.data.senderUid == request.auth.uid;
+        allow update: if isMatchroomUser(chatId) && isDeleteForMeUpdate();
+        allow delete: if false;
+      }
+    }
+
     // Booking Intents
     match /booking_intents/{intentId} {
       allow read: if isAuthenticated();
@@ -224,10 +267,20 @@ service cloud.firestore {
     // Booking Offers (Zones replying to requests)
     match /booking_offers/{offerId} {
       allow read: if isAuthenticated();
-      // Only the zone owner of the offering zone (or super-admin) can create/update
-      allow create: if isAuthenticated(); // Simplified for now, should check zone ownership
+      // Contract (Phase 1):
+      // - requestOwnerUid: player who created booking request
+      // - zoneOwnerUid: zone admin creating the offer
+      // - zoneAdminId kept as legacy alias for old docs
+      allow create: if isAuthenticated() &&
+        request.resource.data.requestId is string &&
+        request.resource.data.requestOwnerUid is string &&
+        (
+          request.resource.data.zoneOwnerUid == request.auth.uid ||
+          request.resource.data.zoneAdminId == request.auth.uid
+        );
       allow update: if isAuthenticated() && (
         isSuperAdmin() || 
+        resource.data.zoneAdminId == request.auth.uid ||
         resource.data.zoneOwnerUid == request.auth.uid ||
         resource.data.requestOwnerUid == request.auth.uid
       );

@@ -67,6 +67,7 @@ export default function PlayerProfile() {
     const [incomingRequestId, setIncomingRequestId] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     // --- Derived Logic Helpers ---
 
@@ -246,6 +247,11 @@ export default function PlayerProfile() {
             return (
                 <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
                     <TouchableOpacity
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_friend_accept", targetUid: uid });
+                            }
+                        }}
                         onPress={async () => {
                             if (!incomingRequestId) return;
                             setActionLoading(true);
@@ -265,6 +271,8 @@ export default function PlayerProfile() {
                         }}
                         disabled={actionLoading}
                         style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.success }]}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {actionLoading ? (
                             <ActivityIndicator color="#FFF" size="small" />
@@ -276,6 +284,11 @@ export default function PlayerProfile() {
                         )}
                     </TouchableOpacity>
                     <TouchableOpacity
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_friend_decline", targetUid: uid });
+                            }
+                        }}
                         onPress={async () => {
                             if (!incomingRequestId) return;
                             setActionLoading(true);
@@ -295,6 +308,8 @@ export default function PlayerProfile() {
                         }}
                         disabled={actionLoading}
                         style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight, borderWidth: 1, borderColor: COLORS.divider }]}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         <MaterialIcons name="close" size={18} color={COLORS.text} />
                         <Text style={[styles.mainButtonText, { color: COLORS.text }]}>Decline</Text>
@@ -313,7 +328,18 @@ export default function PlayerProfile() {
         }
 
         return (
-            <TouchableOpacity onPress={handleAddFriend} disabled={actionLoading} style={styles.mainButton}>
+            <TouchableOpacity
+                onPressIn={() => {
+                    if (touchDebugEnabled) {
+                        Logger.debug("TouchDebug", "pressIn", { tag: "profile_add_friend", targetUid: uid });
+                    }
+                }}
+                onPress={handleAddFriend}
+                disabled={actionLoading}
+                style={styles.mainButton}
+                activeOpacity={0.85}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
                 {actionLoading ? (
                     <ActivityIndicator color="#FFF" size="small" />
                 ) : (
@@ -485,9 +511,16 @@ export default function PlayerProfile() {
                 </View>
                 {uid === user?.uid && (
                     <TouchableOpacity
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_sync_stats", targetUid: uid });
+                            }
+                        }}
                         onPress={handleSync}
                         disabled={syncing}
                         style={styles.syncButton}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {syncing ? (
                             <ActivityIndicator size="small" color={COLORS.accent} />

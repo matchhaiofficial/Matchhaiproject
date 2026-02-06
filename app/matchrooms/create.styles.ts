@@ -125,6 +125,8 @@ export default StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: COLORS.overlayLight,
         paddingBottom: SPACING.lg + 20, // Safe area
+        zIndex: 10000,
+        elevation: 10000,
     },
     createButton: {
         backgroundColor: COLORS.accent,

@@ -31,7 +31,7 @@ const isGameActive = (gameKey: string, profile: any): boolean => {
         case 'cs2': return !!(profile.cs2Role || profile.faceitSkillLevel);
         case 'fc26': return !!(profile.fcTeam || profile.fcFormation);
         case 'tekken8': return !!(profile.tekkenFavorites && profile.tekkenFavorites.length > 0);
-        case 'futsal': return !!(profile.futsalPosition);
+        case 'futsal': return !!(profile.futsalPosition || (Array.isArray(profile.futsalPositions) && profile.futsalPositions.length > 0));
         case 'indoor_cricket': return !!(profile.indoorCricketRole || profile.indoorCricketBattingStyle || profile.indoorCricketBowlingStyle);
         case 'padel': return !!(profile.padelRole);
         case 'pickleball': return !!(profile.pickleballRole);

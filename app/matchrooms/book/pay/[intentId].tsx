@@ -29,6 +29,7 @@ export default function MockPaymentScreen() {
     const [intent, setIntent] = useState<BookingIntent | null>(null);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -144,8 +145,15 @@ export default function MockPaymentScreen() {
             <View style={styles.footer}>
                 <TouchableOpacity
                     style={[styles.payBtn, (processing || !intent) && styles.payBtnDisabled]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "booking_pay_now" });
+                        }
+                    }}
                     onPress={handleMockPayment}
                     disabled={processing || !intent}
+                    activeOpacity={0.85}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     {processing ? (
                         <ActivityIndicator color="#FFF" />

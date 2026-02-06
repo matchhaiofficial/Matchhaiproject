@@ -1,5 +1,6 @@
 import {
     addDoc,
+    arrayRemove,
     arrayUnion,
     collection,
     deleteDoc,
@@ -18,6 +19,7 @@ import {
 import { auth, db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
 import { isRoomExpired, isRoomLocked } from "../utils/matchroomLifecycle";
+import { doWindowsOverlap, formatTimeRange, getMatchroomWindow } from "../utils/matchroomTime";
 
 export interface Slot {
     slotId: string;
@@ -65,6 +67,7 @@ export interface Matchroom {
     locationMode?: 'zone' | 'broadcast'; // Phase 1: zone only, Phase 3: broadcast
     broadcastAreas?: string[]; // Phase 3
     zoneId?: string; // If linked to a specific venue
+    zoneOwnerUid?: string;
 
     // Timing & Pricing
     startTime?: any;
@@ -75,6 +78,7 @@ export interface Matchroom {
         perPlayer: number;
         currency: string;
     };
+    matchCode?: string;
     flexibility?: string; // "Exact time" | "Within 2hrs" etc (Phase 3)
 
     // Game-Specific Dynamic Fields (Phase 1)
@@ -136,6 +140,22 @@ export interface Matchroom {
     paymentCurrency?: string;
     resultVerification?: {
         status: 'pending' | 'participant_vote' | 'admin_review' | 'resolved';
+
+        // Captains (optional, used by result/vote flows)
+        team1Captain?: string;
+        team2Captain?: string;
+
+        // Captain reports (optional)
+        captainReports?: {
+            team1Captain?: { result: 'team1' | 'team2'; timestamp?: any };
+            team2Captain?: { result: 'team1' | 'team2'; timestamp?: any };
+        };
+
+        // Participant voting (optional)
+        participantVotes?: Record<string, 'team1' | 'team2' | 'unknown'>;
+        deadline?: any;
+
+        // Legacy
         votes?: Record<string, string>;
     };
 }
@@ -209,7 +229,6 @@ async function backfillStructuredFormat(room: Matchroom) {
             }
         }
     }
-
     return room;
 }
 
@@ -257,6 +276,19 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             };
         }
 
+        // Resolve zone owner (for chat participants)
+        let zoneOwnerUid: string | null = null;
+        if (roomData.zoneId) {
+            try {
+                const zoneSnap = await getDoc(doc(db, 'zones', roomData.zoneId));
+                if (zoneSnap.exists()) {
+                    zoneOwnerUid = zoneSnap.data()?.ownerUid || null;
+                }
+            } catch (e) {
+                Logger.warn("matchService", "Failed to resolve zone owner", e);
+            }
+        }
+
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...roomData,
             players,
@@ -265,9 +297,39 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             captainUidA,
             currentPlayers: players.length,
             playerUids: roomData.playerUids || [roomData.hostUid],
+            zoneOwnerUid: zoneOwnerUid || undefined,
             createdAt: serverTimestamp(),
         });
         Logger.info("matchService", "Matchroom created", { id: docRef.id });
+
+        // Create chatroom for this matchroom (participants: host + current players + zone owner)
+        try {
+            const participantUids = Array.from(new Set([
+                roomData.hostUid,
+                ...(roomData.playerUids || [roomData.hostUid]),
+                ...(zoneOwnerUid ? [zoneOwnerUid] : []),
+            ]));
+            const rolesByUid: Record<string, string> = {};
+            participantUids.forEach((uid) => {
+                if (uid === roomData.hostUid) rolesByUid[uid] = 'host';
+                else if (uid === zoneOwnerUid) rolesByUid[uid] = 'venue_owner';
+                else if (uid === captainUidA) rolesByUid[uid] = 'captain';
+                else rolesByUid[uid] = 'player';
+            });
+            await setDoc(doc(db, 'chatrooms', docRef.id), {
+                matchroomId: docRef.id,
+                zoneId: roomData.zoneId || null,
+                participantUids,
+                rolesByUid,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                lastMessage: null,
+                lastReadBy: {},
+            }, { merge: true });
+        } catch (e) {
+            Logger.warn("matchService", "Failed to create chatroom", e);
+        }
+
         return { ok: true, id: docRef.id };
     } catch (error) {
         Logger.error("matchService", "Error creating matchroom", error);
@@ -277,6 +339,9 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
 
 export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: Matchroom[] } | { ok: false; message: string }> {
     try {
+        if (!auth.currentUser) {
+            return { ok: false, message: "Not authenticated" };
+        }
         const q = query(
             collection(db, COLLECTION_NAME),
             orderBy("createdAt", "desc"),
@@ -294,6 +359,9 @@ export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: 
 
 export async function getMatchroom(id: string): Promise<{ ok: true; data: Matchroom } | { ok: false; message: string }> {
     try {
+        if (!auth.currentUser) {
+            return { ok: false, message: "Not authenticated" };
+        }
         const docRef = doc(db, COLLECTION_NAME, id);
         const snapshot = await getDoc(docRef);
         if (snapshot.exists()) {
@@ -308,11 +376,86 @@ export async function getMatchroom(id: string): Promise<{ ok: true; data: Matchr
     }
 }
 
+// Backwards compatible alias (used by older result/vote screens)
+export async function getMatchroomById(id: string) {
+    return getMatchroom(id);
+}
+
+export async function submitCaptainReport(
+    matchroomId: string,
+    captainUid: string,
+    winner: 'team1' | 'team2'
+): Promise<{ ok: true } | { ok: false; message: string }> {
+    try {
+        if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
+
+        const roomRef = doc(db, COLLECTION_NAME, matchroomId);
+
+        await runTransaction(db, async (tx) => {
+            const snap = await tx.get(roomRef);
+            if (!snap.exists()) throw new Error("Matchroom not found");
+            const room = snap.data() as Matchroom;
+
+            const rv = room.resultVerification || { status: 'pending' as const };
+            const team1Captain = rv.team1Captain || room.hostUid;
+
+            // best-effort fallback: pick the first uid not equal to team1Captain
+            const fallbackTeam2Captain =
+                (room.players || []).map(p => p.uid).find(uid => uid && uid !== team1Captain) || '';
+            const team2Captain = rv.team2Captain || fallbackTeam2Captain;
+
+            const captainKey =
+                captainUid === team1Captain ? 'team1Captain'
+                    : captainUid === team2Captain ? 'team2Captain'
+                        : null;
+
+            if (!captainKey) throw new Error("Only captains can submit a report");
+
+            const reportPath = `resultVerification.captainReports.${captainKey}`;
+
+            tx.update(roomRef, {
+                "resultVerification.status": rv.status || 'pending',
+                "resultVerification.team1Captain": team1Captain,
+                "resultVerification.team2Captain": team2Captain,
+                [reportPath]: { result: winner, timestamp: serverTimestamp() },
+                updatedAt: serverTimestamp(),
+            } as any);
+        });
+
+        return { ok: true };
+    } catch (e: any) {
+        Logger.error("matchService", "submitCaptainReport error", e);
+        return { ok: false, message: e?.message || "Failed to submit report" };
+    }
+}
+
+export async function submitParticipantVote(
+    matchroomId: string,
+    participantUid: string,
+    vote: 'team1' | 'team2' | 'unknown'
+): Promise<{ ok: true } | { ok: false; message: string }> {
+    try {
+        if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
+
+        const roomRef = doc(db, COLLECTION_NAME, matchroomId);
+        await updateDoc(roomRef, {
+            [`resultVerification.participantVotes.${participantUid}`]: vote,
+            "resultVerification.status": "participant_vote",
+            updatedAt: serverTimestamp(),
+        } as any);
+
+        return { ok: true };
+    } catch (e: any) {
+        Logger.error("matchService", "submitParticipantVote error", e);
+        return { ok: false, message: e?.message || "Failed to submit vote" };
+    }
+}
+
 export async function leaveMatchroom(roomId: string, userUid: string): Promise<{ ok: true } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
-        return await runTransaction(db, async (transaction: any) => {
+        await runTransaction(db, async (transaction) => {
             const snap = await transaction.get(roomRef);
             if (!snap.exists()) throw "Matchroom not found";
 
@@ -365,6 +508,18 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
 
             return { ok: true };
         });
+
+        // Remove from chatroom participants (best-effort)
+        try {
+            await updateDoc(doc(db, 'chatrooms', roomId), {
+                participantUids: arrayRemove(userUid),
+                updatedAt: serverTimestamp(),
+            });
+        } catch (e) {
+            Logger.warn("matchService", "Failed to remove chat participant", e);
+        }
+
+        return { ok: true };
     } catch (error: any) {
         Logger.error("matchService", "Error in leaveMatchroom", error);
         return { ok: false, message: typeof error === 'string' ? error : "Failed to leave matchroom" };
@@ -374,8 +529,15 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
 /**
  * Checks if a user is currently in any active (not completed/expired) matchroom.
  */
-export async function isUserInActiveMatchroom(uid: string): Promise<{ inRoom: boolean; roomId?: string; message?: string }> {
+export async function findUserTimeConflict(
+    uid: string,
+    targetRoom: Matchroom,
+    excludeRoomId?: string
+): Promise<{ conflict: true; room: Matchroom; message: string } | { conflict: false }> {
     try {
+        const targetWindow = getMatchroomWindow(targetRoom);
+        if (!targetWindow) return { conflict: false };
+
         const q = query(
             collection(db, COLLECTION_NAME),
             where("playerUids", "array-contains", uid),
@@ -385,35 +547,37 @@ export async function isUserInActiveMatchroom(uid: string): Promise<{ inRoom: bo
         // Use getDocs but we'll manually verify expiry and membership
         const snap = await getDocs(q);
 
-        if (!snap.empty) {
-            // Find the FIRST room that is truly active and not expired
-            for (const docSnap of snap.docs) {
-                const room = { id: docSnap.id, ...docSnap.data() } as Matchroom;
-
-                // 1. Check if the room has actually expired based on time
-                if (isRoomExpired(room)) {
-                    Logger.info("matchService", "Ignoring expired room in busy check", { roomId: room.id });
-                    continue;
-                }
-
-                // 2. Double-check membership (idempotency)
-                if (!room.playerUids?.includes(uid)) {
-                    Logger.info("matchService", "Ignoring room where player is no longer in playerUids", { roomId: room.id });
-                    continue;
-                }
-
+        for (const docSnap of snap.docs) {
+            if (excludeRoomId && docSnap.id === excludeRoomId) continue;
+            const room = { id: docSnap.id, ...docSnap.data() } as Matchroom;
+            const window = getMatchroomWindow(room);
+            if (!window) continue;
+            if (doWindowsOverlap(targetWindow, window)) {
                 return {
-                    inRoom: true,
-                    roomId: docSnap.id,
-                    message: `User is already in an active matchroom: ${room.title}`
+                    conflict: true,
+                    room,
+                    message: `You already have a matchroom scheduled ${formatTimeRange(window)}.`
                 };
             }
         }
-        return { inRoom: false };
+
+        return { conflict: false };
     } catch (error) {
-        Logger.error("matchService", "Error checking active matchrooms", error);
-        return { inRoom: false };
+        Logger.error("matchService", "Error checking time conflicts", error);
+        return { conflict: false };
     }
+}
+
+export async function isUserInActiveMatchroom(
+    uid: string,
+    targetRoom?: Matchroom
+): Promise<{ inRoom: boolean; roomId?: string; message?: string }> {
+    if (!targetRoom) return { inRoom: false };
+    const conflict = await findUserTimeConflict(uid, targetRoom, targetRoom.id);
+    if (conflict.conflict) {
+        return { inRoom: true, roomId: conflict.room.id, message: conflict.message };
+    }
+    return { inRoom: false };
 }
 
 /**
@@ -429,6 +593,11 @@ export async function requestJoinMatchroom(
     try {
         const roomId = room.id;
         if (!roomId) throw "Matchroom ID missing";
+
+        const conflict = await findUserTimeConflict(user.uid, room, roomId);
+        if (conflict.conflict) {
+            return { ok: false, message: conflict.message };
+        }
 
         // Idempotency: Use deterministic ID to prevent duplicate pending requests
         // If slot-specific, maybe uniqueness changes? For now, keep one request per user per room to avoid spam.
@@ -495,7 +664,7 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
         const room = roomSnap.data() as Matchroom;
 
         // BUSY CHECK
-        const busyCheck = await isUserInActiveMatchroom(user.uid);
+        const busyCheck = await isUserInActiveMatchroom(user.uid, { id: roomId, ...room } as Matchroom);
         if (busyCheck.inRoom && busyCheck.roomId !== roomId) {
             return { ok: false, message: busyCheck.message || "You are already in another active matchroom." };
         }
@@ -533,6 +702,16 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
         }
 
         await updateDoc(roomRef, updateData);
+
+        // Add to chatroom participants (best-effort)
+        try {
+            await updateDoc(doc(db, 'chatrooms', roomId), {
+                participantUids: arrayUnion(user.uid),
+                updatedAt: serverTimestamp(),
+            });
+        } catch (e) {
+            Logger.warn("matchService", "Failed to add chat participant", e);
+        }
 
         return { ok: true };
     } catch (error) {
@@ -581,13 +760,11 @@ export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: 
     try {
         const hostedQuery = query(
             collection(db, COLLECTION_NAME),
-            where("hostUid", "==", uid),
-            orderBy("createdAt", "desc")
+            where("hostUid", "==", uid)
         );
         const joinedQuery = query(
             collection(db, COLLECTION_NAME),
-            where("playerUids", "array-contains", uid),
-            orderBy("createdAt", "desc")
+            where("playerUids", "array-contains", uid)
         );
 
         const [hostedSnap, joinedSnap] = await Promise.all([
@@ -595,12 +772,24 @@ export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: 
             getDocs(joinedQuery)
         ]);
 
-        const hosted = hostedSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom));
+        const toMillis = (value: any) => {
+            if (!value) return 0;
+            if (typeof value?.toMillis === "function") return value.toMillis();
+            if (typeof value?.seconds === "number") return value.seconds * 1000;
+            if (value instanceof Date) return value.getTime();
+            if (typeof value === "number") return value;
+            return 0;
+        };
+
+        const sortByCreatedAtDesc = (rooms: Matchroom[]) =>
+            [...rooms].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+
+        const hosted = sortByCreatedAtDesc(hostedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom)));
         const joined = joinedSnap.docs
             .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
             .filter((room: Matchroom) => room.hostUid !== uid); // Only non-hosted
 
-        return { ok: true, data: { hosted, joined } };
+        return { ok: true, data: { hosted, joined: sortByCreatedAtDesc(joined) } };
     } catch (error) {
         Logger.error("matchService", "Error fetching user matchrooms", error);
         return { ok: false, message: "Failed to fetch your matchrooms" };

@@ -9,8 +9,6 @@ export default StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.lg,
         paddingBottom: SPACING.md,
         backgroundColor: COLORS.background,
     },
@@ -27,7 +25,6 @@ export default StyleSheet.create({
     },
     tabContainer: {
         flexDirection: 'row',
-        paddingHorizontal: SPACING.screenPadding,
         paddingVertical: SPACING.md,
         gap: SPACING.sm,
     },
@@ -55,7 +52,6 @@ export default StyleSheet.create({
         color: '#FFF',
     },
     listContent: {
-        padding: SPACING.screenPadding,
         paddingBottom: 100,
     },
     sectionTitle: {

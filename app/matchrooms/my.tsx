@@ -10,7 +10,8 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import AppHeader from "../../src/components/AppHeader";
+import Screen from "../../src/components/Screen";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserMatchrooms, Matchroom } from "../../src/services/matchService";
@@ -111,14 +112,8 @@ export default function MyMatchrooms() {
     };
 
     return (
-        <SafeAreaView style={styles.screen}>
-            {/* Header */}
-            <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.headerTitle}>My Matchrooms</Text>
-            </View>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title="My Matchrooms" onBack={() => router.back()} />
 
             {/* Tabs */}
             <View style={styles.tabContainer}>
@@ -167,6 +162,6 @@ export default function MyMatchrooms() {
                     }
                 />
             )}
-        </SafeAreaView>
+        </Screen>
     );
 }

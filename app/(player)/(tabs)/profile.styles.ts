@@ -10,7 +10,6 @@ export default StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: SPACING.screenPadding,
         paddingBottom: SPACING.md,
         backgroundColor: COLORS.background,
     },
@@ -23,16 +22,13 @@ export default StyleSheet.create({
         padding: SPACING.xs,
     },
 
-    scrollContent: {
-        paddingBottom: 160,
-    },
+    scrollContent: {},
 
     // Profile Card
     profileCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: RADII.lg,
         padding: SPACING.lg,
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
@@ -151,11 +147,8 @@ export default StyleSheet.create({
     sectionHorizontal: {
         marginTop: SPACING.xl,
     },
-    sectionPadding: {
-        paddingHorizontal: SPACING.screenPadding,
-    },
+    sectionPadding: {},
     gamesScrollContainer: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: SPACING.sm,
     },
     sectionHeader: {
@@ -163,7 +156,6 @@ export default StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: SPACING.md,
-        paddingHorizontal: SPACING.screenPadding,
     },
     sectionTitle: {
         color: COLORS.text,
@@ -472,7 +464,6 @@ export default StyleSheet.create({
     // Settings Section
     settingsSection: {
         marginTop: SPACING.xl,
-        paddingHorizontal: SPACING.screenPadding,
     },
     settingsItem: {
         backgroundColor: COLORS.cardDark,
@@ -505,7 +496,6 @@ export default StyleSheet.create({
         backgroundColor: 'rgba(239, 83, 80, 0.1)',
         borderRadius: RADII.md,
         padding: SPACING.md,
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.xl,
         marginBottom: SPACING.lg,
         flexDirection: 'row',

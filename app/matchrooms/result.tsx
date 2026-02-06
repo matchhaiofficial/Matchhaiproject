@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../../src/config/firebaseConfig';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/matchService';
 import { COLORS } from '../../src/theme';
+import Logger from '../../src/utils/logger';
 import styles from './result.styles';
 
 interface MatchData {
@@ -24,13 +25,7 @@ interface MatchData {
     team2Players: { uid: string; name: string }[];
     team1Captain: string;
     team2Captain: string;
-    resultVerification?: {
-        status: 'pending' | 'captain_agree' | 'participant_vote' | 'admin_confirm' | 'voided' | 'completed';
-        captainReports?: {
-            team1Captain?: { result: 'team1' | 'team2'; timestamp: Date };
-            team2Captain?: { result: 'team1' | 'team2'; timestamp: Date };
-        };
-    };
+    resultVerification?: any;
 }
 
 export default function MatchResultSubmission() {
@@ -42,6 +37,7 @@ export default function MatchResultSubmission() {
     const [matchData, setMatchData] = useState<MatchData | null>(null);
     const [selectedWinner, setSelectedWinner] = useState<'team1' | 'team2' | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const currentUserId = auth.currentUser?.uid;
 
@@ -50,8 +46,12 @@ export default function MatchResultSubmission() {
 
         try {
             const res = await getMatchroomById(matchroomId);
-            if (res.ok && res.data) {
-                const room = res.data;
+            if (!res.ok) {
+                setError(res.message || "Failed to load match");
+                return;
+            }
+
+            const room = res.data;
                 // Transform Matchroom to MatchData interface expected by UI
                 // (Or update UI to use Matchroom directly - simpler to map here for now)
 
@@ -71,9 +71,6 @@ export default function MatchResultSubmission() {
                     team2Captain: room.resultVerification?.team2Captain || (team2[0]?.uid || ''), // fallback to first of team 2
                     resultVerification: room.resultVerification
                 });
-            } else {
-                setError(res.message || "Failed to load match");
-            }
         } catch (err) {
             setError("An error occurred");
         } finally {
@@ -273,8 +270,15 @@ export default function MatchResultSubmission() {
                             styles.submitButton,
                             (!selectedWinner || submitting) && styles.submitButtonDisabled,
                         ]}
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "result_submit" });
+                            }
+                        }}
                         onPress={handleSubmit}
                         disabled={!selectedWinner || submitting}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
                             <ActivityIndicator size="small" color={COLORS.background} />

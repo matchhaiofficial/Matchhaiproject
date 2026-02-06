@@ -7,7 +7,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.background,
     },
     header: {
-        padding: SPACING.lg,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -39,6 +38,8 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        width: '100%',
+        gap: SPACING.sm,
         marginBottom: SPACING.xs,
     },
     editNameIcon: {
@@ -46,7 +47,6 @@ export default StyleSheet.create({
         padding: 4,
     },
     teamHeader: {
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
         padding: SPACING.xl,
         alignItems: 'center',
@@ -55,6 +55,7 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         ...SHADOWS.cardSoft,
+        width: '100%',
     },
     teamLogoLarge: {
         width: 80,
@@ -99,6 +100,9 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.heading,
         marginBottom: SPACING.sm,
+        textAlign: 'center',
+        flexShrink: 1,
+        maxWidth: '100%',
     },
     gameBadge: {
         backgroundColor: COLORS.accent,
@@ -160,7 +164,6 @@ export default StyleSheet.create({
 
     // Stats
     statsCard: {
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.lg,
         padding: SPACING.lg,
         backgroundColor: COLORS.cardDark,
@@ -168,6 +171,7 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         ...SHADOWS.cardSoft,
+        width: '100%',
     },
     statsTitle: {
         color: COLORS.text,
@@ -199,8 +203,8 @@ export default StyleSheet.create({
 
     // Roster
     rosterSection: {
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.lg,
+        width: '100%',
     },
     rosterTitle: {
         color: COLORS.text,
@@ -475,6 +479,9 @@ export default StyleSheet.create({
     },
     statError: {
         color: COLORS.error,
+    },
+    scrollContent: {
+        paddingBottom: SPACING.xxl,
     },
 });
 

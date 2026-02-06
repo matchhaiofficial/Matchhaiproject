@@ -1,19 +1,17 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    KeyboardAvoidingView,
-    Platform,
     Pressable,
-    SafeAreaView,
-    ScrollView,
     Text,
     TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import AppHeader from '../../../src/components/AppHeader';
+import Screen from '../../../src/components/Screen';
 import { db } from '../../../src/config/firebaseConfig';
 import { useAuth } from '../../../src/context/AuthContext';
 import { createMatchroom } from '../../../src/services/matchService';
@@ -40,6 +38,12 @@ import SkillBracketSection from './components/SkillBracketSection';
 // import SlotReservation from './components/SlotReservation';
 import ZonePicker from './components/ZonePicker';
 import styles from './create.styles';
+
+const generateMatchCode = (zoneName?: string | null) => {
+    const prefix = zoneName ? zoneName.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() : 'MH';
+    const random = Math.floor(100000 + Math.random() * 900000);
+    return `${prefix}-${random}`;
+};
 
 export default function CreateMatchroom() {
     const { user } = useAuth();
@@ -220,13 +224,24 @@ export default function CreateMatchroom() {
 
     const selectableTeamMembers = useMemo(() => {
         if (!resolvedTeam) return [];
-        const members = resolvedTeam.members || [];
-        if (members.length > 0) {
-            return members.filter(m => m.uid !== resolvedTeam.captainUid);
-        }
-        return (resolvedTeam.memberUids || [])
-            .filter(uid => uid !== resolvedTeam.captainUid)
-            .map(uid => ({ uid, username: uid.slice(0, 6) + '…', role: 'member' as const, joinedAt: null }));
+        const members = Array.isArray(resolvedTeam.members) ? resolvedTeam.members : [];
+        const memberUids = Array.isArray(resolvedTeam.memberUids) ? resolvedTeam.memberUids : [];
+
+        const membersByUid = new Map<string, any>();
+        members.forEach((m) => {
+            if (m?.uid) membersByUid.set(m.uid, m);
+        });
+
+        // Prefer explicit memberUids ordering, but fall back to whatever we have.
+        const uids = memberUids.length > 0 ? memberUids : Array.from(membersByUid.keys());
+
+        return uids
+            .filter((uid) => !!uid && uid !== resolvedTeam.captainUid)
+            .map((uid) => {
+                const existing = membersByUid.get(uid);
+                if (existing) return existing;
+                return { uid, username: uid.slice(0, 6) + '…', role: 'member' as const, joinedAt: null };
+            });
     }, [resolvedTeam]);
 
     useEffect(() => {
@@ -313,25 +328,29 @@ export default function CreateMatchroom() {
         });
     }, [teamMode, reservedSlots, selectableTeamMembers, resolvedTeam]);
 
+    const refreshSelectedTeam = useCallback(async (teamId: string) => {
+        const res = await getTeamById(teamId);
+        if (res.ok && res.data) {
+            setSelectedTeamDetails(res.data);
+            setTeams(prev => prev.map(t => t.id === teamId ? res.data! : t));
+        }
+    }, []);
+
     useEffect(() => {
         if (!selectedTeamId) {
             setSelectedTeamDetails(null);
             return;
         }
-        const localTeam = teams.find(t => t.id === selectedTeamId);
-        if (localTeam?.members && localTeam.members.length > 0) {
-            setSelectedTeamDetails(localTeam);
-            return;
-        }
-        const fetchTeam = async () => {
-            const res = await getTeamById(selectedTeamId);
-            if (res.ok && res.data) {
-                setSelectedTeamDetails(res.data);
-                setTeams(prev => prev.map(t => t.id === selectedTeamId ? res.data! : t));
+        refreshSelectedTeam(selectedTeamId);
+    }, [selectedTeamId, refreshSelectedTeam]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (selectedTeamId) {
+                refreshSelectedTeam(selectedTeamId);
             }
-        };
-        fetchTeam();
-    }, [selectedTeamId, teams]);
+        }, [selectedTeamId, refreshSelectedTeam])
+    );
 
     const minLeadDays = teamMode === 'team' ? 2 : 3;
     const minAllowedDate = (() => {
@@ -425,6 +444,12 @@ export default function CreateMatchroom() {
                 setZoneRate(match.price);
                 return;
             }
+        }
+
+        if (options.length === 1) {
+            setSelectedZoneRateKey(options[0].key);
+            setZoneRate(options[0].price);
+            return;
         }
 
         setSelectedZoneRateKey(null);
@@ -789,54 +814,49 @@ export default function CreateMatchroom() {
     };
 
     const validateForm = () => {
-        if (!selectedGame) {
-            Alert.alert('Missing Game', 'Please select a game/sport');
+        const fail = (title: string, message: string, reason: string) => {
+            Logger.debug('CreateMatchroom', 'Validation blocked submit', { reason });
+            Alert.alert(title, message);
             return false;
+        };
+
+        if (!selectedGame) {
+            return fail('Missing Game', 'Please select a game/sport', 'missing_game');
         }
         if (!formData.title?.trim()) {
-            Alert.alert('Missing Title', 'Please enter a match title');
-            return false;
+            return fail('Missing Title', 'Please enter a match title', 'missing_title');
         }
         if (!formData.maxPlayers || formData.maxPlayers < 2) {
-            Alert.alert('Invalid Players', 'Please enter a valid number of players (minimum 2)');
-            return false;
+            return fail('Invalid Players', 'Please enter a valid number of players (minimum 2)', 'invalid_max_players');
         }
         if (!formData.format) {
-            Alert.alert('Missing Format', 'Please select a match format');
-            return false;
+            return fail('Missing Format', 'Please select a match format', 'missing_format');
         }
         if (!formData.date || !formData.time) {
-            Alert.alert('Missing Date/Time', 'Please enter date and time');
-            return false;
+            return fail('Missing Date/Time', 'Please enter date and time', 'missing_date_time');
         }
         if (!isDateAllowed) {
             const label = teamMode === 'team' ? 'captains' : 'solo players';
-            Alert.alert('Date Too Soon', `Earliest date for ${label} is ${minAllowedDate.toLocaleDateString()}.`);
-            return false;
+            return fail('Date Too Soon', `Earliest date for ${label} is ${minAllowedDate.toLocaleDateString()}.`, 'invalid_date_lead_time');
         }
         if (teamMode === 'team') {
             if (!isCaptainForGame) {
-                Alert.alert('Not Authorized', 'Only team captains can book multiple reserved slots.');
-                return false;
+                return fail('Not Authorized', 'Only team captains can book multiple reserved slots.', 'team_mode_not_captain');
             }
             if (!selectedTeamId) {
-                Alert.alert('Missing Team', 'Please select your team.');
-                return false;
+                return fail('Missing Team', 'Please select your team.', 'team_mode_missing_team');
             }
             if (reservedSlots < 2 || reservedSlots > 5) {
-                Alert.alert('Invalid Slots', 'Reserved slots must be between 2 and 5.');
-                return false;
+                return fail('Invalid Slots', 'Reserved slots must be between 2 and 5.', 'team_mode_invalid_reserved_slots');
             }
             const needed = Math.max(0, reservedSlots - 1);
             if (selectedTeamMemberUids.length !== needed) {
-                Alert.alert('Select Players', `Please select ${needed} player${needed === 1 ? '' : 's'} from your team.`);
-                return false;
+                return fail('Select Players', `Please select ${needed} player${needed === 1 ? '' : 's'} from your team.`, 'team_mode_missing_players');
             }
         }
         // Phase 3: Zone validation
         if (locationMode === 'zone' && !selectedZoneId) {
-            Alert.alert('Missing Zone', 'Please select a zone to host the match');
-            return false;
+            return fail('Missing Zone', 'Please select a zone to host the match', 'zone_missing');
         }
         if (
             locationMode === 'zone' &&
@@ -844,13 +864,11 @@ export default function CreateMatchroom() {
             zoneRateOptions.length > 0 &&
             !selectedZoneRateKey
         ) {
-            Alert.alert('Missing Rate Type', 'Please select a rate type to calculate price per player.');
-            return false;
+            return fail('Missing Rate Type', 'Please select a rate type to calculate price per player.', 'zone_rate_type_missing');
         }
         // Phase 3: Broadcast validation
         if (locationMode === 'broadcast' && broadcastAreas.length === 0 && (!userProfile?.areasPreferred || userProfile.areasPreferred.length === 0)) {
-            Alert.alert('Missing Areas', 'Please select at least one area for broadcast');
-            return false;
+            return fail('Missing Areas', 'Please select at least one area for broadcast', 'broadcast_area_missing');
         }
         return true;
     };
@@ -870,7 +888,7 @@ export default function CreateMatchroom() {
     };
 
     const handleSubmit = async () => {
-        if (!validateForm() || !user || !userProfile) return;
+        if (!user || !userProfile) return;
 
         setSubmitting(true);
         try {
@@ -960,6 +978,7 @@ export default function CreateMatchroom() {
                 paymentAmount: amountDue,
                 paymentReservedSlots: seatsPaid,
                 paymentCurrency: 'PKR',
+                matchCode: generateMatchCode(selectedZoneName),
                 pricing: {
                     perPlayer: formData.pricePerPlayer || 0,
                     currency: 'PKR',
@@ -1101,52 +1120,74 @@ export default function CreateMatchroom() {
         }
     };
 
+    const submitBlockers = useMemo(() => {
+        const blockers: string[] = [];
+        if (!selectedGame) blockers.push('Select a game');
+        if (!formData.title?.trim()) blockers.push('Enter match title');
+        if (!formData.format) blockers.push('Select match format');
+        if (!formData.date || !formData.time) blockers.push('Pick date and time');
+        if (!isDateAllowed) blockers.push(`Earliest allowed date is ${minAllowedDate.toLocaleDateString()}`);
+        if (locationMode === 'zone' && !selectedZoneId) blockers.push('Select a zone/court');
+        if (locationMode === 'zone' && selectedZoneId && zoneRateOptions.length > 0 && !selectedZoneRateKey) {
+            blockers.push('Select zone rate type');
+        }
+        if (teamMode === 'team') {
+            if (!selectedTeamId) blockers.push('Select your team');
+            const needed = Math.max(0, reservedSlots - 1);
+            if (selectedTeamMemberUids.length !== needed) {
+                blockers.push(`Select ${needed} teammate${needed === 1 ? '' : 's'}`);
+            }
+        }
+        return blockers;
+    }, [
+        selectedGame,
+        formData.title,
+        formData.format,
+        formData.date,
+        formData.time,
+        isDateAllowed,
+        minAllowedDate,
+        locationMode,
+        selectedZoneId,
+        zoneRateOptions.length,
+        selectedZoneRateKey,
+        teamMode,
+        selectedTeamId,
+        selectedTeamMemberUids.length,
+        reservedSlots,
+    ]);
+
+    const canSubmit = submitBlockers.length === 0;
+
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.centered}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
-    const canSubmit = (
-        selectedGame &&
-        formData.title &&
-        formData.format &&
-        formData.date &&
-        formData.time &&
-        isDateAllowed &&
-        (locationMode === 'broadcast' || selectedZoneId) &&
-        (locationMode === 'broadcast' || zoneRateOptions.length === 0 || !!selectedZoneRateKey) &&
-        (teamMode !== 'team' || (!!selectedTeamId && selectedTeamMemberUids.length === Math.max(0, reservedSlots - 1)))
-    );
-
     return (
-        <SafeAreaView style={styles.screen}>
-            <KeyboardAvoidingView
-                style={styles.flex1}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                >
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <Pressable onPress={() => router.back()} style={styles.marginBottom8}>
-                            <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                        </Pressable>
-                        <Text style={styles.headerTitle}>Create Matchroom</Text>
-                        <Text style={styles.headerSubtitle}>
-                            Set up your match and invite players
-                        </Text>
-                    </View>
+        <Screen
+            style={styles.screen}
+            scroll
+            keyboardAvoiding
+            contentStyle={styles.scrollContent}
+            scrollProps={{
+                showsVerticalScrollIndicator: false,
+                keyboardShouldPersistTaps: 'always',
+            }}
+        >
+            <AppHeader
+                title="Create Matchroom"
+                subtitle="Set up your match and invite players"
+                onBack={() => router.back()}
+            />
 
-                    {/* Game Selector */}
-                    <GameSelector selectedGame={selectedGame} onSelectGame={handleGameSelect} userProfile={userProfile} />
+            {/* Game Selector */}
+            <GameSelector selectedGame={selectedGame} onSelectGame={handleGameSelect} userProfile={userProfile} />
 
                     {selectedGame && (
                         <>
@@ -1639,10 +1680,42 @@ export default function CreateMatchroom() {
                                     </View>
                                 )}
 
-                                <TouchableOpacity
-                                    style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}
-                                    onPress={handleSubmit}
-                                    disabled={!canSubmit || submitting}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.primaryButton,
+                                        (!canSubmit || submitting) && styles.primaryButtonDisabled,
+                                        pressed && canSubmit && !submitting && styles.primaryButtonPressed,
+                                    ]}
+                                    onPressIn={() => {
+                                        if (__DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1') {
+                                            Logger.debug('TouchDebug', 'pressIn', {
+                                                tag: 'create_matchroom_submit',
+                                                canSubmit,
+                                                submitting,
+                                                blockers: submitBlockers,
+                                            });
+                                        }
+                                    }}
+                                    onPress={() => {
+                                        if (__DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1') {
+                                            Logger.debug('TouchDebug', 'press', {
+                                                tag: 'create_matchroom_submit',
+                                                canSubmit,
+                                                submitting,
+                                                blockers: submitBlockers,
+                                            });
+                                        }
+                                        if (submitting) return;
+                                        Logger.debug('CreateMatchroom', 'Submit pressed', {
+                                            canSubmit,
+                                            submitting,
+                                            blockers: submitBlockers,
+                                        });
+                                        if (!validateForm()) return;
+                                        handleSubmit();
+                                    }}
+                                    disabled={submitting}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 >
                                     {submitting ? (
                                         <ActivityIndicator color="#FFF" />
@@ -1651,12 +1724,15 @@ export default function CreateMatchroom() {
                                             {locationMode === 'broadcast' ? 'Send Broadcast' : 'Create Matchroom'}
                                         </Text>
                                     )}
-                                </TouchableOpacity>
+                                </Pressable>
+                                {!canSubmit && (
+                                    <Text style={[styles.helperTextTiny, styles.submitHintText]}>
+                                        Complete required fields: {submitBlockers[0]}
+                                    </Text>
+                                )}
                             </View>
                         </>
                     )}
-                </ScrollView>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

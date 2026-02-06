@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../../src/config/firebaseConfig';
 import { getMatchroomById, submitParticipantVote } from '../../src/services/matchService';
 import { COLORS } from '../../src/theme';
+import Logger from '../../src/utils/logger';
 import styles from './vote.styles';
 
 interface VoteData {
@@ -45,6 +46,7 @@ export default function ParticipantVoting() {
     const [voteData, setVoteData] = useState<VoteData | null>(null);
     const [selectedVote, setSelectedVote] = useState<'team1' | 'team2' | 'unknown' | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const currentUserId = auth.currentUser?.uid;
 
@@ -53,8 +55,12 @@ export default function ParticipantVoting() {
 
         try {
             const res = await getMatchroomById(matchroomId);
-            if (res.ok && res.data) {
-                const room = res.data;
+            if (!res.ok) {
+                setError(res.message || "Failed to load match");
+                return;
+            }
+
+            const room = res.data;
                 const rv = room.resultVerification;
                 if (!rv) {
                     setError("Voting not started");
@@ -75,9 +81,6 @@ export default function ParticipantVoting() {
                     },
                     totalParticipants: room.players.length
                 });
-            } else {
-                setError(res.message || "Failed to load match");
-            }
         } catch (err) {
             setError("An error occurred loading voting data");
         } finally {
@@ -275,8 +278,15 @@ export default function ParticipantVoting() {
                             styles.submitButton,
                             (!selectedVote || submitting) && styles.submitButtonDisabled,
                         ]}
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "vote_submit" });
+                            }
+                        }}
                         onPress={handleSubmit}
                         disabled={!selectedVote || submitting}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
                             <ActivityIndicator size="small" color={COLORS.background} />

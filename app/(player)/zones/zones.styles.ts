@@ -55,12 +55,14 @@ export default StyleSheet.create({
         textShadowColor: 'rgba(0, 0, 0, 0.75)',
         textShadowOffset: { width: -1, height: 1 },
         textShadowRadius: 10,
+        textAlign: 'center',
+        flexShrink: 1,
+        maxWidth: '100%',
     },
 
     // Info Section
     infoCard: {
         backgroundColor: COLORS.cardDark,
-        marginHorizontal: SPACING.screenPadding,
         marginVertical: SPACING.sm,
         padding: SPACING.lg,
         borderRadius: RADII.lg,
@@ -90,7 +92,6 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontWeight: 'bold',
         marginBottom: SPACING.md,
-        paddingHorizontal: SPACING.screenPadding,
     },
 
     // Game Tags
@@ -98,7 +99,6 @@ export default StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 8,
-        paddingHorizontal: SPACING.screenPadding,
     },
     tag: {
         backgroundColor: 'rgba(66, 165, 245, 0.1)',
@@ -144,7 +144,6 @@ export default StyleSheet.create({
     // Action Button
     actionButton: {
         backgroundColor: COLORS.accent,
-        marginHorizontal: SPACING.screenPadding,
         padding: 16,
         borderRadius: RADII.md,
         alignItems: 'center',

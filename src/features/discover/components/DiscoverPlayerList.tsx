@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { COLORS, SPACING, FONTS } from "../../../../src/theme";
+import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
 import { normalizeGameKey } from "../utils/gameKeys";
@@ -18,8 +18,7 @@ import {
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
 
-// Reuse styles from find-players.styles
-import styles from "../../../../app/(player)/(tabs)/find-players.styles";
+import styles from "../styles/players.styles";
 
 interface Player {
     // ... (keep interface same)
@@ -94,9 +93,11 @@ const getFaceitLevel = (elo: number): number => {
 interface DiscoverPlayerListProps {
     selectedGame: GameKey;
     searchQuery: string;
+    edgePadding?: number;
+    bottomPadding?: number;
 }
 
-export default function DiscoverPlayerList({ selectedGame, searchQuery }: DiscoverPlayerListProps) {
+export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadding, bottomPadding }: DiscoverPlayerListProps) {
     const router = useRouter();
     const { user } = useAuth();
     const [players, setPlayers] = useState<Player[]>([]);
@@ -159,7 +160,9 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                 if (data.fc26Role) roles.fc26Role = data.fc26Role;
                 if (data.padelRole) roles.padelRole = data.padelRole;
                 if (data.pickleballRole) roles.pickleballRole = data.pickleballRole;
-                if (data.futsalPosition) roles.futsalRole = data.futsalPosition; // Futsal uses 'position'
+                const futsalPositions = Array.isArray(data.futsalPositions) ? data.futsalPositions.filter(Boolean) : [];
+                const futsalRole = futsalPositions[0] || data.futsalPosition;
+                if (futsalRole) roles.futsalRole = futsalRole; // Futsal uses 'position(s)'
                 if (data.indoorCricketRole) roles.indoor_cricketRole = data.indoorCricketRole;
                 // Add other roles as needed
 
@@ -437,11 +440,20 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
         );
     }
 
+    const filterBleedStyle = edgePadding ? { marginHorizontal: -edgePadding, paddingHorizontal: edgePadding } : null;
+    const filterScrollStyle = edgePadding ? { marginHorizontal: -edgePadding } : null;
+    const filterContentStyle = edgePadding ? { paddingHorizontal: edgePadding } : null;
+
     // Render filter row helper (Copied from matchrooms to avoid bad re-use, or extract to shared component later)
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
         <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>{label}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filterOptionsScroll}
+                contentContainerStyle={styles.filterOptionsContent}
+            >
                 {options.map(opt => (
                     <TouchableOpacity
                         key={opt}
@@ -482,19 +494,9 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                     <TouchableOpacity
                         onPress={() => setFiltersExpanded(!filtersExpanded)}
                         activeOpacity={0.7}
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            paddingHorizontal: 16,
-                            paddingBottom: 8,
-                            paddingTop: 8,
-                            backgroundColor: COLORS.background
-                        }}
+                        style={[styles.filterToggleRow, filterBleedStyle]}
                     >
-                        <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
-                            Filters
-                        </Text>
+                        <Text style={styles.filterToggleText}>Filters</Text>
                         <MaterialIcons
                             name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
                             size={20}
@@ -506,7 +508,8 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                         <View style={{ maxHeight: 300 }}>
                             <ScrollView
                                 showsVerticalScrollIndicator={true}
-                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                                style={filterScrollStyle || undefined}
+                                contentContainerStyle={[styles.filtersPanel, filterContentStyle || undefined]}
                             >
                                 {/* Availability filter - show for all games */}
                                 {renderFilterRow('Availability', AVAILABILITY_OPTIONS, selectedAvailability, setSelectedAvailability)}
@@ -539,7 +542,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery }: Discov
                 data={filteredPlayers}
                 renderItem={renderPlayerItem}
                 keyExtractor={item => item.uid}
-                contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
+                contentContainerStyle={[styles.listContent, { paddingBottom: bottomPadding ?? 24 }]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />

@@ -14,7 +14,10 @@ import {
     useWindowDimensions,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import QRCode from "react-native-qrcode-svg";
+import AppHeader from "../../src/components/AppHeader";
+import Screen from "../../src/components/Screen";
 
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import SkillBadge from "../../src/components/SkillBadge";
@@ -37,6 +40,7 @@ export default function MatchroomDetails() {
     const router = useRouter();
     const { user } = useAuth();
     const { width } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
 
     const [room, setRoom] = useState<Matchroom | null>(null);
     const [loading, setLoading] = useState(true);
@@ -58,6 +62,7 @@ export default function MatchroomDetails() {
     const [friends, setFriends] = useState<any[]>([]);
     const [loadingFriends, setLoadingFriends] = useState(false);
     const [invitingSlot, setInvitingSlot] = useState<{ team: 'A' | 'B', slotId: string } | null>(null);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -175,7 +180,7 @@ export default function MatchroomDetails() {
         if (!room || !user || !id) return;
 
         // BUSY CHECK
-        const busyCheck = await isUserInActiveMatchroom(user.uid);
+        const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
         if (busyCheck.inRoom && busyCheck.roomId !== id) {
             Alert.alert("Already Busy", busyCheck.message);
             return;
@@ -512,7 +517,9 @@ export default function MatchroomDetails() {
     const handleManagePlayer = (team: 'A' | 'B', playerUid: string, playerName: string) => {
         if (!id || !user || !room) return;
 
-        const isCurrentCaptain = team === 'A' ? room.captainUidA === playerUid : room.captainUidB === playerUid;
+        const isCurrentCaptain = team === 'A'
+            ? captainUidAResolved === playerUid
+            : captainUidBResolved === playerUid;
 
         Alert.alert(
             "Manage Player",
@@ -536,23 +543,73 @@ export default function MatchroomDetails() {
 
     const isHost = useMemo(() => user?.uid === room?.hostUid, [user?.uid, room?.hostUid]);
     const playersArr = useMemo(() => room?.players || [], [room?.players]);
-    const isJoined = useMemo(() => playersArr.some((p: any) => p.uid === user?.uid), [playersArr, user?.uid]);
+    const participantUids = useMemo(() => {
+        const slots = [...(room?.slotsA || []), ...(room?.slotsB || [])];
+        const slotUids = slots
+            .map((s: any) => s?.user?.uid || s?.uid)
+            .filter(Boolean);
+        return new Set<string>([
+            ...(room?.playerUids || []),
+            ...slotUids,
+            room?.hostUid,
+            room?.zoneOwnerUid,
+        ].filter(Boolean));
+    }, [room]);
+    const isJoined = useMemo(() => !!user?.uid && participantUids.has(user.uid), [participantUids, user?.uid]);
     const isFull = useMemo(() => playersArr.length >= (room?.maxPlayers || 0), [playersArr.length, room?.maxPlayers]);
 
     // Lifecycle states
     const isExpired = useMemo(() => (room ? isRoomExpired(room) : false), [room]);
     const isLocked = useMemo(() => (room ? isRoomLocked(room) : false), [room]);
     const canJoin = useMemo(() => !isExpired && !isLocked && !isJoined && !isFull, [isExpired, isLocked, isJoined, isFull]);
+    const matchCode = room?.matchCode || (room?.id ? room.id.slice(-6).toUpperCase() : '');
+    const qrValue = room?.id ? `matchhai://matchrooms/${room.id}` : '';
+
+    const { displaySlotsA, displaySlotsB } = useMemo(() => {
+        const slotsA = room?.slotsA || [];
+        const slotsB = room?.slotsB || [];
+        if (slotsA.length === 0 && slotsB.length === 0) {
+            return { displaySlotsA: slotsA, displaySlotsB: slotsB };
+        }
+        const assigned = new Set<string>();
+        slotsA.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
+        slotsB.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
+        const unassigned = (room?.players || []).filter((p: any) => !assigned.has(p.uid));
+        let idx = 0;
+        const fill = (slots: any[]) =>
+            slots.map((slot) => {
+                if (slot.user || slot.uid) return slot;
+                if (idx < unassigned.length) {
+                    const p = unassigned[idx++];
+                    return {
+                        ...slot,
+                        uid: p.uid,
+                        user: { uid: p.uid, username: p.username },
+                        status: 'confirmed',
+                        role: slot.role || p.role || 'Flex'
+                    };
+                }
+                return slot;
+            });
+        return { displaySlotsA: fill(slotsA), displaySlotsB: fill(slotsB) };
+    }, [room]);
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
+
+    const captainUidAResolved = room?.captainUidA || room?.hostUid;
+    const captainUidBResolved = room?.captainUidB || null;
+    const canManageTeamA = isHost || (!!captainUidAResolved && user?.uid === captainUidAResolved);
+    const canManageTeamB = isHost || (!!captainUidBResolved && user?.uid === captainUidBResolved) || (!captainUidBResolved && isHost);
+    const canInviteTeamA = !!captainUidAResolved && user?.uid === captainUidAResolved;
+    const canInviteTeamB = !!user?.uid && (user.uid === captainUidBResolved || (!captainUidBResolved && isHost));
 
     if (!room) return null;
 
@@ -560,30 +617,72 @@ export default function MatchroomDetails() {
     const availableRoles: any[] = []; // room.requiredRoles removed from schema
 
     return (
-        <SafeAreaView style={styles.screen}>
-            {/* Header */}
-            <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.headerTitle}>Lobby Details</Text>
-                <View style={{ flex: 1 }} />
-                {isJoined && !isHost && (
-                    <TouchableOpacity onPress={handleLeave} style={{ marginRight: 16 }}>
-                        <MaterialIcons name="exit-to-app" size={24} color={COLORS.error} />
-                    </TouchableOpacity>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader
+                title="Lobby Details"
+                onBack={() => router.back()}
+                inlineTitle
+                rightAction={(
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        {isJoined && !isHost && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_header_leave" });
+                                    }
+                                }}
+                                onPress={handleLeave}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="exit-to-app" size={24} color={COLORS.error} />
+                            </TouchableOpacity>
+                        )}
+                        {isHost && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_header_delete" });
+                                    }
+                                }}
+                                onPress={handleDelete}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="delete-outline" size={24} color={COLORS.error} />
+                            </TouchableOpacity>
+                        )}
+                        {user?.uid && participantUids.has(user.uid) && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_header_chat" });
+                                    }
+                                }}
+                                onPress={() => router.push(`/matchrooms/chat/${id}`)}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="chat" size={24} color={COLORS.accent} />
+                            </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                            onPressIn={() => {
+                                if (touchDebugEnabled) {
+                                    Logger.debug("TouchDebug", "pressIn", { tag: "lobby_header_share" });
+                                }
+                            }}
+                            onPress={handleShare}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <MaterialIcons name="share" size={24} color={COLORS.accent} />
+                        </TouchableOpacity>
+                    </View>
                 )}
-                {isHost && (
-                    <TouchableOpacity onPress={handleDelete} style={{ marginRight: 16 }}>
-                        <MaterialIcons name="delete-outline" size={24} color={COLORS.error} />
-                    </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={handleShare}>
-                    <MaterialIcons name="share" size={24} color={COLORS.accent} />
-                </TouchableOpacity>
-            </View>
+            />
 
-            <ScrollView contentContainerStyle={styles.content}>
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 {/* Expired Banner */}
                 {isExpired && (
                     <View style={[styles.banner, styles.expiredBanner]}>
@@ -603,6 +702,24 @@ export default function MatchroomDetails() {
                         </Text>
                     </View>
                 )}
+
+                {/* Matchroom QR (Locked Rooms) */}
+                {isLocked && qrValue ? (
+                    <View style={styles.qrCard}>
+                        <View style={styles.qrHeader}>
+                            <Text style={styles.qrTitle}>Matchroom QR</Text>
+                            <Text style={styles.qrSubtitle}>Scan to open this lobby</Text>
+                        </View>
+                        <View style={styles.qrBody}>
+                            <QRCode value={qrValue} size={140} backgroundColor="transparent" color={COLORS.text} />
+                            <View style={styles.qrInfo}>
+                                <Text style={styles.qrCodeLabel}>Match Code</Text>
+                                <Text style={styles.qrCodeValue}>{matchCode || '—'}</Text>
+                                <Text style={styles.qrHint}>Admin can use this code if QR fails.</Text>
+                            </View>
+                        </View>
+                    </View>
+                ) : null}
 
                 {/* Main Card */}
                 <View style={styles.mainCard}>
@@ -731,7 +848,7 @@ export default function MatchroomDetails() {
                             <View style={styles.teamTitleContainer}>
                                 <Text style={styles.teamTitle}>TEAM A</Text>
                             </View>
-                            {(room.slotsA || []).map((slot, idx) => (
+                            {(displaySlotsA || []).map((slot, idx) => (
                                 <View key={slot.slotId || `A${idx}`} style={styles.slotRow}>
                                     <View style={styles.slotAvatar}>
                                         <Text style={styles.slotAvatarText}>
@@ -740,7 +857,7 @@ export default function MatchroomDetails() {
                                     </View>
                                     <TouchableOpacity
                                         style={styles.slotInfo}
-                                        disabled={!slot.user || slot.user.uid === user?.uid || (room.captainUidA !== user?.uid && !isHost)}
+                                        disabled={!slot.user || slot.user.uid === user?.uid || !canManageTeamA}
                                         onPress={() => slot.user && handleManagePlayer('A', slot.user.uid, slot.user.username)}
                                     >
                                         {slot.user ? (
@@ -748,13 +865,11 @@ export default function MatchroomDetails() {
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
-                                                        {room.captainUidA === slot.user.uid && (
-                                                            <View style={[styles.captainBadge, { marginLeft: 6 }]}>
-                                                                <Text style={styles.captainText}>CAPTAIN</Text>
-                                                            </View>
+                                                        {captainUidAResolved === slot.user.uid && (
+                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
                                                         )}
                                                     </View>
-                                                    {(room.captainUidA === user?.uid || isHost) && slot.user.uid !== user?.uid && (
+                                                    {canManageTeamA && slot.user.uid !== user?.uid && (
                                                         <TouchableOpacity
                                                             onPress={() => handleManagePlayer('A', slot.user!.uid, slot.user!.username)}
                                                             style={{ padding: 4 }}
@@ -787,7 +902,7 @@ export default function MatchroomDetails() {
                                     </TouchableOpacity>
                                     {!slot.user && (
                                         <View style={{ flexDirection: 'row', gap: 8 }}>
-                                            {room.captainUidA === user?.uid && (
+                                            {canInviteTeamA && (
                                                 <TouchableOpacity
                                                     style={styles.inviteSlotButton}
                                                     onPress={() => handleInvitePress('A', slot.slotId)}
@@ -844,7 +959,7 @@ export default function MatchroomDetails() {
                             <View style={styles.teamTitleContainer}>
                                 <Text style={styles.teamTitle}>TEAM B</Text>
                             </View>
-                            {(room.slotsB || []).map((slot, idx) => (
+                            {(displaySlotsB || []).map((slot, idx) => (
                                 <View key={slot.slotId || `B${idx}`} style={styles.slotRow}>
                                     <View style={styles.slotAvatar}>
                                         <Text style={styles.slotAvatarText}>
@@ -853,7 +968,7 @@ export default function MatchroomDetails() {
                                     </View>
                                     <TouchableOpacity
                                         style={styles.slotInfo}
-                                        disabled={!slot.user || slot.user.uid === user?.uid || (room.captainUidB !== user?.uid && !isHost)}
+                                        disabled={!slot.user || slot.user.uid === user?.uid || !canManageTeamB}
                                         onPress={() => slot.user && handleManagePlayer('B', slot.user.uid, slot.user.username)}
                                     >
                                         {slot.user ? (
@@ -861,13 +976,11 @@ export default function MatchroomDetails() {
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
-                                                        {room.captainUidB === slot.user.uid && (
-                                                            <View style={[styles.captainBadge, { marginLeft: 6 }]}>
-                                                                <Text style={styles.captainText}>CAPTAIN</Text>
-                                                            </View>
+                                                        {captainUidBResolved === slot.user.uid && (
+                                                            <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
                                                         )}
                                                     </View>
-                                                    {(room.captainUidB === user?.uid || isHost) && slot.user.uid !== user?.uid && (
+                                                    {canManageTeamB && slot.user.uid !== user?.uid && (
                                                         <TouchableOpacity
                                                             onPress={() => handleManagePlayer('B', slot.user!.uid, slot.user!.username)}
                                                             style={{ padding: 4 }}
@@ -900,7 +1013,7 @@ export default function MatchroomDetails() {
                                     </TouchableOpacity>
                                     {!slot.user && (
                                         <View style={{ flexDirection: 'row', gap: 8 }}>
-                                            {room.captainUidB === user?.uid && (
+                                            {canInviteTeamB && (
                                                 <TouchableOpacity
                                                     style={styles.inviteSlotButton}
                                                     onPress={() => handleInvitePress('B', slot.slotId)}
@@ -998,7 +1111,7 @@ export default function MatchroomDetails() {
             </ScrollView>
 
             {/* Footer Actions */}
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + SPACING.sm, SPACING.lg + 12) }]}>
                 {isExpired ? (
                     <View style={[styles.fullButton, styles.expiredBanner]}>
                         <Text style={styles.fullText}>Matchroom Expired</Text>
@@ -1025,9 +1138,21 @@ export default function MatchroomDetails() {
                                                     : 'Request Sent. Waiting for host approval.')}
                                         </Text>
                                         <TouchableOpacity
-                                            onPress={handleCancelRequest}
+                                            onPress={() => {
+                                                if (touchDebugEnabled) {
+                                                    Logger.debug("TouchDebug", "press", { tag: "lobby_cancel_request" });
+                                                }
+                                                handleCancelRequest();
+                                            }}
+                                            onPressIn={() => {
+                                                if (touchDebugEnabled) {
+                                                    Logger.debug("TouchDebug", "pressIn", { tag: "lobby_cancel_request" });
+                                                }
+                                            }}
                                             disabled={requestLoading}
                                             style={styles.cancelRequestButton}
+                                            activeOpacity={0.85}
+                                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                         >
                                             {requestLoading ? (
                                                 <ActivityIndicator color={COLORS.error} />
@@ -1039,7 +1164,19 @@ export default function MatchroomDetails() {
                                 ) : (
                                     <TouchableOpacity
                                         style={styles.getRequestButton}
-                                        onPress={() => handleRequestJoin()}
+                                        onPress={() => {
+                                            if (touchDebugEnabled) {
+                                                Logger.debug("TouchDebug", "press", { tag: "lobby_request_join" });
+                                            }
+                                            handleRequestJoin();
+                                        }}
+                                        onPressIn={() => {
+                                            if (touchDebugEnabled) {
+                                                Logger.debug("TouchDebug", "pressIn", { tag: "lobby_request_join" });
+                                            }
+                                        }}
+                                        activeOpacity={0.85}
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                     >
                                         <Text style={styles.getRequestButtonText}>Request to Join</Text>
                                     </TouchableOpacity>
@@ -1050,9 +1187,16 @@ export default function MatchroomDetails() {
                         <View style={styles.footerRow}>
                             {isHost && (isFull || room.isLocked) ? (
                                 <TouchableOpacity
+                                    onPressIn={() => {
+                                        if (touchDebugEnabled) {
+                                            Logger.debug("TouchDebug", "pressIn", { tag: "lobby_start_match" });
+                                        }
+                                    }}
                                     onPress={handleStartMatch}
                                     disabled={starting}
                                     style={[styles.joinButton, { flex: 1, backgroundColor: COLORS.success }]}
+                                    activeOpacity={0.85}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 >
                                     {starting ? (
                                         <ActivityIndicator color="#fff" />
@@ -1071,9 +1215,21 @@ export default function MatchroomDetails() {
                             {/* Self-Leave Button if not Host (Host deletes) */}
                             {!isHost && (
                                 <TouchableOpacity
-                                    onPress={handleLeave}
+                                    onPress={() => {
+                                        if (touchDebugEnabled) {
+                                            Logger.debug("TouchDebug", "press", { tag: "lobby_leave" });
+                                        }
+                                        handleLeave();
+                                    }}
+                                    onPressIn={() => {
+                                        if (touchDebugEnabled) {
+                                            Logger.debug("TouchDebug", "pressIn", { tag: "lobby_leave" });
+                                        }
+                                    }}
                                     disabled={joining}
                                     style={[styles.secondaryButton, { flex: 1 }]}
+                                    activeOpacity={0.85}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 >
                                     {joining ? (
                                         <ActivityIndicator color={COLORS.error} />
@@ -1096,8 +1252,15 @@ export default function MatchroomDetails() {
                         {/* Captain Result Action */}
                         {(room.status === 'in-progress' || room.resultVerification?.status === 'pending') && isJoined && (
                             <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_report_result" });
+                                    }
+                                }}
                                 onPress={handleResultSubmission}
                                 style={[styles.joinButton, { backgroundColor: COLORS.warning }]}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.joinButtonText}>Report Result</Text>
                             </TouchableOpacity>
@@ -1106,8 +1269,15 @@ export default function MatchroomDetails() {
                         {/* Participant Vote Action */}
                         {room.resultVerification?.status === 'participant_vote' && isJoined && (
                             <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_vote_dispute" });
+                                    }
+                                }}
                                 onPress={handleVote}
                                 style={[styles.joinButton, { backgroundColor: COLORS.error }]}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.joinButtonText}>Vote on Dispute</Text>
                             </TouchableOpacity>
@@ -1172,6 +1342,6 @@ export default function MatchroomDetails() {
                     </Pressable>
                 </Pressable>
             </Modal>
-        </SafeAreaView>
+        </Screen>
     );
 }

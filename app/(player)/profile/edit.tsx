@@ -26,6 +26,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
 import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
 import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
+import Logger from "../../../src/utils/logger";
 import {
     isEaIdAvailable,
     isFaceitIdAvailable,
@@ -86,6 +87,7 @@ const formatPakistaniPhone = (value: string) => {
 export default function EditProfile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -823,20 +825,35 @@ export default function EditProfile() {
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Edit Profile</Text>
 
-                <TouchableOpacity
-                    style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.saveButton,
+                        saving && styles.saveButtonDisabled,
+                        pressed && !saving && styles.saveButtonPressed,
+                    ]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_edit_save" });
+                        }
+                    }}
                     onPress={handleSave}
                     disabled={saving}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                </TouchableOpacity>
+                </Pressable>
             </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
                 style={styles.flex1}
             >
-                <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                >
 
                     <Text style={styles.sectionTitle}>Basic Info</Text>
 

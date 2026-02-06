@@ -12,14 +12,15 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View,
-    SafeAreaView
+    View
 } from "react-native";
 
+import AppHeader from "../../src/components/AppHeader";
+import Screen from "../../src/components/Screen";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserTeams, Team } from "../../src/services/teamService";
-import { COLORS, SPACING } from "../../src/theme";
+import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./(tabs)/teams.styles"; // Reuse styles from tabs/teams
 
@@ -107,6 +108,9 @@ export default function MyTeams() {
     }, [teams, searchQuery]);
 
     const renderTeamItem = ({ item }: { item: Team }) => {
+        const maxMembers = item.maxMembers || 0;
+        const rawMemberCount = item.memberUids?.length ?? item.memberCount ?? 0;
+        const memberCount = maxMembers > 0 ? Math.min(rawMemberCount, maxMembers) : rawMemberCount;
         return (
             <Pressable
                 style={({ pressed }) => [
@@ -120,7 +124,7 @@ export default function MyTeams() {
                     <View style={styles.memberCountRow}>
                         <MaterialIcons name="people" size={12} color={COLORS.muted} />
                         <Text style={styles.memberCountText}>
-                            {item.memberCount || 0} / {item.maxMembers || 0}
+                            {memberCount} / {maxMembers}
                         </Text>
                     </View>
                 </View>
@@ -154,41 +158,33 @@ export default function MyTeams() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
-            {/* Header Area */}
-            <View style={styles.header}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.md }}>
-                    <TouchableOpacity onPress={() => router.back()} style={{ marginRight: SPACING.md }}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { marginBottom: 0 }]}>My Teams</Text>
-                </View>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title="My Teams" onBack={() => router.back()} />
 
-                {/* Search Bar */}
-                <View style={styles.searchBar}>
-                    <MaterialIcons name="search" size={20} color={COLORS.muted} />
-                    <TextInput
-                        style={styles.searchInput}
-                        placeholder="Search my teams..."
-                        placeholderTextColor={COLORS.muted}
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                    />
-                    {searchQuery.length > 0 && (
-                        <TouchableOpacity onPress={() => setSearchQuery("")}>
-                            <MaterialIcons name="close" size={20} color={COLORS.muted} />
-                        </TouchableOpacity>
-                    )}
-                </View>
+            {/* Search Bar */}
+            <View style={styles.searchBar}>
+                <MaterialIcons name="search" size={20} color={COLORS.muted} />
+                <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search my teams..."
+                    placeholderTextColor={COLORS.muted}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchQuery("")}>
+                        <MaterialIcons name="close" size={20} color={COLORS.muted} />
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Results Count Section */}
@@ -252,6 +248,6 @@ export default function MyTeams() {
                     <MaterialIcons name="add" size={28} color="#FFF" />
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </Screen>
     );
 }

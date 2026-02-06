@@ -93,14 +93,19 @@ export default StyleSheet.create({
         borderTopColor: COLORS.divider,
     },
     primaryButton: {
+        minHeight: 48,
         backgroundColor: COLORS.accent,
-        paddingVertical: SPACING.lg,
+        paddingVertical: SPACING.lg - 2,
         borderRadius: RADII.md,
         alignItems: 'center',
+        justifyContent: 'center',
         ...SHADOWS.accentStrong,
     },
     primaryButtonDisabled: {
         opacity: 0.6,
+    },
+    primaryButtonPressed: {
+        opacity: 0.9,
     },
     primaryButtonText: {
         color: '#FFF',

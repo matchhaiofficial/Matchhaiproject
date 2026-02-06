@@ -78,9 +78,9 @@ export const getTeamById = async (id: string): Promise<{ ok: boolean; data?: Tea
         if (docSnap.exists()) {
             const teamData = { id: docSnap.id, ...docSnap.data() } as Team;
 
-            // If members array exists in main doc, use it, otherwise fetch subcollection
-            if (!teamData.members || teamData.members.length === 0) {
-                const membersSnap = await getDocs(collection(db, TEAMS_COLLECTION, id, 'members'));
+            // Always prefer members subcollection if present (main doc can be stale)
+            const membersSnap = await getDocs(collection(db, TEAMS_COLLECTION, id, 'members'));
+            if (!membersSnap.empty) {
                 teamData.members = membersSnap.docs.map(d => ({ ...d.data() } as TeamMember));
             }
 

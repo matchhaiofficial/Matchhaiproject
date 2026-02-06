@@ -7,13 +7,11 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     container: {
-        paddingBottom: 100,
+        paddingBottom: SPACING.md,
     },
 
     // 🔥 TOP SECTION: Personalized Header
     header: {
-        paddingHorizontal: SPACING.screenPadding,
-        paddingTop: SPACING.xl + 30, // Increased to move header lower
         paddingBottom: SPACING.lg,
         backgroundColor: COLORS.backgroundDark,
     },
@@ -69,6 +67,35 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
     },
+    notificationBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -6,
+        backgroundColor: COLORS.error,
+        borderRadius: 10,
+        minWidth: 20,
+        height: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 2,
+        borderColor: COLORS.background,
+    },
+    notificationBadgeText: {
+        color: '#FFF',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    menuButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: COLORS.cardDark,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+    },
     notificationDot: {
         position: 'absolute',
         top: 8,
@@ -104,7 +131,6 @@ export default StyleSheet.create({
     // 📍 SECTION 1: Quick Actions
     section: {
         marginTop: SPACING.xl,
-        paddingHorizontal: SPACING.screenPadding,
     },
     sectionHeaderRow: {
         flexDirection: 'row',

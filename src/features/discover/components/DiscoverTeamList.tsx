@@ -11,28 +11,30 @@ import {
     Text,
     TouchableOpacity,
     View,
-    StyleSheet,
     ScrollView
 } from "react-native";
 import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
-import { COLORS, SPACING, FONTS } from "../../../../src/theme";
+import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
+import SegmentedTabs from "../../../../src/components/SegmentedTabs";
 import { GameKey } from "../types";
 import { normalizeGameKey } from "../utils/gameKeys";
 
 // Reuse styles
-import styles from "../../../../app/(player)/(tabs)/teams.styles";
+import styles from "../styles/teams.styles";
 
 interface DiscoverTeamListProps {
     selectedGame: GameKey;
     searchQuery: string;
     initialMode?: 'my' | 'discover'; // NEW: allow initial mode selection
     intentTime?: string; // NEW: force sync on re-navigation
+    edgePadding?: number;
+    bottomPadding?: number;
 }
 
-export default function DiscoverTeamList({ selectedGame, searchQuery, initialMode = 'discover', intentTime }: DiscoverTeamListProps) {
+export default function DiscoverTeamList({ selectedGame, searchQuery, initialMode = 'discover', intentTime, edgePadding, bottomPadding }: DiscoverTeamListProps) {
     const router = useRouter();
     const { user } = useAuth();
 
@@ -147,14 +149,11 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
 
     // Refetch when mode, filters change
     useEffect(() => {
-        const timeoutId = setTimeout(() => {
-            if (mode === 'my') {
-                fetchMyTeams();
-            } else {
-                fetchPublicTeams(false);
-            }
-        }, 500);
-        return () => clearTimeout(timeoutId);
+        if (mode === 'my') {
+            fetchMyTeams();
+        } else {
+            fetchPublicTeams(false);
+        }
     }, [user, mode, selectedGame, searchQuery]);
 
     useEffect(() => {
@@ -191,7 +190,10 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
     const renderTeamItem = ({ item }: { item: Team }) => {
         const isMyTeam = mode === 'my';
         const isRequested = requestedTeamIds.has(item.id || "");
-        const isFull = (item.memberCount || 0) >= (item.maxMembers || 0);
+        const rawMemberCount = item.memberUids?.length ?? item.memberCount ?? 0;
+        const maxMembers = item.maxMembers || 0;
+        const memberCount = maxMembers > 0 ? Math.min(rawMemberCount, maxMembers) : rawMemberCount;
+        const isFull = maxMembers > 0 ? memberCount >= maxMembers : false;
 
         return (
             <Pressable
@@ -206,7 +208,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                     <View style={styles.memberCountRow}>
                         <MaterialIcons name="people" size={12} color={COLORS.muted} />
                         <Text style={styles.memberCountText}>
-                            {item.memberCount || 0} / {item.maxMembers || 0}
+                            {memberCount} / {maxMembers}
                         </Text>
                     </View>
                 </View>
@@ -279,12 +281,13 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         if (mode === 'discover') {
             // Existing Open Slots filter
             if (selectedTeamFilter === 'Open Slots') {
-                if ((t.memberCount || 0) >= (t.maxMembers || 0)) return false;
+                const memberCount = t.memberUids?.length ?? t.memberCount ?? 0;
+                if (memberCount >= (t.maxMembers || 0)) return false;
             }
 
             // Team Size filter
             if (selectedTeamSize !== 'Any') {
-                const memberCount = t.memberCount || 0;
+                const memberCount = t.memberUids?.length ?? t.memberCount ?? 0;
                 if (selectedTeamSize === '1-2 players') {
                     if (memberCount < 1 || memberCount > 2) return false;
                 } else if (selectedTeamSize === '3-5 players') {
@@ -312,10 +315,19 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         );
     }
 
+    const filterBleedStyle = edgePadding ? { marginHorizontal: -edgePadding, paddingHorizontal: edgePadding } : null;
+    const filterScrollStyle = edgePadding ? { marginHorizontal: -edgePadding } : null;
+    const filterContentStyle = edgePadding ? { paddingHorizontal: edgePadding } : null;
+
     const renderFilterRow = (label: string, options: string[], selected: string, onSelect: (val: string) => void) => (
         <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>{label}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptionsScroll}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filterOptionsScroll}
+                contentContainerStyle={styles.filterOptionsContent}
+            >
                 {options.map(opt => (
                     <TouchableOpacity
                         key={opt}
@@ -338,50 +350,16 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
     return (
         <View style={{ flex: 1 }}>
             {/* NEW: Mode Toggle (Browse Teams vs My Teams) */}
-            <View style={{
-                flexDirection: 'row',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                marginHorizontal: 16,
-                marginTop: 8,
-                marginBottom: 8,
-                borderRadius: 12,
-                padding: 4,
-                borderWidth: 1,
-                borderColor: 'rgba(255, 255, 255, 0.1)'
-            }}>
-                <TouchableOpacity
-                    onPress={() => setMode('discover')}
-                    style={{
-                        flex: 1,
-                        paddingVertical: 8,
-                        borderRadius: 8,
-                        alignItems: 'center',
-                        backgroundColor: mode === 'discover' ? COLORS.accent : 'transparent'
-                    }}
-                >
-                    <Text style={{
-                        color: mode === 'discover' ? '#FFF' : COLORS.muted,
-                        fontWeight: 'bold',
-                        fontSize: 13
-                    }}>Browse Teams</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={() => setMode('my')}
-                    style={{
-                        flex: 1,
-                        paddingVertical: 8,
-                        borderRadius: 8,
-                        alignItems: 'center',
-                        backgroundColor: mode === 'my' ? COLORS.accent : 'transparent'
-                    }}
-                >
-                    <Text style={{
-                        color: mode === 'my' ? '#FFF' : COLORS.muted,
-                        fontWeight: 'bold',
-                        fontSize: 13
-                    }}>My Teams</Text>
-                </TouchableOpacity>
-            </View>
+            <SegmentedTabs
+                items={[
+                    { key: 'discover', label: 'Browse' },
+                    { key: 'my', label: 'My Teams' },
+                ]}
+                value={mode}
+                onChange={setMode}
+                style={styles.segmentTabs}
+                compact
+            />
 
             {/* Contextual Filters - Only for Discover mode */}
             {mode === 'discover' && selectedGame !== 'all' && (
@@ -389,19 +367,9 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                     <TouchableOpacity
                         onPress={() => setFiltersExpanded(!filtersExpanded)}
                         activeOpacity={0.7}
-                        style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            paddingHorizontal: 16,
-                            paddingBottom: 8,
-                            paddingTop: 8,
-                            backgroundColor: COLORS.background
-                        }}
+                        style={[styles.filterToggleRow, filterBleedStyle]}
                     >
-                        <Text style={{ fontFamily: FONTS.heading, fontSize: 14, color: COLORS.textSecondary }}>
-                            Filters
-                        </Text>
+                        <Text style={styles.filterToggleText}>Filters</Text>
                         <MaterialIcons
                             name={filtersExpanded ? "keyboard-arrow-up" : "keyboard-arrow-down"}
                             size={20}
@@ -413,7 +381,8 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                         <View style={{ maxHeight: 300 }}>
                             <ScrollView
                                 showsVerticalScrollIndicator={true}
-                                contentContainerStyle={[styles.filtersPanel, { marginTop: 0, paddingBottom: 20 }]}
+                                style={filterScrollStyle || undefined}
+                                contentContainerStyle={[styles.filtersPanel, filterContentStyle || undefined]}
                             >
                                 {renderFilterRow(
                                     'Availability',
@@ -439,7 +408,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                 data={displayedTeams}
                 renderItem={renderTeamItem}
                 keyExtractor={(item) => item.id || Math.random().toString()}
-                contentContainerStyle={[styles.listContent, { paddingBottom: 100 }]}
+                contentContainerStyle={[styles.listContent, { paddingBottom: bottomPadding ?? 24 }]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />

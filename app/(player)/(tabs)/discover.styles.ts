@@ -1,4 +1,4 @@
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
@@ -7,16 +7,13 @@ export default StyleSheet.create({
         backgroundColor: COLORS.background,
     },
     header: {
-        paddingTop: SPACING.md, // SafeArea handled by view or context usually
+        paddingTop: SPACING.sm,
         paddingBottom: SPACING.sm,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
         backgroundColor: COLORS.background,
-        elevation: 2,
-        zIndex: 10,
     },
     headerTopRow: {
-        paddingHorizontal: SPACING.screenPadding,
         marginBottom: SPACING.md,
     },
     headerTitle: {
@@ -47,32 +44,8 @@ export default StyleSheet.create({
     },
 
     // Segmented Control (Tabs)
-    segmentContainer: {
-        flexDirection: 'row',
-        paddingHorizontal: SPACING.screenPadding,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
-    },
-    segmentButton: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-        borderBottomWidth: 2,
-        borderBottomColor: 'transparent',
-    },
-    segmentButtonActive: {
-        borderBottomColor: COLORS.accent,
-    },
-    segmentText: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.heading,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    segmentTextActive: {
-        color: COLORS.accent,
+    segmentTabs: {
+        marginTop: SPACING.xs,
     },
 
     // Global Chips
@@ -81,18 +54,20 @@ export default StyleSheet.create({
         marginBottom: 0, // Tight against bottom of header
     },
     itemFiltersContent: {
-        paddingHorizontal: SPACING.screenPadding,
+        flexGrow: 1,
         paddingBottom: SPACING.sm,
     },
     optionChip: {
+        minWidth: 84,
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 999,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 7,
         marginRight: SPACING.sm,
     },
     optionChipActive: {
@@ -112,9 +87,10 @@ export default StyleSheet.create({
     // FAB
     fabWrapper: {
         position: 'absolute',
-        bottom: Platform.OS === 'android' ? 130 : 110, // Increased to 130 to safely clear TabBar on all Android devices
         right: 24,
-        zIndex: 1000,
+        zIndex: 20,
+        elevation: 12,
+        pointerEvents: 'box-none',
     },
     fab: {
         width: 56,

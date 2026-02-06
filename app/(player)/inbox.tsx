@@ -3,7 +3,9 @@ import { useRouter } from "expo-router";
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, PanResponder, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import AppHeader from "../../src/components/AppHeader";
+import Screen from "../../src/components/Screen";
+import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
@@ -65,6 +67,7 @@ export default function Inbox() {
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState<string | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     useEffect(() => {
         if (!user) return;
@@ -262,6 +265,15 @@ export default function Inbox() {
             ]
         );
     };
+
+    const pendingCount = notifications.filter(n => {
+        if (n.status !== 'pending') return false;
+        if (n.expiresAt) {
+            const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
+            if (expiresMs < Date.now()) return false;
+        }
+        return true;
+    }).length;
 
     const filtered = notifications.filter(n => {
         const isPending = n.status === 'pending';
@@ -569,6 +581,11 @@ export default function Inbox() {
                     <View style={styles.actionRow}>
                         <TouchableOpacity
                             disabled={!!processing}
+                            onPressIn={() => {
+                                if (touchDebugEnabled) {
+                                    Logger.debug("TouchDebug", "pressIn", { tag: "inbox_accept", id: item.id, type: item.type });
+                                }
+                            }}
                             onPress={() => {
                                 if (isRequest) handleFriendResponse(item.id, 'accept');
                                 else if (isJoinRequest) handleJoinResponse(item.id, 'accept');
@@ -578,6 +595,8 @@ export default function Inbox() {
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'accept');
                             }}
                             style={styles.acceptButton}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
                             {isProcessing ? (
                                 <ActivityIndicator color="#FFF" size="small" />
@@ -590,6 +609,11 @@ export default function Inbox() {
 
                         <TouchableOpacity
                             disabled={!!processing}
+                            onPressIn={() => {
+                                if (touchDebugEnabled) {
+                                    Logger.debug("TouchDebug", "pressIn", { tag: "inbox_reject", id: item.id, type: item.type });
+                                }
+                            }}
                             onPress={() => {
                                 if (isRequest) handleFriendResponse(item.id, 'decline');
                                 else if (isJoinRequest) handleJoinResponse(item.id, 'reject');
@@ -599,6 +623,8 @@ export default function Inbox() {
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'decline');
                             }}
                             style={styles.declineButton}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
                             <Text style={styles.declineButtonText}>Reject</Text>
                         </TouchableOpacity>
@@ -620,56 +646,33 @@ export default function Inbox() {
     };
 
     return (
-        <View style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <StatusBar barStyle="light-content" />
-            <SafeAreaView edges={['top']} style={{ backgroundColor: COLORS.background }}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Inbox</Text>
-                </View>
-            </SafeAreaView>
+            <AppHeader title="Inbox" onBack={() => router.back()} inlineTitle />
 
-            <View style={styles.tabContainer}>
-                <Pressable
-                    onPress={() => setActiveTab('pending')}
-                    style={[styles.tab, activeTab === 'pending' && styles.activeTab]}
-                >
-                    <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>
-                        Pending {notifications.filter(n => {
-                            if (n.status !== 'pending') return false;
-                            if (n.expiresAt) {
-                                const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
-                                if (expiresMs < Date.now()) return false;
-                            }
-                            return true;
-                        }).length > 0 ? `(${notifications.filter(n => {
-                            if (n.status !== 'pending') return false;
-                            if (n.expiresAt) {
-                                const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
-                                if (expiresMs < Date.now()) return false;
-                            }
-                            return true;
-                        }).length})` : ''}
-                    </Text>
-                </Pressable>
-                <Pressable
-                    onPress={() => setActiveTab('resolved')}
-                    style={[styles.tab, activeTab === 'resolved' && styles.activeTab]}
-                >
-                    <Text style={[styles.tabText, activeTab === 'resolved' && styles.activeTabText]}>
-                        History
-                    </Text>
-                </Pressable>
-            </View>
+            <SegmentedTabs
+                items={[
+                    { key: 'pending', label: 'Pending', badge: pendingCount > 0 ? pendingCount : undefined },
+                    { key: 'resolved', label: 'History' },
+                ]}
+                value={activeTab}
+                onChange={setActiveTab}
+                style={styles.segmentTabs}
+            />
 
             {/* Clear All Button - Only visible in History tab when there are items */}
             {activeTab === 'resolved' && notifications.filter(n => n.status !== 'pending').length > 0 && (
                 <TouchableOpacity
                     onPress={handleClearAllHistory}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "inbox_clear_history" });
+                        }
+                    }}
                     disabled={deleting}
                     style={styles.clearHistoryButton}
+                    activeOpacity={0.85}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     {deleting ? (
                         <ActivityIndicator size="small" color={COLORS.error} />
@@ -712,6 +715,6 @@ export default function Inbox() {
                     }
                 />
             )}
-        </View>
+        </Screen>
     );
 }

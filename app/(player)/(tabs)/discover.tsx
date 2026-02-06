@@ -1,15 +1,21 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import React, { useEffect, useState } from "react";
 import {
     ScrollView,
     Text,
     TextInput,
+    Pressable,
     TouchableOpacity,
     View,
     StatusBar,
     Platform
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
+import { useScreenPadding } from "../../../src/hooks/useScreenPadding";
+import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { useRouter, useLocalSearchParams } from "expo-router";
 
 import DiscoverMatchroomList from "../../../src/features/discover/components/DiscoverMatchroomList";
@@ -33,7 +39,21 @@ const GAMES: { key: GameKey; label: string }[] = [
     { key: 'pickleball', label: 'Pickleball' },
 ];
 
+const VENUE_TYPES: { key: 'all' | 'zones' | 'courts'; label: string }[] = [
+    { key: 'all', label: 'All Venues' },
+    { key: 'zones', label: 'Gaming Zones' },
+    { key: 'courts', label: 'Sports Courts' },
+];
+
 const ALLOWED_SEGMENTS: DiscoverSegment[] = ['matchrooms', 'players', 'teams', 'zones'];
+const SEGMENT_ITEMS: { key: DiscoverSegment; label: string }[] = [
+    { key: 'matchrooms', label: 'Rooms' },
+    { key: 'players', label: 'Players' },
+    { key: 'teams', label: 'Teams' },
+    { key: 'zones', label: 'Venues' },
+];
+
+const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1';
 
 const getValidSegment = (s?: string): DiscoverSegment | null => {
     if (!s) return null;
@@ -43,10 +63,14 @@ const getValidSegment = (s?: string): DiscoverSegment | null => {
 export default function DiscoverScreen() {
     const router = useRouter();
     const params = useLocalSearchParams<{ segment?: string; mode?: string; t?: string }>();
+    const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
 
     // Global State
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedGame, setSelectedGame] = useState<GameKey>('all');
+    const [selectedVenueType, setSelectedVenueType] = useState<'all' | 'zones' | 'courts'>('all');
+    const screenPadding = useScreenPadding();
 
     // Segment State
     const [activeSegment, setActiveSegment] = useState<DiscoverSegment>(
@@ -96,29 +120,24 @@ export default function DiscoverScreen() {
         });
     }, [activeSegment]);
 
-    const renderSegmentButton = (segment: DiscoverSegment, label: string) => (
-        <TouchableOpacity
-            onPress={() => {
-                setActiveSegment(segment);
-                // Core Fix: Update URL params so they stay in sync with manual switch
-                // Clear mode when switching segments manually to avoid sticking to 'my' mode
-                router.setParams({ segment, mode: undefined } as any);
-            }}
-            style={[styles.segmentButton, activeSegment === segment && styles.segmentButtonActive]}
-        >
-            <Text style={[styles.segmentText, activeSegment === segment && styles.segmentTextActive]}>
-                {label}
-            </Text>
-        </TouchableOpacity>
-    );
+    const fullBleed = { marginHorizontal: -screenPadding };
+    const fullBleedContent = { paddingHorizontal: screenPadding };
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const bottomPadding = HIDE_PLAYER_TAB_BAR ? (insets.bottom + 16) : (tabBarHeight + 16);
+
+    const handleSegmentChange = (segment: DiscoverSegment) => {
+        setActiveSegment(segment);
+        router.setParams({ segment, mode: undefined } as any);
+    };
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title="Discover" />
+
             {/* Header Section */}
             <View style={styles.header}>
                 <View style={styles.headerTopRow}>
                     <View style={{ flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'center', marginBottom: 12 }}>
-                        <Text style={[styles.headerTitle, { marginBottom: 0 }]}>Discover</Text>
                         {activeSegment === 'teams' && (
                             <View /> // Placeholder where button used to be
                         )}
@@ -143,20 +162,20 @@ export default function DiscoverScreen() {
                 </View>
 
                 {/* Internal Segment Tabs (Now using View for full width/tab style) */}
-                <View style={styles.segmentContainer}>
-                    {renderSegmentButton('matchrooms', 'Rooms')}
-                    {renderSegmentButton('players', 'Players')}
-                    {renderSegmentButton('teams', 'Teams')}
-                    {renderSegmentButton('zones', 'Venues')}
-                </View>
+                <SegmentedTabs
+                    items={SEGMENT_ITEMS}
+                    value={activeSegment}
+                    onChange={handleSegmentChange}
+                    style={styles.segmentTabs}
+                />
 
                 {/* Global Game Chips - Hidden for Venues tab (has its own filter system) */}
                 {activeSegment !== 'zones' && (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
-                        style={[styles.itemFiltersScroll, { marginTop: 12 }]}
-                        contentContainerStyle={styles.itemFiltersContent}
+                        style={[styles.itemFiltersScroll, { marginTop: 12 }, fullBleed]}
+                        contentContainerStyle={[styles.itemFiltersContent, fullBleedContent]}
                     >
                         {GAMES.map(game => (
                             <TouchableOpacity
@@ -177,6 +196,33 @@ export default function DiscoverScreen() {
                         ))}
                     </ScrollView>
                 )}
+
+                {activeSegment === 'zones' && (
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={[styles.itemFiltersScroll, { marginTop: 12 }, fullBleed]}
+                        contentContainerStyle={[styles.itemFiltersContent, fullBleedContent]}
+                    >
+                        {VENUE_TYPES.map(type => (
+                            <TouchableOpacity
+                                key={type.key}
+                                onPress={() => setSelectedVenueType(type.key)}
+                                style={[
+                                    styles.optionChip,
+                                    selectedVenueType === type.key && styles.optionChipActive
+                                ]}
+                            >
+                                <Text style={[
+                                    styles.optionChipText,
+                                    selectedVenueType === type.key && styles.optionChipTextActive
+                                ]}>
+                                    {type.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                )}
             </View>
 
             {/* Content Area - Lazy Mounted & Persisted */}
@@ -186,6 +232,8 @@ export default function DiscoverScreen() {
                         <DiscoverMatchroomList
                             selectedGame={selectedGame}
                             searchQuery={searchQuery}
+                            edgePadding={screenPadding}
+                            bottomPadding={bottomPadding}
                         />
                     </View>
                 )}
@@ -195,6 +243,8 @@ export default function DiscoverScreen() {
                         <DiscoverPlayerList
                             selectedGame={selectedGame}
                             searchQuery={searchQuery}
+                            edgePadding={screenPadding}
+                            bottomPadding={bottomPadding}
                         />
                     </View>
                 )}
@@ -206,6 +256,8 @@ export default function DiscoverScreen() {
                             searchQuery={searchQuery}
                             initialMode={params.mode as any}
                             intentTime={params.t}
+                            edgePadding={screenPadding}
+                            bottomPadding={bottomPadding}
                         />
                     </View>
                 )}
@@ -215,6 +267,9 @@ export default function DiscoverScreen() {
                         <DiscoverZoneList
                             selectedGame={selectedGame}
                             searchQuery={searchQuery}
+                            selectedVenueType={selectedVenueType}
+                            edgePadding={screenPadding}
+                            bottomPadding={bottomPadding}
                         />
                     </View>
                 )}
@@ -222,22 +277,35 @@ export default function DiscoverScreen() {
 
             {/* Floating Action Button (FAB) - Contextual for Rooms and Teams */}
             {(activeSegment === 'matchrooms' || activeSegment === 'teams') && (
-                <View style={styles.fabWrapper}>
-                    <TouchableOpacity
+                <View
+                    style={[
+                        styles.fabWrapper,
+                        { bottom: Math.max(insets.bottom + 16, (HIDE_PLAYER_TAB_BAR ? 0 : tabBarHeight) + 12) },
+                    ]}
+                >
+                    <Pressable
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: `discover_fab_${activeSegment}` });
+                            }
+                        }}
                         onPress={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "press", { tag: `discover_fab_${activeSegment}` });
+                            }
                             if (activeSegment === 'matchrooms') {
                                 router.push("/matchrooms/create" as any);
                             } else {
                                 router.push("/teams/create" as any);
                             }
                         }}
-                        activeOpacity={0.8}
-                        style={styles.fab}
+                        style={({ pressed }) => [styles.fab, pressed && { opacity: 0.88 }]}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                         <MaterialIcons name="add" size={28} color="#FFF" />
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
             )}
-        </SafeAreaView>
+        </Screen>
     );
 }

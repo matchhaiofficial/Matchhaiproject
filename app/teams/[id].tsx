@@ -4,13 +4,15 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AppHeader from "../../src/components/AppHeader";
+import Screen from "../../src/components/Screen";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
 import { getUserProfile } from "../../src/services/userService";
-import { COLORS } from "../../src/theme";
+import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./[id].styles";
 import InviteFriendsSheet from "./components/InviteFriendsSheet";
@@ -33,6 +35,7 @@ export default function TeamDetails() {
     const { id } = params;
     const router = useRouter();
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
     const [team, setTeam] = useState<Team | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -48,6 +51,7 @@ export default function TeamDetails() {
 
     // Invite States
     const [showInviteSheet, setShowInviteSheet] = useState(false);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     // Optimized fetchTeam: 1 doc read + 1 members query + 1 request check = 3 reads total
     const fetchTeam = async () => {
@@ -71,7 +75,21 @@ export default function TeamDetails() {
             );
             const members: any[] = [];
             membersSnapshot.forEach(doc => members.push({ ...doc.data() }));
-            teamData.members = members;
+            // Prefer subcollection members, but merge in memberUids if subcollection is incomplete/stale.
+            const memberUids = Array.isArray(teamData.memberUids) ? teamData.memberUids : [];
+            if (memberUids.length > 0) {
+                const membersByUid = new Map<string, any>();
+                members.forEach(m => {
+                    if (m?.uid) membersByUid.set(m.uid, m);
+                });
+                teamData.members = memberUids.map(uid => {
+                    const existing = membersByUid.get(uid);
+                    if (existing) return existing;
+                    return { uid, username: uid.slice(0, 6) + '…', role: 'member', joinedAt: null };
+                });
+            } else {
+                teamData.members = members;
+            }
 
             setTeam(teamData);
 
@@ -102,7 +120,10 @@ export default function TeamDetails() {
     // Role & Permission Checks
     const isMember = team?.members?.some(m => m.uid === user?.uid) || false;
     const isCaptain = team?.captainUid === user?.uid;
-    const isFull = team ? (team.memberCount || 0) >= (team.maxMembers || 0) : false;
+    const memberCount = team?.members?.length ?? team?.memberUids?.length ?? team?.memberCount ?? 0;
+    const maxMembers = team ? (team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5) : 0;
+    const memberCountDisplay = maxMembers > 0 ? Math.min(memberCount, maxMembers) : memberCount;
+    const isFull = team ? memberCountDisplay >= maxMembers : false;
     const isPrivate = team?.visibility === 'private';
 
     // Real-time Listeners (Captain only)
@@ -427,50 +448,93 @@ export default function TeamDetails() {
 
     const buttonState = getButtonState();
 
+    const handleEmptySlotPress = () => {
+        if (isCaptain) {
+            setShowInviteSheet(true);
+            return;
+        }
+        if (buttonState === 'eligible') {
+            handleJoinRequest();
+            return;
+        }
+        if (buttonState === 'requested') {
+            Alert.alert("Request Pending", "Your request is already pending captain approval.");
+            return;
+        }
+        if (buttonState === 'full') {
+            Alert.alert("Team Full", "This team is currently full.");
+            return;
+        }
+        if (buttonState === 'private') {
+            Alert.alert("Invite Only", "This team is private. Ask the captain for an invite.");
+        }
+    };
+
     if (loading || !team) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
-            {/* Header */}
-            <View style={styles.header}>
-                <View style={styles.headerLeft}>
-                    <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>Team Details</Text>
-                </View>
-                {isCaptain && (
-                    <TouchableOpacity onPress={handleDeleteAction} style={styles.headerIcon}>
-                        <MaterialIcons name="delete" size={24} color={COLORS.error} />
-                    </TouchableOpacity>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader
+                title="Team Details"
+                onBack={() => router.back()}
+                inlineTitle
+                rightAction={(
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        {isCaptain && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_header_delete" });
+                                    }
+                                }}
+                                onPress={handleDeleteAction}
+                                style={styles.headerIcon}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="delete" size={24} color={COLORS.error} />
+                            </TouchableOpacity>
+                        )}
+                        {isCaptain && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_header_invite" });
+                                    }
+                                }}
+                                onPress={() => setShowInviteSheet(true)}
+                                style={styles.headerIcon}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="person-add" size={24} color={COLORS.accent} />
+                            </TouchableOpacity>
+                        )}
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.headerIcon,
+                                pressed && { opacity: 0.7 }
+                            ]}
+                            onPress={handleShare}
+                            android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 24 }}
+                        >
+                            <MaterialIcons name="share" size={24} color={COLORS.accent} />
+                        </Pressable>
+                    </View>
                 )}
-                {isCaptain && (
-                    <TouchableOpacity onPress={() => setShowInviteSheet(true)} style={styles.headerIcon}>
-                        <MaterialIcons name="person-add" size={24} color={COLORS.accent} />
-                    </TouchableOpacity>
-                )}
-                <Pressable
-                    style={({ pressed }) => [
-                        styles.headerIcon,
-                        pressed && { opacity: 0.7 }
-                    ]}
-                    onPress={handleShare}
-                    android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 24 }}
-                >
-                    <MaterialIcons name="share" size={24} color={COLORS.accent} />
-                </Pressable>
-            </View>
+            />
 
             <ScrollView
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
+                contentContainerStyle={styles.scrollContent}
             >
                 {/* Team Info Section */}
                 <View style={styles.teamHeader}>
@@ -494,7 +558,9 @@ export default function TeamDetails() {
                         )}
                     </TouchableOpacity>
                     <View style={styles.teamNameContainer}>
-                        <Text style={styles.teamNameLarge}>{team.name}</Text>
+                        <Text style={styles.teamNameLarge} numberOfLines={1} ellipsizeMode="tail">
+                            {team.name}
+                        </Text>
                         {isCaptain && (
                             <Pressable
                                 onPress={() => {
@@ -520,9 +586,9 @@ export default function TeamDetails() {
                     <View style={styles.occupancyRow}>
                         <MaterialIcons name="people" size={16} color={COLORS.muted} />
                         <Text style={styles.occupancyText}>
-                            {team.memberCount || 0} / {team.maxMembers || 5}
+                            {memberCountDisplay} / {maxMembers}
                         </Text>
-                        {(team.memberCount || 0) >= (team.maxMembers || 5) && <Text style={styles.fullBadge}>FULL</Text>}
+                        {isFull && <Text style={styles.fullBadge}>FULL</Text>}
                     </View>
 
                     {/* Member Badge */}
@@ -596,13 +662,13 @@ export default function TeamDetails() {
                 <View style={styles.rosterSection}>
                     <Text style={styles.rosterTitle}>Lineup</Text>
                     <RosterSlots
-                        maxMembers={team.maxMembers || 5}
+                        maxMembers={maxMembers}
                         members={team.members || []}
                         captainUid={team.captainUid}
                         viewerUid={user?.uid}
                         isCaptain={isCaptain}
                         game={team.game}
-                        onEmptySlotPress={isCaptain ? () => setShowInviteSheet(true) : undefined}
+                        onEmptySlotPress={handleEmptySlotPress}
                         onMemberPress={isCaptain ? (member) => {
                             if (member.uid !== user?.uid) {
                                 Alert.alert(
@@ -630,11 +696,18 @@ export default function TeamDetails() {
 
             {/* Action Bar */}
             {isMember && !isCaptain && (
-                <View style={styles.actionBar}>
+                <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom + 12, SPACING.lg) }]}>
                     <TouchableOpacity
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "team_leave" });
+                            }
+                        }}
                         onPress={handleLeaveTeam}
                         disabled={submitting}
                         style={[styles.leaveButton, submitting && { opacity: 0.6 }]}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
                             <ActivityIndicator size="small" color="#FFF" />
@@ -647,13 +720,20 @@ export default function TeamDetails() {
 
             {/* Action Bar (Non-Members Only) */}
             {!isMember && (
-                <View style={styles.actionBar}>
+                <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom + 12, SPACING.lg) }]}>
                     {buttonState === 'eligible' && (
                         <>
                             <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_request_join" });
+                                    }
+                                }}
                                 onPress={handleJoinRequest}
                                 disabled={submitting}
                                 style={[styles.actionButton, submitting && styles.actionButtonDisabled]}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.actionButtonText}>Request to Join</Text>
                             </TouchableOpacity>
@@ -729,6 +809,6 @@ export default function TeamDetails() {
                 teamId={id as string}
                 teamName={team.name}
             />
-        </SafeAreaView>
+        </Screen>
     );
 }

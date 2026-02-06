@@ -19,7 +19,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.background,
     },
     header: {
-        padding: SPACING.screenPadding,
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
@@ -57,7 +56,6 @@ export default StyleSheet.create({
         flexGrow: 0,
     },
     filtersPanel: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: SPACING.md,
         backgroundColor: COLORS.background,
     },
@@ -337,7 +335,6 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     },
     resultsCount: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingTop: SPACING.md,
         paddingBottom: SPACING.sm,
     },
@@ -346,7 +343,6 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
     listContent: {
-        paddingHorizontal: SPACING.screenPadding,
         paddingBottom: 100,
     },
     emptyState: {
@@ -395,9 +391,10 @@ export default StyleSheet.create({
     },
     fabWrapper: {
         position: 'absolute',
-        bottom: 100, // Adjusted for tab bar + spacing
         right: SPACING.xl,
-        zIndex: 1000,
+        zIndex: 20,
+        elevation: 12,
+        pointerEvents: 'box-none',
     },
     fab: {
         width: 56,
@@ -407,6 +404,7 @@ export default StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         ...SHADOWS.cardElevated,
+        elevation: 10,
     },
     resetButton: {
         padding: 5,

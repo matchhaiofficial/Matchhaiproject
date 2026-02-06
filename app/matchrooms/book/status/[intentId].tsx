@@ -24,6 +24,7 @@ export default function BookingStatusScreen() {
     const [intent, setIntent] = useState<BookingIntent | null>(null);
     const [loading, setLoading] = useState(true);
     const [timeLeft, setTimeLeft] = useState<number>(0);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     useEffect(() => {
         if (!intentId) return;
@@ -237,10 +238,17 @@ export default function BookingStatusScreen() {
                     {isApproved && (
                         <TouchableOpacity
                             style={styles.primaryBtn}
+                            onPressIn={() => {
+                                if (touchDebugEnabled) {
+                                    Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_proceed_pay" });
+                                }
+                            }}
                             onPress={() => router.push({
                                 pathname: "/matchrooms/book/pay/[intentId]",
                                 params: { intentId: intentId }
                             } as any)}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
                             <Text style={styles.primaryBtnText}>Proceed to Pay</Text>
                             <MaterialIcons name="payment" size={20} color="#FFF" />
@@ -250,7 +258,14 @@ export default function BookingStatusScreen() {
                     {isCompleted && (
                         <TouchableOpacity
                             style={styles.primaryBtn}
+                            onPressIn={() => {
+                                if (touchDebugEnabled) {
+                                    Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_return_lobby" });
+                                }
+                            }}
                             onPress={() => router.replace(`/matchrooms/${intent.matchroomId}`)}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
                             <Text style={styles.primaryBtnText}>Return to Lobby</Text>
                             <MaterialIcons name="group" size={20} color="#FFF" />
@@ -263,7 +278,14 @@ export default function BookingStatusScreen() {
                             {!isRejected && (
                                 <TouchableOpacity
                                     style={[styles.secondaryBtn, { flex: 1, borderColor: COLORS.error + '40' }]}
+                                    onPressIn={() => {
+                                        if (touchDebugEnabled) {
+                                            Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_cancel" });
+                                        }
+                                    }}
                                     onPress={handleCancel}
+                                    activeOpacity={0.85}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 >
                                     <Text style={[styles.secondaryBtnText, { color: COLORS.error }]} numberOfLines={1}>Cancel</Text>
                                 </TouchableOpacity>
@@ -272,7 +294,14 @@ export default function BookingStatusScreen() {
                             {/* Dashboard Button */}
                             <TouchableOpacity
                                 style={[styles.secondaryBtn, { flex: 1 }]}
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_dashboard" });
+                                    }
+                                }}
                                 onPress={() => router.replace("/(player)/(tabs)/matchrooms" as any)}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.secondaryBtnText} numberOfLines={1}>Dashboard</Text>
                             </TouchableOpacity>

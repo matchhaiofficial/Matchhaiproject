@@ -1,6 +1,6 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { CS2_ROLES, INDOOR_CRICKET_BATTING_ORDER, INDOOR_CRICKET_BATTING_STYLES, INDOOR_CRICKET_BOWLING_ORDER, INDOOR_CRICKET_BOWLING_STYLES, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from '../../../../constants/profileOptions';
 import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
@@ -187,7 +187,9 @@ export default function RoleAutoFill({ gameKey, profile, selectedRole, onRoleCha
     const getRoleInfo = (): string[] => {
         switch (gameKey) {
             case 'futsal':
-                return profile.futsalPosition ? [profile.futsalPosition] : [];
+                return (Array.isArray(profile.futsalPositions) && profile.futsalPositions.length > 0)
+                    ? profile.futsalPositions
+                    : (profile.futsalPosition ? [profile.futsalPosition] : []);
             case 'indoor_cricket':
                 const roles: string[] = [];
                 if (profile.indoorCricketRole) roles.push(profile.indoorCricketRole);

@@ -30,10 +30,13 @@ export default StyleSheet.create({
         letterSpacing: 0.5,
     },
     saveButton: {
+        minHeight: 38,
         paddingHorizontal: SPACING.lg,
-        paddingVertical: SPACING.sm,
+        paddingVertical: SPACING.sm - 1,
         backgroundColor: COLORS.accent,
         borderRadius: RADII.md,
+        alignItems: 'center',
+        justifyContent: 'center',
         ...SHADOWS.accentSoft,
     },
     saveButtonText: {
@@ -46,6 +49,9 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBorder,
         opacity: 0.5,
         elevation: 0,
+    },
+    saveButtonPressed: {
+        opacity: 0.9,
     },
 
     scrollContent: {
