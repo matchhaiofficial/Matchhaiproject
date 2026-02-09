@@ -8,7 +8,21 @@ import React, { useEffect } from "react";
 import { LogBox, View } from "react-native";
 
 // Suppress the keep-awake error in development (Expo internal issue)
-LogBox.ignoreLogs(['Unable to activate keep awake']);
+LogBox.ignoreLogs([
+  "Unable to activate keep awake",
+  "Uncaught (in promise, id: 0) Error: Unable to activate keep awake",
+]);
+
+if (__DEV__) {
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    const text = args.map((item) => String(item ?? "")).join(" ");
+    if (text.includes("Unable to activate keep awake")) {
+      return;
+    }
+    originalConsoleError(...args);
+  };
+}
 
 // Fonts
 import { Lora_400Regular, useFonts as useLora } from "@expo-google-fonts/lora";
@@ -55,6 +69,38 @@ export default function RootLayout() {
   const { showToast } = useToast();
 
   useEffect(() => {
+    const globalAny = globalThis as any;
+    const errorUtils = globalAny.ErrorUtils;
+    const previousGlobalErrorHandler =
+      typeof errorUtils?.getGlobalHandler === "function"
+        ? errorUtils.getGlobalHandler()
+        : null;
+    const previousUnhandled = globalAny.onunhandledrejection;
+
+    if (typeof errorUtils?.setGlobalHandler === "function") {
+      errorUtils.setGlobalHandler((error: any, isFatal: boolean) => {
+        const message = String(error?.message || error || "");
+        if (message.includes("Unable to activate keep awake")) {
+          return;
+        }
+        if (typeof previousGlobalErrorHandler === "function") {
+          previousGlobalErrorHandler(error, isFatal);
+        }
+      });
+    }
+
+    globalAny.onunhandledrejection = (event: any) => {
+      const reason = event?.reason;
+      const message = String(reason?.message || reason || "");
+      if (message.includes("Unable to activate keep awake")) {
+        event?.preventDefault?.();
+        return;
+      }
+      if (typeof previousUnhandled === "function") {
+        previousUnhandled(event);
+      }
+    };
+
     const handleDeepLink = (event: { url: string }) => {
       const { url } = event;
       console.log("[Linking] Received URL:", url);
@@ -105,6 +151,10 @@ export default function RootLayout() {
 
     const sub = Linking.addEventListener("url", handleDeepLink);
     return () => {
+      if (typeof errorUtils?.setGlobalHandler === "function" && previousGlobalErrorHandler) {
+        errorUtils.setGlobalHandler(previousGlobalErrorHandler);
+      }
+      globalAny.onunhandledrejection = previousUnhandled;
       sub.remove();
     };
   }, [showToast]);

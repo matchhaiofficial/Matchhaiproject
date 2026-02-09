@@ -4,20 +4,14 @@ import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { COLORS } from "../../src/theme";
-import Logger from "../../src/utils/logger";
 
 export default function ZoneLayout() {
     const { user, loading } = useAuth();
 
-    React.useEffect(() => {
-        Logger.debug('ZoneLayout', 'Mounting zone layout');
-        return () => Logger.debug('ZoneLayout', 'Unmounting zone layout');
-    }, []);
-
     // Show loading while checking auth state
     if (loading) {
         return (
-            <View style={{ flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator color={COLORS.accent} />
             </View>
         );
@@ -32,10 +26,13 @@ export default function ZoneLayout() {
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.background },
+                contentStyle: { backgroundColor: COLORS.backgroundDark },
             }}
         >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="modules" options={{ headerShown: false }} />
+            <Stack.Screen name="branch/[id]" options={{ headerShown: false }} />
+            <Stack.Screen name="branch/new" options={{ presentation: "modal", headerShown: false }} />
         </Stack>
     );
 }

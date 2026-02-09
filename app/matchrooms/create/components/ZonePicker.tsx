@@ -60,6 +60,10 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
     });
 
     const getStartingPrice = (zone: Zone) => {
+        if (typeof zone.effectiveRate === 'number' && zone.effectiveRate > 0) {
+            return zone.effectiveRate;
+        }
+
         const pricing: any = zone.pricing || (zone.branches?.[0] as any)?.pricing;
         if (!pricing) return null;
 

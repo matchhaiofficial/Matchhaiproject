@@ -88,7 +88,7 @@ export default function AddBranch() {
                             style={styles.input}
                             value={branchName}
                             onChangeText={setBranchName}
-                            placeholder="e.g. North Nazimabad Branch"
+                            placeholder="North Nazimabad Branch"
                             placeholderTextColor={COLORS.muted}
                         />
                     </View>
@@ -131,7 +131,7 @@ export default function AddBranch() {
                             style={[styles.input, styles.textArea]}
                             value={address}
                             onChangeText={setAddress}
-                            placeholder="Full address"
+                            placeholder="Street 12, Area, City"
                             placeholderTextColor={COLORS.muted}
                             multiline
                             textAlignVertical="top"
@@ -144,7 +144,7 @@ export default function AddBranch() {
                             style={styles.input}
                             value={googleMapsUrl}
                             onChangeText={setGoogleMapsUrl}
-                            placeholder="https://maps.app.goo.gl/..."
+                            placeholder="https://maps.app.goo.gl/abc123"
                             placeholderTextColor={COLORS.muted}
                             keyboardType="url"
                             autoCapitalize="none"

@@ -330,6 +330,30 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             Logger.warn("matchService", "Failed to create chatroom", e);
         }
 
+        if (zoneOwnerUid && zoneOwnerUid !== roomData.hostUid) {
+            try {
+                await addDoc(collection(db, "notifications"), {
+                    type: "admin_matchroom_created",
+                    fromUid: roomData.hostUid,
+                    fromUsername: roomData.hostName,
+                    toUid: zoneOwnerUid,
+                    status: "pending",
+                    createdAt: serverTimestamp(),
+                    title: "New direct zone booking",
+                    message: `${roomData.hostName} created ${roomData.title || roomData.game} at your venue.`,
+                    meta: {
+                        matchroomId: docRef.id,
+                        zoneId: roomData.zoneId || null,
+                        game: roomData.game,
+                        scheduledDate: roomData.scheduledDate || null,
+                        scheduledTime: roomData.scheduledTime || null,
+                    },
+                });
+            } catch (error) {
+                Logger.warn("matchService", "Failed to create admin matchroom notification", error);
+            }
+        }
+
         return { ok: true, id: docRef.id };
     } catch (error) {
         Logger.error("matchService", "Error creating matchroom", error);
@@ -391,7 +415,7 @@ export async function submitCaptainReport(
 
         const roomRef = doc(db, COLLECTION_NAME, matchroomId);
 
-        await runTransaction(db, async (tx) => {
+        await runTransaction(db, async (tx: any) => {
             const snap = await tx.get(roomRef);
             if (!snap.exists()) throw new Error("Matchroom not found");
             const room = snap.data() as Matchroom;
@@ -455,7 +479,7 @@ export async function leaveMatchroom(roomId: string, userUid: string): Promise<{
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
-        await runTransaction(db, async (transaction) => {
+        await runTransaction(db, async (transaction: any) => {
             const snap = await transaction.get(roomRef);
             if (!snap.exists()) throw "Matchroom not found";
 
@@ -784,7 +808,7 @@ export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: 
         const sortByCreatedAtDesc = (rooms: Matchroom[]) =>
             [...rooms].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
-        const hosted = sortByCreatedAtDesc(hostedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Matchroom)));
+        const hosted = sortByCreatedAtDesc(hostedSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom)));
         const joined = joinedSnap.docs
             .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
             .filter((room: Matchroom) => room.hostUid !== uid); // Only non-hosted

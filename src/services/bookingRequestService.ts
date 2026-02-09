@@ -3,9 +3,11 @@ import {
     addDoc,
     collection,
     doc,
+    getDoc,
     getDocs,
     query,
     serverTimestamp,
+    setDoc,
     updateDoc,
     where
 } from 'firebase/firestore';
@@ -48,6 +50,8 @@ export interface BookingRequest {
     flexibilityWindow: string; // "Exact time" | "Within 2hrs" | "Within 4hrs" | "Anytime today"
 
     // Location
+    locationMode?: 'zone' | 'broadcast';
+    zoneId?: string;
     preferredAreas: string[]; // From user profile
 
     // Pricing
@@ -136,6 +140,94 @@ const chunk = <T,>(arr: T[], size: number) => {
     return chunks;
 };
 
+const toAreaChunks = (areas: string[]) =>
+    chunk(
+        Array.from(
+            new Set(
+                (areas || [])
+                    .map((area) => String(area || "").trim())
+                    .filter(Boolean),
+            ),
+        ),
+        10,
+    );
+
+const bookingAssetTypeFromGame = (gameKey: string) => {
+    const key = String(gameKey || "").toLowerCase();
+    if (["cs2", "fc25", "fc26", "tekken8"].includes(key)) return "pc";
+    if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(key)) return "court";
+    return "mixed";
+};
+
+const createAdminBookingNotifications = async (
+    requestId: string,
+    requestData: Omit<BookingRequest, 'id' | 'createdAt' | 'status'> & { status?: BookingRequest['status'] },
+) => {
+    const targetOwnerUids = new Set<string>();
+    const preferredAreas = Array.isArray(requestData.preferredAreas) ? requestData.preferredAreas : [];
+
+    if (requestData.zoneId) {
+        try {
+            const zoneSnap = await getDoc(doc(db, "zones", requestData.zoneId));
+            if (zoneSnap.exists()) {
+                const ownerUid = zoneSnap.data()?.ownerUid;
+                if (ownerUid) targetOwnerUids.add(ownerUid);
+            }
+        } catch {
+            // Ignore and continue area-based matching.
+        }
+    }
+
+    const areaChunks = toAreaChunks(preferredAreas);
+    for (const areaChunk of areaChunks) {
+        try {
+            const zonesQuery = query(
+                collection(db, "zones"),
+                where("status", "==", "active"),
+                where("primaryBranch.areaLabel", "in", areaChunk),
+            );
+            const zoneSnap = await getDocs(zonesQuery);
+            zoneSnap.docs.forEach((zoneDoc: any) => {
+                const ownerUid = zoneDoc.data()?.ownerUid;
+                if (ownerUid) targetOwnerUids.add(ownerUid);
+            });
+        } catch (error) {
+            Logger.warn("bookingRequestService", "Area notification lookup failed", {
+                areas: areaChunk,
+                error: (error as any)?.message || "query_error",
+            });
+        }
+    }
+
+    const ownerUids = Array.from(targetOwnerUids).filter((uid) => uid && uid !== requestData.userId);
+    if (!ownerUids.length) return;
+
+    await Promise.all(
+        ownerUids.map(async (ownerUid) => {
+            const notificationId = `admin_booking_request_${requestId}_${ownerUid}`;
+            await setDoc(doc(db, "notifications", notificationId), {
+                type: "admin_booking_request",
+                fromUid: requestData.userId,
+                fromUsername: requestData.userName || "Player",
+                toUid: ownerUid,
+                status: "pending",
+                title: requestData.title || "New booking request",
+                message: `${requestData.userName || "Player"} requested ${requestData.gameKey}`,
+                createdAt: serverTimestamp(),
+                meta: {
+                    requestId,
+                    gameKey: requestData.gameKey,
+                    assetType: bookingAssetTypeFromGame(requestData.gameKey),
+                    preferredAreas,
+                    preferredDate: requestData.preferredDate || null,
+                    preferredTime: requestData.preferredTime || null,
+                    budgetPerPlayer: requestData.budgetPerPlayer || null,
+                },
+            }, { merge: true });
+        }),
+    );
+};
+
 /**
  * Create a new booking request (broadcast mode)
  */
@@ -152,6 +244,9 @@ export const createBookingRequest = async (
         };
 
         const docRef = await addDoc(collection(db, 'booking_requests'), requestData);
+        if (requestData.status === 'open') {
+            await createAdminBookingNotifications(docRef.id, requestData);
+        }
         Logger.info('bookingRequestService', 'Created booking request', { id: docRef.id });
 
         return { ok: true, id: docRef.id };
@@ -175,14 +270,14 @@ export const getRequestsForZoneAdmin = async (
         );
 
         const snapshot = await getDocs(q);
-        const allRequests = snapshot.docs.map(doc => ({
+        const allRequests = snapshot.docs.map((doc: any) => ({
             id: doc.id,
             ...doc.data(),
         } as BookingRequest));
 
         // Filter in-memory for requests matching zone areas
-        const matchingRequests = allRequests.filter(request =>
-            request.preferredAreas.some(area => zoneAreas.includes(area))
+        const matchingRequests = allRequests.filter((request: BookingRequest) =>
+            request.preferredAreas.some((area: string) => zoneAreas.includes(area))
         );
 
         return { ok: true, data: matchingRequests };
@@ -214,10 +309,10 @@ export const getUserRequests = async (
             return 0;
         };
 
-        const requests = snapshot.docs.map(doc => ({
+        const requests = snapshot.docs.map((doc: any) => ({
             id: doc.id,
             ...doc.data(),
-        } as BookingRequest)).sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+        } as BookingRequest)).sort((a: BookingRequest, b: BookingRequest) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
         return { ok: true, data: requests };
     } catch (error) {
@@ -274,8 +369,8 @@ export const getOffersForRequest = async (
 
         const snapshot = await getDocs(q);
         const offers = snapshot.docs
-            .map(docSnap => normalizeZoneOffer(docSnap.id, docSnap.data()))
-            .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+            .map((docSnap: any) => normalizeZoneOffer(docSnap.id, docSnap.data()))
+            .sort((a: ZoneOffer, b: ZoneOffer) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
         return { ok: true, data: offers };
     } catch (error) {
@@ -301,7 +396,7 @@ export const getOffersForUser = async (
             where('requestOwnerUid', '==', userId)
         );
         const directSnap = await getDocs(directQuery);
-        directSnap.docs.forEach((docSnap) => {
+        directSnap.docs.forEach((docSnap: any) => {
             offersById.set(docSnap.id, normalizeZoneOffer(docSnap.id, docSnap.data()));
         });
 
@@ -320,7 +415,7 @@ export const getOffersForUser = async (
             );
 
             chunkSnaps.forEach((snap) => {
-                snap.docs.forEach((docSnap) => {
+                snap.docs.forEach((docSnap: any) => {
                     const normalized = normalizeZoneOffer(docSnap.id, docSnap.data());
                     if (!normalized.requestOwnerUid) {
                         normalized.requestOwnerUid = userId;

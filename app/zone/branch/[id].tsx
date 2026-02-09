@@ -130,7 +130,7 @@ export default function BranchDetails() {
                             style={styles.input}
                             value={branchName}
                             onChangeText={setBranchName}
-                            placeholder="e.g. Main Branch"
+                            placeholder="Main Branch"
                             placeholderTextColor={COLORS.muted}
                         />
                     </View>
@@ -141,7 +141,7 @@ export default function BranchDetails() {
                             style={styles.input}
                             value={city}
                             onChangeText={setCity}
-                            placeholder="e.g. Karachi"
+                            placeholder="Karachi"
                             placeholderTextColor={COLORS.muted}
                         />
                     </View>
@@ -152,7 +152,7 @@ export default function BranchDetails() {
                             style={styles.input}
                             value={area}
                             onChangeText={setArea}
-                            placeholder="e.g. DHA Phase 6"
+                            placeholder="DHA Phase 6"
                             placeholderTextColor={COLORS.muted}
                         />
                     </View>
@@ -163,7 +163,7 @@ export default function BranchDetails() {
                             style={[styles.input, styles.textArea]}
                             value={address}
                             onChangeText={setAddress}
-                            placeholder="Full address"
+                            placeholder="Street 12, Area, City"
                             placeholderTextColor={COLORS.muted}
                             multiline
                             textAlignVertical="top"

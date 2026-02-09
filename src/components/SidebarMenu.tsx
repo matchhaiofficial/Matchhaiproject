@@ -6,6 +6,7 @@ import {
   Image,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -70,7 +71,11 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
 
           <Text style={styles.sectionLabel}>{title}</Text>
 
-          <View style={styles.menuList}>
+          <ScrollView
+            style={styles.menuScroll}
+            contentContainerStyle={[styles.menuList, { paddingBottom: SPACING.md }]}
+            showsVerticalScrollIndicator={false}
+          >
             {items.map((item) => (
               <TouchableOpacity
                 key={item.label}
@@ -88,7 +93,7 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
                 <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
 
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.lg) }]}>
             <Text style={styles.footerHint}>Swipe or tap outside to close</Text>
@@ -164,6 +169,9 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: SPACING.sm,
+  },
+  menuScroll: {
+    flex: 1,
   },
   menuList: {
     gap: SPACING.sm,
