@@ -262,6 +262,33 @@ service cloud.firestore {
 
       // Delete: Only super-admins
       allow delete: if isSuperAdmin();
+
+      // Pricing rules used by zone admin pricing engine
+      match /pricing_rules/{ruleId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isSuperAdmin() || (
+          isAuthenticated() &&
+          get(/databases/$(database)/documents/zones/$(zoneId)).data.ownerUid == request.auth.uid
+        );
+      }
+
+      // Branches (new per-branch model)
+      match /branches/{branchId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isSuperAdmin() || (
+          isAuthenticated() &&
+          get(/databases/$(database)/documents/zones/$(zoneId)).data.ownerUid == request.auth.uid
+        );
+
+        // Branch resources (seat-level and court-level)
+        match /resources/{resourceId} {
+          allow read: if isAuthenticated();
+          allow create, update, delete: if isSuperAdmin() || (
+            isAuthenticated() &&
+            get(/databases/$(database)/documents/zones/$(zoneId)).data.ownerUid == request.auth.uid
+          );
+        }
+      }
     }
 
     // Booking Offers (Zones replying to requests)

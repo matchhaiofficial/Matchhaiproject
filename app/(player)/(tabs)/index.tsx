@@ -200,10 +200,10 @@ export default function PlayerDashboard() {
             where("toUid", "==", user.uid)
         );
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const unsubscribe = onSnapshot(q, (snapshot: any) => {
             const items: DashboardNotification[] = [];
             let count = 0;
-            snapshot.forEach((docSnap) => {
+            snapshot.forEach((docSnap: any) => {
                 const data = docSnap.data();
                 if (data.status !== "pending") return;
                 if (data.expiresAt && getMillis(data.expiresAt) < Date.now()) {
@@ -361,6 +361,7 @@ export default function PlayerDashboard() {
                         <QuickAction icon="add-circle" label="Create Room" color={COLORS.accent} onPress={() => router.push("/matchrooms/create" as any)} />
                         <QuickAction icon="event" label="My Schedule" color={COLORS.successBright} onPress={() => router.push("/(player)/schedule" as any)} />
                         <QuickAction icon="search" label="Find Match" color={COLORS.warning} onPress={() => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: "matchrooms", t: Date.now().toString() } } as any)} />
+                        <QuickAction icon="inbox" label="Inbox" color="#26A69A" onPress={() => router.push("/(player)/inbox" as any)} />
                         <QuickAction icon="account-balance-wallet" label="Wallet" color="#AB47BC" onPress={() => router.push("/(player)/wallet" as any)} />
                     </View>
                 </View>
@@ -473,8 +474,8 @@ export default function PlayerDashboard() {
                 <View style={styles.section}>
                     <View style={styles.sectionHeaderRow}>
                         <Text style={styles.sectionTitle}>Wallet & Requests</Text>
-                        <TouchableOpacity onPress={() => router.push("/(player)/wallet" as any)}>
-                            <Text style={styles.seeAllText}>Open Wallet</Text>
+                        <TouchableOpacity onPress={() => router.push("/(player)/inbox" as any)}>
+                            <Text style={styles.seeAllText}>Open Inbox</Text>
                         </TouchableOpacity>
                     </View>
                     <View style={styles.walletCard}>
@@ -483,7 +484,7 @@ export default function PlayerDashboard() {
                             <Text style={styles.walletBalance}>{requestStats.myRequests}</Text>
                             <Text style={styles.notificationTime}>Offers received: {requestStats.myOffers}</Text>
                         </View>
-                        <TouchableOpacity style={styles.walletIconContainer} onPress={() => router.push("/(player)/wallet" as any)}>
+                        <TouchableOpacity style={styles.walletIconContainer} onPress={() => router.push("/(player)/inbox" as any)}>
                             <MaterialIcons name="chevron-right" size={24} color={COLORS.accent} />
                         </TouchableOpacity>
                     </View>

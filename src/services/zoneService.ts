@@ -12,6 +12,10 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../config/firebaseConfig";
+import {
+  getEnabledPricingRulesForZone,
+  resolveEffectiveRateForGame,
+} from "./pricingRuleService";
 import type {
   BranchData,
   ZoneStep1Data,
@@ -267,6 +271,7 @@ export interface Zone {
   // Computed fields (for UI)
   effectiveRate?: number | null;
   effectiveRateLabel?: string | null;
+  effectiveRateRuleName?: string | null;
 }
 
 /**
@@ -283,24 +288,7 @@ export async function getActiveZones(
     );
 
     const snapshot = await getDocs(q);
-    let zones = snapshot.docs.map(doc => {
-      const zoneData = { id: doc.id, ...doc.data() } as Zone;
-      if (gameKey) {
-        const derivation = deriveZoneRate(zoneData, gameKey);
-        zoneData.effectiveRate = derivation.rate;
-        zoneData.effectiveRateLabel = derivation.label;
-
-        // Legacy compatibility
-        if (gameKey === 'fc26' || gameKey === 'fc25' || gameKey === 'tekken8') {
-          zoneData.ps5HourlyRate = derivation.rate || undefined;
-          zoneData.hourlyRate = undefined;
-        } else {
-          zoneData.hourlyRate = derivation.rate || undefined;
-          zoneData.ps5HourlyRate = undefined;
-        }
-      }
-      return zoneData;
-    });
+    let zones = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Zone));
 
     // Filter by game if specified
     if (gameKey) {
@@ -313,23 +301,53 @@ export async function getActiveZones(
       }
 
       const gameField = `supports${normalizedGameKey.charAt(0).toUpperCase() + normalizedGameKey.slice(1)}` as keyof Zone['games'];
-      zones = zones.filter(zone => zone.games?.[gameField] === true);
+      zones = zones.filter((zone: Zone) => zone.games?.[gameField] === true);
 
       // Additional filter based on equipment availability
       // CS2 requires PCs
       if (gameKey === 'cs2') {
-        zones = zones.filter(zone => {
+        zones = zones.filter((zone: Zone) => {
           const pcSeats = zone.capacity?.pcSeats ?? 0;
           return pcSeats > 0;
         });
       }
       // FC25, FC26, and Tekken8 require consoles (PS5)
       else if (gameKey === 'fc25' || gameKey === 'fc26' || gameKey === 'tekken8') {
-        zones = zones.filter(zone => {
+        zones = zones.filter((zone: Zone) => {
           const consoleSeats = zone.capacity?.consoleSeats ?? 0;
           return consoleSeats > 0; // Removed hourly rate check as we now derive it
         });
       }
+
+      zones = await Promise.all(
+        zones.map(async (zoneData: Zone) => {
+          const derivation = deriveZoneRate(zoneData, gameKey);
+          const rules = await getEnabledPricingRulesForZone(zoneData.id);
+          const branchId = zoneData.branches?.[0]?.id || null;
+          const resolved = resolveEffectiveRateForGame({
+            gameKey,
+            baseRate: derivation.rate,
+            baseLabel: derivation.label,
+            rules,
+            branchId,
+            at: new Date(),
+          });
+
+          zoneData.effectiveRate = resolved.rate ?? derivation.rate;
+          zoneData.effectiveRateLabel = resolved.label ?? derivation.label;
+          zoneData.effectiveRateRuleName = resolved.appliedRule?.name || null;
+
+          // Legacy compatibility
+          if (gameKey === 'fc26' || gameKey === 'fc25' || gameKey === 'tekken8') {
+            zoneData.ps5HourlyRate = zoneData.effectiveRate || undefined;
+            zoneData.hourlyRate = undefined;
+          } else {
+            zoneData.hourlyRate = zoneData.effectiveRate || undefined;
+            zoneData.ps5HourlyRate = undefined;
+          }
+          return zoneData;
+        })
+      );
     }
 
     Logger.info('zoneService', 'Fetched active zones', { count: zones.length, gameKey });

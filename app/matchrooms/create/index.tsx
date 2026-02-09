@@ -15,6 +15,11 @@ import Screen from '../../../src/components/Screen';
 import { db } from '../../../src/config/firebaseConfig';
 import { useAuth } from '../../../src/context/AuthContext';
 import { createMatchroom } from '../../../src/services/matchService';
+import {
+    applyPricingRulesToRate,
+    getEnabledPricingRulesForZone,
+    type PricingRule,
+} from '../../../src/services/pricingRuleService';
 import { SkillTier } from '../../../src/services/skillRatingService';
 import type { Team } from '../../../src/services/teamService';
 import { getTeamById, getUserTeamsForGame } from '../../../src/services/teamService';
@@ -78,6 +83,7 @@ export default function CreateMatchroom() {
     const [selectedZoneId, setSelectedZoneId] = useState<string | null>(params.zoneId || null);
     const [selectedZoneName, setSelectedZoneName] = useState<string | null>(params.zoneName || null);
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+    const [zonePricingRules, setZonePricingRules] = useState<PricingRule[]>([]);
 
     // Phase 4: CS2 & FC25/26 Specific State
     const [zoneRate, setZoneRate] = useState<number>(0);
@@ -240,7 +246,7 @@ export default function CreateMatchroom() {
             .map((uid) => {
                 const existing = membersByUid.get(uid);
                 if (existing) return existing;
-                return { uid, username: uid.slice(0, 6) + '…', role: 'member' as const, joinedAt: null };
+                return { uid, username: uid.slice(0, 6) + 'â€¦', role: 'member' as const, joinedAt: null };
             });
     }, [resolvedTeam]);
 
@@ -375,6 +381,27 @@ export default function CreateMatchroom() {
     }, [teamMode]);
 
     useEffect(() => {
+        let cancelled = false;
+
+        const loadPricingRules = async () => {
+            if (!selectedZoneId) {
+                setZonePricingRules([]);
+                return;
+            }
+
+            const rules = await getEnabledPricingRulesForZone(selectedZoneId);
+            if (!cancelled) {
+                setZonePricingRules(rules);
+            }
+        };
+
+        loadPricingRules();
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedZoneId]);
+
+    useEffect(() => {
         if (!selectedZone || !selectedGame) {
             setZoneRateOptions([]);
             setSelectedZoneRateKey(null);
@@ -384,50 +411,71 @@ export default function CreateMatchroom() {
 
         const pricing: any = selectedZone.pricing || (selectedZone.branches?.[0] as any)?.pricing || {};
         const options: Array<{ key: string; label: string; price: number }> = [];
+        const branchId = selectedZone.branches?.[0]?.id || null;
 
         const formatLabel = formData.format === '2v2' ? '2v2' : '1v1';
         const priceKey = formData.format === '2v2' ? 'price2v2' : 'price1v1';
         const otherPriceKey = priceKey === 'price1v1' ? 'price2v2' : 'price1v1';
 
-        const addOption = (key: string, label: string, price?: number) => {
-            if (typeof price === 'number' && price > 0) {
-                options.push({ key, label: `${label} • ₨${price}/hr`, price });
-            }
+        const addOption = (
+            key: string,
+            label: string,
+            price: number | undefined,
+            context: { assetType: any; tier?: string; surface?: string }
+        ) => {
+            if (typeof price !== 'number' || price <= 0) return;
+
+            const resolved = applyPricingRulesToRate(price, zonePricingRules, {
+                at: new Date(),
+                assetType: context.assetType,
+                branchId,
+                tier: context.tier || null,
+                surface: context.surface || null,
+            });
+
+            const hasPromo = Boolean(resolved.appliedRule);
+            options.push({
+                key,
+                label: hasPromo
+                    ? `${label} - PKR ${resolved.rate}/hr - Promo`
+                    : `${label} - PKR ${resolved.rate}/hr`,
+                price: resolved.rate,
+            });
         };
 
         if (selectedGame === 'cs2') {
             const pc = pricing.pc || {};
-            addOption('pc:regular', 'Regular', pc?.regular?.price);
-            addOption('pc:premium', 'Premium', pc?.premium?.price);
-            addOption('pc:elite', 'Elite', pc?.elite?.price);
+            addOption('pc:regular', 'Regular', pc?.regular?.price, { assetType: 'pc', tier: 'regular' });
+            addOption('pc:premium', 'Premium', pc?.premium?.price, { assetType: 'pc', tier: 'premium' });
+            addOption('pc:elite', 'Elite', pc?.elite?.price, { assetType: 'pc', tier: 'elite' });
         } else if (selectedGame === 'fc26' || selectedGame === 'tekken8') {
             const console = pricing.console || {};
             const ps5 = console.ps5 || {};
             const xbox = console.xbox || {};
             const ps5Price = (ps5?.[priceKey] || ps5?.[otherPriceKey]) as number | undefined;
             const xboxPrice = (xbox?.[priceKey] || xbox?.[otherPriceKey]) as number | undefined;
-            addOption('console:ps5', `PS5 (${formatLabel})`, ps5Price);
-            addOption('console:xbox', `Xbox (${formatLabel})`, xboxPrice);
+            addOption('console:ps5', `PS5 (${formatLabel})`, ps5Price, { assetType: 'console', tier: 'ps5' });
+            addOption('console:xbox', `Xbox (${formatLabel})`, xboxPrice, { assetType: 'console', tier: 'xbox' });
         } else if (selectedGame === 'futsal') {
             Object.entries(pricing.futsal || {}).forEach(([key, val]: any) => {
                 const label = String(key).replace(/[-_]/g, ' ');
-                addOption(`futsal:${key}`, label, val?.price);
+                addOption(`futsal:${key}`, label, val?.price, { assetType: 'futsal', surface: key });
             });
         } else if (selectedGame === 'indoor_cricket') {
             const cricket = pricing.indoorCricket || pricing.indoor_cricket || {};
             Object.entries(cricket || {}).forEach(([key, val]: any) => {
                 const label = String(key).replace(/[-_]/g, ' ');
-                addOption(`cricket:${key}`, label, val?.price);
+                addOption(`cricket:${key}`, label, val?.price, { assetType: 'indoor_cricket', surface: key });
             });
         } else if (selectedGame === 'padel') {
             Object.entries(pricing.padel || {}).forEach(([key, val]: any) => {
                 const label = String(key).replace(/[-_]/g, ' ');
-                addOption(`padel:${key}`, label, val?.price);
+                addOption(`padel:${key}`, label, val?.price, { assetType: 'padel', surface: key });
             });
         } else if (selectedGame === 'pickleball') {
             Object.entries(pricing.pickleball || {}).forEach(([key, val]: any) => {
                 const label = String(key).replace(/[-_]/g, ' ');
-                addOption(`pickleball:${key}`, label, val?.price);
+                addOption(`pickleball:${key}`, label, val?.price, { assetType: 'pickleball', surface: key });
             });
         }
 
@@ -454,7 +502,7 @@ export default function CreateMatchroom() {
 
         setSelectedZoneRateKey(null);
         setZoneRate(0);
-    }, [selectedZone, selectedGame, formData.format, selectedZoneRateKey]);
+    }, [selectedZone, selectedGame, formData.format, selectedZoneRateKey, zonePricingRules]);
 
     // Format-specific defaults are now applied in handleFieldChange to avoid duplicated effects
 
@@ -877,7 +925,7 @@ export default function CreateMatchroom() {
         return await new Promise<'paid' | 'unpaid' | 'cancel'>((resolve) => {
             Alert.alert(
                 'Payment Required',
-                `To send this request to the admin, payment is required.\n\nAmount (placeholder): ₨ ${amountDue}\n\nChoose an option:`,
+                `To send this request to the admin, payment is required.\n\nAmount (placeholder): â‚¨ ${amountDue}\n\nChoose an option:`,
                 [
                     { text: 'Cancel', style: 'cancel', onPress: () => resolve('cancel') },
                     { text: 'Create Pending', onPress: () => resolve('unpaid') },
@@ -1065,7 +1113,7 @@ export default function CreateMatchroom() {
                             uid: resolvedTeam.captainUid,
                             username: resolvedTeam.captainUsername || userProfile.username || userProfile.displayName || 'Captain',
                             role: memberSportRoleByUid[resolvedTeam.captainUid]
-                                ? `Captain • ${memberSportRoleByUid[resolvedTeam.captainUid]}`
+                                ? `Captain â€¢ ${memberSportRoleByUid[resolvedTeam.captainUid]}`
                                 : 'Captain',
                         },
                         ...selectedTeamMemberUids.map((uid) => {
@@ -1556,7 +1604,7 @@ export default function CreateMatchroom() {
 
                             {/* Price Per Player */}
                             <View style={styles.section}>
-                                <Text style={styles.sectionLabel}>Price Per Player (₨)</Text>
+                                <Text style={styles.sectionLabel}>Price Per Player (â‚¨)</Text>
                                 <View style={[styles.inputBox, { flexDirection: 'row', alignItems: 'center' }]}>
                                     <TextInput
                                         style={[styles.input, { flex: 1 }, (selectedGame === 'cs2' || selectedGame === 'fc26' || selectedGame === 'tekken8' || selectedGame === 'futsal' || selectedGame === 'indoor_cricket' || selectedGame === 'padel' || selectedGame === 'pickleball') && { color: COLORS.muted }]}
@@ -1615,13 +1663,13 @@ export default function CreateMatchroom() {
                                                     ? `${broadcastAreas.length > 0 ? broadcastAreas.join(', ') : (userProfile?.areasPreferred?.join(', ') || 'preferred areas')} `
                                                     : (selectedZoneName || 'selected zone')}
                                             </Text>
-                                            {' · '}
+                                            {' Â· '}
                                             <Text style={{ color: COLORS.accent }}>
                                                 {hostSkillTier || formData.skillLevel || 'Any skill'}
                                             </Text>
                                             {formData.selectedMaps && formData.selectedMaps.length > 0 && (
                                                 <>
-                                                    {' · '}
+                                                    {' Â· '}
                                                     <Text style={{ color: COLORS.accent }}>
                                                         {formData.selectedMaps.join(', ')}
                                                     </Text>
@@ -1663,14 +1711,14 @@ export default function CreateMatchroom() {
                                                         : (userProfile?.areasPreferred?.join(', ') || 'preferred areas'))
                                                     : (selectedZoneName || 'selected zone')}
                                             </Text>
-                                            {' · '}
+                                            {' Â· '}
                                             <Text style={{ color: COLORS.accent }}>
                                                 {hostSkillTier || formData.skillLevel || 'Any bracket'}
                                             </Text>
                                             {Array.isArray(formData.tekkenCharacters) &&
                                                 formData.tekkenCharacters.length > 0 && (
                                                     <>
-                                                        {' · '}
+                                                        {' Â· '}
                                                         <Text style={{ color: COLORS.accent }}>
                                                             {formData.tekkenCharacters.join(', ')}
                                                         </Text>
@@ -1736,3 +1784,5 @@ export default function CreateMatchroom() {
         </Screen>
     );
 }
+
+

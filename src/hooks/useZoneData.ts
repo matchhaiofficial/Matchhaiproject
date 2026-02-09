@@ -11,30 +11,35 @@ export function useZoneData() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (!user) {
-            Logger.debug('useZoneData', 'No user, skipping fetch');
+        if (!user?.uid) {
+            setZone(null);
             setLoading(false);
             return;
         }
 
-        Logger.debug('useZoneData', 'Fetching zone data for user', { uid: user.uid });
+        setLoading(true);
 
         const q = query(collection(db, "zones"), where("ownerUid", "==", user.uid));
-        const unsub = onSnapshot(q, (snapshot) => {
-            if (!snapshot.empty) {
-                // For now, assume 1 zone per owner
-                const doc = snapshot.docs[0];
-                Logger.info('useZoneData', 'Zone data found', { zoneId: doc.id });
-                setZone({ id: doc.id, ...doc.data() });
-            } else {
-                Logger.debug('useZoneData', 'No zone found for user', { uid: user.uid });
+        const unsub = onSnapshot(
+            q,
+            (snapshot: any) => {
+                if (!snapshot.empty) {
+                    const doc = snapshot.docs[0];
+                    setZone({ id: doc.id, ...doc.data() });
+                } else {
+                    setZone(null);
+                }
+                setLoading(false);
+            },
+            (error: any) => {
+                Logger.error('useZoneData', 'Zone listener failed', error);
                 setZone(null);
-            }
-            setLoading(false);
-        });
+                setLoading(false);
+            },
+        );
 
         return () => unsub();
-    }, [user]);
+    }, [user?.uid]);
 
     return { zone, loading };
 }

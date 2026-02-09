@@ -1,246 +1,350 @@
 import { StyleSheet } from "react-native";
-import { COLORS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
-    container: {
+    screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
-    scrollContent: {
-        padding: SPACING.screenPadding,
+    container: {
+        paddingBottom: SPACING.md,
     },
     loadingContainer: {
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     noZoneContainer: {
         flex: 1,
         justifyContent: "center",
+        paddingBottom: SPACING.xl,
+    },
+    noZoneCard: {
+        backgroundColor: COLORS.cardDark,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        padding: SPACING.xl,
         alignItems: "center",
     },
-    noZoneText: {
+    noZoneIconWrap: {
+        width: 56,
+        height: 56,
+        borderRadius: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: SPACING.md,
+        backgroundColor: "rgba(66,165,245,0.14)",
+        borderWidth: 1,
+        borderColor: "rgba(66,165,245,0.32)",
+    },
+    noZoneIconDanger: {
+        backgroundColor: "rgba(239,83,80,0.14)",
+        borderColor: "rgba(239,83,80,0.32)",
+    },
+    noZoneTitle: {
         color: COLORS.text,
-        fontSize: 18,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.lg,
+        textAlign: "center",
     },
-    registerButton: {
-        marginTop: 16,
+    noZoneText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        textAlign: "center",
+        marginTop: SPACING.sm,
+        lineHeight: 22,
     },
-    registerButtonText: {
-        color: COLORS.accent,
+    rejectReason: {
+        color: COLORS.error,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        marginTop: SPACING.md,
+        textAlign: "center",
     },
-    header: {
-        marginBottom: SPACING.xxl,
+    iconButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardDark,
     },
-    headerTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
+    iconButtonPressed: {
+        opacity: 0.85,
     },
-    headerTextContainer: {
+    notificationBadge: {
+        position: "absolute",
+        top: -4,
+        right: -6,
+        minWidth: 20,
+        height: 20,
+        paddingHorizontal: 4,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.error,
+        borderWidth: 2,
+        borderColor: COLORS.background,
+    },
+    notificationBadgeText: {
+        color: "#fff",
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+    },
+    heroCard: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 20,
+        backgroundColor: COLORS.cardDark,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    heroRow: {
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    avatarIconWrap: {
+        width: 54,
+        height: 54,
+        borderRadius: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(66,165,245,0.15)",
+        borderWidth: 1,
+        borderColor: "rgba(66,165,245,0.38)",
+    },
+    heroTextWrap: {
+        marginLeft: SPACING.md,
         flex: 1,
     },
-    headerLabel: {
-        color: COLORS.muted,
-        fontSize: TEXT_SIZES.caption,
+    heroEyebrow: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs,
         textTransform: "uppercase",
         letterSpacing: 1,
     },
-    headerTitle: {
+    heroTitle: {
         color: COLORS.text,
-        fontSize: TEXT_SIZES.heading,
-        fontWeight: "bold",
-        marginTop: SPACING.xs,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.lg,
+        marginTop: 2,
     },
-    logoutButton: {
-        backgroundColor: COLORS.cardBackground,
-        borderWidth: 1,
-        borderColor: COLORS.divider,
-        paddingHorizontal: SPACING.lg,
-        paddingVertical: SPACING.sm,
-        borderRadius: RADII.sm,
-    },
-    logoutButtonText: {
-        color: COLORS.error,
-        fontWeight: '600',
-        fontSize: TEXT_SIZES.label,
-    },
-    statusContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginTop: SPACING.sm,
-    },
-    statusDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginRight: 6,
-    },
-    statusText: {
-        color: COLORS.muted,
-    },
-    statusValue: {
-        color: COLORS.text,
-        textTransform: "capitalize",
-    },
-    statsGrid: {
-        flexDirection: "row",
-        gap: SPACING.md,
-        marginBottom: SPACING.xxl,
-    },
-    statCard: {
-        flex: 1,
-        backgroundColor: COLORS.cardBackground,
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: COLORS.divider,
-    },
-    statIcon: {
-        marginBottom: SPACING.sm,
-    },
-    statValue: {
-        color: COLORS.text,
-        fontSize: 24,
-        fontWeight: "bold",
-    },
-    statLabel: {
-        color: COLORS.muted,
+    heroSubtitle: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
+        marginTop: 2,
     },
-    section: {
-        marginBottom: SPACING.xxl,
-    },
-    sectionTitle: {
-        color: COLORS.text,
-        fontSize: 18,
-        fontWeight: "600",
-        marginBottom: SPACING.md,
-    },
-    emptyState: {
-        backgroundColor: COLORS.cardBackground,
-        padding: SPACING.xl,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: COLORS.divider,
-        borderStyle: 'dashed',
-    },
-    emptyStateIcon: {
-        marginBottom: SPACING.sm,
-    },
-    emptyStateTitle: {
-        color: COLORS.text,
-        fontWeight: 'bold',
-        marginBottom: SPACING.xs,
-        fontSize: TEXT_SIZES.body,
-    },
-    emptyStateText: {
-        color: COLORS.muted,
-        textAlign: 'center',
-        fontSize: TEXT_SIZES.label,
-    },
-    requestCard: {
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: RADII.md,
-        padding: SPACING.lg,
-        marginBottom: SPACING.md,
-        borderWidth: 1,
-        borderColor: COLORS.accent,
-    },
-    requestHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: SPACING.sm,
-    },
-    gameBadge: {
-        backgroundColor: COLORS.accent,
-        paddingHorizontal: SPACING.sm,
-        paddingVertical: SPACING.xs,
-        borderRadius: RADII.sm,
-    },
-    gameBadgeText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        fontSize: TEXT_SIZES.caption,
-    },
-    sendOfferButton: {
-        backgroundColor: COLORS.success,
-        padding: SPACING.md,
-        borderRadius: RADII.sm,
-        alignItems: 'center',
-    },
-    sendOfferText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        fontSize: TEXT_SIZES.body,
-    },
-    userName: {
-        color: COLORS.text,
-        fontSize: TEXT_SIZES.body,
-        fontWeight: '600',
-        marginBottom: SPACING.xs,
-    },
-    requestDetailRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SPACING.xs,
-        marginBottom: SPACING.xs,
-    },
-    requestDetailText: {
-        color: COLORS.muted,
-        fontSize: TEXT_SIZES.label,
-    },
-    branchHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 12,
-    },
-    viewAllLink: {
-        color: COLORS.accent,
-    },
-    branchCard: {
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: 16,
-        padding: 16,
-        borderWidth: 1,
-        borderColor: COLORS.divider,
-    },
-    branchInfoRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-    },
-    branchName: {
-        color: COLORS.text,
-        fontSize: 18,
-        fontWeight: "bold",
-    },
-    branchLocation: {
-        color: COLORS.muted,
-        marginTop: 4,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: COLORS.divider,
-        marginVertical: 16,
-    },
-    gamesContainer: {
+    tagsRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 8,
+        marginTop: SPACING.sm,
     },
-    gameChip: {
+    tag: {
         backgroundColor: "rgba(255,255,255,0.05)",
         paddingHorizontal: 10,
         paddingVertical: 4,
-        borderRadius: 100,
+        borderRadius: RADII.pill,
+        marginRight: SPACING.sm,
+        marginBottom: 6,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.1)",
     },
-    gameChipText: {
+    tagText: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.xs,
+        fontFamily: FONTS.body,
+        textTransform: "uppercase",
+    },
+    tagSuccess: {
+        backgroundColor: "rgba(0,230,118,0.14)",
+        borderColor: "rgba(0,230,118,0.3)",
+    },
+    tagDanger: {
+        backgroundColor: "rgba(239,83,80,0.14)",
+        borderColor: "rgba(239,83,80,0.3)",
+    },
+    tagSuccessText: {
+        color: COLORS.successBright,
+    },
+    tagDangerText: {
+        color: COLORS.error,
+    },
+    coreGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "space-between",
+        marginBottom: SPACING.md,
+    },
+    coreCard: {
+        width: "48%",
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 16,
+        backgroundColor: "rgba(255,255,255,0.04)",
+        padding: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    coreValue: {
         color: COLORS.text,
-        fontSize: 12,
-        textTransform: "capitalize",
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.xl,
+    },
+    coreLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    section: {
+        marginTop: SPACING.sm,
+    },
+    sectionHeaderRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: SPACING.md,
+    },
+    sectionTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: 18,
+    },
+    sectionLink: {
+        color: COLORS.accent,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    sectionMuted: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    opsCard: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 20,
+        backgroundColor: COLORS.cardDark,
+        padding: SPACING.md,
+    },
+    metricRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginBottom: SPACING.xs,
+    },
+    metricLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    metricValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption + 1,
+    },
+    emptyText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    matchroomsWrap: {
+        gap: SPACING.sm,
+    },
+    moduleGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "space-between",
+    },
+    moduleCard: {
+        width: "48%",
+        borderWidth: 1,
+        borderRadius: 20,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    moduleCardPressed: {
+        opacity: 0.9,
+        transform: [{ scale: 0.98 }],
+    },
+    moduleTop: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: SPACING.sm,
+    },
+    moduleIconWrap: {
+        width: 48,
+        height: 48,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+        backgroundColor: "rgba(0,0,0,0.2)",
+    },
+    moduleTag: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.3)",
+    },
+    moduleTagText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: 10,
+        textTransform: "uppercase",
+    },
+    moduleTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+        marginBottom: 4,
+    },
+    moduleDescription: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        lineHeight: 17,
+    },
+    opsGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "space-between",
+    },
+    opsTile: {
+        width: "48%",
+        borderWidth: 1,
+        borderRadius: 20,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    opsTileTop: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: SPACING.sm,
+    },
+    opsTileValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.lg,
+    },
+    opsTileTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption + 1,
+        marginBottom: 2,
+    },
+    opsTileSubtitle: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        lineHeight: 16,
     },
 });
+

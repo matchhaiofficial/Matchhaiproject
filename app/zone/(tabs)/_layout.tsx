@@ -4,42 +4,39 @@ import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { COLORS, FONTS } from "../../../src/theme";
-import Logger from "../../../src/utils/logger";
 
 export default function ZoneTabsLayout() {
     const insets = useSafeAreaInsets();
-
-    React.useEffect(() => {
-        Logger.debug('ZoneTabsLayout', 'Mounting zone tabs layout');
-    }, []);
+    const hideZoneTabBar = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
     return (
         <Tabs
             screenOptions={{
                 headerShown: false,
-                tabBarStyle: {
-                    position: 'absolute',
-                    backgroundColor: COLORS.cardDark,
-                    borderTopWidth: 1,
-                    borderTopColor: COLORS.overlayMedium,
-                    height: 65 + insets.bottom,
-                    paddingBottom: insets.bottom + 8,
-                    paddingTop: 12,
-                    paddingHorizontal: 16,
-                    borderTopLeftRadius: 20,
-                    borderTopRightRadius: 20,
-                    // Elevated design
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: -4 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 8,
-                    elevation: 10,
-                },
+                tabBarHideOnKeyboard: true,
+                tabBarStyle: hideZoneTabBar
+                    ? { display: "none" }
+                    : {
+                        backgroundColor: COLORS.cardDark,
+                        borderTopWidth: 1,
+                        borderTopColor: "rgba(255,255,255,0.1)",
+                        height: 65 + insets.bottom,
+                        paddingBottom: insets.bottom + 8,
+                        paddingTop: 12,
+                        paddingHorizontal: 16,
+                        borderTopLeftRadius: 20,
+                        borderTopRightRadius: 20,
+                        elevation: 10,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: -4 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 8,
+                    },
                 tabBarActiveTintColor: COLORS.accent,
                 tabBarInactiveTintColor: COLORS.textSecondary,
                 tabBarLabelStyle: {
                     fontSize: 11,
-                    fontWeight: '600',
+                    fontWeight: "600",
                     fontFamily: FONTS.interMedium,
                     marginTop: 4,
                 },
@@ -54,9 +51,9 @@ export default function ZoneTabsLayout() {
             <Tabs.Screen
                 name="index"
                 options={{
-                    title: "Dashboard",
+                    title: "Home",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons name="dashboard" size={24} color={color} />
+                        <MaterialIcons name="home" size={24} color={color} />
                     ),
                 }}
             />
@@ -72,6 +69,18 @@ export default function ZoneTabsLayout() {
             {/* Hide style files from navigation */}
             <Tabs.Screen
                 name="_zone-dashboard.styles"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="dashboard.styles"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="branches.styles"
                 options={{
                     href: null,
                 }}

@@ -1,613 +1,581 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
-    Modal,
+    Animated,
+    Pressable,
     ScrollView,
     Text,
-    TextInput,
-    TouchableOpacity,
-    View
+    View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
+import SidebarMenu from "../../../src/components/SidebarMenu";
+import MatchroomCard from "../../matchrooms/components/MatchroomCard";
+import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
+import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
-import { BookingRequest, createZoneOffer, getRequestsForZoneAdmin } from "../../../src/services/bookingRequestService";
+import {
+    subscribeZoneBookingQueue,
+    subscribeZoneMatchrooms,
+    type ZoneBookingQueueItem,
+    type ZoneMatchroomListItem,
+} from "../../../src/services/zoneAdminBookingService";
+import {
+    subscribeBranchResources,
+    subscribeZoneBranches,
+    type ZoneBranch,
+    type ZoneBranchResource,
+} from "../../../src/services/zoneAdminResourceService";
+import { type Matchroom } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
-import Logger from "../../../src/utils/logger";
-import styles from "./_zone-dashboard.styles";
+import styles from "./dashboard.styles";
 
-// Mock data types
-interface AlertItem {
-    id: string;
-    type: 'urgent' | 'warning' | 'info';
-    icon: string;
-    message: string;
-    time: string;
-    action?: string;
-}
+const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
-interface Match {
-    id: string;
-    time: string;
-    game: string;
-    players: string;
-    status: 'upcoming' | 'checkin' | 'live' | 'finished';
-    court: string;
-}
+const MODULE_COLORS = [
+    { bg: "rgba(66,165,245,0.14)", border: "rgba(66,165,245,0.45)", icon: "#64B5F6" },
+    { bg: "rgba(0,230,118,0.12)", border: "rgba(0,230,118,0.4)", icon: "#00E676" },
+    { bg: "rgba(255,193,7,0.14)", border: "rgba(255,193,7,0.45)", icon: "#FFCA28" },
+    { bg: "rgba(239,83,80,0.12)", border: "rgba(239,83,80,0.45)", icon: "#EF5350" },
+    { bg: "rgba(171,71,188,0.15)", border: "rgba(171,71,188,0.45)", icon: "#BA68C8" },
+    { bg: "rgba(38,198,218,0.14)", border: "rgba(38,198,218,0.45)", icon: "#4DD0E1" },
+    { bg: "rgba(255,112,67,0.14)", border: "rgba(255,112,67,0.45)", icon: "#FF8A65" },
+    { bg: "rgba(124,179,66,0.14)", border: "rgba(124,179,66,0.45)", icon: "#9CCC65" },
+];
 
+const toMillis = (value: any) => {
+    if (!value) return 0;
+    if (typeof value?.toMillis === "function") return value.toMillis();
+    if (typeof value?.seconds === "number") return value.seconds * 1000;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") return value;
+    return 0;
+};
 
+const toMatchroomDateMs = (room: ZoneMatchroomListItem) => {
+    if (room.scheduledDate && room.scheduledTime) {
+        const parsed = new Date(`${room.scheduledDate}T${room.scheduledTime}`);
+        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+    }
+    return toMillis(room.createdAt);
+};
 
-export default function ZoneDashboard() {
+const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: string): Matchroom => ({
+    id: room.id,
+    hostUid: room.zoneOwnerUid || "",
+    hostName: "Zone Host",
+    game: room.game,
+    title: room.title,
+    description: "Zone booking",
+    status: room.status as any,
+    maxPlayers: room.maxPlayers || 0,
+    currentPlayers: room.currentPlayers || 0,
+    players: [],
+    playerUids: [],
+    createdAt: room.createdAt || new Date(),
+    location: room.location || fallbackLocation || "Zone Venue",
+    pricing: {
+        perPlayer: 0,
+        currency: "PKR",
+    },
+    scheduledDate: room.scheduledDate,
+    scheduledTime: room.scheduledTime,
+    slotsA: [],
+    slotsB: [],
+    paymentStatus: (room.paymentStatus || "unpaid") as any,
+});
+
+export default function ZoneDashboardHome() {
+    const router = useRouter();
+    const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
-    const router = useRouter();
-    const [signingOut, setSigningOut] = useState(false);
 
-    // Mock data
-    const [alerts] = useState<AlertItem[]>([
-        { id: '1', type: 'urgent', icon: 'person-add', message: 'New matchroom request from Ahmad', time: '2m ago', action: 'View' },
-        { id: '2', type: 'warning', icon: 'schedule', message: 'Match starting in 15 minutes - check-in required', time: '5m ago' },
-        { id: '3', type: 'info', icon: 'payment', message: 'Payment confirmed for tonights CS2 match', time: '10m ago' },
-    ]);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [notificationCount, setNotificationCount] = useState(0);
+    const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
+    const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
+    const [branches, setBranches] = useState<ZoneBranch[]>([]);
+    const [resourcesByBranch, setResourcesByBranch] = useState<Record<string, ZoneBranchResource[]>>({});
 
-    const [todayMatches] = useState<Match[]>([
-        { id: '1', time: '10:00 AM', game: 'CS2 5v5', players: '8/10', status: 'checkin', court: 'PC Room 1' },
-        { id: '2', time: '12:00 PM', game: 'Futsal', players: '10/10', status: 'live', court: 'Court A' },
-        { id: '3', time: '3:00 PM', game: 'Padel Doubles', players: '4/4', status: 'upcoming', court: 'Padel 1' },
-        { id: '4', time: '6:00 PM', game: 'FC25', players: '6/8', status: 'upcoming', court: 'PC Room 2' },
-        { id: '5', time: '9:00 PM', game: 'CS2 10v10', players: '20/20', status: 'upcoming', court: 'Full Arena' },
-    ]);
+    const entrance = useRef(new Animated.Value(0)).current;
 
-    const [incomingRequests, setIncomingRequests] = useState<BookingRequest[]>([]);
-    const [loadingRequests, setLoadingRequests] = useState(false);
+    const branchAreas = useMemo(() => {
+        const areas = new Set<string>();
+        if (zone?.primaryBranch?.areaLabel) {
+            areas.add(String(zone.primaryBranch.areaLabel));
+        }
+        (zone?.branches || []).forEach((branch: any) => {
+            if (branch?.areaLabel) areas.add(String(branch.areaLabel));
+        });
+        return Array.from(areas);
+    }, [zone?.branches, zone?.primaryBranch?.areaLabel]);
 
-    // Offer Modal State
-    const [selectedRequest, setSelectedRequest] = useState<BookingRequest | null>(null);
-    const [offerPrice, setOfferPrice] = useState('');
-    const [offerMessage, setOfferMessage] = useState('');
-    const [sendingOffer, setSendingOffer] = useState(false);
+    const branchIdsKey = useMemo(
+        () => branches.map((branch) => branch.id).sort().join("|"),
+        [branches],
+    );
 
     useEffect(() => {
-        if (zone?.primaryBranch?.areaLabel) {
-            fetchRequests();
-        }
-    }, [zone]);
+        Animated.timing(entrance, {
+            toValue: 1,
+            duration: 360,
+            useNativeDriver: true,
+        }).start();
+    }, [entrance]);
 
-    const fetchRequests = async () => {
-        if (!zone?.primaryBranch?.areaLabel) return;
-        setLoadingRequests(true);
-        try {
-            // Fetch requests for the zone's area
-            // TODO: If zone has multiple branches/areas, include them all
-            const res = await getRequestsForZoneAdmin([zone.primaryBranch.areaLabel]);
-            if (res.ok && res.data) {
-                setIncomingRequests(res.data);
-            }
-        } catch (e) {
-            Logger.error("ZoneDashboard", "Error fetching requests", e);
-        } finally {
-            setLoadingRequests(false);
-        }
-    };
+    useEffect(() => {
+        if (!zone?.id) return;
+        const unsub = subscribeZoneBranches(
+            zone.id,
+            (rows) => setBranches(rows),
+            () => setBranches([]),
+        );
+        return () => unsub();
+    }, [zone?.id]);
 
-    const openOfferModal = (req: BookingRequest) => {
-        setSelectedRequest(req);
-        setOfferPrice(req.budgetPerPlayer ? String(req.budgetPerPlayer) : '');
-        setOfferMessage('');
-    };
-
-    const closeOfferModal = () => {
-        setSelectedRequest(null);
-        setOfferPrice('');
-        setOfferMessage('');
-    };
-
-    const handleSendOffer = async () => {
-        if (!selectedRequest || !zone || !user) return;
-        if (!offerPrice) {
-            Alert.alert("Error", "Please enter a price per player");
+    useEffect(() => {
+        if (!zone?.id || branches.length === 0) {
+            setResourcesByBranch({});
             return;
         }
+        const unsubs: Array<() => void> = [];
+        branches.forEach((branch) => {
+            unsubs.push(
+                subscribeBranchResources(
+                    zone.id,
+                    branch.id,
+                    (rows) => {
+                        setResourcesByBranch((prev) => ({ ...prev, [branch.id]: rows }));
+                    },
+                    () => {
+                        setResourcesByBranch((prev) => ({ ...prev, [branch.id]: [] }));
+                    },
+                ),
+            );
+        });
+        return () => unsubs.forEach((unsub) => unsub());
+    }, [branchIdsKey, branches, zone?.id]);
 
-        setSendingOffer(true);
-        try {
-            const res = await createZoneOffer({
-                requestId: selectedRequest.id!,
-                requestOwnerUid: selectedRequest.userId,
-                zoneId: zone.id,
-                branchId: 'primary', // TODO: Handle multiple branches
-                zoneName: zone.venueBrandName,
-                branchName: zone.primaryBranch.branchDisplayName || zone.venueBrandName,
-                zoneOwnerUid: user.uid,
-                zoneAdminId: user.uid, // legacy alias
-                proposedDate: selectedRequest.preferredDate || new Date(), // Default to requested date
-                proposedTime: selectedRequest.preferredTime || 'Flexible',
-                pricePerPlayer: parseInt(offerPrice),
-                currency: 'PKR',
-                location: `${zone.primaryBranch.addressLine1}, ${zone.primaryBranch.areaLabel}`,
-                message: offerMessage.trim(),
+    useEffect(() => {
+        if (!zone?.id) return;
+        const unsubQueue = subscribeZoneBookingQueue(
+            zone.id,
+            branchAreas,
+            (rows) => setQueue(rows),
+            () => setQueue([]),
+        );
+        const unsubMatchrooms = subscribeZoneMatchrooms(
+            zone.id,
+            user?.uid,
+            (rows) => setMatchrooms(rows),
+            () => setMatchrooms([]),
+            {
+                locationHints: [
+                    zone.venueBrandName || "",
+                    zone.primaryBranch?.branchDisplayName || "",
+                    zone.primaryBranch?.areaLabel || "",
+                    ...branchAreas,
+                ],
+            },
+        );
 
-            });
+        return () => {
+            unsubQueue();
+            unsubMatchrooms();
+        };
+    }, [branchAreas, user?.uid, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
 
-            if (res.ok) {
-                Alert.alert("Success", "Offer sent to player!");
-                closeOfferModal();
-                // Optionally refresh requests or mark this one as 'offered' locally
-            } else {
-                Alert.alert("Error", res.message || "Failed to send offer");
-            }
-        } catch (e) {
-            Logger.error("ZoneDashboard", "Error sending offer", e);
-            Alert.alert("Error", "Something went wrong");
-        } finally {
-            setSendingOffer(false);
-        }
-    };
+    useEffect(() => {
+        if (!user?.uid) return;
+        const q = query(
+            collection(db, "notifications"),
+            where("toUid", "==", user.uid),
+            where("status", "==", "pending"),
+        );
+        const unsub = onSnapshot(
+            q,
+            (snapshot: any) => setNotificationCount(snapshot.size || 0),
+            () => setNotificationCount(0),
+        );
+        return () => unsub();
+    }, [user?.uid]);
 
-    // Mock data for other sections (keep for now)
+    const allResources = useMemo(
+        () => Object.values(resourcesByBranch).flat(),
+        [resourcesByBranch],
+    );
 
+    const summary = useMemo(() => {
+        const branchCount = Array.isArray(zone?.branches) ? zone.branches.length : branches.length;
+        const gameCount = zone?.games
+            ? Object.values(zone.games).filter((value) => value === true).length
+            : 0;
+        const zoneType = zone?.type === "sports" ? "Sports" : zone?.type === "hybrid" ? "Hybrid" : "Gaming";
+        const status = zone?.status === "active" ? "Active" : zone?.status === "rejected" ? "Rejected" : "Pending";
+        const ownerName = zone?.ownerFullName || user?.displayName || "Zone Owner";
+        const busy = allResources.filter((item) => item.lifecycleStatus === "booked" || item.lifecycleStatus === "held").length;
+        const utilization = allResources.length ? Math.round((busy / allResources.length) * 100) : 0;
+        const liveRooms = matchrooms.filter((item) => ["open", "in-progress"].includes(String(item.status || "").toLowerCase())).length;
+        const pendingQueue = queue.filter((item) => item.status === "open" || item.status === "pending_payment").length;
+        const walkins = matchrooms.filter((item) => item.bookingSource === "walkin").length;
+        const now = Date.now();
+        const upcomingCount = matchrooms.filter((item) => {
+            const startMs = toMillis(item.createdAt);
+            if (!startMs) return false;
+            const delta = startMs - now;
+            return delta > 0 && delta <= 2 * 60 * 60 * 1000;
+        }).length;
 
-    const [courts] = useState([
-        { id: '1', name: 'PC 1', status: 'free', color: COLORS.successBright },
-        { id: '2', name: 'PC 2', status: 'in-use', color: '#FFC107' },
-        { id: '3', name: 'Court A', status: 'in-use', color: '#FFC107' },
-        { id: '4', name: 'Court B', status: 'free', color: COLORS.successBright },
-        { id: '5', name: 'Padel 1', status: 'reserved', color: COLORS.accent },
-        { id: '6', name: 'Padel 2', status: 'maintenance', color: COLORS.error },
-    ]);
+        return {
+            branchCount,
+            gameCount,
+            zoneType,
+            status,
+            ownerName,
+            utilization,
+            liveRooms,
+            pendingQueue,
+            walkins,
+            upcomingCount,
+            maintenanceCount: allResources.filter((item) => item.lifecycleStatus === "maintenance").length,
+        };
+    }, [allResources, branches.length, matchrooms, queue, user?.displayName, zone]);
+
+    const dashboardModules = useMemo(
+        () =>
+            ZONE_ADMIN_MODULES.filter(
+                (module) =>
+                    !["notifications_center", "support_safety", "audit_security", "venue_settings"].includes(module.id),
+            ),
+        [],
+    );
+
+    const upcomingMatchrooms = useMemo(
+        () =>
+            [...matchrooms]
+                .filter((room) => {
+                    const dateMs = toMatchroomDateMs(room);
+                    return !dateMs || dateMs >= Date.now();
+                })
+                .sort((a, b) => toMatchroomDateMs(a) - toMatchroomDateMs(b))
+                .slice(0, 5),
+        [matchrooms],
+    );
+
+    const operationsCards = useMemo(
+        () => [
+            {
+                key: "ops_queue",
+                title: "Queue Pressure",
+                value: `${summary.pendingQueue}`,
+                subtitle: "Pending approvals right now",
+                icon: "pending-actions" as const,
+                tint: "rgba(255,193,7,0.16)",
+                border: "rgba(255,193,7,0.4)",
+            },
+            {
+                key: "ops_live",
+                title: "Live Matchrooms",
+                value: `${summary.liveRooms}`,
+                subtitle: "Open or in-progress sessions",
+                icon: "sports-esports" as const,
+                tint: "rgba(66,165,245,0.16)",
+                border: "rgba(66,165,245,0.4)",
+            },
+            {
+                key: "ops_util",
+                title: "Utilization",
+                value: `${summary.utilization}%`,
+                subtitle: "Held + booked resource load",
+                icon: "bolt" as const,
+                tint: "rgba(0,230,118,0.14)",
+                border: "rgba(0,230,118,0.4)",
+            },
+            {
+                key: "ops_maint",
+                title: "Maintenance",
+                value: `${summary.maintenanceCount}`,
+                subtitle: "Resources under maintenance",
+                icon: "build-circle" as const,
+                tint: "rgba(239,83,80,0.14)",
+                border: "rgba(239,83,80,0.42)",
+            },
+        ],
+        [summary.liveRooms, summary.maintenanceCount, summary.pendingQueue, summary.utilization],
+    );
 
     const handleLogout = async () => {
-        setSigningOut(true);
-        const res = await signOutUser();
-        setSigningOut(false);
-        if (!res.ok) {
-            Alert.alert("Logout Failed", res.message);
+        const result = await signOutUser();
+        if (!result.ok) {
+            Alert.alert("Logout failed", result.message);
         }
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'live': return COLORS.successBright;
-            case 'checkin': return '#FFC107';
-            case 'upcoming': return COLORS.accent;
-            case 'finished': return COLORS.textSecondary;
-            default: return COLORS.muted;
-        }
-    };
+    const sidebarItems = useMemo(
+        () => [
+            { label: "Dashboard", icon: "home" as const, onPress: () => router.push("/zone/(tabs)" as any) },
+            ...dashboardModules.map((module) => ({
+                label: module.title,
+                icon: module.icon as any,
+                onPress: () => router.push(module.route as any),
+            })),
+            { label: "Logout", icon: "logout" as const, onPress: handleLogout },
+        ],
+        [dashboardModules, router],
+    );
 
     if (loading) {
         return (
-            <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>
+            <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
             </View>
         );
     }
 
-    if (!zone || zone.status === 'pending-review') {
+    if (!zone || zone.status === "pending-review") {
         return (
-            <SafeAreaView style={styles.screen}>
-                <View style={[styles.emptyState, { flex: 1, justifyContent: 'center', padding: 40 }]}>
-                    <MaterialIcons
-                        name={!zone ? "business" : "hourglass-empty"}
-                        size={64}
-                        color={COLORS.accent}
-                        style={styles.emptyStateIcon}
-                    />
-                    <Text style={[styles.emptyStateText, { fontSize: 22, color: COLORS.text, fontWeight: 'bold', marginBottom: 12 }]}>
-                        {!zone ? "No zone found" : "Registration Pending"}
-                    </Text>
-                    <Text style={[styles.emptyStateText, { fontSize: 16, textAlign: 'center', lineHeight: 24 }]}>
-                        {!zone
-                            ? "Register a zone to get started and access your dashboard."
-                            : `Your registration for "${zone.venueBrandName}" is currently under review by our team.`}
-                    </Text>
-                    <Text style={[styles.emptyStateText, { fontSize: 14, color: COLORS.muted, marginTop: 12, textAlign: 'center' }]}>
-                        {!zone
-                            ? "It only takes a few minutes to set up your business."
-                            : "We'll notify you via email once your zone has been approved."}
-                    </Text>
-
-                    {!zone ? (
-                        <TouchableOpacity
-                            onPress={() => router.replace("/auth/zone-register")}
-                            style={[styles.requestActionPrimary, { marginTop: 32, paddingHorizontal: 32 }]}
-                        >
-                            <Text style={styles.requestActionPrimaryText}>Register Zone</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity
-                            onPress={handleLogout}
-                            style={[styles.requestActionSecondary, { marginTop: 32, paddingHorizontal: 32 }]}
-                        >
-                            <Text style={styles.requestActionSecondaryText}>Sign Out</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </SafeAreaView>
-        );
-    }
-
-    if (zone.status === 'rejected') {
-        return (
-            <SafeAreaView style={styles.screen}>
-                <View style={[styles.emptyState, { flex: 1, justifyContent: 'center', padding: 40 }]}>
-                    <MaterialIcons name="error-outline" size={64} color={COLORS.error} style={styles.emptyStateIcon} />
-                    <Text style={[styles.emptyStateText, { fontSize: 22, color: COLORS.text, fontWeight: 'bold', marginBottom: 12 }]}>
-                        Registration Rejected
-                    </Text>
-                    <Text style={[styles.emptyStateText, { fontSize: 16, textAlign: 'center', lineHeight: 24 }]}>
-                        Your registration for "{zone.venueBrandName}" was not approved.
-                    </Text>
-                    {zone.rejectionReason && (
-                        <View style={{ backgroundColor: 'rgba(255, 68, 68, 0.1)', padding: 16, borderRadius: 12, marginTop: 20, width: '100%' }}>
-                            <Text style={{ color: COLORS.error, fontWeight: '600', marginBottom: 4 }}>Reason:</Text>
-                            <Text style={{ color: COLORS.textSecondary }}>{zone.rejectionReason}</Text>
+            <Screen style={styles.screen} scroll={false}>
+                <AppHeader title="Zone Dashboard" />
+                <View style={styles.noZoneContainer}>
+                    <View style={styles.noZoneCard}>
+                        <View style={styles.noZoneIconWrap}>
+                            <MaterialIcons name="hourglass-empty" size={26} color={COLORS.accent} />
                         </View>
-                    )}
-                    <TouchableOpacity
-                        onPress={handleLogout}
-                        style={[styles.requestActionSecondary, { marginTop: 32, paddingHorizontal: 32 }]}
-                    >
-                        <Text style={styles.requestActionSecondaryText}>Sign Out & Contact Support</Text>
-                    </TouchableOpacity>
+                        <Text style={styles.noZoneTitle}>Registration Pending</Text>
+                        <Text style={styles.noZoneText}>
+                            Your venue is under review. Admin modules unlock after approval.
+                        </Text>
+                    </View>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
+
+    if (zone.status === "rejected") {
+        return (
+            <Screen style={styles.screen} scroll={false}>
+                <AppHeader title="Zone Dashboard" />
+                <View style={styles.noZoneContainer}>
+                    <View style={styles.noZoneCard}>
+                        <View style={[styles.noZoneIconWrap, styles.noZoneIconDanger]}>
+                            <MaterialIcons name="report-gmailerrorred" size={26} color={COLORS.error} />
+                        </View>
+                        <Text style={styles.noZoneTitle}>Registration Rejected</Text>
+                        <Text style={styles.noZoneText}>
+                            Update your details and contact support before retrying.
+                        </Text>
+                        {zone.rejectionReason ? (
+                            <Text style={styles.rejectReason} numberOfLines={4}>
+                                Reason: {zone.rejectionReason}
+                            </Text>
+                        ) : null}
+                    </View>
+                </View>
+            </Screen>
+        );
+    }
+
+    const leftAction = (
+        <Pressable
+            onPress={() => setSidebarOpen(true)}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
+        >
+            <MaterialIcons name="menu" size={20} color={COLORS.text} />
+        </Pressable>
+    );
+
+    const rightAction = (
+        <Pressable
+            onPress={() => router.push("/zone/modules/notifications" as any)}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
+        >
+            <MaterialIcons name="notifications-none" size={20} color={COLORS.text} />
+            {notificationCount > 0 ? (
+                <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>{notificationCount > 9 ? "9+" : notificationCount}</Text>
+                </View>
+            ) : null}
+        </Pressable>
+    );
 
     return (
-        <SafeAreaView style={styles.screen}>
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-                {/* 🔵 SECTION: Zone Overview Header */}
-                <View style={styles.header}>
-                    <View style={styles.headerTopRow}>
-                        <View style={styles.zoneNameContainer}>
-                            <Text style={styles.zoneLabel}>ZONE ADMIN</Text>
-                            <Text style={styles.zoneName}>{zone.venueBrandName}</Text>
-                        </View>
-                        <TouchableOpacity onPress={handleLogout} disabled={signingOut}>
-                            {signingOut ? (
-                                <ActivityIndicator size="small" color={COLORS.accent} />
-                            ) : (
-                                <MaterialIcons name="exit-to-app" size={24} color={COLORS.muted} />
-                            )}
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={[styles.statusBadge, { borderColor: COLORS.successBright + '50' }]}>
-                        <View style={[styles.statusDot, { backgroundColor: COLORS.successBright }]} />
-                        <Text style={styles.statusText}>Open</Text>
-                    </View>
-
-                    <View style={styles.quickStatsRow}>
-                        <View style={styles.quickStatItem}>
-                            <Text style={styles.quickStatLabel}>Today's Bookings</Text>
-                            <Text style={styles.quickStatValue}>5</Text>
-                        </View>
-                        <View style={styles.quickStatItem}>
-                            <Text style={styles.quickStatLabel}>Pending Approvals</Text>
-                            <Text style={styles.quickStatValue}>2</Text>
-                        </View>
-                        <View style={styles.quickStatItem}>
-                            <Text style={styles.quickStatLabel}>Courts Available</Text>
-                            <Text style={styles.quickStatValue}>2/6</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* 🔔 SECTION 1: Critical Alerts */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Critical Alerts</Text>
-                        <Text style={styles.seeAllText}>View All</Text>
-                    </View>
-                    {alerts.slice(0, 3).map((alert) => (
-                        <TouchableOpacity
-                            key={alert.id}
-                            style={[
-                                styles.alertCard,
-                                { borderLeftColor: alert.type === 'urgent' ? COLORS.error : alert.type === 'warning' ? '#FFC107' : COLORS.accent }
-                            ]}
-                        >
-                            <MaterialIcons name={alert.icon as any} size={20} color={COLORS.accent} style={styles.alertIcon} />
-                            <View style={styles.alertContent}>
-                                <Text style={styles.alertText}>{alert.message}</Text>
-                                <Text style={styles.alertTime}>{alert.time}</Text>
-                            </View>
-                            <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} style={styles.alertAction} />
-                        </TouchableOpacity>
-                    ))}
-                </View>
-
-                {/* 📅 SECTION 2: Today's Matches Timeline */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Today's Matches</Text>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.timelineContainer} contentContainerStyle={styles.timelineScroll}>
-                        {todayMatches.map((match) => (
-                            <TouchableOpacity key={match.id} style={styles.matchTimelineCard}>
-                                <View style={styles.matchTimeHeader}>
-                                    <Text style={styles.matchTime}>{match.time}</Text>
-                                    <View style={[styles.matchStatusBadge, { backgroundColor: getStatusColor(match.status) + '20', borderWidth: 1, borderColor: getStatusColor(match.status) }]}>
-                                        <Text style={[styles.matchStatusText, { color: getStatusColor(match.status) }]}>{match.status}</Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.matchGameTitle}>{match.game}</Text>
-                                <Text style={styles.matchDetail}>{match.players} Players • {match.court}</Text>
-                                <View style={styles.matchActions}>
-                                    <TouchableOpacity style={styles.matchActionBtn}>
-                                        <Text style={styles.matchActionText}>View</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={styles.matchActionBtn}>
-                                        <Text style={styles.matchActionText}>Edit</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-
-                {/* 💬 SECTION 3: Incoming Matchroom Requests */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Incoming Requests</Text>
-                        <Text style={styles.seeAllText}>{incomingRequests.length} New</Text>
-                    </View>
-                    {loadingRequests ? (
-                        <ActivityIndicator color={COLORS.accent} style={{ marginVertical: 20 }} />
-                    ) : incomingRequests.length === 0 ? (
-                        <View style={{ padding: 20, alignItems: 'center' }}>
-                            <Text style={{ color: COLORS.textSecondary }}>No new requests in your area.</Text>
-                        </View>
-                    ) : (
-                        incomingRequests.map((req) => (
-                            <View key={req.id} style={styles.requestCard}>
-                                <View style={styles.requestHeader}>
-                                    <View style={styles.requestUserInfo}>
-                                        <Text style={styles.requestUserName}>{req.userName}</Text>
-                                        <Text style={styles.requestUserRole}>{req.skillLevel || 'Any Level'}</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.requestDetailRow}>
-                                    <MaterialIcons name="sports-esports" size={14} color={COLORS.textSecondary} />
-                                    <Text style={styles.requestDetailText}>{req.gameKey.toUpperCase()} • {req.maxPlayers} players</Text>
-                                </View>
-                                <View style={styles.requestDetailRow}>
-                                    <MaterialIcons name="schedule" size={14} color={COLORS.textSecondary} />
-                                    <Text style={styles.requestDetailText}>{req.preferredTime || req.flexibilityWindow}</Text>
-                                </View>
-                                <View style={styles.requestDetailRow}>
-                                    <MaterialIcons name="location-on" size={14} color={COLORS.textSecondary} />
-                                    <Text style={styles.requestDetailText}>{req.preferredAreas.join(', ')}</Text>
-                                </View>
-                                {req.description ? (
-                                    <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 4, fontStyle: 'italic' }} numberOfLines={2}>
-                                        "{req.description}"
-                                    </Text>
-                                ) : null}
-                                <View style={styles.requestActions}>
-                                    <TouchableOpacity
-                                        style={styles.requestActionPrimary}
-                                        onPress={() => openOfferModal(req)}
-                                    >
-                                        <Text style={styles.requestActionPrimaryText}>
-                                            Send Offer {req.budgetPerPlayer ? `(Target: ₨${req.budgetPerPlayer})` : ''}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.requestActionSecondary}
-                                        onPress={() => Alert.alert("Not Implemented", "Hiding requests will be available soon.")}
-                                    >
-                                        <Text style={styles.requestActionSecondaryText}>Reject</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        ))
-                    )}
-                </View>
-
-                {/* 🔴 SECTION 5: Live Matches */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Live Matches</Text>
-                    </View>
-                    <View style={styles.liveMatchCard}>
-                        <View style={styles.liveMatchHeader}>
-                            <View style={styles.livePulse} />
-                            <Text style={styles.liveMatchTitle}>Futsal • Court A</Text>
-                        </View>
-                        <View style={styles.liveMatchStats}>
-                            <View style={styles.liveStatItem}>
-                                <Text style={styles.liveStatLabel}>Checked In</Text>
-                                <Text style={styles.liveStatValue}>10/10</Text>
-                            </View>
-                            <View style={styles.liveStatItem}>
-                                <Text style={styles.liveStatLabel}>Time Left</Text>
-                                <Text style={styles.liveStatValue}>45m</Text>
-                            </View>
-                        </View>
-                        <View style={styles.requestActions}>
-                            <TouchableOpacity style={[styles.requestActionPrimary, { flex: 1 }]}>
-                                <Text style={styles.requestActionPrimaryText}>View Details</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.requestActionSecondary}>
-                                <Text style={styles.requestActionSecondaryText}>Extend</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-
-                {/* 🖥️ SECTION 6: Court/PC Management */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Court Status</Text>
-                    </View>
-                    <View style={styles.courtGrid}>
-                        {courts.map((court) => (
-                            <TouchableOpacity key={court.id} style={[styles.courtCard, { borderColor: court.color }]}>
-                                <MaterialIcons
-                                    name={court.status === 'free' ? 'check-circle' : court.status === 'in-use' ? 'sports-esports' : court.status === 'reserved' ? 'schedule' : 'build'}
-                                    size={32}
-                                    color={court.color}
-                                />
-                                <Text style={styles.courtName}>{court.name}</Text>
-                                <Text style={[styles.courtStatus, { color: court.color }]}>{court.status.toUpperCase()}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
-
-                {/* 💳 SECTION 7: Payments Dashboard */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Today's Earnings</Text>
-                    </View>
-                    <View style={styles.paymentWidget}>
-                        <View style={styles.paymentRow}>
-                            <Text style={styles.paymentLabel}>Total Revenue</Text>
-                            <Text style={styles.paymentValue}>₨12,500</Text>
-                        </View>
-                        <View style={styles.paymentRow}>
-                            <Text style={styles.paymentLabel}>MatchHai Commission (10%)</Text>
-                            <Text style={[styles.paymentValue, { color: COLORS.error }]}>-₨1,250</Text>
-                        </View>
-                        <View style={styles.paymentDivider} />
-                        <View style={styles.paymentRow}>
-                            <Text style={[styles.paymentLabel, { fontSize: 14, fontWeight: '700' }]}>Your Earnings</Text>
-                            <Text style={styles.paymentTotal}>₨11,250</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* 📊 SECTION 8: Analytics */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Analytics</Text>
-                    </View>
-                    <View style={styles.analyticsCard}>
-                        <View style={styles.analyticsMetric}>
-                            <Text style={styles.metricLabel}>Occupancy Rate (Today)</Text>
-                            <Text style={styles.metricValue}>75%</Text>
-                        </View>
-                        <View style={styles.analyticsMetric}>
-                            <Text style={styles.metricLabel}>Most Popular Game</Text>
-                            <Text style={styles.metricValue}>CS2</Text>
-                        </View>
-                        <View style={styles.analyticsMetric}>
-                            <Text style={styles.metricLabel}>Peak Hours</Text>
-                            <Text style={styles.metricValue}>6 PM - 10 PM</Text>
-                        </View>
-                        <View style={styles.analyticsMetric}>
-                            <Text style={styles.metricLabel}>Repeat Users</Text>
-                            <Text style={styles.metricValue}>68%</Text>
-                        </View>
-                    </View>
-                    <View style={styles.aiInsightCard}>
-                        <MaterialIcons name="lightbulb" size={16} color={COLORS.accent} />
-                        <Text style={[styles.aiInsightText, { marginTop: 8 }]}>
-                            💡 Your Tuesday slots have low bookings. Consider offering a 20% discount to boost occupancy.
-                        </Text>
-                    </View>
-                </View>
-
-                {/* 🧾 SECTION 9: Quick Settings */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Quick Settings</Text>
-                    </View>
-                    <TouchableOpacity style={styles.requestCard} onPress={() => router.push("/zone/(tabs)/branches")}>
-                        <View style={[styles.requestHeader, { marginBottom: 0 }]}>
-                            <View style={styles.requestUserInfo}>
-                                <Text style={styles.requestUserName}>Zone Settings</Text>
-                                <Text style={styles.requestDetailText}>Manage pricing, hours, and availability</Text>
-                            </View>
-                            <MaterialIcons name="chevron-right" size={24} color={COLORS.muted} />
-                        </View>
-                    </TouchableOpacity>
-                </View>
-
-            </ScrollView>
-
-            {/* Offer Modal */}
-            <Modal
-                visible={!!selectedRequest}
-                transparent
-                animationType="slide"
-                onRequestClose={closeOfferModal}
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader
+                title="Dashboard"
+                subtitle={zone.venueBrandName}
+                leftAction={leftAction}
+                rightAction={rightAction}
+                inlineTitle
+            />
+            <Animated.View
+                style={{
+                    flex: 1,
+                    opacity: entrance,
+                    transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
+                }}
             >
-                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
-                    <View style={{ backgroundColor: COLORS.cardBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
-                        <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: 'bold', marginBottom: 16 }}>
-                            Send Offer to {selectedRequest?.userName}
-                        </Text>
-
-                        <Text style={{ color: COLORS.textSecondary, marginBottom: 8 }}>Price Per Player (₨)</Text>
-                        <TextInput
-                            style={{
-                                backgroundColor: COLORS.inputBackground,
-                                color: COLORS.text,
-                                padding: 12,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: COLORS.inputBorder,
-                                marginBottom: 16
-                            }}
-                            placeholder="e.g. 500"
-                            placeholderTextColor={COLORS.muted}
-                            keyboardType="number-pad"
-                            value={offerPrice}
-                            onChangeText={setOfferPrice}
-                        />
-
-                        <Text style={{ color: COLORS.textSecondary, marginBottom: 8 }}>Message (Optional)</Text>
-                        <TextInput
-                            style={{
-                                backgroundColor: COLORS.inputBackground,
-                                color: COLORS.text,
-                                padding: 12,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: COLORS.inputBorder,
-                                marginBottom: 24,
-                                height: 80,
-                                textAlignVertical: 'top'
-                            }}
-                            placeholder="e.g. We have a private room available..."
-                            placeholderTextColor={COLORS.muted}
-                            multiline
-                            value={offerMessage}
-                            onChangeText={setOfferMessage}
-                        />
-
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity
-                                style={{ flex: 1, padding: 16, borderRadius: 12, backgroundColor: COLORS.surface, alignItems: 'center' }}
-                                onPress={closeOfferModal}
-                            >
-                                <Text style={{ color: COLORS.textSecondary, fontWeight: '600' }}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={{ flex: 1, padding: 16, borderRadius: 12, backgroundColor: COLORS.accent, alignItems: 'center' }}
-                                onPress={handleSendOffer}
-                                disabled={sendingOffer}
-                            >
-                                {sendingOffer ? (
-                                    <ActivityIndicator color="#FFF" />
-                                ) : (
-                                    <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Send Offer</Text>
-                                )}
-                            </TouchableOpacity>
+                <ScrollView
+                    contentContainerStyle={[
+                        styles.container,
+                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : tabBarHeight + 16 },
+                    ]}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={styles.heroCard}>
+                        <View style={styles.heroRow}>
+                            <View style={styles.avatarIconWrap}>
+                                <MaterialIcons
+                                    name={zone.type === "sports" ? "sports-soccer" : zone.type === "hybrid" ? "sports" : "sports-esports"}
+                                    size={24}
+                                    color={COLORS.accent}
+                                />
+                            </View>
+                            <View style={styles.heroTextWrap}>
+                                <Text style={styles.heroEyebrow}>Zone Owner</Text>
+                                <Text style={styles.heroTitle}>{summary.ownerName}</Text>
+                                <Text style={styles.heroSubtitle}>{zone.venueBrandName}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.tagsRow}>
+                            <View style={styles.tag}>
+                                <Text style={styles.tagText}>{summary.zoneType}</Text>
+                            </View>
+                            <View style={[styles.tag, summary.status === "Active" ? styles.tagSuccess : styles.tagDanger]}>
+                                <Text style={[styles.tagText, summary.status === "Active" ? styles.tagSuccessText : styles.tagDangerText]}>
+                                    {summary.status}
+                                </Text>
+                            </View>
+                            <View style={styles.tag}>
+                                <Text style={styles.tagText}>{summary.branchCount} branches</Text>
+                            </View>
                         </View>
                     </View>
-                </View>
-            </Modal>
-        </SafeAreaView>
+
+                    <View style={styles.coreGrid}>
+                        <View style={styles.coreCard}>
+                            <Text style={styles.coreValue}>{summary.pendingQueue}</Text>
+                            <Text style={styles.coreLabel}>Queue</Text>
+                        </View>
+                        <View style={styles.coreCard}>
+                            <Text style={styles.coreValue}>{summary.liveRooms}</Text>
+                            <Text style={styles.coreLabel}>Live Rooms</Text>
+                        </View>
+                        <View style={styles.coreCard}>
+                            <Text style={styles.coreValue}>{summary.utilization}%</Text>
+                            <Text style={styles.coreLabel}>Utilization</Text>
+                        </View>
+                        <View style={styles.coreCard}>
+                            <Text style={styles.coreValue}>{summary.walkins}</Text>
+                            <Text style={styles.coreLabel}>Walk-ins</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeaderRow}>
+                            <Text style={styles.sectionTitle}>Admin Modules</Text>
+                            <Text style={styles.sectionMuted}>Core flows</Text>
+                        </View>
+                        <View style={styles.moduleGrid}>
+                            {dashboardModules.map((module, index) => {
+                                const theme = MODULE_COLORS[index % MODULE_COLORS.length];
+                                return (
+                                    <Pressable
+                                        key={module.id}
+                                        style={({ pressed }) => [
+                                            styles.moduleCard,
+                                            { backgroundColor: theme.bg, borderColor: theme.border },
+                                            pressed && styles.moduleCardPressed,
+                                        ]}
+                                        onPress={() => router.push(module.route as any)}
+                                    >
+                                        <View style={styles.moduleTop}>
+                                            <View style={[styles.moduleIconWrap, { borderColor: theme.border }]}>
+                                                <MaterialIcons name={module.icon as any} size={20} color={theme.icon} />
+                                            </View>
+                                            {module.tag ? (
+                                                <View style={styles.moduleTag}>
+                                                    <Text style={styles.moduleTagText}>{module.tag}</Text>
+                                                </View>
+                                            ) : null}
+                                        </View>
+                                        <Text style={styles.moduleTitle}>{module.title}</Text>
+                                        <Text style={styles.moduleDescription}>{module.description}</Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeaderRow}>
+                            <Text style={styles.sectionTitle}>Upcoming Matchrooms</Text>
+                            <Text style={styles.sectionMuted}>{upcomingMatchrooms.length}</Text>
+                        </View>
+                        <View style={styles.matchroomsWrap}>
+                            {upcomingMatchrooms.length === 0 ? (
+                                <Text style={styles.emptyText}>No upcoming matchrooms yet.</Text>
+                            ) : (
+                                upcomingMatchrooms.map((room) => (
+                                    <MatchroomCard
+                                        key={room.id}
+                                        room={mapZoneRoomToMatchroom(
+                                            room,
+                                            zone.primaryBranch?.areaLabel || zone.venueBrandName || "Zone Venue",
+                                        )}
+                                    />
+                                ))
+                            )}
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeaderRow}>
+                            <Text style={styles.sectionTitle}>Operations</Text>
+                            <Pressable onPress={() => router.push("/zone/modules/insights" as any)}>
+                                <Text style={styles.sectionLink}>Detailed Analytics</Text>
+                            </Pressable>
+                        </View>
+                        <View style={styles.opsGrid}>
+                            {operationsCards.map((card) => (
+                                <Pressable
+                                    key={card.key}
+                                    style={({ pressed }) => [
+                                        styles.opsTile,
+                                        { backgroundColor: card.tint, borderColor: card.border },
+                                        pressed && styles.moduleCardPressed,
+                                    ]}
+                                    onPress={() => router.push("/zone/modules/insights" as any)}
+                                >
+                                    <View style={styles.opsTileTop}>
+                                        <MaterialIcons name={card.icon} size={18} color={COLORS.text} />
+                                        <Text style={styles.opsTileValue}>{card.value}</Text>
+                                    </View>
+                                    <Text style={styles.opsTileTitle}>{card.title}</Text>
+                                    <Text style={styles.opsTileSubtitle}>{card.subtitle}</Text>
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+                </ScrollView>
+            </Animated.View>
+
+            <SidebarMenu
+                visible={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                items={sidebarItems}
+                title="Zone Modules"
+            />
+        </Screen>
     );
 }

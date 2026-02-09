@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { collection, onSnapshot, query } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -9,47 +9,79 @@ import {
     Text,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
+import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 import { db } from "../../../src/config/firebaseConfig";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
+import styles from "./branches.styles";
 
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
     const router = useRouter();
     const [branches, setBranches] = useState<any[]>([]);
+    const [usingLegacyFallback, setUsingLegacyFallback] = useState(false);
     const [loadingBranches, setLoadingBranches] = useState(true);
+
+    const legacyBranches = useMemo(
+        () =>
+            Array.isArray(zone?.branches)
+                ? zone.branches.map((branch: any, index: number) => ({
+                    id: branch?.id || `legacy_${index + 1}`,
+                    ...branch,
+                    _legacy: true,
+                }))
+                : [],
+        [zone?.branches],
+    );
 
     useEffect(() => {
         if (!zone?.id) {
             setLoadingBranches(false);
             return;
         }
+        if (!zone?.migration?.perBranchSeatModel) {
+            setBranches(legacyBranches);
+            setUsingLegacyFallback(legacyBranches.length > 0);
+            setLoadingBranches(false);
+            return;
+        }
 
         const q = query(collection(db, "zones", zone.id, "branches"));
-        const unsub = onSnapshot(q, (snapshot) => {
-            const list = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-            }));
-            setBranches(list);
-            setLoadingBranches(false);
-        });
+        const unsub = onSnapshot(
+            q,
+            (snapshot: any) => {
+                const list = snapshot.docs.map((doc: any) => ({
+                    id: doc.id,
+                    ...doc.data(),
+                }));
+                if (list.length > 0) {
+                    setBranches(list);
+                    setUsingLegacyFallback(false);
+                } else {
+                    setBranches(legacyBranches);
+                    setUsingLegacyFallback(legacyBranches.length > 0);
+                }
+                setLoadingBranches(false);
+            },
+            (error: any) => {
+                setBranches(legacyBranches);
+                setUsingLegacyFallback(legacyBranches.length > 0);
+                setLoadingBranches(false);
+                if (error?.code !== "permission-denied") {
+                    Logger.error("ZoneBranches", "branches listener failed", error);
+                }
+            },
+        );
 
         return () => unsub();
-    }, [zone?.id]);
+    }, [legacyBranches, zone?.id, zone?.migration?.perBranchSeatModel]);
 
     if (loading || loadingBranches) {
         return (
-            <View
-                style={{
-                    flex: 1,
-                    justifyContent: "center",
-                    alignItems: "center",
-                    backgroundColor: COLORS.background,
-                }}
-            >
+            <View style={styles.loadingWrap}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
             </View>
         );
@@ -57,136 +89,89 @@ export default function ZoneBranches() {
 
     if (!zone) {
         return (
-            <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
-                <View
-                    style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-                >
-                    <Text style={{ color: COLORS.text, fontSize: 18 }}>
-                        No zone found.
-                    </Text>
+            <Screen style={styles.screen} scroll={false}>
+                <AppHeader title="Branches" inlineTitle />
+                <View style={styles.emptyWrap}>
+                    <Text style={styles.emptyTitle}>No zone found.</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
-            <ScrollView contentContainerStyle={{ padding: 16 }}>
-                <View
-                    style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: 24,
-                    }}
-                >
-                    <Text style={{ color: COLORS.text, fontSize: 28, fontWeight: "bold" }}>
-                        Branches
-                    </Text>
+        <Screen style={styles.screen} scroll={false}>
+            <AppHeader title="Branches" subtitle={`${branches.length} locations`} inlineTitle />
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                {usingLegacyFallback && (
+                    <View style={styles.noticeBox}>
+                        <Text style={styles.noticeTitle}>
+                            Legacy branch model detected
+                        </Text>
+                        <Text style={styles.noticeText}>
+                            Run migration from Venue Settings to enable per-branch seat-level resources.
+                        </Text>
+                    </View>
+                )}
+
+                <View style={styles.topRow}>
                     <Pressable
-                        style={{
-                            backgroundColor: COLORS.accent,
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
-                            borderRadius: 8,
-                            flexDirection: "row",
-                            alignItems: "center",
-                        }}
+                        style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}
                         onPress={() => {
                             router.push("/zone/branch/new");
                         }}
                     >
-                        <MaterialIcons
-                            name="add"
-                            size={18}
-                            color="#fff"
-                            style={{ marginRight: 4 }}
-                        />
-                        <Text style={{ color: "#fff", fontWeight: "600" }}>Add New</Text>
+                        <MaterialIcons name="add" size={18} color="#fff" />
+                        <Text style={styles.addButtonText}>Add New Branch</Text>
                     </Pressable>
                 </View>
 
                 {branches.length === 0 ? (
-                    <View style={{ alignItems: "center", marginTop: 40 }}>
-                        <Text style={{ color: COLORS.muted }}>No branches found.</Text>
+                    <View style={styles.emptyWrap}>
+                        <Text style={styles.emptyText}>No branches found.</Text>
                     </View>
                 ) : (
                     branches.map((branch) => (
                         <Pressable
                             key={branch.id}
-                            style={({ pressed }) => ({
-                                backgroundColor: COLORS.cardBackground,
-                                borderRadius: 12,
-                                padding: 16,
-                                marginBottom: 16,
-                                borderWidth: 1,
-                                borderColor: COLORS.divider,
-                                opacity: pressed ? 0.9 : 1,
-                            })}
+                            style={({ pressed }) => [styles.branchCard, pressed && styles.branchCardPressed]}
                             onPress={() => {
                                 router.push(`/zone/branch/${branch.id}`);
                             }}
                         >
-                            <View
-                                style={{
-                                    flexDirection: "row",
-                                    justifyContent: "space-between",
-                                    alignItems: "flex-start",
-                                }}
-                            >
+                            <View style={styles.branchCardRow}>
                                 <View>
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                        <Text
-                                            style={{
-                                                color: COLORS.text,
-                                                fontSize: 18,
-                                                fontWeight: "bold",
-                                            }}
-                                        >
+                                    <View style={styles.branchTitleRow}>
+                                        <Text style={styles.branchTitle}>
                                             {branch.branchDisplayName || "Main Branch"}
                                         </Text>
                                         {branch.isPrimary && (
-                                            <View
-                                                style={{
-                                                    backgroundColor: "rgba(66, 165, 245, 0.15)",
-                                                    paddingHorizontal: 8,
-                                                    paddingVertical: 2,
-                                                    borderRadius: 4,
-                                                    marginLeft: 8,
-                                                }}
-                                            >
-                                                <Text
-                                                    style={{
-                                                        color: COLORS.accent,
-                                                        fontSize: 10,
-                                                        fontWeight: "bold",
-                                                        textTransform: "uppercase",
-                                                    }}
-                                                >
+                                            <View style={styles.primaryPill}>
+                                                <Text style={styles.primaryPillText}>
                                                     Primary
                                                 </Text>
                                             </View>
                                         )}
+                                        {branch._legacy && (
+                                            <View style={styles.legacyPill}>
+                                                <Text style={styles.legacyPillText}>
+                                                    Legacy
+                                                </Text>
+                                            </View>
+                                        )}
                                     </View>
-                                    <Text style={{ color: COLORS.muted, marginTop: 4 }}>
+                                    <Text style={styles.branchLocation}>
                                         {branch.areaLabel}, {branch.city}
                                     </Text>
-                                    <Text
-                                        style={{ color: COLORS.muted, fontSize: 12, marginTop: 2 }}
-                                    >
+                                    <Text style={styles.branchAddress}>
                                         {branch.addressLine1}
                                     </Text>
                                 </View>
-                                <MaterialIcons
-                                    name="chevron-right"
-                                    size={24}
-                                    color={COLORS.muted}
-                                />
+                                <MaterialIcons name="chevron-right" size={24} color={COLORS.muted} />
                             </View>
                         </Pressable>
                     ))
                 )}
             </ScrollView>
-        </SafeAreaView>
+        </Screen>
     );
 }
