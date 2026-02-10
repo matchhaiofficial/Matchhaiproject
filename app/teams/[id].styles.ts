@@ -452,6 +452,21 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
     },
+    challengeButton: {
+        backgroundColor: "rgba(0, 230, 118, 0.18)",
+        borderWidth: 1,
+        borderColor: COLORS.successBright,
+        paddingVertical: SPACING.md,
+        borderRadius: RADII.md,
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: SPACING.sm,
+    },
+    challengeButtonText: {
+        color: COLORS.successBright,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
     actionButtonTextDisabled: {
         color: COLORS.muted,
         fontFamily: FONTS.heading,

@@ -297,6 +297,9 @@ export default function ZoneBookingsModule() {
             zoneId: zone.id,
             requestOwnerUid: selectedRequest.userId,
             branchId: primaryBranch?.id || undefined,
+            branchName: primaryBranch?.branchDisplayName || undefined,
+            location: zone.primaryBranch?.areaLabel || zone.venueBrandName || undefined,
+            zoneName: zone.venueBrandName || undefined,
             note: "Accepted via admin queue",
         });
         setProcessingAction(null);
@@ -361,7 +364,7 @@ export default function ZoneBookingsModule() {
             return;
         }
 
-        Alert.alert("Counter-offer sent", "Player can accept this from their offers inbox.");
+        Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
     };
 
     const handleCreateWalkIn = async () => {
@@ -690,19 +693,19 @@ export default function ZoneBookingsModule() {
                             />
 
                             <View style={styles.counterHeader}>
-                                <Text style={styles.detailsTitle}>Counter-offer</Text>
-                                <Pressable
-                                    style={[styles.actionButton, styles.counterButton]}
-                                    onPress={handleCounterOffer}
-                                    disabled={processingAction !== null}
-                                >
-                                    {processingAction === "counter" ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
-                                    ) : (
-                                        <Text style={styles.actionText}>Send Offer</Text>
-                                    )}
-                                </Pressable>
-                            </View>
+                            <Text style={styles.detailsTitle}>Suggest Alternative</Text>
+                            <Pressable
+                                style={[styles.actionButton, styles.counterButton]}
+                                onPress={handleCounterOffer}
+                                disabled={processingAction !== null}
+                            >
+                                {processingAction === "counter" ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <Text style={styles.actionText}>Send Alternative</Text>
+                                )}
+                            </Pressable>
+                        </View>
                             <TextInput
                                 value={counterPrice}
                                 onChangeText={setCounterPrice}
