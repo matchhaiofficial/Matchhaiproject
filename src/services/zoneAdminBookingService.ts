@@ -50,6 +50,8 @@ export interface ZoneBookingQueueItem {
 
 export interface ZoneMatchroomListItem {
     id: string;
+    hostUid?: string | null;
+    hostName?: string | null;
     title: string;
     game: string;
     status: string;
@@ -373,6 +375,8 @@ export function subscribeZoneMatchrooms(
                 );
                 return {
                     id: row.id,
+                    hostUid: data.hostUid || null,
+                    hostName: data.hostName || null,
                     title: data.title || "Matchroom",
                     game: data.game || "unknown",
                     status: data.status || "open",
@@ -564,7 +568,10 @@ export async function acceptZoneBookingRequest(input: {
             slotsB: [],
         };
 
-        const matchroomResult = await createMatchroom(matchroomData);
+        const matchroomResult = await createMatchroom({
+            ...matchroomData,
+            skipBookingRequest: true,
+        });
         if (!matchroomResult.ok) {
             return { ok: false as const, message: matchroomResult.message || "Failed to create matchroom." };
         }

@@ -1,11 +1,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { memo } from "react";
+import React, { memo, useEffect, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
 import { Matchroom } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
-import { isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
+import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
 import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
@@ -22,6 +22,37 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     // Check if room is locked/full
     const isLocked = isRoomLocked(room);
     const isFull = isRoomFull(room);
+    const isExpired = isRoomExpired(room);
+    const [nowMs, setNowMs] = useState(() => Date.now());
+
+    useEffect(() => {
+        const id = setInterval(() => setNowMs(Date.now()), 60 * 1000);
+        return () => clearInterval(id);
+    }, []);
+
+    const formatCountdown = (ms: number) => {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const days = Math.floor(total / (24 * 3600));
+        const hours = Math.floor((total % (24 * 3600)) / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+    };
+
+    const expiresAt = getRoomExpiresAt(room);
+    const lockAt = getRoomLockAt(room);
+    const expiryLabel = (() => {
+        if (isExpired) return "EXPIRED";
+        if (isFull) {
+            if (!lockAt) return null;
+            const diff = lockAt.getTime() - nowMs;
+            return diff <= 0 ? "LOCKED" : `LOCKS IN ${formatCountdown(diff)}`;
+        }
+        if (!expiresAt) return null;
+        const diff = expiresAt.getTime() - nowMs;
+        return diff <= 0 ? "EXPIRED" : `EXPIRES IN ${formatCountdown(diff)}`;
+    })();
 
     // Prepare Roles/Skills for display
     const displayRoles: string[] = [];
@@ -91,6 +122,13 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             <MaterialIcons name="lock" size={10} color="#FFF" />
                             <Text style={styles.lockBadgeText}>
                                 {isFull ? 'FULL' : 'LOCKED'}
+                            </Text>
+                        </View>
+                    )}
+                    {!!expiryLabel && (
+                        <View style={[styles.lockBadge, { backgroundColor: isExpired ? COLORS.error : COLORS.overlayMedium }]}>
+                            <Text style={styles.lockBadgeText}>
+                                {expiryLabel}
                             </Text>
                         </View>
                     )}
