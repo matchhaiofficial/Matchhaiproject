@@ -10,6 +10,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
 import { respondFriendRequest, respondToJoinRequest, respondToMatchroomInvite, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
+import { respondToTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
@@ -19,7 +20,7 @@ const SWIPE_THRESHOLD = -80;
 
 interface Notification {
     id: string;
-    type: 'friend_request' | 'team_invite' | 'team_join_request' | 'team_join_decision' | 'match_booking_captain_approval' | 'match_seat_invitation' | 'match_join_request';
+    type: 'friend_request' | 'team_invite' | 'team_join_request' | 'team_join_decision' | 'match_booking_captain_approval' | 'match_seat_invitation' | 'match_join_request' | 'team_match_challenge' | 'team_match_challenge_update';
     fromUid: string;
     fromUsername: string;
     status: 'pending' | 'accepted' | 'declined' | 'rejected';
@@ -39,6 +40,9 @@ interface Notification {
         intentId?: string;
         side?: string;
         role?: string;
+        challengeId?: string;
+        challengerTeamName?: string;
+        opponentTeamName?: string;
     };
 }
 
@@ -137,6 +141,25 @@ export default function Inbox() {
         try {
             const res = await respondToTeamInvite({ notificationId: notifId, decision });
             if (!res.ok) alert(res.message || 'Failed to respond.');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setProcessing(null);
+        }
+    };
+
+    const handleTeamChallengeResponse = async (notifId: string, decision: 'accept' | 'reject') => {
+        if (processing) return;
+        setProcessing(notifId);
+        try {
+            const res = await respondToTeamMatchChallenge({ notificationId: notifId, decision });
+            if (!res.ok) {
+                alert(res.message || 'Failed to respond to challenge.');
+                return;
+            }
+            if (decision === 'accept' && res.challengeId) {
+                router.push(`/teams/challenge?id=${res.challengeId}` as any);
+            }
         } catch (e) {
             console.error(e);
         } finally {
@@ -477,31 +500,44 @@ export default function Inbox() {
         const isDecision = item.type === 'team_join_decision';
         const isBookingApproval = item.type === 'match_booking_captain_approval';
         const isSeatInv = item.type === 'match_seat_invitation';
+        const isTeamChallenge = item.type === 'team_match_challenge';
+        const isTeamChallengeUpdate = item.type === 'team_match_challenge_update';
         const isPending = item.status === 'pending';
         const isProcessing = processing === item.id;
+        const typeLabel = isRequest
+            ? "Friend Request"
+            : isJoinRequest
+                ? "Team Join Request"
+                : isMatchJoinRequest
+                    ? "Matchroom Join Request"
+                    : isTeamInvite
+                        ? "Team Invitation"
+                        : isBookingApproval
+                            ? "Booking Approval"
+                            : isSeatInv
+                                ? "Seat Invitation"
+                                : isTeamChallenge
+                                    ? "Team Match Challenge"
+                                    : isTeamChallengeUpdate
+                                        ? "Challenge Update"
+                                        : "Team Update";
 
-        const iconColor = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? COLORS.accent : COLORS.success;
-        const iconBg = (isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) ? 'rgba(66, 165, 245, 0.1)' : 'rgba(76, 175, 80, 0.1)';
+        const isInfoType = isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv || isTeamChallenge || isTeamChallengeUpdate;
+        const iconColor = isInfoType ? COLORS.accent : COLORS.success;
+        const iconBg = isInfoType ? 'rgba(66, 165, 245, 0.1)' : 'rgba(76, 175, 80, 0.1)';
 
         const cardContent = (
             <View style={[styles.notificationCard, { marginBottom: 0 }]}>
                 <View style={styles.cardHeader}>
                     <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
                         <MaterialIcons
-                            name={isRequest ? "person-add" : (isJoinRequest || isTeamInvite ? "group" : (isBookingApproval ? "gavel" : (isSeatInv ? "event-seat" : "info")))}
+                            name={isRequest ? "person-add" : (isJoinRequest || isTeamInvite ? "group" : (isBookingApproval ? "gavel" : (isSeatInv ? "event-seat" : (isTeamChallenge || isTeamChallengeUpdate ? "sports-esports" : "info"))))}
                             size={20}
                             color={iconColor}
                         />
                     </View>
                     <View style={styles.headerInfo}>
-                        <Text style={styles.typeText}>
-                            {isRequest ? "Friend Request" :
-                                (isJoinRequest ? "Team Join Request" :
-                                    (isMatchJoinRequest ? "Matchroom Join Request" :
-                                        (isTeamInvite ? "Team Invitation" :
-                                            (isBookingApproval ? "Booking Approval" :
-                                                (isSeatInv ? "Seat Invitation" : "Team Update")))))}
-                        </Text>
+                        <Text style={styles.typeText}>{typeLabel}</Text>
                         <Text style={styles.timeText}>{getTimeAgo(item.createdAt)}</Text>
                     </View>
                     {!isPending && (
@@ -564,6 +600,18 @@ export default function Inbox() {
                                     {" match."}
                                 </>
                             )}
+                            {isTeamChallenge && (
+                                <>
+                                    {" challenged your team for a "}
+                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.game || "match"}</Text>
+                                    {" match."}
+                                </>
+                            )}
+                            {isTeamChallengeUpdate && (
+                                <>
+                                    {" updated challenge status. Open the challenge workspace to continue."}
+                                </>
+                            )}
                         </Text>
                     </View>
 
@@ -577,7 +625,7 @@ export default function Inbox() {
                     )}
                 </View>
 
-                {isPending && (isRequest || isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) && (
+                {isPending && (isRequest || isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv || isTeamChallenge) && (
                     <View style={styles.actionRow}>
                         <TouchableOpacity
                             disabled={!!processing}
@@ -593,6 +641,7 @@ export default function Inbox() {
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'accept');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'approved');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'accept');
+                                else if (isTeamChallenge) handleTeamChallengeResponse(item.id, 'accept');
                             }}
                             style={styles.acceptButton}
                             activeOpacity={0.85}
@@ -602,7 +651,7 @@ export default function Inbox() {
                                 <ActivityIndicator color="#FFF" size="small" />
                             ) : (
                                 <Text style={styles.buttonText}>
-                                    {isSeatInv ? "Claim Seat" : "Approve"}
+                                    {isSeatInv ? "Claim Seat" : (isTeamChallenge ? "Accept" : "Approve")}
                                 </Text>
                             )}
                         </TouchableOpacity>
@@ -621,12 +670,24 @@ export default function Inbox() {
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'decline');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'rejected');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'decline');
+                                else if (isTeamChallenge) handleTeamChallengeResponse(item.id, 'reject');
                             }}
                             style={styles.declineButton}
                             activeOpacity={0.85}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
                             <Text style={styles.declineButtonText}>Reject</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+                {(item.meta?.challengeId && (isTeamChallenge || isTeamChallengeUpdate || item.status !== 'pending')) && (
+                    <View style={styles.actionRow}>
+                        <TouchableOpacity
+                            style={styles.acceptButton}
+                            onPress={() => router.push(`/teams/challenge?id=${item.meta?.challengeId}` as any)}
+                            activeOpacity={0.85}
+                        >
+                            <Text style={styles.buttonText}>Open Challenge</Text>
                         </TouchableOpacity>
                     </View>
                 )}

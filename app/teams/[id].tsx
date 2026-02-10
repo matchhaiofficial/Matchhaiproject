@@ -11,6 +11,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
+import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -51,6 +52,7 @@ export default function TeamDetails() {
 
     // Invite States
     const [showInviteSheet, setShowInviteSheet] = useState(false);
+    const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     // Optimized fetchTeam: 1 doc read + 1 members query + 1 request check = 3 reads total
@@ -116,6 +118,17 @@ export default function TeamDetails() {
     useEffect(() => {
         fetchTeam();
     }, [id, user]);
+
+    useEffect(() => {
+        if (!user?.uid) return;
+        getCaptainedTeams(user.uid).then((result) => {
+            if (result.ok && result.data) {
+                setCaptainedTeams(result.data);
+            } else {
+                setCaptainedTeams([]);
+            }
+        });
+    }, [user?.uid]);
 
     // Role & Permission Checks
     const isMember = team?.members?.some(m => m.uid === user?.uid) || false;
@@ -437,6 +450,28 @@ export default function TeamDetails() {
         );
     };
 
+    const handleChallenge = async () => {
+        if (!team?.id || !user?.uid) return;
+        const candidates = captainedTeams.filter(
+            (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+        );
+        if (candidates.length === 0) {
+            Alert.alert("Captain team required", `Captain a ${String(team.game || "").toUpperCase()} team first to challenge.`);
+            return;
+        }
+        const challenger = candidates[0];
+        const result = await sendTeamMatchChallenge({
+            challengerTeamId: challenger.id!,
+            opponentTeamId: team.id,
+            maxPlayers: Math.max(Number(challenger.maxMembers || 0) + Number(team.maxMembers || 0), 2),
+        });
+        if (!result.ok) {
+            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
+            return;
+        }
+        Alert.alert("Challenge sent", `${challenger.name} challenged ${team.name}.`);
+    };
+
     // Button State Logic
     const getButtonState = () => {
         if (isMember) return 'member';
@@ -723,6 +758,18 @@ export default function TeamDetails() {
                 <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom + 12, SPACING.lg) }]}>
                     {buttonState === 'eligible' && (
                         <>
+                            {captainedTeams.some(
+                                (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+                            ) ? (
+                                <TouchableOpacity
+                                    onPress={handleChallenge}
+                                    disabled={submitting}
+                                    style={[styles.challengeButton, submitting && styles.actionButtonDisabled]}
+                                    activeOpacity={0.85}
+                                >
+                                    <Text style={styles.challengeButtonText}>Challenge Team</Text>
+                                </TouchableOpacity>
+                            ) : null}
                             <TouchableOpacity
                                 onPressIn={() => {
                                     if (touchDebugEnabled) {
