@@ -11,6 +11,7 @@ import {
     updateDoc,
     where
 } from 'firebase/firestore';
+import { createMatchroom, type Matchroom } from "./matchService";
 import { db } from '../config/firebaseConfig';
 import Logger from '../utils/logger';
 
@@ -61,6 +62,7 @@ export interface BookingRequest {
     // Status
     status: 'open' | 'pending_payment' | 'accepted' | 'expired' | 'cancelled';
     acceptedOfferId?: string;
+    matchroomId?: string;
 
     // Payment placeholder (production)
     paymentStatus?: 'paid' | 'unpaid';
@@ -106,6 +108,68 @@ const toMillis = (value: any) => {
     if (value instanceof Date) return value.getTime();
     if (typeof value === 'number') return value;
     return 0;
+};
+
+const toDateString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length >= 8) return trimmed;
+    }
+    const millis = toMillis(value);
+    if (!millis) return undefined;
+    return new Date(millis).toISOString().slice(0, 10);
+};
+
+const toTimeString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") return value.trim();
+    const millis = toMillis(value);
+    if (!millis) return undefined;
+    return new Date(millis).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+
+const toDurationMinutes = (request: BookingRequest) => {
+    const gameKey = String(request.gameKey || "").toLowerCase();
+    const seriesType = String(request.seriesType || "").toUpperCase();
+    const overs = String(request.overs || "").trim();
+
+    if (gameKey === "futsal") {
+        const hours = Number(request.durationHours || 0);
+        if (Number.isFinite(hours) && hours > 0) return Math.round(hours * 60);
+        return 60;
+    }
+    if (gameKey === "indoor_cricket") {
+        if (overs === "6") return 150;
+        if (overs === "5") return 120;
+        return 120;
+    }
+    if (gameKey === "cs2") {
+        if (seriesType === "BO1") return 60;
+        if (seriesType === "BO3") return 180;
+        if (seriesType === "BO5") return 300;
+        if (seriesType === "BO10") return 600;
+        return 60;
+    }
+    if (gameKey === "fc26") {
+        if (seriesType === "BO1") return 30;
+        if (seriesType === "BO3") return 60;
+        if (seriesType === "BO5") return 120;
+        if (seriesType === "BO10") return 180;
+        return 60;
+    }
+    if (gameKey === "tekken8") {
+        if (seriesType === "BO7") return 60;
+        if (seriesType === "BO20") return 120;
+        if (seriesType === "BO40") return 180;
+        return 60;
+    }
+    if (gameKey === "padel" || gameKey === "pickleball") {
+        if (seriesType === "BO5") return 120;
+        if (seriesType === "BO10") return 180;
+        return 60;
+    }
+    return 60;
 };
 
 const normalizeZoneOffer = (id: string, data: any): ZoneOffer => {
@@ -443,10 +507,86 @@ export const acceptOffer = async (
     requestId: string
 ): Promise<{ ok: boolean; matchroomId?: string; message?: string }> => {
     try {
+        const offerSnap = await getDoc(doc(db, 'booking_offers', offerId));
+        if (!offerSnap.exists()) {
+            return { ok: false, message: 'Offer not found' };
+        }
+        const offer = normalizeZoneOffer(offerSnap.id, offerSnap.data());
+
+        const requestSnap = await getDoc(doc(db, 'booking_requests', requestId));
+        if (!requestSnap.exists()) {
+            return { ok: false, message: 'Booking request not found' };
+        }
+        const request = requestSnap.data() as BookingRequest;
+        if (!request.userId) {
+            return { ok: false, message: 'Request owner missing' };
+        }
+
+        const scheduledDate = toDateString(offer.proposedDate || request.preferredDate);
+        const scheduledTime = toTimeString(offer.proposedTime || request.preferredTime);
+        const paymentSlots = Number(request.paymentReservedSlots || request.reservedSlots || 1);
+        const paymentAmount = Math.max(0, offer.pricePerPlayer * paymentSlots);
+
+        const matchroomData: Matchroom = {
+            hostUid: request.userId,
+            hostName: request.userName || "Player",
+            game: request.gameKey,
+            title: request.title || "Zone Booking",
+            description: request.description || "Accepted zone booking request",
+            status: "open",
+            maxPlayers: Number(request.maxPlayers || 10),
+            currentPlayers: 1,
+            players: [{
+                uid: request.userId,
+                username: request.userName || "Player",
+                joinedAt: new Date(),
+                role: "Host",
+            }],
+            playerUids: [request.userId],
+            createdAt: new Date(),
+            locationMode: "zone",
+            zoneId: offer.zoneId,
+            location: offer.location || offer.branchName || offer.zoneName || "Zone Venue",
+            scheduledDate,
+            scheduledTime,
+            durationMinutes: toDurationMinutes(request),
+            pricing: {
+                perPlayer: offer.pricePerPlayer,
+                currency: offer.currency || "PKR",
+            },
+            format: request.format,
+            seriesType: request.seriesType || null,
+            durationHours: request.durationHours || null,
+            selectedMaps: request.selectedMaps || [],
+            skillLevel: request.skillLevel,
+            hostSkillScore: request.hostSkillScore ?? null,
+            hostSkillTier: request.hostSkillTier ?? "Any",
+            hostSkillContext: request.hostSkillContext,
+            overs: request.overs ? Number(request.overs) : null,
+            teamMode: request.teamMode,
+            teamId: request.teamId || null,
+            reservedSlots: request.reservedSlots,
+            flexibility: request.flexibilityWindow,
+            paymentStatus: request.paymentStatus || "unpaid",
+            paymentAmount,
+            paymentReservedSlots: paymentSlots,
+            paymentCurrency: offer.currency || "PKR",
+            isLocked: request.paymentStatus !== "paid",
+            zoneAdminApproved: true,
+            slotsA: [],
+            slotsB: [],
+        };
+
+        const matchroomResult = await createMatchroom(matchroomData);
+        if (!matchroomResult.ok) {
+            return { ok: false, message: matchroomResult.message || "Failed to create matchroom" };
+        }
+
         // Update offer status
         const offerRef = doc(db, 'booking_offers', offerId);
         await updateDoc(offerRef, {
             status: 'accepted',
+            matchroomId: matchroomResult.id,
             updatedAt: serverTimestamp(),
         });
 
@@ -455,6 +595,9 @@ export const acceptOffer = async (
         await updateDoc(requestRef, {
             status: 'accepted',
             acceptedOfferId: offerId,
+            zoneId: offer.zoneId,
+            matchroomId: matchroomResult.id,
+            lifecycleStatus: "confirmed",
             updatedAt: serverTimestamp(),
         });
 
@@ -472,12 +615,27 @@ export const acceptOffer = async (
             );
         }
 
-        // TODO: Create matchroom from accepted offer
-        // This would call createMatchroom() with data from request + accepted offer
-        // For MVP, returning success - actual matchroom creation can be done separately
+        await addDoc(collection(db, "notifications"), {
+            type: "booking_offer_accepted",
+            fromUid: request.userId,
+            fromUsername: request.userName || "Player",
+            toUid: offer.zoneOwnerUid,
+            status: "pending",
+            createdAt: serverTimestamp(),
+            title: "Offer accepted",
+            message: `${request.userName || "Player"} accepted your offer for ${request.title || request.gameKey}.`,
+            meta: {
+                requestId,
+                offerId,
+                matchroomId: matchroomResult.id,
+                zoneId: offer.zoneId,
+                proposedDate: scheduledDate || null,
+                proposedTime: scheduledTime || null,
+            },
+        });
 
         Logger.info('bookingRequestService', 'Accepted offer', { offerId, requestId });
-        return { ok: true };
+        return { ok: true, matchroomId: matchroomResult.id };
     } catch (error) {
         Logger.error('bookingRequestService', 'Error accepting offer', error);
         return { ok: false, message: 'Failed to accept offer' };
