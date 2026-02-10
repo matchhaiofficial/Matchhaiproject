@@ -218,20 +218,27 @@ export default StyleSheet.create({
         height: 40,
         borderRadius: RADII.pill,
         borderWidth: 1,
-        borderColor: COLORS.accent,
-        backgroundColor: "rgba(66, 165, 245, 0.14)",
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
         alignItems: "center",
         justifyContent: "center",
         paddingHorizontal: SPACING.md,
+    },
+    selectionActionActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: "rgba(66, 165, 245, 0.2)",
     },
     selectionActionPressed: {
         opacity: 0.85,
     },
     selectionActionText: {
-        color: COLORS.text,
+        color: COLORS.muted,
         fontFamily: FONTS.body,
         fontSize: 13,
         fontWeight: "700",
+    },
+    selectionActionTextActive: {
+        color: COLORS.text,
     },
     bulkStatusWrap: {
         marginBottom: SPACING.sm,

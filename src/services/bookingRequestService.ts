@@ -577,7 +577,10 @@ export const acceptOffer = async (
             slotsB: [],
         };
 
-        const matchroomResult = await createMatchroom(matchroomData);
+        const matchroomResult = await createMatchroom({
+            ...matchroomData,
+            skipBookingRequest: true,
+        });
         if (!matchroomResult.ok) {
             return { ok: false, message: matchroomResult.message || "Failed to create matchroom" };
         }

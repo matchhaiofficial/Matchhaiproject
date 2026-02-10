@@ -242,6 +242,11 @@ export default function ZoneResourcesModule() {
     }, [selectedRequest]);
     const allocationGap = requestedCount - selectedResourceIds.length;
     const needsMoreResources = selectedRequest && requestedCount > 0 && allocationGap > 0;
+    const isClearSelectionActive = selectedResourceIds.length === 0;
+    const isSelectVisibleActive =
+        !isClearSelectionActive &&
+        filteredResources.length > 0 &&
+        selectedResourceIds.length === filteredResources.length;
 
     const statusSummary = useMemo(() => {
         const summary: Record<ResourceLifecycleStatus, number> = {
@@ -482,20 +487,36 @@ export default function ZoneResourcesModule() {
                                         <Pressable
                                             style={({ pressed }) => [
                                                 styles.selectionAction,
+                                                isSelectVisibleActive && styles.selectionActionActive,
                                                 pressed && styles.selectionActionPressed,
                                             ]}
                                             onPress={() => setSelectedResourceIds(filteredResources.map((item) => item.id))}
                                         >
-                                            <Text style={styles.selectionActionText}>Select visible</Text>
+                                            <Text
+                                                style={[
+                                                    styles.selectionActionText,
+                                                    isSelectVisibleActive && styles.selectionActionTextActive,
+                                                ]}
+                                            >
+                                                Select visible
+                                            </Text>
                                         </Pressable>
                                         <Pressable
                                             style={({ pressed }) => [
                                                 styles.selectionAction,
+                                                isClearSelectionActive && styles.selectionActionActive,
                                                 pressed && styles.selectionActionPressed,
                                             ]}
                                             onPress={() => setSelectedResourceIds([])}
                                         >
-                                            <Text style={styles.selectionActionText}>Clear selection</Text>
+                                            <Text
+                                                style={[
+                                                    styles.selectionActionText,
+                                                    isClearSelectionActive && styles.selectionActionTextActive,
+                                                ]}
+                                            >
+                                                Clear selection
+                                            </Text>
                                         </Pressable>
                                     </View>
                                     <View style={styles.bulkStatusWrap}>
@@ -573,20 +594,36 @@ export default function ZoneResourcesModule() {
                                 <Pressable
                                     style={({ pressed }) => [
                                         styles.selectionAction,
+                                        isSelectVisibleActive && styles.selectionActionActive,
                                         pressed && styles.selectionActionPressed,
                                     ]}
                                     onPress={() => setSelectedResourceIds(filteredResources.map((item) => item.id))}
                                 >
-                                    <Text style={styles.selectionActionText}>Select visible</Text>
+                                    <Text
+                                        style={[
+                                            styles.selectionActionText,
+                                            isSelectVisibleActive && styles.selectionActionTextActive,
+                                        ]}
+                                    >
+                                        Select visible
+                                    </Text>
                                 </Pressable>
                                 <Pressable
                                     style={({ pressed }) => [
                                         styles.selectionAction,
+                                        isClearSelectionActive && styles.selectionActionActive,
                                         pressed && styles.selectionActionPressed,
                                     ]}
                                     onPress={() => setSelectedResourceIds([])}
                                 >
-                                    <Text style={styles.selectionActionText}>Clear selection</Text>
+                                    <Text
+                                        style={[
+                                            styles.selectionActionText,
+                                            isClearSelectionActive && styles.selectionActionTextActive,
+                                        ]}
+                                    >
+                                        Clear selection
+                                    </Text>
                                 </Pressable>
                             </View>
                             <View style={styles.bulkStatusWrap}>
