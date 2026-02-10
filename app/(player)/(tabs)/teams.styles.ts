@@ -21,6 +21,26 @@ export default StyleSheet.create({
     segmentTabs: {
         marginBottom: SPACING.md,
     },
+    challengeHubButton: {
+        marginBottom: SPACING.sm,
+        alignSelf: "flex-start",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.successBright,
+        backgroundColor: "rgba(0, 230, 118, 0.12)",
+    },
+    challengeHubButtonText: {
+        color: COLORS.successBright,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+        fontWeight: "700",
+        textTransform: "uppercase",
+    },
 
     // Search Bar (matching Find Match)
     searchBar: {
@@ -182,6 +202,20 @@ export default StyleSheet.create({
     },
     requestBtnText: {
         color: COLORS.accent,
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+    },
+    challengeBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        backgroundColor: 'rgba(0, 230, 118, 0.15)',
+        borderWidth: 1,
+        borderColor: COLORS.successBright,
+    },
+    challengeBtnText: {
+        color: COLORS.successBright,
         fontSize: 11,
         fontWeight: '700',
         textTransform: 'uppercase',

@@ -23,6 +23,7 @@ import { collection, doc, getDoc, getDocs, query, where } from "firebase/firesto
 import SkillBadge from "../../src/components/SkillBadge";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
 import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
@@ -117,14 +118,29 @@ export default function MatchroomDetails() {
     }, [id, user]);
 
     useEffect(() => {
-        if (user) {
-            import('../../src/services/userService').then(({ getUserProfile }) => {
-                getUserProfile(user.uid).then(res => {
-                    if (res.ok) setProfile(res.data);
-                });
-            });
-        }
+        if (!user) return;
+        getUserProfile(user.uid).then(res => {
+            if (res.ok) setProfile(res.data);
+        });
     }, [user]);
+
+    const isZoneAdmin = profile?.role === "zone-admin" || profile?.role === "super-admin";
+    const bookingRequestId = useMemo(() => {
+        if (!room) return null;
+        const raw: any = room as any;
+        return raw.bookingRequestId || raw.requestId || raw.booking?.requestId || raw.bookingRequest?.id || null;
+    }, [room]);
+
+    const openBookingQueue = () => {
+        if (!bookingRequestId) {
+            Alert.alert("No booking request linked", "This lobby is not linked to a booking request.");
+            return;
+        }
+        router.push({
+            pathname: "/zone/modules/bookings",
+            params: { segment: "requests", requestId: bookingRequestId },
+        } as any);
+    };
 
     // Fetch ratings when players list updates
     useEffect(() => {
@@ -191,7 +207,6 @@ export default function MatchroomDetails() {
             // Determine Role from Profile - Ensure we have latest profile
             let currentProfile = profile;
             if (!currentProfile && user) {
-                const { getUserProfile } = await import('../../src/services/userService');
                 const res = await getUserProfile(user.uid);
                 if (res.ok) {
                     currentProfile = res.data;
@@ -910,7 +925,7 @@ export default function MatchroomDetails() {
                                                     <Text style={styles.inviteSlotText}>Invite</Text>
                                                 </TouchableOpacity>
                                             )}
-                                            {!isJoined && canJoin && (
+                                            {!isJoined && canJoin && !isZoneAdmin && (
                                                 (() => {
                                                     const status = requestedSlots.get(slot.slotId);
                                                     if (status === 'pending') {
@@ -1021,7 +1036,7 @@ export default function MatchroomDetails() {
                                                     <Text style={styles.inviteSlotText}>Invite</Text>
                                                 </TouchableOpacity>
                                             )}
-                                            {!isJoined && canJoin && (
+                                            {!isJoined && canJoin && !isZoneAdmin && (
                                                 (() => {
                                                     const status = requestedSlots.get(slot.slotId);
                                                     if (status === 'pending') {
@@ -1112,7 +1127,42 @@ export default function MatchroomDetails() {
 
             {/* Footer Actions */}
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + SPACING.sm, SPACING.lg + 12) }]}>
-                {isExpired ? (
+                {isZoneAdmin ? (
+                    <View style={{ gap: SPACING.sm }}>
+                        <Text style={{ textAlign: "center", color: COLORS.textSecondary }}>
+                            Booking actions (zone admin)
+                        </Text>
+                        <View style={styles.footerRow}>
+                            <TouchableOpacity
+                                style={[styles.joinButton, { flex: 1, opacity: bookingRequestId ? 1 : 0.5 }]}
+                                onPress={openBookingQueue}
+                                disabled={!bookingRequestId}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <Text style={styles.joinButtonText}>Accept</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.secondaryButton, { flex: 1, opacity: bookingRequestId ? 1 : 0.5 }]}
+                                onPress={openBookingQueue}
+                                disabled={!bookingRequestId}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <Text style={styles.secondaryButtonText}>Reject</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <TouchableOpacity
+                            style={[styles.joinButton, { backgroundColor: COLORS.warning, opacity: bookingRequestId ? 1 : 0.5 }]}
+                            onPress={openBookingQueue}
+                            disabled={!bookingRequestId}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Text style={styles.joinButtonText}>Suggest Alternative</Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : isExpired ? (
                     <View style={[styles.fullButton, styles.expiredBanner]}>
                         <Text style={styles.fullText}>Matchroom Expired</Text>
                     </View>

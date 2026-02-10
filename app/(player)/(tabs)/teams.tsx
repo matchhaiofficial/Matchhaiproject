@@ -21,6 +21,7 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../src/services/teamService";
+import { getCaptainedTeams, sendTeamMatchChallenge } from "../../../src/services/teamMatchService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./teams.styles";
@@ -51,6 +52,7 @@ export default function Teams() {
     const [hasMore, setHasMore] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [requestedTeamIds, setRequestedTeamIds] = useState<Set<string>>(new Set());
+    const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -104,6 +106,16 @@ export default function Teams() {
         } finally {
             setLoading(false);
             setRefreshing(false);
+        }
+    };
+
+    const fetchCaptainedTeams = async () => {
+        if (!user?.uid) return;
+        const result = await getCaptainedTeams(user.uid);
+        if (result.ok && result.data) {
+            setCaptainedTeams(result.data);
+        } else {
+            setCaptainedTeams([]);
         }
     };
 
@@ -173,6 +185,7 @@ export default function Teams() {
             fetchPublicTeams();
             fetchSocialState();
         }
+        fetchCaptainedTeams();
     }, [user, mode, selectedGame]); // Intentionally not including searchQuery here to prevent instant fetch spam
 
     const handleSearch = () => {
@@ -203,6 +216,33 @@ export default function Teams() {
             Logger.error("Teams", "Join request error", e);
             Alert.alert("Error", "An unexpected error occurred.");
         }
+    };
+
+    const handleChallengeTeam = async (opponent: Team) => {
+        if (!opponent.id || !user?.uid) return;
+        const captainedForGame = captainedTeams.filter(
+            (team) => String(team.game || "").toLowerCase() === String(opponent.game || "").toLowerCase(),
+        );
+        if (captainedForGame.length === 0) {
+            Alert.alert("Captain team required", `Create or captain a ${String(opponent.game || "").toUpperCase()} team first.`);
+            return;
+        }
+
+        const challenger = captainedForGame[0];
+        const result = await sendTeamMatchChallenge({
+            challengerTeamId: challenger.id!,
+            opponentTeamId: opponent.id,
+            maxPlayers: Math.max(Number(challenger.maxMembers || 0) + Number(opponent.maxMembers || 0), 2),
+        });
+        if (!result.ok) {
+            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
+            return;
+        }
+        Alert.alert("Challenge sent", `${challenger.name} challenged ${opponent.name}.`);
+    };
+
+    const handleOpenChallenges = () => {
+        router.push("/teams/challenges" as any);
     };
 
     const filteredTeams = useMemo(() => {
@@ -259,7 +299,14 @@ export default function Teams() {
                             <Text style={styles.viewBtnText}>View</Text>
                         </TouchableOpacity>
                     ) : (
-                        isRequested ? (
+                        captainedTeams.some((team) => String(team.game || "").toLowerCase() === String(item.game || "").toLowerCase()) ? (
+                            <TouchableOpacity
+                                style={styles.challengeBtn}
+                                onPress={() => handleChallengeTeam(item)}
+                            >
+                                <Text style={styles.challengeBtnText}>Challenge</Text>
+                            </TouchableOpacity>
+                        ) : isRequested ? (
                             <View style={styles.requestedBtn}>
                                 <Text style={styles.requestedBtnText}>Requested</Text>
                             </View>
@@ -325,6 +372,17 @@ export default function Teams() {
                     style={styles.segmentTabs}
                     compact
                 />
+
+                {captainedTeams.length > 0 && (
+                    <TouchableOpacity
+                        onPress={handleOpenChallenges}
+                        style={styles.challengeHubButton}
+                        activeOpacity={0.85}
+                    >
+                        <MaterialIcons name="sports-esports" size={16} color={COLORS.successBright} />
+                        <Text style={styles.challengeHubButtonText}>My Challenges</Text>
+                    </TouchableOpacity>
+                )}
 
                 {/* Search Bar */}
                 <View style={styles.searchBar}>
