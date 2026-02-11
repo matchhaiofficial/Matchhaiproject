@@ -258,6 +258,22 @@ export default StyleSheet.create({
         fontWeight: '700',
         textTransform: 'uppercase',
     },
+    acceptBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        backgroundColor: COLORS.success + '33',
+        borderWidth: 1.5,
+        borderColor: COLORS.success,
+    },
+    acceptBtnText: {
+        color: COLORS.success,
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+    },
     joinedBtn: {
         paddingHorizontal: 10,
         paddingVertical: 4,

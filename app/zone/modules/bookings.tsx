@@ -34,6 +34,7 @@ import {
     type ZoneMatchroomListItem,
 } from "../../../src/services/zoneAdminBookingService";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 import styles from "./bookings.styles";
 
 type Segment = "requests" | "matchrooms" | "walkins";
@@ -151,7 +152,7 @@ const toDateString = (value: any) => {
 };
 
 const requestToMatchroomCardData = (item: ZoneBookingQueueItem): Matchroom => ({
-    id: item.id,
+    id: getRequestMatchroomId(item) || item.id,
     hostUid: item.userId,
     hostName: item.userName,
     game: item.gameKey.toUpperCase(),
@@ -220,6 +221,7 @@ export default function ZoneBookingsModule() {
     const [showFilters, setShowFilters] = useState(true);
     const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
     const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
+    const [showCounterModal, setShowCounterModal] = useState(false);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
     const [linkedRequests, setLinkedRequests] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
@@ -579,29 +581,39 @@ export default function ZoneBookingsModule() {
 
         const counterDateTime = formatDateTime(counterDateValue);
         setProcessingAction("counter");
-        const result = await sendZoneCounterOffer({
-            requestId: selectedRequest.id,
-            requestOwnerUid: selectedRequest.userId,
-            zoneId: zone.id,
-            zoneName: zone.venueBrandName || "Zone",
-            zoneOwnerUid: user.uid,
-            branchId: primaryBranch?.id || undefined,
-            branchName: primaryBranch?.branchDisplayName || null,
-            proposedDate: counterDateTime.date,
-            proposedTime: counterDateTime.time,
-            pricePerPlayer: parsedPrice,
-            currency: selectedRequest.currency || "PKR",
-            location: zone.primaryBranch?.areaLabel || "",
-            message: counterMessage.trim(),
-            expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
-        });
-        setProcessingAction(null);
-        if (!result.ok) {
-            Alert.alert("Counter-offer failed", result.message);
-            return;
-        }
+        try {
+            const result = await sendZoneCounterOffer({
+                requestId: selectedRequest.id,
+                requestOwnerUid: selectedRequest.userId,
+                zoneId: zone.id,
+                zoneName: zone.venueBrandName || "Zone",
+                zoneOwnerUid: user.uid,
+                branchId: primaryBranch?.id || undefined,
+                branchName: primaryBranch?.branchDisplayName || null,
+                proposedDate: counterDateTime.date,
+                proposedTime: counterDateTime.time,
+                pricePerPlayer: parsedPrice,
+                currency: selectedRequest.currency || "PKR",
+                location: zone.primaryBranch?.areaLabel || "",
+                message: counterMessage.trim(),
+                expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
+            });
 
-        Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
+            if (!result.ok) {
+                Alert.alert("Counter-offer failed", result.message);
+                return;
+            }
+
+            Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
+            setShowCounterModal(false);
+            setCounterPrice(""); // Reset on success
+            setCounterMessage("");
+        } catch (error: any) {
+            Logger.error("bookings", "handleCounterOffer crashed", error);
+            Alert.alert("Error", "An unexpected error occurred while sending the offer.");
+        } finally {
+            setProcessingAction(null);
+        }
     };
 
     const handleCreateWalkIn = async () => {
@@ -853,96 +865,66 @@ export default function ZoneBookingsModule() {
                                             setSelectedRequestId(item.id);
                                             handleAccept(item);
                                         }}
+                                        onPress={() => {
+                                            setSelectedRequestId(selected ? null : item.id);
+                                        }}
                                         acceptLabel="Accept"
+                                        containerStyle={selected ? { marginBottom: 0 } : undefined}
                                     />
+                                    {/* Inline actions inside the room card when selected */}
+                                    {selected && (
+                                        <View style={styles.inlineActionsCard}>
+                                            <View style={styles.actionsRow}>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.counterButton]}
+                                                    onPress={() => setShowCounterModal(true)}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        <MaterialIcons name="edit" size={16} color="#FFF" />
+                                                        <Text style={[styles.actionText, { marginLeft: 6 }]}>Suggest Alternative</Text>
+                                                    </View>
+                                                </Pressable>
+                                            </View>
+                                            <View style={styles.actionsRow}>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.acceptButton]}
+                                                    onPress={() => handleAccept()}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        {processingAction === "accept" ? (
+                                                            <ActivityIndicator size="small" color="#FFF" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialIcons name="check" size={16} color="#FFF" />
+                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
+                                                            </>
+                                                        )}
+                                                    </View>
+                                                </Pressable>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.rejectButton]}
+                                                    onPress={handleReject}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        {processingAction === "reject" ? (
+                                                            <ActivityIndicator size="small" color="#FFF" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialIcons name="close" size={16} color="#FFF" />
+                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
+                                                            </>
+                                                        )}
+                                                    </View>
+                                                </Pressable>
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
                             );
                         })
-                    )}
-
-                    {selectedRequest && (
-                        <View style={styles.detailsCard}>
-                            <Text style={styles.detailsTitle}>Manage Request</Text>
-                            <Text style={styles.detailsLine}>User: {selectedRequest.userName}</Text>
-                            <Text style={styles.detailsLine}>Game: {selectedRequest.gameKey.toUpperCase()}</Text>
-                            <Text style={styles.detailsLine}>Status: {selectedRequest.status}</Text>
-
-                            <View style={styles.counterHeader}>
-                                <Text style={styles.detailsTitle}>Counter Offer</Text>
-                            </View>
-
-                            <Text style={styles.formLabel}>Counter Price (PKR)</Text>
-                            <TextInput
-                                value={counterPrice}
-                                onChangeText={setCounterPrice}
-                                keyboardType="numeric"
-                                style={styles.input}
-                                placeholder="e.g. 1500"
-                                placeholderTextColor={COLORS.muted}
-                            />
-
-                            <Text style={styles.formLabel}>Expires In (Minutes)</Text>
-                            <TextInput
-                                value={counterExpiryMinutes}
-                                onChangeText={setCounterExpiryMinutes}
-                                keyboardType="numeric"
-                                style={styles.input}
-                                placeholder="e.g. 10"
-                                placeholderTextColor={COLORS.muted}
-                            />
-
-                            <Text style={styles.formLabel}>Message (Optional)</Text>
-                            <TextInput
-                                value={counterMessage}
-                                onChangeText={setCounterMessage}
-                                style={[styles.input, styles.inputMultiline]}
-                                placeholder="e.g. Alternative timing available..."
-                                placeholderTextColor={COLORS.muted}
-                                multiline
-                            />
-
-                            <View style={styles.actionsRow}>
-                                <Pressable
-                                    style={[styles.actionButton, styles.counterButton]}
-                                    onPress={handleCounterOffer}
-                                    disabled={processingAction !== null}
-                                >
-                                    <Text style={styles.actionText}>Send Counter</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.actionButton, styles.acceptButton]}
-                                    onPress={() => handleAccept()}
-                                    disabled={processingAction !== null}
-                                >
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                        {processingAction === "accept" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <>
-                                                <MaterialIcons name="check" size={16} color="#FFF" />
-                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.actionButton, styles.rejectButton]}
-                                    onPress={handleReject}
-                                    disabled={processingAction !== null}
-                                >
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                        {processingAction === "reject" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <>
-                                                <MaterialIcons name="close" size={16} color="#FFF" />
-                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </Pressable>
-                            </View>
-                        </View>
                     )}
                 </ScrollView>
             ) : null}
@@ -967,6 +949,7 @@ export default function ZoneBookingsModule() {
                                             item,
                                             zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
                                         )}
+                                        containerStyle={focusedMatchroomId === item.id ? { marginBottom: 0 } : undefined}
                                     />
                                     {item.bookingSource === "walkin" ? (
                                         <View style={styles.walkinChipOverlay}>
@@ -1258,6 +1241,95 @@ export default function ZoneBookingsModule() {
                         </View>
                     </View>
                 </View>
+            </Modal>
+            {/* Counter Offer Modal */}
+            <Modal
+                visible={showCounterModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => !processingAction && setShowCounterModal(false)}
+            >
+                <TouchableWithoutFeedback onPress={() => !processingAction && setShowCounterModal(false)}>
+                    <View style={styles.modalOverlay}>
+                        <TouchableWithoutFeedback>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <View>
+                                        <Text style={styles.modalTitle}>Suggest Alternative</Text>
+                                        <Text style={styles.modalSubtitle}>Propose a different time or price</Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={() => setShowCounterModal(false)}
+                                        disabled={processingAction !== null}
+                                    >
+                                        <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                                    </Pressable>
+                                </View>
+
+                                <ScrollView style={styles.counterForm} showsVerticalScrollIndicator={false}>
+                                    <Text style={styles.formLabel}>Counter Price (PKR)</Text>
+                                    <TextInput
+                                        value={counterPrice}
+                                        onChangeText={setCounterPrice}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 1500"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={styles.formLabel}>Suggested Time</Text>
+                                    <View style={styles.dateRow}>
+                                        <Pressable style={styles.dateField} onPress={() => openDatePicker("counter")}>
+                                            <MaterialIcons name="calendar-today" size={16} color={COLORS.accent} />
+                                            <Text style={styles.dateFieldText}>{toDateDisplay(counterDateValue)}</Text>
+                                        </Pressable>
+                                        <Pressable style={styles.dateField} onPress={() => openTimePicker("counter")}>
+                                            <MaterialIcons name="access-time" size={16} color={COLORS.accent} />
+                                            <Text style={styles.dateFieldText}>{toTimeDisplay(counterDateValue)}</Text>
+                                        </Pressable>
+                                    </View>
+
+                                    <Text style={styles.formLabel}>Offer Expires In (Minutes)</Text>
+                                    <TextInput
+                                        value={counterExpiryMinutes}
+                                        onChangeText={setCounterExpiryMinutes}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 15"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={styles.formLabel}>Note to Player</Text>
+                                    <TextInput
+                                        value={counterMessage}
+                                        onChangeText={setCounterMessage}
+                                        style={[styles.input, styles.inputMultiline]}
+                                        placeholder="e.g. We have slots available at 10 PM instead..."
+                                        placeholderTextColor={COLORS.muted}
+                                        multiline
+                                    />
+
+                                    <Pressable
+                                        style={[
+                                            styles.actionButton,
+                                            styles.counterButton,
+                                            { marginTop: 20, height: 54, width: '100%' },
+                                            (processingAction || !counterPrice) && { opacity: 0.6 }
+                                        ]}
+                                        onPress={handleCounterOffer}
+                                        disabled={processingAction !== null || !counterPrice}
+                                    >
+                                        {processingAction === "counter" ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={[styles.actionText, { fontSize: 16 }]}>Send Suggestion</Text>
+                                        )}
+                                    </Pressable>
+                                </ScrollView>
+                            </View>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
             </Modal>
         </Screen>
     );
