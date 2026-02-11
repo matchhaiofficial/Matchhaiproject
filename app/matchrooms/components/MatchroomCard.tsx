@@ -10,13 +10,15 @@ import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
     room: Matchroom;
+    isJoined?: boolean;
     onJoinPress?: () => void;
     onCancelJoinPress?: () => void;
     isRequested?: boolean;
-    isJoined?: boolean;
+    onAcceptPress?: () => void;
+    acceptLabel?: string;
 }
 
-const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined }: MatchroomCardProps) => {
+const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel }: MatchroomCardProps) => {
     const router = useRouter();
 
     // Check if room is locked/full
@@ -150,11 +152,6 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             <Text style={styles.joinedBtnText}>Joined</Text>
                         </View>
                     )}
-                    {isRequested && (
-                        <View style={styles.requestedBtn}>
-                            <Text style={styles.requestedBtnText}>Requested</Text>
-                        </View>
-                    )}
                     {!isJoined && !isRequested && onJoinPress && (room.status !== 'in-progress' && room.status !== 'completed') && (
                         <TouchableOpacity
                             style={styles.requestBtn}
@@ -164,6 +161,17 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             }}
                         >
                             <Text style={styles.requestBtnText}>Request</Text>
+                        </TouchableOpacity>
+                    )}
+                    {onAcceptPress && (
+                        <TouchableOpacity
+                            style={[styles.requestBtn, { backgroundColor: COLORS.success }]}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onAcceptPress();
+                            }}
+                        >
+                            <Text style={styles.requestBtnText}>{acceptLabel || "Accept"}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -216,7 +224,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     </Text>
                 </View>
             </View>
-        </TouchableOpacity>
+        </TouchableOpacity >
     );
 });
 
