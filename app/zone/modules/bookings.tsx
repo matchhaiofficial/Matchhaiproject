@@ -12,6 +12,7 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
+import { collection, doc, getDocs, limit, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 
 import AppHeader from "../../../src/components/AppHeader";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
@@ -19,6 +20,7 @@ import Screen from "../../../src/components/Screen";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
+import { db } from "../../../src/config/firebaseConfig";
 import { type Matchroom } from "../../../src/services/matchService";
 import {
     acceptZoneBookingRequest,
@@ -41,6 +43,7 @@ type WalkInPaymentMode = "venue_pay" | "guest_pay" | "mixed";
 
 const REQUEST_FILTERS: RequestFilter[] = ["all", "open", "pending_payment", "accepted"];
 const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "court", "mixed", "unknown"];
+const ACTIVE_QUEUE_STATUSES = new Set(["open", "pending_payment", "accepted"]);
 const WALKIN_GAMES = [
     { key: "cs2", label: "CS2" },
     { key: "fc26", label: "FC26" },
@@ -57,6 +60,56 @@ const toMillis = (value: any) => {
     if (value instanceof Date) return value.getTime();
     if (typeof value === "number") return value;
     return 0;
+};
+
+const chunk = <T,>(items: T[], size: number) => {
+    const result: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+        result.push(items.slice(i, i + size));
+    }
+    return result;
+};
+
+const normalizeGameKey = (value: unknown) => String(value || "").trim().toLowerCase();
+const computeAssetTypeFromGame = (gameKey: string): ZoneBookingAssetType => {
+    if (["cs2", "fc25", "fc26", "tekken8"].includes(gameKey)) return "pc";
+    if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(gameKey)) return "court";
+    return "unknown";
+};
+
+const normalizeLinkedRequest = (id: string, data: Record<string, any>): ZoneBookingQueueItem => {
+    const gameKey = normalizeGameKey(data.gameKey);
+    return {
+        id,
+        userId: data.userId || "",
+        userName: data.userName || "Player",
+        title: data.title || "Booking Request",
+        gameKey,
+        maxPlayers: Number(data.maxPlayers || 0),
+        reservedSlots: Number(data.reservedSlots || 0) || undefined,
+        teamMode: data.teamMode,
+        preferredDate: data.preferredDate,
+        preferredTime: data.preferredTime,
+        preferredAreas: Array.isArray(data.preferredAreas) ? data.preferredAreas : [],
+        budgetPerPlayer: Number(data.budgetPerPlayer || 0) || undefined,
+        currency: data.currency || "PKR",
+        status: data.status || "open",
+        paymentStatus: data.paymentStatus || "unpaid",
+        locationMode: data.locationMode,
+        zoneId: data.zoneId,
+        lifecycleStatus: data.lifecycleStatus,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+        assetType: computeAssetTypeFromGame(gameKey),
+        priorityFlags: [],
+        raw: data,
+    };
+};
+
+const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {
+    if (!item) return null;
+    const raw = item.raw || {};
+    return raw.matchroomId || raw.matchroom?.id || raw.meta?.matchroomId || null;
 };
 
 const formatDateTime = (value: Date) => ({
@@ -126,12 +179,15 @@ export default function ZoneBookingsModule() {
     const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
     const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
+    const [linkedRequests, setLinkedRequests] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | "walkin" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
+    const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
+    const [backfillInProgress, setBackfillInProgress] = useState(false);
 
     const [rejectReason, setRejectReason] = useState("fully_booked");
     const [rejectNote, setRejectNote] = useState("");
@@ -197,6 +253,14 @@ export default function ZoneBookingsModule() {
         [matchrooms],
     );
 
+    const combinedQueue = useMemo(() => {
+        if (!linkedRequests.length) return queue;
+        const merged = new Map<string, ZoneBookingQueueItem>();
+        queue.forEach((item) => merged.set(item.id, item));
+        linkedRequests.forEach((item) => merged.set(item.id, item));
+        return Array.from(merged.values());
+    }, [linkedRequests, queue]);
+
     useEffect(() => {
         if (!zone?.id) {
             setLoadingQueue(false);
@@ -254,6 +318,91 @@ export default function ZoneBookingsModule() {
     }, [branchAreas, user?.uid, zone?.id]);
 
     useEffect(() => {
+        let cancelled = false;
+        const resolveLinkedRequests = async () => {
+            if (!matchrooms.length) {
+                setLinkedRequests([]);
+                return;
+            }
+            try {
+                setBackfillInProgress(true);
+                const ids = Array.from(new Set(matchrooms.map((item) => item.id).filter(Boolean)));
+                const batches = chunk(ids, 10);
+                const collected: ZoneBookingQueueItem[] = [];
+                const linkedMatchroomIds = new Set<string>();
+
+                for (const batch of batches) {
+                    const q = query(
+                        collection(db, "booking_requests"),
+                        where("matchroomId", "in", batch),
+                    );
+                    const snapshot = await getDocs(q);
+                    snapshot.docs.forEach((docSnap) => {
+                        const data = docSnap.data() as Record<string, any>;
+                        const status = String(data.status || "open");
+                        if (data.matchroomId) {
+                            linkedMatchroomIds.add(String(data.matchroomId));
+                        }
+                        if (ACTIVE_QUEUE_STATUSES.has(status)) {
+                            collected.push(normalizeLinkedRequest(docSnap.id, data));
+                        }
+                    });
+                }
+
+                const matchroomMap = new Map(matchrooms.map((room) => [room.id, room]));
+                const missing = ids.filter((id) => !linkedMatchroomIds.has(id));
+                for (const matchroomId of missing) {
+                    const room = matchroomMap.get(matchroomId);
+                    if (!room || room.bookingSource === "walkin") continue;
+                    const docId = `matchroom_request_${matchroomId}`;
+                    const gameKey = normalizeGameKey(room.game);
+                    const requestData = {
+                        userId: room.hostUid || "",
+                        userName: room.hostName || "Player",
+                        gameKey,
+                        title: room.title || "Matchroom Booking",
+                        description: "Matchroom created. Awaiting zone admin approval.",
+                        maxPlayers: Number(room.maxPlayers || 0),
+                        reservedSlots: Number(room.currentPlayers || 0) || undefined,
+                        preferredDate: room.scheduledDate || null,
+                        preferredTime: room.scheduledTime || null,
+                        flexibilityWindow: "Exact time",
+                        preferredAreas: room.location ? [room.location] : [],
+                        budgetPerPlayer: Number(room.pricePerPlayer || 0) || 0,
+                        currency: room.currency || "PKR",
+                        locationMode: "zone",
+                        zoneId: zone?.id || null,
+                        status: "open",
+                        paymentStatus: room.paymentStatus || "unpaid",
+                        lifecycleStatus: "matchroom_admin_pending",
+                        matchroomId,
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp(),
+                    };
+                    await setDoc(doc(db, "booking_requests", docId), requestData, { merge: true });
+                    collected.push(normalizeLinkedRequest(docId, requestData));
+                }
+
+                if (!cancelled) {
+                    setLinkedRequests(collected);
+                }
+            } catch (e) {
+                if (!cancelled) {
+                    setLinkedRequests([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setBackfillInProgress(false);
+                }
+            }
+        };
+        resolveLinkedRequests();
+        return () => {
+            cancelled = true;
+        };
+    }, [matchrooms, zone?.id]);
+
+    useEffect(() => {
         if (deepSegment === "matchrooms" || deepSegment === "requests") {
             setSegment(deepSegment);
         }
@@ -262,31 +411,76 @@ export default function ZoneBookingsModule() {
         }
         if (deepMatchroomId) {
             setFocusedMatchroomId(deepMatchroomId);
-            setSegment("matchrooms");
+            if (!deepRequestId) {
+                setSegment("requests");
+            }
         }
     }, [deepMatchroomId, deepRequestId, deepSegment]);
 
+    useEffect(() => {
+        if (!deepMatchroomId || deepRequestId || selectedRequestId || !zone?.id) return;
+        let cancelled = false;
+        const resolveRequestId = async () => {
+            try {
+                const q = query(
+                    collection(db, "booking_requests"),
+                    where("matchroomId", "==", deepMatchroomId),
+                    limit(1),
+                );
+                const snapshot = await getDocs(q);
+                const docSnap = snapshot.docs[0];
+                if (!cancelled && docSnap) {
+                    setSelectedRequestId(docSnap.id);
+                }
+                if (!cancelled) {
+                    setMatchroomLookupDone(true);
+                }
+            } catch (e) {
+                // If we can't resolve, leave selection empty and let admin handle manually.
+                if (!cancelled) {
+                    setMatchroomLookupDone(true);
+                }
+            }
+        };
+        resolveRequestId();
+        return () => {
+            cancelled = true;
+        };
+    }, [deepMatchroomId, deepRequestId, selectedRequestId, zone?.id]);
+
+    useEffect(() => {
+        if (!deepMatchroomId || !matchroomLookupDone || selectedRequestId) return;
+        Alert.alert(
+            "No booking request linked",
+            "This matchroom doesn't have a booking request linked yet. Please select one from the Requests list.",
+        );
+    }, [deepMatchroomId, matchroomLookupDone, selectedRequestId]);
+
     const filteredQueue = useMemo(
         () =>
-            queue.filter((item) => {
+            combinedQueue.filter((item) => {
                 const requestOk = requestFilter === "all" ? true : item.status === requestFilter;
                 const assetOk = assetFilter === "all" ? true : item.assetType === assetFilter;
                 return requestOk && assetOk;
             }),
-        [assetFilter, queue, requestFilter],
+        [assetFilter, combinedQueue, requestFilter],
     );
 
     const selectedRequest = useMemo(
-        () => queue.find((item) => item.id === selectedRequestId) || null,
-        [queue, selectedRequestId],
+        () => combinedQueue.find((item) => item.id === selectedRequestId) || null,
+        [combinedQueue, selectedRequestId],
+    );
+    const selectedMatchroomId = useMemo(
+        () => getRequestMatchroomId(selectedRequest),
+        [selectedRequest],
     );
 
     useEffect(() => {
         setSelectedRequestId((prev) => {
-            if (prev && queue.some((item) => item.id === prev)) return prev;
-            return queue[0]?.id || null;
+            if (prev && combinedQueue.some((item) => item.id === prev)) return prev;
+            return combinedQueue[0]?.id || null;
         });
-    }, [queue]);
+    }, [combinedQueue]);
 
     const handleAccept = async () => {
         if (!zone?.id || !user?.uid || !selectedRequest) return;
@@ -599,16 +793,27 @@ export default function ZoneBookingsModule() {
 
                     {loadingQueue ? (
                         <ActivityIndicator size="small" color={COLORS.accent} />
+                    ) : backfillInProgress ? (
+                        <Text style={styles.emptyText}>Syncing matchroom requests...</Text>
                     ) : filteredQueue.length === 0 ? (
                         <Text style={styles.emptyText}>No requests found for selected filters.</Text>
                     ) : (
                         filteredQueue.map((item) => {
                             const selected = selectedRequestId === item.id;
+                            const matchroomId = getRequestMatchroomId(item);
                             return (
                                 <Pressable
                                     key={item.id}
                                     style={[styles.requestCard, selected && styles.requestCardActive]}
-                                    onPress={() => setSelectedRequestId(item.id)}
+                                    onPress={() => {
+                                        setSelectedRequestId(item.id);
+                                        if (matchroomId) {
+                                            router.push({
+                                                pathname: "/matchrooms/[id]" as any,
+                                                params: { id: matchroomId },
+                                            } as any);
+                                        }
+                                    }}
                                 >
                                     <View style={styles.requestTopRow}>
                                         <Text style={styles.requestTitle} numberOfLines={1}>
@@ -636,112 +841,7 @@ export default function ZoneBookingsModule() {
                         })
                     )}
 
-                    {selectedRequest ? (
-                        <View style={styles.detailsCard}>
-                            <Text style={styles.detailsTitle}>Request Details</Text>
-                            <Text style={styles.detailsLine}>Requested by: {selectedRequest.userName}</Text>
-                            <Text style={styles.detailsLine}>Date/Time: {selectedRequest.preferredDate ? formatDate(selectedRequest.preferredDate) : "N/A"} {selectedRequest.preferredTime || ""}</Text>
-                            <Text style={styles.detailsLine}>Areas: {(selectedRequest.preferredAreas || []).join(", ") || "N/A"}</Text>
-                            <Text style={styles.detailsLine}>Payment: {selectedRequest.paymentStatus || "unpaid"}</Text>
-
-                            <View style={styles.actionsRow}>
-                                <Pressable
-                                    style={[styles.actionButton, styles.acceptButton]}
-                                    onPress={handleAccept}
-                                    disabled={processingAction !== null}
-                                >
-                                    {processingAction === "accept" ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
-                                    ) : (
-                                        <Text style={styles.actionText}>Accept</Text>
-                                    )}
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.actionButton, styles.rejectButton]}
-                                    onPress={handleReject}
-                                    disabled={processingAction !== null}
-                                >
-                                    {processingAction === "reject" ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
-                                    ) : (
-                                        <Text style={styles.actionText}>Reject</Text>
-                                    )}
-                                </Pressable>
-                            </View>
-
-                            <Text style={styles.formLabel}>Reject reason</Text>
-                            <TextInput
-                                value={rejectReason}
-                                onChangeText={setRejectReason}
-                                style={styles.input}
-                                placeholder="fully_booked"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <TextInput
-                                value={rejectNote}
-                                onChangeText={setRejectNote}
-                                style={styles.input}
-                                placeholder="Maintenance in progress"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <TextInput
-                                value={rejectAlternative}
-                                onChangeText={setRejectAlternative}
-                                style={styles.input}
-                                placeholder="Tomorrow 7:00 PM, Court 2"
-                                placeholderTextColor={COLORS.muted}
-                            />
-
-                            <View style={styles.counterHeader}>
-                            <Text style={styles.detailsTitle}>Suggest Alternative</Text>
-                            <Pressable
-                                style={[styles.actionButton, styles.counterButton]}
-                                onPress={handleCounterOffer}
-                                disabled={processingAction !== null}
-                            >
-                                {processingAction === "counter" ? (
-                                    <ActivityIndicator size="small" color="#FFF" />
-                                ) : (
-                                    <Text style={styles.actionText}>Send Alternative</Text>
-                                )}
-                            </Pressable>
-                        </View>
-                            <TextInput
-                                value={counterPrice}
-                                onChangeText={setCounterPrice}
-                                style={styles.input}
-                                keyboardType="numeric"
-                                placeholder="2500"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <View style={styles.dateRow}>
-                                <Pressable style={styles.dateField} onPress={() => openDatePicker("counter")}>
-                                    <MaterialIcons name="event" size={16} color={COLORS.accent} />
-                                    <Text style={styles.dateFieldText}>{toDateDisplay(counterDateValue)}</Text>
-                                </Pressable>
-                                <Pressable style={styles.dateField} onPress={() => openTimePicker("counter")}>
-                                    <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
-                                    <Text style={styles.dateFieldText}>{toTimeDisplay(counterDateValue)}</Text>
-                                </Pressable>
-                            </View>
-                            <TextInput
-                                value={counterExpiryMinutes}
-                                onChangeText={setCounterExpiryMinutes}
-                                style={styles.input}
-                                keyboardType="numeric"
-                                placeholder="10"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <TextInput
-                                value={counterMessage}
-                                onChangeText={setCounterMessage}
-                                style={[styles.input, styles.inputMultiline]}
-                                multiline
-                                placeholder="Free drink included"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                        </View>
-                    ) : null}
+                    {selectedRequest ? null : null}
                 </ScrollView>
             ) : null}
 

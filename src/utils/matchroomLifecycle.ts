@@ -1,8 +1,64 @@
 // src/utils/matchroomLifecycle.ts
-// Helpers for matchroom expiry and lock status
+// Helpers for matchroom expiry/lock using scheduled match time.
 
-// Matchroom TTL: 48 hours from creation
+// Legacy fallback TTL (older docs without scheduled timestamps)
 const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+function toDate(value: any): Date | null {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === "function") {
+        const d = value.toDate();
+        return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null;
+    }
+    if (typeof value?.toMillis === "function") {
+        const ms = value.toMillis();
+        return Number.isFinite(ms) ? new Date(ms) : null;
+    }
+    if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
+    if (typeof value === "number") return new Date(value);
+    if (typeof value === "string") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
+}
+
+export function parseScheduledStartAt(room: any): Date | null {
+    const existing = toDate(room?.scheduledStartAt);
+    if (existing) return existing;
+
+    const date = String(room?.scheduledDate || "").trim();
+    const time = String(room?.scheduledTime || "").trim();
+    if (!date || !time) return null;
+
+    // Treat as local time (consistent with existing date/time storage)
+    const dt = new Date(`${date}T${time}`);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+export function getRoomLockAt(room: any): Date | null {
+    const explicit = toDate(room?.lockAt);
+    if (explicit) return explicit;
+
+    const startAt = parseScheduledStartAt(room);
+    if (!startAt) return null;
+    return new Date(startAt.getTime() - ONE_DAY_MS);
+}
+
+export function getRoomExpiresAt(room: any): Date | null {
+    const explicit = toDate(room?.expiresAt);
+    if (explicit) return explicit;
+
+    const lockAt = getRoomLockAt(room);
+    if (lockAt) return lockAt;
+
+    const createdAt = getRoomCreatedAt(room);
+    if (!createdAt) return null;
+    return new Date(createdAt.getTime() + ROOM_TTL_MS);
+}
 
 /**
  * Get the creation date of a matchroom.
@@ -10,28 +66,9 @@ const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
  * @returns Date or null if unavailable
  */
 export function getRoomCreatedAt(room: any): Date | null {
-    // Primary: createdAt
-    if (room.createdAt) {
-        if (typeof room.createdAt === 'object' && 'seconds' in room.createdAt) {
-            return new Date(room.createdAt.seconds * 1000);
-        }
-        if (room.createdAt instanceof Date) {
-            return room.createdAt;
-        }
-        if (typeof room.createdAt === 'string') {
-            const parsed = new Date(room.createdAt);
-            if (!isNaN(parsed.getTime())) return parsed;
-        }
-    }
-
-    // Fallback: updatedAt if createdAt missing
-    if (room.updatedAt) {
-        if (typeof room.updatedAt === 'object' && 'seconds' in room.updatedAt) {
-            return new Date(room.updatedAt.seconds * 1000);
-        }
-    }
-
-    return null;
+    const created = toDate(room?.createdAt);
+    if (created) return created;
+    return toDate(room?.updatedAt);
 }
 
 /**
@@ -61,12 +98,14 @@ export function isRoomFull(room: any): boolean {
 }
 
 /**
- * Check if a matchroom is expired (not full after 48 hours).
- * 
- * A matchroom is expired if:
- * 1. createdAt exists AND
- * 2. now - createdAt > 48 hours AND
- * 3. Room is NOT full
+ * A matchroom is expired if it is not full by its expiry time.
+ *
+ * New behavior:
+ * - expiresAt defaults to lockAt (24h before scheduledStartAt).
+ * - If not full by expiresAt, treat as expired.
+ *
+ * Legacy fallback:
+ * - expires after ROOM_TTL_MS from createdAt if scheduled timestamps are missing.
  * 
  * @param room The matchroom object
  * @param now Current time (for testing)
@@ -79,23 +118,32 @@ export function isRoomExpired(room: any, now = new Date()): boolean {
     // Full rooms don't expire
     if (isRoomFull(room)) return false;
 
-    const createdAt = getRoomCreatedAt(room);
-    if (!createdAt) return false; // Can't determine, assume not expired
-
-    const elapsed = now.getTime() - createdAt.getTime();
-    return elapsed > ROOM_TTL_MS;
+    const expiresAt = getRoomExpiresAt(room);
+    if (!expiresAt) return false;
+    return now.getTime() >= expiresAt.getTime();
 }
 
 /**
- * Check if a matchroom is locked (full or explicitly locked).
+ * Check if a matchroom is locked.
+ *
+ * Locked rules:
+ * - Full rooms are considered locked (no more joins).
+ * - If now >= lockAt, room is locked (but if not full by then, it is expired instead).
  * 
  * @param room The matchroom object
  * @returns true if room is locked
  */
-export function isRoomLocked(room: any): boolean {
+export function isRoomLocked(room: any, now = new Date()): boolean {
     // Explicit lock
     if (room.status === 'locked') return true;
     if (room.isLocked === true) return true;
+
+    // Expired rooms aren't treated as locked for join logic
+    if (isRoomExpired(room, now)) return false;
+
+    // Time lock (24h before match)
+    const lockAt = getRoomLockAt(room);
+    if (lockAt && now.getTime() >= lockAt.getTime()) return true;
 
     // Full = locked
     return isRoomFull(room);
@@ -108,10 +156,10 @@ export function isRoomLocked(room: any): boolean {
  * @returns 'locked' | 'expired' | 'open' | original status
  */
 export function getRoomDisplayStatus(room: any): string {
-    if (isRoomLocked(room)) return 'locked';
     if (isRoomExpired(room)) return 'expired';
+    if (isRoomLocked(room)) return 'locked';
     return room.status || 'open';
 }
 
 // Export TTL for external use
-export { ROOM_TTL_MS };
+export { ROOM_TTL_MS, ONE_DAY_MS };

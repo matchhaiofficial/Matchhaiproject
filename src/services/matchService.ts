@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
+import { ONE_DAY_MS } from "../utils/matchroomLifecycle";
 import { isRoomExpired, isRoomLocked } from "../utils/matchroomLifecycle";
 import { doWindowsOverlap, formatTimeRange, getMatchroomWindow } from "../utils/matchroomTime";
 
@@ -80,6 +81,8 @@ export interface Matchroom {
     };
     matchCode?: string;
     flexibility?: string; // "Exact time" | "Within 2hrs" etc (Phase 3)
+    bookingSource?: string;
+    skipBookingRequest?: boolean;
 
     // Game-Specific Dynamic Fields (Phase 1)
     format?: string; // e.g., "5v5", "FT5", "6-a-side"
@@ -234,6 +237,38 @@ async function backfillStructuredFormat(room: Matchroom) {
 
 export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     try {
+        const parseScheduledStartAt = () => {
+            const date = String((roomData as any).scheduledDate || "").trim();
+            const time = String((roomData as any).scheduledTime || "").trim();
+            if (!date || !time) return null;
+            const dt = new Date(`${date}T${time}`);
+            return Number.isNaN(dt.getTime()) ? null : dt;
+        };
+
+        // Enforce lead time constraints (client-only app, so keep the check here too).
+        // Walk-ins are the only exception.
+        if (roomData.bookingSource !== "walkin") {
+            const scheduledStartAt = parseScheduledStartAt();
+            if (!scheduledStartAt) {
+                return { ok: false as const, message: "Scheduled date/time is required." };
+            }
+
+            const now = Date.now();
+            const isAdminFlow = roomData.zoneAdminApproved === true;
+            const playerFlowLeadMs =
+                roomData.teamMode === "team"
+                    ? 2 * ONE_DAY_MS
+                    : roomData.teamMode === "solo"
+                        ? 3 * ONE_DAY_MS
+                        : ONE_DAY_MS;
+            const minLeadMs = isAdminFlow ? ONE_DAY_MS : playerFlowLeadMs;
+
+            if (scheduledStartAt.getTime() - now < minLeadMs) {
+                const hours = Math.round(minLeadMs / (60 * 60 * 1000));
+                return { ok: false as const, message: `Match must be scheduled at least ${hours} hours in advance.` };
+            }
+        }
+
         const players = roomData.players || [{
             uid: roomData.hostUid,
             username: roomData.hostName,
@@ -289,6 +324,17 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             }
         }
 
+        const scheduledStartAt = roomData.bookingSource !== "walkin"
+            ? (() => {
+                const date = String((roomData as any).scheduledDate || "").trim();
+                const time = String((roomData as any).scheduledTime || "").trim();
+                if (!date || !time) return null;
+                const dt = new Date(`${date}T${time}`);
+                return Number.isNaN(dt.getTime()) ? null : dt;
+            })()
+            : null;
+        const lockAt = scheduledStartAt ? new Date(scheduledStartAt.getTime() - ONE_DAY_MS) : null;
+
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             ...roomData,
             players,
@@ -298,6 +344,9 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             currentPlayers: players.length,
             playerUids: roomData.playerUids || [roomData.hostUid],
             zoneOwnerUid: zoneOwnerUid || undefined,
+            scheduledStartAt: scheduledStartAt || null,
+            lockAt: lockAt || null,
+            expiresAt: lockAt || null,
             createdAt: serverTimestamp(),
         });
         Logger.info("matchService", "Matchroom created", { id: docRef.id });
@@ -372,7 +421,9 @@ export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: 
             limit(limitCount)
         );
         const snapshot = await getDocs(q);
-        const rooms = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom));
+        const rooms = snapshot.docs
+            .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
+            .filter((room: Matchroom) => !isRoomExpired(room));
         await Promise.allSettled(rooms.map((room: Matchroom) => backfillStructuredFormat(room)));
         return { ok: true, data: rooms };
     } catch (error) {
@@ -695,12 +746,12 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
 
         // Guard: Check if room is expired
         if (isRoomExpired(room)) {
-            return { ok: false, message: "This matchroom has expired (valid for 48 hours)" };
+            return { ok: false, message: "This matchroom has expired (not filled before the lock time)." };
         }
 
         // Guard: Check if room is locked or full
         if (isRoomLocked(room)) {
-            return { ok: false, message: "Matchroom is full and locked" };
+            return { ok: false, message: "This matchroom is locked (no new players allowed)." };
         }
 
         // Calculate if this join will fill the room
@@ -718,14 +769,53 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
             playerUids: arrayUnion(user.uid)
         };
 
-        // Auto-lock when full
-        if (willBeFull) {
-            updateData.status = 'locked';
-            updateData.isLocked = true;
-            updateData.lockedAt = serverTimestamp();
-        }
-
         await updateDoc(roomRef, updateData);
+
+        // If the lobby becomes full before lock time, create (or upsert) a booking request for venue admin.
+        // Deterministic ID keeps it idempotent across clients.
+        if (willBeFull && room.bookingSource !== "walkin" && room.locationMode === "zone" && room.zoneId) {
+            try {
+                const lockAt = (room as any).lockAt ? (room as any).lockAt : null;
+                const lockAtMs =
+                    typeof lockAt?.toMillis === "function"
+                        ? lockAt.toMillis()
+                        : typeof lockAt?.seconds === "number"
+                            ? lockAt.seconds * 1000
+                            : lockAt instanceof Date
+                                ? lockAt.getTime()
+                                : null;
+
+                if (lockAtMs && Date.now() < lockAtMs) {
+                    const requestId = `matchroom_request_${roomId}`;
+                    await setDoc(doc(db, "booking_requests", requestId), {
+                        userId: room.hostUid,
+                        userName: room.hostName || "Player",
+                        gameKey: room.game || "unknown",
+                        title: room.title || "Matchroom Booking",
+                        description: "Lobby filled. Awaiting venue admin confirmation.",
+                        maxPlayers: Number(room.maxPlayers || 0),
+                        reservedSlots: Number(room.maxPlayers || 0),
+                        teamMode: room.teamMode || "solo",
+                        teamId: room.teamId || null,
+                        preferredDate: (room as any).scheduledDate || null,
+                        preferredTime: (room as any).scheduledTime || null,
+                        flexibilityWindow: (room as any).flexibility || "Exact time",
+                        preferredAreas: room.location ? [room.location] : [],
+                        budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
+                        currency: room.pricing?.currency || "PKR",
+                        locationMode: "zone",
+                        zoneId: room.zoneId,
+                        status: "open",
+                        paymentStatus: room.paymentStatus || "unpaid",
+                        lifecycleStatus: "matchroom_full_admin_pending",
+                        matchroomId: roomId,
+                        updatedAt: serverTimestamp(),
+                    }, { merge: true });
+                }
+            } catch (e) {
+                Logger.warn("matchService", "Failed to create booking request on fill", e);
+            }
+        }
 
         // Add to chatroom participants (best-effort)
         try {
@@ -808,9 +898,14 @@ export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: 
         const sortByCreatedAtDesc = (rooms: Matchroom[]) =>
             [...rooms].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
-        const hosted = sortByCreatedAtDesc(hostedSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom)));
+        const hosted = sortByCreatedAtDesc(
+            hostedSnap.docs
+                .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
+                .filter((room: Matchroom) => !isRoomExpired(room)),
+        );
         const joined = joinedSnap.docs
             .map((doc: any) => ({ id: doc.id, ...doc.data() } as Matchroom))
+            .filter((room: Matchroom) => !isRoomExpired(room))
             .filter((room: Matchroom) => room.hostUid !== uid); // Only non-hosted
 
         return { ok: true, data: { hosted, joined: sortByCreatedAtDesc(joined) } };

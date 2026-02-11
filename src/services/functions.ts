@@ -21,6 +21,7 @@ import type { Matchroom } from './matchService';
 import { findUserTimeConflict } from './matchService';
 import { GAME_FORMATS } from '../constants/gameRules';
 import Logger from '../utils/logger';
+import { getRoomLockAt, isRoomExpired, isRoomFull } from '../utils/matchroomLifecycle';
 
 // ----------------------------------------------------------------------------
 // Social Functions (Client-Side Implementation)
@@ -1036,6 +1037,20 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
                 throw new Error("Only the host can respond to join requests");
             }
 
+            // Enforce lock/expiry: room expires if not full by lock time (24h before match).
+            if (isRoomExpired(matchroomData)) {
+                transaction.update(notifRef, { status: 'rejected', reason: 'room_expired', updatedAt: serverTimestamp() });
+                // Best-effort state mark (host is allowed to update).
+                transaction.update(matchroomRef, { status: 'expired', updatedAt: serverTimestamp() });
+                return { ok: false, message: "Matchroom expired (not filled before lock time)." };
+            }
+            const lockAt = getRoomLockAt(matchroomData);
+            if (lockAt && Date.now() >= lockAt.getTime() && !isRoomFull(matchroomData)) {
+                transaction.update(notifRef, { status: 'rejected', reason: 'room_locked', updatedAt: serverTimestamp() });
+                transaction.update(matchroomRef, { status: 'expired', updatedAt: serverTimestamp() });
+                return { ok: false, message: "Matchroom is locked and expired (not filled before lock time)." };
+            }
+
             if (decision === 'reject') {
                 transaction.update(notifRef, { status: 'rejected', updatedAt: serverTimestamp() });
                 return { ok: true, message: "Request rejected." };
@@ -1165,6 +1180,35 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
 
             transaction.update(matchroomRef, updateData);
             transaction.update(notifRef, { status: 'accepted', updatedAt: serverTimestamp() });
+
+            // If lobby becomes full before lock time, upsert booking request for venue admin/owner.
+            if (willBeFull && matchroomData.bookingSource !== 'walkin' && matchroomData.locationMode === 'zone' && matchroomData.zoneId && lockAt && Date.now() < lockAt.getTime()) {
+                const requestId = `matchroom_request_${matchroomId}`;
+                transaction.set(doc(db, 'booking_requests', requestId), {
+                    userId: matchroomData.hostUid,
+                    userName: matchroomData.hostName || 'Player',
+                    gameKey: matchroomData.game || 'unknown',
+                    title: matchroomData.title || 'Matchroom Booking',
+                    description: 'Lobby filled. Awaiting venue admin confirmation.',
+                    maxPlayers: Number(matchroomData.maxPlayers || 0),
+                    reservedSlots: Number(matchroomData.maxPlayers || 0),
+                    teamMode: matchroomData.teamMode || 'solo',
+                    teamId: matchroomData.teamId || null,
+                    preferredDate: matchroomData.scheduledDate || null,
+                    preferredTime: matchroomData.scheduledTime || null,
+                    flexibilityWindow: matchroomData.flexibility || 'Exact time',
+                    preferredAreas: matchroomData.location ? [matchroomData.location] : [],
+                    budgetPerPlayer: Number(matchroomData.pricing?.perPlayer || 0),
+                    currency: matchroomData.pricing?.currency || 'PKR',
+                    locationMode: 'zone',
+                    zoneId: matchroomData.zoneId,
+                    status: 'open',
+                    paymentStatus: matchroomData.paymentStatus || 'unpaid',
+                    lifecycleStatus: 'matchroom_full_admin_pending',
+                    matchroomId,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            }
 
             return { ok: true, message: "Player added to matchroom." };
         });
