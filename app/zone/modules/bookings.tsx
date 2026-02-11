@@ -343,7 +343,7 @@ export default function ZoneBookingsModule() {
                         where("matchroomId", "in", batch),
                     );
                     const snapshot = await getDocs(q);
-                    snapshot.docs.forEach((docSnap) => {
+                    snapshot.docs.forEach((docSnap: any) => {
                         const data = docSnap.data() as Record<string, any>;
                         const status = String(data.status || "open");
                         if (data.matchroomId) {
@@ -966,287 +966,288 @@ export default function ZoneBookingsModule() {
                                         </View>
                                     ) : null}
                                 </View>
-                            ))
+                            ))}
+                        </>
                     )}
-                        </ScrollView>
+                </ScrollView>
             ) : null}
 
-                    {segment === "walkins" ? (
-                        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                            <View style={styles.walkinCard}>
-                                <Text style={styles.walkinTitle}>Create Walk-in Matchroom</Text>
-                                <Text style={styles.walkinSubtitle}>
-                                    Create booking for walk-ins with venue-pay, guest-pay, or mixed mode.
-                                </Text>
+            {segment === "walkins" ? (
+                <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                    <View style={styles.walkinCard}>
+                        <Text style={styles.walkinTitle}>Create Walk-in Matchroom</Text>
+                        <Text style={styles.walkinSubtitle}>
+                            Create booking for walk-ins with venue-pay, guest-pay, or mixed mode.
+                        </Text>
 
-                                <Text style={styles.formLabel}>Matchroom Title</Text>
+                        <Text style={styles.formLabel}>Matchroom Title</Text>
+                        <TextInput
+                            value={walkInTitle}
+                            onChangeText={setWalkInTitle}
+                            style={styles.input}
+                            placeholder="e.g. Walk-in Futsal 5v5"
+                            placeholderTextColor={COLORS.muted}
+                        />
+
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {WALKIN_GAMES.map((item) => (
+                                <Pressable
+                                    key={item.key}
+                                    onPress={() => setWalkInGame(item.key)}
+                                    style={[styles.filterChip, walkInGame === item.key && styles.filterChipActive]}
+                                >
+                                    <Text style={[styles.filterChipText, walkInGame === item.key && styles.filterChipTextActive]}>
+                                        {item.label}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {(["venue_pay", "guest_pay", "mixed"] as WalkInPaymentMode[]).map((mode) => (
+                                <Pressable
+                                    key={mode}
+                                    onPress={() => setWalkInPaymentMode(mode)}
+                                    style={[styles.filterChip, walkInPaymentMode === mode && styles.filterChipActive]}
+                                >
+                                    <Text style={[styles.filterChipText, walkInPaymentMode === mode && styles.filterChipTextActive]}>
+                                        {mode}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+
+                        <View style={styles.formGrid}>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Seat Count</Text>
                                 <TextInput
-                                    value={walkInTitle}
-                                    onChangeText={setWalkInTitle}
+                                    value={walkInSeatCount}
+                                    onChangeText={setWalkInSeatCount}
+                                    keyboardType="numeric"
                                     style={styles.input}
-                                    placeholder="e.g. Walk-in Futsal 5v5"
+                                    placeholder="e.g. 10"
                                     placeholderTextColor={COLORS.muted}
                                 />
+                            </View>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Duration (Mins)</Text>
+                                <TextInput
+                                    value={walkInDuration}
+                                    onChangeText={setWalkInDuration}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 90"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
+                        </View>
 
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                    {WALKIN_GAMES.map((item) => (
-                                        <Pressable
-                                            key={item.key}
-                                            onPress={() => setWalkInGame(item.key)}
-                                            style={[styles.filterChip, walkInGame === item.key && styles.filterChipActive]}
-                                        >
-                                            <Text style={[styles.filterChipText, walkInGame === item.key && styles.filterChipTextActive]}>
-                                                {item.label}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </ScrollView>
+                        <View style={styles.formGrid}>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Known Players</Text>
+                                <TextInput
+                                    value={walkInKnownPlayers}
+                                    onChangeText={setWalkInKnownPlayers}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 4"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Price Per Player</Text>
+                                <TextInput
+                                    value={walkInPrice}
+                                    onChangeText={setWalkInPrice}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 1500"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
+                        </View>
 
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                    {(["venue_pay", "guest_pay", "mixed"] as WalkInPaymentMode[]).map((mode) => (
-                                        <Pressable
-                                            key={mode}
-                                            onPress={() => setWalkInPaymentMode(mode)}
-                                            style={[styles.filterChip, walkInPaymentMode === mode && styles.filterChipActive]}
-                                        >
-                                            <Text style={[styles.filterChipText, walkInPaymentMode === mode && styles.filterChipTextActive]}>
-                                                {mode}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </ScrollView>
+                        <View style={styles.dateRow}>
+                            <Pressable style={styles.dateField} onPress={() => openDatePicker("walkin")}>
+                                <MaterialIcons name="event" size={16} color={COLORS.accent} />
+                                <Text style={styles.dateFieldText}>{toDateDisplay(walkInDateValue)}</Text>
+                            </Pressable>
+                            <Pressable style={styles.dateField} onPress={() => openTimePicker("walkin")}>
+                                <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
+                                <Text style={styles.dateFieldText}>{toTimeDisplay(walkInDateValue)}</Text>
+                            </Pressable>
+                        </View>
 
-                                <View style={styles.formGrid}>
-                                    <View style={styles.halfInput}>
-                                        <Text style={styles.formLabel}>Seat Count</Text>
-                                        <TextInput
-                                            value={walkInSeatCount}
-                                            onChangeText={setWalkInSeatCount}
-                                            keyboardType="numeric"
-                                            style={styles.input}
-                                            placeholder="e.g. 10"
-                                            placeholderTextColor={COLORS.muted}
-                                        />
-                                    </View>
-                                    <View style={styles.halfInput}>
-                                        <Text style={styles.formLabel}>Duration (Mins)</Text>
-                                        <TextInput
-                                            value={walkInDuration}
-                                            onChangeText={setWalkInDuration}
-                                            keyboardType="numeric"
-                                            style={styles.input}
-                                            placeholder="e.g. 90"
-                                            placeholderTextColor={COLORS.muted}
-                                        />
-                                    </View>
-                                </View>
+                        <Text style={styles.walkinInfo}>
+                            Branch: {primaryBranch?.branchDisplayName || zone?.primaryBranch?.branchDisplayName || "Primary"}
+                        </Text>
 
-                                <View style={styles.formGrid}>
-                                    <View style={styles.halfInput}>
-                                        <Text style={styles.formLabel}>Known Players</Text>
-                                        <TextInput
-                                            value={walkInKnownPlayers}
-                                            onChangeText={setWalkInKnownPlayers}
-                                            keyboardType="numeric"
-                                            style={styles.input}
-                                            placeholder="e.g. 4"
-                                            placeholderTextColor={COLORS.muted}
-                                        />
-                                    </View>
-                                    <View style={styles.halfInput}>
-                                        <Text style={styles.formLabel}>Price Per Player</Text>
-                                        <TextInput
-                                            value={walkInPrice}
-                                            onChangeText={setWalkInPrice}
-                                            keyboardType="numeric"
-                                            style={styles.input}
-                                            placeholder="e.g. 1500"
-                                            placeholderTextColor={COLORS.muted}
-                                        />
-                                    </View>
-                                </View>
+                        <Pressable
+                            style={[styles.actionButton, styles.walkinCreateButton]}
+                            onPress={handleCreateWalkIn}
+                            disabled={processingAction !== null}
+                        >
+                            {processingAction === "walkin" ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <Text style={styles.actionText}>Create Walk-in Matchroom</Text>
+                            )}
+                        </Pressable>
+                    </View>
+                </ScrollView>
+            ) : null}
 
-                                <View style={styles.dateRow}>
-                                    <Pressable style={styles.dateField} onPress={() => openDatePicker("walkin")}>
-                                        <MaterialIcons name="event" size={16} color={COLORS.accent} />
-                                        <Text style={styles.dateFieldText}>{toDateDisplay(walkInDateValue)}</Text>
-                                    </Pressable>
-                                    <Pressable style={styles.dateField} onPress={() => openTimePicker("walkin")}>
-                                        <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
-                                        <Text style={styles.dateFieldText}>{toTimeDisplay(walkInDateValue)}</Text>
-                                    </Pressable>
-                                </View>
-
-                                <Text style={styles.walkinInfo}>
-                                    Branch: {primaryBranch?.branchDisplayName || zone?.primaryBranch?.branchDisplayName || "Primary"}
-                                </Text>
-
+            <Modal
+                visible={showDatePicker}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowDatePicker(false)}
+            >
+                <View style={styles.pickerOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowDatePicker(false)}>
+                        <View style={styles.pickerBackdrop} />
+                    </TouchableWithoutFeedback>
+                    <View style={styles.pickerSheet}>
+                        <View style={styles.pickerHandle} />
+                        <View style={styles.pickerHeader}>
+                            <Pressable onPress={() => setShowDatePicker(false)}>
+                                <Text style={styles.pickerAction}>Cancel</Text>
+                            </Pressable>
+                            <Text style={styles.pickerTitle}>Select Date</Text>
+                            <Pressable onPress={applyDateDraft}>
+                                <Text style={styles.pickerAction}>Done</Text>
+                            </Pressable>
+                        </View>
+                        <View style={styles.calendarContainer}>
+                            <View style={styles.calendarHeader}>
                                 <Pressable
-                                    style={[styles.actionButton, styles.walkinCreateButton]}
-                                    onPress={handleCreateWalkIn}
-                                    disabled={processingAction !== null}
+                                    style={styles.calendarNavButton}
+                                    onPress={() => {
+                                        const prev = new Date(monthCursor);
+                                        prev.setMonth(prev.getMonth() - 1);
+                                        setMonthCursor(prev);
+                                    }}
                                 >
-                                    {processingAction === "walkin" ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
-                                    ) : (
-                                        <Text style={styles.actionText}>Create Walk-in Matchroom</Text>
-                                    )}
+                                    <Text style={styles.calendarNavText}>{"<"}</Text>
+                                </Pressable>
+                                <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
+                                <Pressable
+                                    style={styles.calendarNavButton}
+                                    onPress={() => {
+                                        const next = new Date(monthCursor);
+                                        next.setMonth(next.getMonth() + 1);
+                                        setMonthCursor(next);
+                                    }}
+                                >
+                                    <Text style={styles.calendarNavText}>{">"}</Text>
                                 </Pressable>
                             </View>
-                        </ScrollView>
-                    ) : null}
-
-                    <Modal
-                        visible={showDatePicker}
-                        transparent
-                        animationType="fade"
-                        onRequestClose={() => setShowDatePicker(false)}
-                    >
-                        <View style={styles.pickerOverlay}>
-                            <TouchableWithoutFeedback onPress={() => setShowDatePicker(false)}>
-                                <View style={styles.pickerBackdrop} />
-                            </TouchableWithoutFeedback>
-                            <View style={styles.pickerSheet}>
-                                <View style={styles.pickerHandle} />
-                                <View style={styles.pickerHeader}>
-                                    <Pressable onPress={() => setShowDatePicker(false)}>
-                                        <Text style={styles.pickerAction}>Cancel</Text>
-                                    </Pressable>
-                                    <Text style={styles.pickerTitle}>Select Date</Text>
-                                    <Pressable onPress={applyDateDraft}>
-                                        <Text style={styles.pickerAction}>Done</Text>
-                                    </Pressable>
-                                </View>
-                                <View style={styles.calendarContainer}>
-                                    <View style={styles.calendarHeader}>
+                            <View style={styles.weekdayRow}>
+                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                                    <Text key={label} style={styles.weekdayLabel}>{label}</Text>
+                                ))}
+                            </View>
+                            <View style={styles.calendarGrid}>
+                                {Array.from({ length: firstWeekday }).map((_, idx) => (
+                                    <View key={`empty-${idx}`} style={styles.dayCell} />
+                                ))}
+                                {Array.from({ length: daysInMonth }).map((_, idx) => {
+                                    const dayNumber = idx + 1;
+                                    const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
+                                    const selected = dateDraft ? isSameDay(dateDraft, date) : false;
+                                    return (
                                         <Pressable
-                                            style={styles.calendarNavButton}
-                                            onPress={() => {
-                                                const prev = new Date(monthCursor);
-                                                prev.setMonth(prev.getMonth() - 1);
-                                                setMonthCursor(prev);
-                                            }}
+                                            key={`day-${dayNumber}`}
+                                            style={[styles.dayCell, selected && styles.dayCellSelected]}
+                                            onPress={() => setDateDraft(date)}
                                         >
-                                            <Text style={styles.calendarNavText}>{"<"}</Text>
+                                            <Text style={[styles.dayText, selected && styles.dayTextSelected]}>
+                                                {dayNumber}
+                                            </Text>
                                         </Pressable>
-                                        <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
-                                        <Pressable
-                                            style={styles.calendarNavButton}
-                                            onPress={() => {
-                                                const next = new Date(monthCursor);
-                                                next.setMonth(next.getMonth() + 1);
-                                                setMonthCursor(next);
-                                            }}
-                                        >
-                                            <Text style={styles.calendarNavText}>{">"}</Text>
-                                        </Pressable>
-                                    </View>
-                                    <View style={styles.weekdayRow}>
-                                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                                            <Text key={label} style={styles.weekdayLabel}>{label}</Text>
-                                        ))}
-                                    </View>
-                                    <View style={styles.calendarGrid}>
-                                        {Array.from({ length: firstWeekday }).map((_, idx) => (
-                                            <View key={`empty-${idx}`} style={styles.dayCell} />
-                                        ))}
-                                        {Array.from({ length: daysInMonth }).map((_, idx) => {
-                                            const dayNumber = idx + 1;
-                                            const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
-                                            const selected = dateDraft ? isSameDay(dateDraft, date) : false;
-                                            return (
-                                                <Pressable
-                                                    key={`day-${dayNumber}`}
-                                                    style={[styles.dayCell, selected && styles.dayCellSelected]}
-                                                    onPress={() => setDateDraft(date)}
-                                                >
-                                                    <Text style={[styles.dayText, selected && styles.dayTextSelected]}>
-                                                        {dayNumber}
-                                                    </Text>
-                                                </Pressable>
-                                            );
-                                        })}
-                                    </View>
-                                </View>
+                                    );
+                                })}
                             </View>
                         </View>
-                    </Modal>
+                    </View>
+                </View>
+            </Modal>
 
-                    <Modal
-                        visible={showTimePicker}
-                        transparent
-                        animationType="fade"
-                        onRequestClose={() => setShowTimePicker(false)}
-                    >
-                        <View style={styles.pickerOverlay}>
-                            <TouchableWithoutFeedback onPress={() => setShowTimePicker(false)}>
-                                <View style={styles.pickerBackdrop} />
-                            </TouchableWithoutFeedback>
-                            <View style={styles.pickerSheet}>
-                                <View style={styles.pickerHandle} />
-                                <View style={styles.pickerHeader}>
-                                    <Pressable onPress={() => setShowTimePicker(false)}>
-                                        <Text style={styles.pickerAction}>Cancel</Text>
-                                    </Pressable>
-                                    <Text style={styles.pickerTitle}>Select Time</Text>
-                                    <Pressable onPress={applyTimeDraft}>
-                                        <Text style={styles.pickerAction}>Done</Text>
-                                    </Pressable>
-                                </View>
-                                <View style={styles.timePickerRow}>
-                                    <View style={styles.timeColumn}>
-                                        {hours12.map((hour) => {
-                                            const selected = timeDraft.hour === hour;
-                                            return (
-                                                <Pressable
-                                                    key={`h-${hour}`}
-                                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                                    onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}
-                                                >
-                                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                        {String(hour).padStart(2, "0")}
-                                                    </Text>
-                                                </Pressable>
-                                            );
-                                        })}
-                                    </View>
-                                    <View style={styles.timeColumn}>
-                                        {minutes.map((minute) => {
-                                            const selected = timeDraft.minute === minute;
-                                            return (
-                                                <Pressable
-                                                    key={`m-${minute}`}
-                                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                                    onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}
-                                                >
-                                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                        {String(minute).padStart(2, "0")}
-                                                    </Text>
-                                                </Pressable>
-                                            );
-                                        })}
-                                    </View>
-                                    <View style={styles.timeColumn}>
-                                        {periods.map((period) => {
-                                            const selected = timeDraft.period === period;
-                                            return (
-                                                <Pressable
-                                                    key={`p-${period}`}
-                                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                                    onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}
-                                                >
-                                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                        {period}
-                                                    </Text>
-                                                </Pressable>
-                                            );
-                                        })}
-                                    </View>
-                                </View>
+            <Modal
+                visible={showTimePicker}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowTimePicker(false)}
+            >
+                <View style={styles.pickerOverlay}>
+                    <TouchableWithoutFeedback onPress={() => setShowTimePicker(false)}>
+                        <View style={styles.pickerBackdrop} />
+                    </TouchableWithoutFeedback>
+                    <View style={styles.pickerSheet}>
+                        <View style={styles.pickerHandle} />
+                        <View style={styles.pickerHeader}>
+                            <Pressable onPress={() => setShowTimePicker(false)}>
+                                <Text style={styles.pickerAction}>Cancel</Text>
+                            </Pressable>
+                            <Text style={styles.pickerTitle}>Select Time</Text>
+                            <Pressable onPress={applyTimeDraft}>
+                                <Text style={styles.pickerAction}>Done</Text>
+                            </Pressable>
+                        </View>
+                        <View style={styles.timePickerRow}>
+                            <View style={styles.timeColumn}>
+                                {hours12.map((hour) => {
+                                    const selected = timeDraft.hour === hour;
+                                    return (
+                                        <Pressable
+                                            key={`h-${hour}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {String(hour).padStart(2, "0")}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                            <View style={styles.timeColumn}>
+                                {minutes.map((minute) => {
+                                    const selected = timeDraft.minute === minute;
+                                    return (
+                                        <Pressable
+                                            key={`m-${minute}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {String(minute).padStart(2, "0")}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                            <View style={styles.timeColumn}>
+                                {periods.map((period) => {
+                                    const selected = timeDraft.period === period;
+                                    return (
+                                        <Pressable
+                                            key={`p-${period}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {period}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
                             </View>
                         </View>
-                    </Modal>
-                </Screen>
-            );
+                    </View>
+                </View>
+            </Modal>
+        </Screen>
+    );
 }
 
