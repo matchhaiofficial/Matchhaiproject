@@ -56,7 +56,6 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
         <Animated.View style={[styles.drawer, headerPadding, { transform: [{ translateX }] }]}>
           <View style={styles.header}>
             <Image source={{ uri: avatarUri }} style={styles.avatar} />
@@ -99,6 +98,7 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
             <Text style={styles.footerHint}>Swipe or tap outside to close</Text>
           </View>
         </Animated.View>
+        <Pressable style={styles.backdrop} onPress={onClose} />
       </View>
     </Modal>
   );

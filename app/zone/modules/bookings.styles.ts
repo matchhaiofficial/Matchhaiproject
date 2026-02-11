@@ -9,6 +9,10 @@ export default StyleSheet.create({
     segmentTabs: {
         marginBottom: SPACING.md,
     },
+    tabTitle: {
+        fontSize: 13,
+        fontFamily: FONTS.body,
+    },
     errorBox: {
         flexDirection: "row",
         alignItems: "center",

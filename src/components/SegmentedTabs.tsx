@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         flexDirection: 'row',
-        gap: SPACING.xs,
+        gap: 2,
     },
     itemCompact: {
         minHeight: 36,
@@ -134,8 +134,8 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
     },
     badge: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
+        paddingHorizontal: 4, // Reduced from 6
+        paddingVertical: 1, // Reduced from 2
         borderRadius: RADII.pill,
         backgroundColor: COLORS.cardDark,
         borderWidth: 1,
