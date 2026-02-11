@@ -258,7 +258,7 @@ export default function Profile() {
 
     if (loading) {
         return (
-            <Screen style={styles.screen} scroll={false}>
+            <Screen style={styles.screen} scroll={false} edges={['top']}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
@@ -274,6 +274,7 @@ export default function Profile() {
                 styles.scrollContent,
                 { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? 24 : (tabBarHeight + 16) },
             ]}
+            edges={['top']}
             scrollProps={{
                 showsVerticalScrollIndicator: false,
                 refreshControl: <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />,

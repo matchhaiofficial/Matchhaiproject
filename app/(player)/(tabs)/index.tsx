@@ -21,6 +21,7 @@ import { COLORS } from "../../../src/theme";
 import { isRoomExpired, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
 import { getRoomStartDate } from "../../../src/utils/timeFilters";
 import Logger from "../../../src/utils/logger";
+import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
 import styles from "./_dashboard.styles";
 
 type DashboardNotification = {
@@ -225,6 +226,24 @@ export default function PlayerDashboard() {
         return () => unsubscribe();
     }, [user]);
 
+    useEffect(() => {
+        if (!user?.uid) return;
+        if (!upcomingRooms.length) return;
+
+        const next = upcomingRooms[0];
+        if (!next?.id) return;
+        const startAt = getRoomStartDate(next);
+        if (!startAt) return;
+
+        scheduleMatchroomReminder({
+            roomId: next.id,
+            title: next.title || "Matchroom reminder",
+            startAt,
+            minutesBefore: 15,
+            href: `/matchrooms/${next.id}`,
+        }).catch(() => null);
+    }, [upcomingRooms, user?.uid]);
+
     const QuickAction = ({ icon, label, onPress, color, shadowColor }: any) => (
         <Pressable
             style={({ pressed }) => [
@@ -287,9 +306,10 @@ export default function PlayerDashboard() {
     );
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent} edges={['top']}>
             <AppHeader
                 title="Home"
+                inlineTitle
                 leftAction={(
                     <TouchableOpacity style={styles.menuButton} onPress={() => setSidebarOpen(true)}>
                         <MaterialIcons name="menu" size={24} color={COLORS.text} />
@@ -319,39 +339,44 @@ export default function PlayerDashboard() {
                     { label: "Players", icon: "people", onPress: () => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: "players", t: Date.now().toString() } } as any) },
                     { label: "Zones", icon: "storefront", onPress: () => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: "zones", t: Date.now().toString() } } as any) },
                     { label: "Schedule", icon: "event", onPress: () => router.push("/(player)/schedule" as any) },
-                    { label: "Wallet", icon: "account-balance-wallet", onPress: () => router.push("/(player)/wallet" as any) },
                 ]}
             />
 
             <ScrollView
                 contentContainerStyle={[
                     styles.container,
-                    { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? (insets.bottom + 16) : (tabBarHeight + 16) },
+                    { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? (insets.bottom + 16) : (tabBarHeight + 12) },
                 ]}
                 showsVerticalScrollIndicator={false}
             >
                 <View style={styles.header}>
-                    <View style={styles.headerTopRow}>
-                        <View style={styles.avatarContainer}>
-                            <Image
-                                source={{
-                                    uri: user?.photoURL || `https://ui-avatars.com/api/?name=${user?.displayName || "Player"}&background=42a5f5&color=fff&size=112`,
-                                }}
-                                style={styles.avatar}
-                            />
-                            <View style={styles.onlineIndicator} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.welcomeText}>PLAYER DASHBOARD</Text>
-                            <Text style={styles.username}>{user?.displayName || "Guest"}</Text>
-                        </View>
-                    </View>
-                    <View style={styles.tagsRow}>
-                        {tags.length > 0 ? tags.map((tag, index) => (
-                            <View key={index} style={styles.tag}>
-                                <Text style={styles.tagText}>{tag}</Text>
+                    <View style={styles.profileCard}>
+                        <View style={styles.profileTopRow}>
+                            <View style={styles.avatarContainer}>
+                                <Image
+                                    source={{
+                                        uri:
+                                            user?.photoURL ||
+                                            `https://ui-avatars.com/api/?name=${user?.displayName || "Player"}&background=42a5f5&color=fff&size=112`,
+                                    }}
+                                    style={styles.avatar}
+                                />
+                                <View style={styles.onlineIndicator} />
                             </View>
-                        )) : null}
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.welcomeText}>PLAYER DASHBOARD</Text>
+                                <Text style={styles.username}>{user?.displayName || "Guest"}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.tagsRow}>
+                            {tags.length > 0
+                                ? tags.map((tag, index) => (
+                                    <View key={index} style={styles.tag}>
+                                        <Text style={styles.tagText}>{tag}</Text>
+                                    </View>
+                                ))
+                                : null}
+                        </View>
                     </View>
                 </View>
 
@@ -362,7 +387,6 @@ export default function PlayerDashboard() {
                         <QuickAction icon="event" label="My Schedule" color={COLORS.successBright} onPress={() => router.push("/(player)/schedule" as any)} />
                         <QuickAction icon="search" label="Find Match" color={COLORS.warning} onPress={() => router.push({ pathname: "/(player)/(tabs)/discover", params: { segment: "matchrooms", t: Date.now().toString() } } as any)} />
                         <QuickAction icon="inbox" label="Inbox" color="#26A69A" onPress={() => router.push("/(player)/inbox" as any)} />
-                        <QuickAction icon="account-balance-wallet" label="Wallet" color="#AB47BC" onPress={() => router.push("/(player)/wallet" as any)} />
                     </View>
                 </View>
 
@@ -473,7 +497,7 @@ export default function PlayerDashboard() {
 
                 <View style={styles.section}>
                     <View style={styles.sectionHeaderRow}>
-                        <Text style={styles.sectionTitle}>Wallet & Requests</Text>
+                        <Text style={styles.sectionTitle}>Requests & Offers</Text>
                         <TouchableOpacity onPress={() => router.push("/(player)/inbox" as any)}>
                             <Text style={styles.seeAllText}>Open Inbox</Text>
                         </TouchableOpacity>
