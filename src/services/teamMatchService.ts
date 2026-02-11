@@ -214,7 +214,10 @@ const maybeCreateMatchroomForChallenge = async (challengeId: string) => {
         slotsB: [],
     };
 
-    const matchroomResult = await createMatchroom(matchroomInput);
+    const matchroomResult = await createMatchroom({
+        ...matchroomInput,
+        skipBookingRequest: true,
+    });
     if (!matchroomResult.ok) {
         return { ok: false as const, message: matchroomResult.message || "Failed to create matchroom." };
     }

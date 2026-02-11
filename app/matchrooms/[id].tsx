@@ -19,7 +19,7 @@ import QRCode from "react-native-qrcode-svg";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import SkillBadge from "../../src/components/SkillBadge";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
@@ -125,20 +125,50 @@ export default function MatchroomDetails() {
     }, [user]);
 
     const isZoneAdmin = profile?.role === "zone-admin" || profile?.role === "super-admin";
-    const bookingRequestId = useMemo(() => {
+    const rawBookingRequestId = useMemo(() => {
         if (!room) return null;
         const raw: any = room as any;
         return raw.bookingRequestId || raw.requestId || raw.booking?.requestId || raw.bookingRequest?.id || null;
     }, [room]);
+    const [bookingRequestId, setBookingRequestId] = useState<string | null>(null);
+
+    useEffect(() => {
+        setBookingRequestId(rawBookingRequestId || null);
+    }, [rawBookingRequestId]);
+
+    useEffect(() => {
+        if (!isZoneAdmin || bookingRequestId || !room?.id) return;
+        let cancelled = false;
+        const resolveRequestId = async () => {
+            try {
+                const q = query(
+                    collection(db, "booking_requests"),
+                    where("matchroomId", "==", room.id),
+                    limit(1),
+                );
+                const snapshot = await getDocs(q);
+                const docSnap = snapshot.docs[0];
+                if (!cancelled && docSnap) {
+                    setBookingRequestId(docSnap.id);
+                }
+            } catch (e) {
+                Logger.warn("MatchroomDetails", "Failed to resolve booking request by matchroomId", e);
+            }
+        };
+        resolveRequestId();
+        return () => {
+            cancelled = true;
+        };
+    }, [bookingRequestId, isZoneAdmin, room?.id]);
 
     const openBookingQueue = () => {
-        if (!bookingRequestId) {
-            Alert.alert("No booking request linked", "This lobby is not linked to a booking request.");
-            return;
-        }
         router.push({
             pathname: "/zone/modules/bookings",
-            params: { segment: "requests", requestId: bookingRequestId },
+            params: {
+                segment: "requests",
+                requestId: bookingRequestId || undefined,
+                matchroomId: room?.id,
+            },
         } as any);
     };
 
@@ -1134,18 +1164,16 @@ export default function MatchroomDetails() {
                         </Text>
                         <View style={styles.footerRow}>
                             <TouchableOpacity
-                                style={[styles.joinButton, { flex: 1, opacity: bookingRequestId ? 1 : 0.5 }]}
+                                style={[styles.joinButton, { flex: 1 }]}
                                 onPress={openBookingQueue}
-                                disabled={!bookingRequestId}
                                 activeOpacity={0.85}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.joinButtonText}>Accept</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={[styles.secondaryButton, { flex: 1, opacity: bookingRequestId ? 1 : 0.5 }]}
+                                style={[styles.secondaryButton, { flex: 1 }]}
                                 onPress={openBookingQueue}
-                                disabled={!bookingRequestId}
                                 activeOpacity={0.85}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
@@ -1153,9 +1181,8 @@ export default function MatchroomDetails() {
                             </TouchableOpacity>
                         </View>
                         <TouchableOpacity
-                            style={[styles.joinButton, { backgroundColor: COLORS.warning, opacity: bookingRequestId ? 1 : 0.5 }]}
+                            style={[styles.joinButton, { backgroundColor: COLORS.warning }]}
                             onPress={openBookingQueue}
-                            disabled={!bookingRequestId}
                             activeOpacity={0.85}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
