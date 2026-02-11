@@ -277,10 +277,20 @@ export default StyleSheet.create({
     matchroomFocusedWrap: {
         borderWidth: 1,
         borderColor: COLORS.accent,
-        borderRadius: 16,
-        padding: 4,
+        borderRadius: 22, // Match card radius + padding
+        padding: 2,
         marginBottom: SPACING.sm,
-        backgroundColor: "rgba(66, 165, 245, 0.08)",
+        backgroundColor: "rgba(66, 165, 245, 0.05)",
+    },
+    resultsCount: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    resultsCountText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
     },
     walkinChipOverlay: {
         marginTop: -6,
