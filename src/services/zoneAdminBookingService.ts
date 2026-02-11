@@ -71,6 +71,15 @@ export interface ZoneMatchroomListItem {
     zoneId?: string | null;
     zoneOwnerUid?: string | null;
     createdAt?: any;
+    // UI mapping fields
+    hostSkillTier?: string;
+    hostSkillScore?: number | null;
+    format?: string;
+    seriesType?: string | null;
+    durationHours?: number | null;
+    overs?: number | null;
+    slotsA?: any[];
+    slotsB?: any[];
 }
 
 interface BookingRequestDoc {
@@ -396,6 +405,14 @@ export function subscribeZoneMatchrooms(
                     zoneId: data.zoneId || null,
                     zoneOwnerUid: data.zoneOwnerUid || null,
                     createdAt: data.createdAt,
+                    hostSkillTier: data.hostSkillTier || "Any",
+                    hostSkillScore: data.hostSkillScore ?? null,
+                    format: data.format,
+                    seriesType: data.seriesType || null,
+                    durationHours: data.durationHours || null,
+                    overs: data.overs ? Number(data.overs) : null,
+                    slotsA: data.slotsA || [],
+                    slotsB: data.slotsB || [],
                 } as ZoneMatchroomListItem;
             })
             .sort((a: ZoneMatchroomListItem, b: ZoneMatchroomListItem) => toMillis(b.createdAt) - toMillis(a.createdAt));
