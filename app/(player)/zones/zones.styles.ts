@@ -6,6 +6,10 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.background,
     },
+    screenContent: {
+        paddingTop: 0,
+        paddingBottom: 0,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -27,7 +31,8 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.heading,
     },
     scrollContent: {
-        paddingBottom: 40,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.xxl,
     },
 
     // Banner Section

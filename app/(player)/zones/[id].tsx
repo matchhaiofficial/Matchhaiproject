@@ -83,7 +83,7 @@ export default function PlayerZoneDetails() {
         .map(([key]) => key.replace('supports', '').toUpperCase());
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
             <StatusBar barStyle="light-content" />
             <AppHeader title="Zone Details" onBack={() => router.back()} inlineTitle />
 
