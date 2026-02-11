@@ -165,7 +165,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     )}
                     {onAcceptPress && (
                         <TouchableOpacity
-                            style={[styles.requestBtn, { backgroundColor: COLORS.success }]}
+                            style={styles.requestBtn}
                             onPress={(e) => {
                                 e.stopPropagation();
                                 onAcceptPress();
