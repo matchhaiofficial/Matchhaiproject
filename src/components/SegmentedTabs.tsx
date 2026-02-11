@@ -124,8 +124,10 @@ const styles = StyleSheet.create({
     itemText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.clean,
-        fontSize: TEXT_SIZES.label,
+        fontSize: 12, // Slightly smaller for more horizontal room
         fontWeight: '600',
+        letterSpacing: 0.3, // Better legibility
+        flexShrink: 1, // Prevent pushing badges out
     },
     itemTextActive: {
         color: COLORS.text,
@@ -134,12 +136,15 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
     },
     badge: {
-        paddingHorizontal: 4, // Reduced from 6
-        paddingVertical: 1, // Reduced from 2
+        paddingHorizontal: 5,
+        paddingVertical: 1,
         borderRadius: RADII.pill,
         backgroundColor: COLORS.cardDark,
         borderWidth: 1,
         borderColor: COLORS.divider,
+        minWidth: 18, // Ensure circularity for single digits
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     badgeActive: {
         backgroundColor: COLORS.accent + '22',
@@ -151,8 +156,8 @@ const styles = StyleSheet.create({
     badgeText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xs,
-        fontWeight: '700',
+        fontSize: 10, // Slightly smaller
+        fontWeight: '600', // Less bulky
     },
     badgeTextActive: {
         color: '#FFF',

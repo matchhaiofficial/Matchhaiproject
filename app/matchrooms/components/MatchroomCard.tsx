@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { memo, useEffect, useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { Matchroom } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
@@ -16,9 +16,11 @@ interface MatchroomCardProps {
     isRequested?: boolean;
     onAcceptPress?: () => void;
     acceptLabel?: string;
+    onPress?: () => void;
+    containerStyle?: StyleProp<ViewStyle>;
 }
 
-const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel }: MatchroomCardProps) => {
+const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel, onPress, containerStyle }: MatchroomCardProps) => {
     const router = useRouter();
 
     // Check if room is locked/full
@@ -89,6 +91,10 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const remainingCount = displayRoles.length - 2;
 
     const handlePress = () => {
+        if (onPress) {
+            onPress();
+            return;
+        }
         router.push({ pathname: "/matchrooms/[id]" as any, params: { id: room.id! } });
     };
 
@@ -110,7 +116,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
 
     return (
         <TouchableOpacity
-            style={styles.nearbyCard}
+            style={[styles.nearbyCard, containerStyle]}
             onPress={handlePress}
             activeOpacity={0.7}
         >
@@ -165,13 +171,13 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     )}
                     {onAcceptPress && (
                         <TouchableOpacity
-                            style={styles.requestBtn}
+                            style={styles.acceptBtn}
                             onPress={(e) => {
                                 e.stopPropagation();
                                 onAcceptPress();
                             }}
                         >
-                            <Text style={styles.requestBtnText}>{acceptLabel || "Accept"}</Text>
+                            <Text style={styles.acceptBtnText}>{acceptLabel || "Accept"}</Text>
                         </TouchableOpacity>
                     )}
                 </View>

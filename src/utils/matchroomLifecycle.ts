@@ -161,5 +161,28 @@ export function getRoomDisplayStatus(room: any): string {
     return room.status || 'open';
 }
 
+/**
+ * Check if a user can submit a complaint for a matchroom.
+ * Allowed if status is 'in-progress' OR 'completed' (within 24 hours of completion).
+ * 
+ * @param room The matchroom object
+ * @param now Current time (for testing)
+ * @returns true if reporting is allowed
+ */
+export function canSubmitComplain(room: any, now = new Date()): boolean {
+    const status = room?.status;
+    if (status === 'in-progress' || status === 'open' || status === 'locked') return true;
+
+    if (status === 'completed') {
+        const completedAt = toDate(room?.completedAt);
+        if (!completedAt) return true; // Fallback: allow if timestamp is missing for existing rooms
+
+        const diff = now.getTime() - completedAt.getTime();
+        return diff >= 0 && diff <= ONE_DAY_MS;
+    }
+
+    return false;
+}
+
 // Export TTL for external use
-export { ROOM_TTL_MS, ONE_DAY_MS };
+export { ROOM_TTL_MS, ONE_DAY_MS, toDate };
