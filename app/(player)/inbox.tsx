@@ -290,6 +290,10 @@ export default function Inbox() {
     };
 
     const pendingCount = notifications.filter(n => {
+        const isRejectedChallengeNotification =
+            (n.type === 'team_match_challenge' || n.type === 'team_match_challenge_update') &&
+            n.status === 'rejected';
+        if (isRejectedChallengeNotification) return false;
         if (n.status !== 'pending') return false;
         if (n.expiresAt) {
             const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
@@ -299,6 +303,11 @@ export default function Inbox() {
     }).length;
 
     const filtered = notifications.filter(n => {
+        const isRejectedChallengeNotification =
+            (n.type === 'team_match_challenge' || n.type === 'team_match_challenge_update') &&
+            n.status === 'rejected';
+        if (isRejectedChallengeNotification) return false;
+
         const isPending = n.status === 'pending';
 
         // Expiration check for pending items
@@ -602,14 +611,32 @@ export default function Inbox() {
                             )}
                             {isTeamChallenge && (
                                 <>
-                                    {" challenged your team for a "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.game || "match"}</Text>
-                                    {" match."}
+                                    {item.status === 'pending' ? (
+                                        <>
+                                            {" challenged your team for a "}
+                                            <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.game || "match"}</Text>
+                                            {" match."}
+                                        </>
+                                    ) : (
+                                        <>
+                                            {" challenge has been marked as "}
+                                            <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.status}</Text>
+                                            {"."}
+                                        </>
+                                    )}
                                 </>
                             )}
                             {isTeamChallengeUpdate && (
                                 <>
-                                    {" updated challenge status. Open the challenge workspace to continue."}
+                                    {item.status === 'accepted' ? (
+                                        item.meta?.matchroomId ? (
+                                            " accepted and confirmed. Matchroom is ready."
+                                        ) : (
+                                            " accepted. Open challenge workspace to continue."
+                                        )
+                                    ) : (
+                                        " updated challenge status. Open the challenge workspace to continue."
+                                    )}
                                 </>
                             )}
                         </Text>
@@ -689,6 +716,15 @@ export default function Inbox() {
                         >
                             <Text style={styles.buttonText}>Open Challenge</Text>
                         </TouchableOpacity>
+                        {!!item.meta?.matchroomId && (
+                            <TouchableOpacity
+                                style={styles.acceptButton}
+                                onPress={() => router.push(`/matchrooms/${item.meta?.matchroomId}` as any)}
+                                activeOpacity={0.85}
+                            >
+                                <Text style={styles.buttonText}>View Matchroom</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 )}
             </View>
@@ -722,7 +758,13 @@ export default function Inbox() {
             />
 
             {/* Clear All Button - Only visible in History tab when there are items */}
-            {activeTab === 'resolved' && notifications.filter(n => n.status !== 'pending').length > 0 && (
+            {activeTab === 'resolved' && notifications.filter(n => {
+                const isRejectedChallengeNotification =
+                    (n.type === 'team_match_challenge' || n.type === 'team_match_challenge_update') &&
+                    n.status === 'rejected';
+                if (isRejectedChallengeNotification) return false;
+                return n.status !== 'pending';
+            }).length > 0 && (
                 <TouchableOpacity
                     onPress={handleClearAllHistory}
                     onPressIn={() => {

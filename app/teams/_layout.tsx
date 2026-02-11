@@ -12,6 +12,10 @@ export default function TeamsLayout() {
         >
             <Stack.Screen name="create" />
             <Stack.Screen name="[id]" />
+            <Stack.Screen name="challenges" />
+            <Stack.Screen name="challenge" />
+            <Stack.Screen name="challenge-chat" />
+            <Stack.Screen name="challenge-create" />
         </Stack>
     );
 }
