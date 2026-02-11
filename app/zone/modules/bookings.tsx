@@ -841,7 +841,90 @@ export default function ZoneBookingsModule() {
                         })
                     )}
 
-                    {selectedRequest ? null : null}
+                    {selectedRequest && (
+                        <View style={styles.detailsCard}>
+                            <Text style={styles.detailsTitle}>Manage Request</Text>
+                            <Text style={styles.detailsLine}>User: {selectedRequest.userName}</Text>
+                            <Text style={styles.detailsLine}>Game: {selectedRequest.gameKey.toUpperCase()}</Text>
+                            <Text style={styles.detailsLine}>Status: {selectedRequest.status}</Text>
+
+                            <View style={styles.counterHeader}>
+                                <Text style={styles.detailsTitle}>Counter Offer</Text>
+                            </View>
+
+                            <Text style={styles.formLabel}>Counter Price (PKR)</Text>
+                            <TextInput
+                                value={counterPrice}
+                                onChangeText={setCounterPrice}
+                                keyboardType="numeric"
+                                style={styles.input}
+                                placeholder="e.g. 1500"
+                                placeholderTextColor={COLORS.muted}
+                            />
+
+                            <Text style={styles.formLabel}>Expires In (Minutes)</Text>
+                            <TextInput
+                                value={counterExpiryMinutes}
+                                onChangeText={setCounterExpiryMinutes}
+                                keyboardType="numeric"
+                                style={styles.input}
+                                placeholder="e.g. 10"
+                                placeholderTextColor={COLORS.muted}
+                            />
+
+                            <Text style={styles.formLabel}>Message (Optional)</Text>
+                            <TextInput
+                                value={counterMessage}
+                                onChangeText={setCounterMessage}
+                                style={[styles.input, styles.inputMultiline]}
+                                placeholder="e.g. Alternative timing available..."
+                                placeholderTextColor={COLORS.muted}
+                                multiline
+                            />
+
+                            <View style={styles.actionsRow}>
+                                <Pressable
+                                    style={[styles.actionButton, styles.counterButton]}
+                                    onPress={handleCounterOffer}
+                                    disabled={processingAction !== null}
+                                >
+                                    <Text style={styles.actionText}>Send Counter</Text>
+                                </Pressable>
+                                <Pressable
+                                    style={[styles.actionButton, styles.acceptButton]}
+                                    onPress={handleAccept}
+                                    disabled={processingAction !== null}
+                                >
+                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                        {processingAction === "accept" ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <MaterialIcons name="check" size={16} color="#FFF" />
+                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
+                                            </>
+                                        )}
+                                    </View>
+                                </Pressable>
+                                <Pressable
+                                    style={[styles.actionButton, styles.rejectButton]}
+                                    onPress={handleReject}
+                                    disabled={processingAction !== null}
+                                >
+                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                        {processingAction === "reject" ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <MaterialIcons name="close" size={16} color="#FFF" />
+                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
+                                            </>
+                                        )}
+                                    </View>
+                                </Pressable>
+                            </View>
+                        </View>
+                    )}
                 </ScrollView>
             ) : null}
 
@@ -883,11 +966,12 @@ export default function ZoneBookingsModule() {
                             Create booking for walk-ins with venue-pay, guest-pay, or mixed mode.
                         </Text>
 
+                        <Text style={styles.formLabel}>Matchroom Title</Text>
                         <TextInput
                             value={walkInTitle}
                             onChangeText={setWalkInTitle}
                             style={styles.input}
-                            placeholder="Walk-in Futsal 5v5"
+                            placeholder="e.g. Walk-in Futsal 5v5"
                             placeholderTextColor={COLORS.muted}
                         />
 
@@ -920,41 +1004,53 @@ export default function ZoneBookingsModule() {
                         </ScrollView>
 
                         <View style={styles.formGrid}>
-                            <TextInput
-                                value={walkInSeatCount}
-                                onChangeText={setWalkInSeatCount}
-                                keyboardType="numeric"
-                                style={[styles.input, styles.halfInput]}
-                                placeholder="10"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <TextInput
-                                value={walkInDuration}
-                                onChangeText={setWalkInDuration}
-                                keyboardType="numeric"
-                                style={[styles.input, styles.halfInput]}
-                                placeholder="90"
-                                placeholderTextColor={COLORS.muted}
-                            />
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Seat Count</Text>
+                                <TextInput
+                                    value={walkInSeatCount}
+                                    onChangeText={setWalkInSeatCount}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 10"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Duration (Mins)</Text>
+                                <TextInput
+                                    value={walkInDuration}
+                                    onChangeText={setWalkInDuration}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 90"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
                         </View>
 
                         <View style={styles.formGrid}>
-                            <TextInput
-                                value={walkInKnownPlayers}
-                                onChangeText={setWalkInKnownPlayers}
-                                keyboardType="numeric"
-                                style={[styles.input, styles.halfInput]}
-                                placeholder="4"
-                                placeholderTextColor={COLORS.muted}
-                            />
-                            <TextInput
-                                value={walkInPrice}
-                                onChangeText={setWalkInPrice}
-                                keyboardType="numeric"
-                                style={[styles.input, styles.halfInput]}
-                                placeholder="1500"
-                                placeholderTextColor={COLORS.muted}
-                            />
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Known Players</Text>
+                                <TextInput
+                                    value={walkInKnownPlayers}
+                                    onChangeText={setWalkInKnownPlayers}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 4"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
+                            <View style={styles.halfInput}>
+                                <Text style={styles.formLabel}>Price Per Player</Text>
+                                <TextInput
+                                    value={walkInPrice}
+                                    onChangeText={setWalkInPrice}
+                                    keyboardType="numeric"
+                                    style={styles.input}
+                                    placeholder="e.g. 1500"
+                                    placeholderTextColor={COLORS.muted}
+                                />
+                            </View>
                         </View>
 
                         <View style={styles.dateRow}>
