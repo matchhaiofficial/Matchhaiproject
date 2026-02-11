@@ -718,6 +718,7 @@ export default function ZoneBookingsModule() {
                 value={segment}
                 onChange={(value) => setSegment(value)}
                 style={styles.segmentTabs}
+                itemTextStyle={styles.tabTitle}
             />
 
             {errorText ? (
