@@ -1,10 +1,14 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, SPACING } from '../../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
+    },
+    screenContent: {
+        paddingTop: 0,
+        paddingBottom: 0,
     },
     container: {
         paddingBottom: SPACING.md,
@@ -15,7 +19,16 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         backgroundColor: COLORS.backgroundDark,
     },
-    headerTopRow: {
+    profileCard: {
+        width: '100%',
+        backgroundColor: COLORS.cardDark,
+        borderRadius: RADII.xl,
+        borderWidth: 1,
+        borderColor: COLORS.accent + '55',
+        padding: SPACING.lg,
+        ...SHADOWS.accentSoft,
+    },
+    profileTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
         marginBottom: SPACING.md,

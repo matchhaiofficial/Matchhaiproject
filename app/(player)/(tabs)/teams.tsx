@@ -346,7 +346,7 @@ export default function Teams() {
 
     if (loading) {
         return (
-            <Screen style={styles.screen} scroll={false}>
+            <Screen style={styles.screen} scroll={false} edges={['top']}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
@@ -355,7 +355,7 @@ export default function Teams() {
     }
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} edges={['top']}>
             <AppHeader title={mode === 'my' ? 'My Teams' : 'Discover Teams'} />
 
             {/* Header Area */}

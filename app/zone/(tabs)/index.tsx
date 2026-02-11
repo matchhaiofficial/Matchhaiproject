@@ -345,7 +345,7 @@ export default function ZoneDashboardHome() {
 
     if (!zone || zone.status === "pending-review") {
         return (
-            <Screen style={styles.screen} scroll={false}>
+            <Screen style={styles.screen} scroll={false} edges={['top']}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -364,7 +364,7 @@ export default function ZoneDashboardHome() {
 
     if (zone.status === "rejected") {
         return (
-            <Screen style={styles.screen} scroll={false}>
+            <Screen style={styles.screen} scroll={false} edges={['top']}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -410,7 +410,7 @@ export default function ZoneDashboardHome() {
     );
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} edges={['top']}>
             <AppHeader
                 title="Dashboard"
                 subtitle={zone.venueBrandName}

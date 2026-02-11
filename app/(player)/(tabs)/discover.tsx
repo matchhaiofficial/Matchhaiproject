@@ -131,7 +131,7 @@ export default function DiscoverScreen() {
     };
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent} edges={['top']}>
             <AppHeader title="Discover" />
 
             {/* Header Section */}
