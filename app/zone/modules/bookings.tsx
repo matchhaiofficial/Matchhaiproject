@@ -139,6 +139,42 @@ const formatDate = (value: any) => {
     return new Date(millis).toLocaleString();
 };
 
+const toDateString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length >= 8) return trimmed;
+    }
+    const millis = toMillis(value);
+    if (!millis) return undefined;
+    return new Date(millis).toISOString().slice(0, 10);
+};
+
+const requestToMatchroomCardData = (item: ZoneBookingQueueItem): Matchroom => ({
+    id: item.id,
+    hostUid: item.userId,
+    hostName: item.userName,
+    game: item.gameKey.toUpperCase(),
+    title: item.title,
+    description: "Booking request",
+    status: item.status as any,
+    maxPlayers: item.maxPlayers,
+    currentPlayers: item.reservedSlots || item.maxPlayers,
+    players: [],
+    playerUids: [],
+    createdAt: item.createdAt || new Date(),
+    location: item.preferredAreas?.[0] || "Zone Venue",
+    pricing: {
+        perPlayer: item.budgetPerPlayer || 0,
+        currency: item.currency || "PKR",
+    },
+    scheduledDate: toDateString(item.preferredDate),
+    scheduledTime: item.preferredTime,
+    slotsA: [],
+    slotsB: [],
+    paymentStatus: (item.paymentStatus || "unpaid") as any,
+});
+
 const toMatchroomCardData = (room: ZoneMatchroomListItem, fallbackLocation?: string): Matchroom => ({
     id: room.id,
     hostUid: room.hostUid || room.zoneOwnerUid || "",
@@ -488,14 +524,15 @@ export default function ZoneBookingsModule() {
         });
     }, [combinedQueue]);
 
-    const handleAccept = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
+    const handleAccept = async (targetRequest?: ZoneBookingQueueItem) => {
+        const req = targetRequest || selectedRequest;
+        if (!zone?.id || !user?.uid || !req) return;
         setProcessingAction("accept");
         const result = await acceptZoneBookingRequest({
-            requestId: selectedRequest.id,
+            requestId: req.id,
             adminUid: user.uid,
             zoneId: zone.id,
-            requestOwnerUid: selectedRequest.userId,
+            requestOwnerUid: req.userId,
             branchId: primaryBranch?.id || undefined,
             branchName: primaryBranch?.branchDisplayName || undefined,
             location: zone.primaryBranch?.areaLabel || zone.venueBrandName || undefined,
@@ -809,41 +846,16 @@ export default function ZoneBookingsModule() {
                             const selected = selectedRequestId === item.id;
                             const matchroomId = getRequestMatchroomId(item);
                             return (
-                                <Pressable
-                                    key={item.id}
-                                    style={[styles.requestCard, selected && styles.requestCardActive]}
-                                    onPress={() => {
-                                        setSelectedRequestId(item.id);
-                                        if (matchroomId) {
-                                            router.push({
-                                                pathname: "/matchrooms/[id]" as any,
-                                                params: { id: matchroomId },
-                                            } as any);
-                                        }
-                                    }}
-                                >
-                                    <View style={styles.requestTopRow}>
-                                        <Text style={styles.requestTitle} numberOfLines={1}>
-                                            {item.title}
-                                        </Text>
-                                        <Text style={styles.requestStatus}>{item.status}</Text>
-                                    </View>
-                                    <Text style={styles.requestMeta}>
-                                        {item.userName} / {item.gameKey.toUpperCase()} / {item.assetType}
-                                    </Text>
-                                    <Text style={styles.requestMeta}>
-                                        Players: {item.maxPlayers} / Budget: {item.currency || "PKR"} {item.budgetPerPlayer || 0}
-                                    </Text>
-                                    {item.priorityFlags.length ? (
-                                        <View style={styles.flagRow}>
-                                            {item.priorityFlags.map((flag) => (
-                                                <View key={`${item.id}_${flag}`} style={styles.flagPill}>
-                                                    <Text style={styles.flagText}>{flag}</Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    ) : null}
-                                </Pressable>
+                                <View key={item.id} style={selected ? styles.matchroomFocusedWrap : undefined}>
+                                    <MatchroomCard
+                                        room={requestToMatchroomCardData(item)}
+                                        onAcceptPress={() => {
+                                            setSelectedRequestId(item.id);
+                                            handleAccept(item);
+                                        }}
+                                        acceptLabel="Accept"
+                                    />
+                                </View>
                             );
                         })
                     )}
@@ -899,7 +911,7 @@ export default function ZoneBookingsModule() {
                                 </Pressable>
                                 <Pressable
                                     style={[styles.actionButton, styles.acceptButton]}
-                                    onPress={handleAccept}
+                                    onPress={() => handleAccept()}
                                     disabled={processingAction !== null}
                                 >
                                     <View style={{ flexDirection: "row", alignItems: "center" }}>
