@@ -1181,8 +1181,8 @@ export const respondToMatchroomJoinRequest = async (data: { notificationId: stri
             transaction.update(matchroomRef, updateData);
             transaction.update(notifRef, { status: 'accepted', updatedAt: serverTimestamp() });
 
-            // If lobby becomes full before lock time, upsert booking request for venue admin/owner.
-            if (willBeFull && matchroomData.bookingSource !== 'walkin' && matchroomData.locationMode === 'zone' && matchroomData.zoneId && lockAt && Date.now() < lockAt.getTime()) {
+            // If lobby becomes full, upsert booking request for venue admin/owner immediately.
+            if (willBeFull && matchroomData.bookingSource !== 'walkin' && matchroomData.locationMode === 'zone' && matchroomData.zoneId) {
                 const requestId = `matchroom_request_${matchroomId}`;
                 transaction.set(doc(db, 'booking_requests', requestId), {
                     userId: matchroomData.hostUid,
@@ -1508,8 +1508,47 @@ export const respondToMatchroomInvite = async (data: {
                 currentPlayers: (roomData.currentPlayers || 0) + 1,
             };
 
+            const newPlayerCount = Number(updates.currentPlayers || 0);
+            const maxPlayers = Number(roomData.maxPlayers || 10);
+            const willBeFull = newPlayerCount >= maxPlayers;
+
+            if (willBeFull) {
+                updates.status = 'locked';
+                updates.isLocked = true;
+                updates.lockedAt = serverTimestamp();
+            }
+
             transaction.update(roomRef, updates);
             transaction.update(notifRef, { status: 'accepted' });
+
+            // When room becomes full, immediately send booking request to zone/admin queue.
+            if (willBeFull && roomData.bookingSource !== 'walkin' && roomData.locationMode === 'zone' && roomData.zoneId) {
+                const requestId = `matchroom_request_${matchroomId}`;
+                transaction.set(doc(db, 'booking_requests', requestId), {
+                    userId: roomData.hostUid,
+                    userName: roomData.hostName || 'Player',
+                    gameKey: roomData.game || 'unknown',
+                    title: roomData.title || 'Matchroom Booking',
+                    description: 'Lobby filled. Awaiting venue admin confirmation.',
+                    maxPlayers,
+                    reservedSlots: maxPlayers,
+                    teamMode: roomData.teamMode || 'solo',
+                    teamId: roomData.teamId || null,
+                    preferredDate: roomData.scheduledDate || null,
+                    preferredTime: roomData.scheduledTime || null,
+                    flexibilityWindow: roomData.flexibility || 'Exact time',
+                    preferredAreas: roomData.location ? [roomData.location] : [],
+                    budgetPerPlayer: Number(roomData.pricing?.perPlayer || 0),
+                    currency: roomData.pricing?.currency || 'PKR',
+                    locationMode: 'zone',
+                    zoneId: roomData.zoneId,
+                    status: 'open',
+                    paymentStatus: roomData.paymentStatus || 'unpaid',
+                    lifecycleStatus: 'matchroom_full_admin_pending',
+                    matchroomId,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            }
 
             return { ok: true };
         });
