@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -113,6 +113,7 @@ export default function PlayerDashboard() {
     const [myTeams, setMyTeams] = useState<Team[]>([]);
     const [nearbyZones, setNearbyZones] = useState<Zone[]>([]);
     const [requestStats, setRequestStats] = useState<DashboardRequestStats>({ myRequests: 0, myOffers: 0 });
+    const lastReminderSignatureRef = useRef("");
 
     const loadDashboardData = useCallback(async () => {
         if (!user?.uid) return;
@@ -227,13 +228,22 @@ export default function PlayerDashboard() {
     }, [user]);
 
     useEffect(() => {
-        if (!user?.uid) return;
-        if (!upcomingRooms.length) return;
+        if (!user?.uid) {
+            lastReminderSignatureRef.current = "";
+            return;
+        }
+        if (!upcomingRooms.length) {
+            lastReminderSignatureRef.current = "";
+            return;
+        }
 
         const next = upcomingRooms[0];
         if (!next?.id) return;
         const startAt = getRoomStartDate(next);
         if (!startAt) return;
+        const signature = `${next.id}:${startAt.getTime()}:15`;
+        if (lastReminderSignatureRef.current === signature) return;
+        lastReminderSignatureRef.current = signature;
 
         scheduleMatchroomReminder({
             roomId: next.id,
@@ -345,7 +355,7 @@ export default function PlayerDashboard() {
             <ScrollView
                 contentContainerStyle={[
                     styles.container,
-                    { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? (insets.bottom + 16) : (tabBarHeight + 12) },
+                    { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? (insets.bottom + 16) : 16 },
                 ]}
                 showsVerticalScrollIndicator={false}
             >

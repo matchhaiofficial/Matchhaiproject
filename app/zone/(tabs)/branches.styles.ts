@@ -13,7 +13,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     content: {
-        paddingBottom: SPACING.xxl + 20,
+        paddingBottom: SPACING.lg,
     },
     noticeBox: {
         borderWidth: 1,

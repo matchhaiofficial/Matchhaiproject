@@ -89,7 +89,7 @@ export default function ZoneBranches() {
 
     if (!zone) {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']}>
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
                 <AppHeader title="Branches" inlineTitle />
                 <View style={styles.emptyWrap}>
                     <Text style={styles.emptyTitle}>No zone found.</Text>
@@ -99,7 +99,7 @@ export default function ZoneBranches() {
     }
 
     return (
-        <Screen style={styles.screen} scroll={false} edges={['top']}>
+        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
             <AppHeader title="Branches" subtitle={`${branches.length} locations`} inlineTitle />
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 {usingLegacyFallback && (

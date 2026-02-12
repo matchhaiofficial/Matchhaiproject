@@ -14,6 +14,7 @@ import AppHeader from '../../../src/components/AppHeader';
 import Screen from '../../../src/components/Screen';
 import { db } from '../../../src/config/firebaseConfig';
 import { useAuth } from '../../../src/context/AuthContext';
+import { useZoneData } from '../../../src/hooks/useZoneData';
 import { createMatchroom } from '../../../src/services/matchService';
 import {
     applyPricingRulesToRate,
@@ -28,6 +29,7 @@ import { getUserProfile, getUserSportRoleLabel } from '../../../src/services/use
 import type { Zone } from '../../../src/services/zoneService';
 import type { BookingRequest } from '../../../src/services/bookingRequestService';
 import { createBookingRequest } from '../../../src/services/bookingRequestService';
+import { createZoneWalkInMatchroom } from '../../../src/services/zoneAdminBookingService';
 import { COLORS, FONTS } from '../../../src/theme';
 
 import Logger from '../../../src/utils/logger';
@@ -50,9 +52,71 @@ const generateMatchCode = (zoneName?: string | null) => {
     return `${prefix}-${random}`;
 };
 
+const ZONE_GAME_SUPPORT_MAP: Array<{ gameKey: string; flags: string[] }> = [
+    { gameKey: 'cs2', flags: ['supportsCs2'] },
+    { gameKey: 'fc26', flags: ['supportsFc25', 'supportsFc26'] },
+    { gameKey: 'tekken8', flags: ['supportsTekken8'] },
+    { gameKey: 'futsal', flags: ['supportsFutsal'] },
+    { gameKey: 'indoor_cricket', flags: ['supportsIndoorCricket'] },
+    { gameKey: 'padel', flags: ['supportsPadel'] },
+    { gameKey: 'pickleball', flags: ['supportsPickleball'] },
+];
+
+const getSupportedGameKeysFromZoneGames = (zoneGames: any): string[] => {
+    if (!zoneGames || typeof zoneGames !== 'object') return [];
+    return ZONE_GAME_SUPPORT_MAP
+        .filter(({ flags }) => flags.some((flag) => zoneGames?.[flag] === true))
+        .map(({ gameKey }) => gameKey);
+};
+
+const WALKIN_SERIES_OPTIONS = ['BO1', 'BO3', 'BO5'] as const;
+type WalkInSeriesType = (typeof WALKIN_SERIES_OPTIONS)[number];
+
+const getWalkInDurationMinutes = (gameKey: string | null, series: WalkInSeriesType, overs?: string) => {
+    if (gameKey === 'cs2') {
+        if (series === 'BO1') return 60;
+        if (series === 'BO3') return 180;
+        return 300;
+    }
+    if (gameKey === 'fc26') {
+        if (series === 'BO1') return 30;
+        if (series === 'BO3') return 60;
+        return 120;
+    }
+    if (gameKey === 'tekken8') {
+        if (series === 'BO1') return 60;
+        if (series === 'BO3') return 120;
+        return 180;
+    }
+    if (gameKey === 'futsal') {
+        if (series === 'BO1') return 60;
+        if (series === 'BO3') return 90;
+        return 120;
+    }
+    if (gameKey === 'padel' || gameKey === 'pickleball') {
+        if (series === 'BO1') return 60;
+        if (series === 'BO3') return 120;
+        return 180;
+    }
+    if (gameKey === 'indoor_cricket') {
+        return overs === '6' ? 150 : 120;
+    }
+    if (series === 'BO1') return 60;
+    if (series === 'BO3') return 120;
+    return 180;
+};
+
 export default function CreateMatchroom() {
     const { user } = useAuth();
-    const params = useLocalSearchParams<{ zoneId?: string; zoneName?: string; zoneSupportedGames?: string }>();
+    const { zone: adminZone } = useZoneData();
+    const params = useLocalSearchParams<{
+        zoneId?: string;
+        zoneName?: string;
+        zoneSupportedGames?: string;
+        mode?: string;
+        branchId?: string;
+    }>();
+    const isZoneWalkInAdmin = params.mode === 'zone_walkin_admin';
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -92,6 +156,11 @@ export default function CreateMatchroom() {
     const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
     const [seriesType, setSeriesType] = useState<'BO1' | 'BO3' | 'BO5' | 'BO10' | 'BO7' | 'BO20' | 'BO40'>('BO1');
     const [duration, setDuration] = useState<number>(1); // Duration in hours (for Futsal)
+    const [walkInSeatCount, setWalkInSeatCount] = useState('10');
+    const [walkInPaymentMode, setWalkInPaymentMode] = useState<'venue_pay' | 'guest_pay'>('venue_pay');
+    const [walkInBranchId, setWalkInBranchId] = useState<string | null>(
+        typeof params.branchId === 'string' && params.branchId.trim().length ? params.branchId : null,
+    );
 
     const [formData, setFormData] = useState({
         title: '',
@@ -152,8 +221,10 @@ export default function CreateMatchroom() {
 
             setFormData(prev => ({ ...prev, pricePerPlayer }));
         } else if (selectedGame === 'tekken8' && zoneRate > 0) {
-            // Tekken 8 Logic: BO7 = 1hr, BO20 = 2hr, BO40 = 3hr
-            const hoursMap: Record<string, number> = { BO7: 1, BO20: 2, BO40: 3 };
+            // Tekken 8 Logic:
+            // Player flow: BO7 = 1hr, BO20 = 2hr, BO40 = 3hr
+            // Admin walk-in flow: BO1 = 1hr, BO3 = 2hr, BO5 = 3hr
+            const hoursMap: Record<string, number> = { BO1: 1, BO3: 2, BO5: 3, BO7: 1, BO20: 2, BO40: 3 };
             const hours = hoursMap[seriesType] || 1;
 
             // Calculate Total Cost for the console/setup
@@ -195,25 +266,40 @@ export default function CreateMatchroom() {
 
             setFormData(prev => ({ ...prev, pricePerPlayer: Math.ceil(pricePerPlayer) }));
         } else if (selectedGame === 'padel' && zoneRate > 0) {
-            // Padel Logic: BO3 = 1hr, BO5 = 2hr, BO10 = 3hr
-            // Price = (Hourly Rate * Hours) / 4 players
-            const hoursMap: Record<string, number> = { BO3: 1, BO5: 2, BO10: 3 };
-            const hours = hoursMap[formData.seriesType] || 1;
+            // Padel Logic:
+            // Player flow: BO3 = 1hr, BO5 = 2hr, BO10 = 3hr
+            // Admin walk-in flow: BO1 = 1hr, BO3 = 2hr, BO5 = 3hr
+            const seriesKey = isZoneWalkInAdmin ? seriesType : formData.seriesType;
+            const hoursMap: Record<string, number> = { BO1: 1, BO3: 2, BO5: 3, BO10: 3 };
+            const hours = hoursMap[seriesKey || ''] || 1;
 
             const totalCourtCost = zoneRate * hours;
             const pricePerPlayer = totalCourtCost / 4;
             setFormData(prev => ({ ...prev, pricePerPlayer: Math.ceil(pricePerPlayer) }));
         } else if (selectedGame === 'pickleball' && zoneRate > 0) {
-            // Pickleball Logic: BO3 = 1hr, BO5 = 2hr, BO10 = 3hr
-            const hoursMap: Record<string, number> = { BO3: 1, BO5: 2, BO10: 3 };
-            const hours = hoursMap[formData.seriesType] || 1;
+            // Pickleball Logic:
+            // Player flow: BO3 = 1hr, BO5 = 2hr, BO10 = 3hr
+            // Admin walk-in flow: BO1 = 1hr, BO3 = 2hr, BO5 = 3hr
+            const seriesKey = isZoneWalkInAdmin ? seriesType : formData.seriesType;
+            const hoursMap: Record<string, number> = { BO1: 1, BO3: 2, BO5: 3, BO10: 3 };
+            const hours = hoursMap[seriesKey || ''] || 1;
 
             const totalCourtCost = zoneRate * hours;
             const players = formData.format === '2v2' ? 4 : 2;
             const pricePerPlayer = totalCourtCost / players;
             setFormData(prev => ({ ...prev, pricePerPlayer: Math.ceil(pricePerPlayer) }));
         }
-    }, [selectedGame, zoneRate, seriesType, formData.format, duration, formData.maxPlayers, formData.overs, formData.seriesType]);
+    }, [
+        selectedGame,
+        zoneRate,
+        seriesType,
+        formData.format,
+        duration,
+        formData.maxPlayers,
+        formData.overs,
+        formData.seriesType,
+        isZoneWalkInAdmin,
+    ]);
 
     const captainedTeams = useMemo(() => {
         if (!user?.uid) return [];
@@ -228,6 +314,43 @@ export default function CreateMatchroom() {
     }, [teams, selectedTeamId]);
 
     const resolvedTeam = selectedTeamDetails || selectedTeam;
+
+    const adminBranches = useMemo(() => {
+        if (!adminZone) return [];
+
+        const mapped = new Map<string, { id: string; label: string; games?: Record<string, boolean> | null }>();
+        const upsert = (candidate: any) => {
+            const id = String(candidate?.id || candidate?.branchId || '').trim();
+            if (!id) return;
+            const label = String(candidate?.branchDisplayName || candidate?.name || candidate?.areaLabel || 'Branch').trim();
+            const existing = mapped.get(id);
+            if (!existing) {
+                mapped.set(id, { id, label, games: candidate?.games || null });
+                return;
+            }
+            mapped.set(id, {
+                id,
+                label: existing.label || label,
+                games: existing.games || candidate?.games || null,
+            });
+        };
+
+        upsert(adminZone.primaryBranch);
+        (Array.isArray(adminZone.branches) ? adminZone.branches : []).forEach(upsert);
+
+        return Array.from(mapped.values());
+    }, [adminZone]);
+
+    const selectedAdminBranch = useMemo(() => {
+        if (!walkInBranchId) return null;
+        return adminBranches.find((branch) => branch.id === walkInBranchId) || null;
+    }, [adminBranches, walkInBranchId]);
+
+    const walkInSupportedGameKeys = useMemo(() => {
+        const byBranch = getSupportedGameKeysFromZoneGames(selectedAdminBranch?.games);
+        if (byBranch.length > 0) return byBranch;
+        return getSupportedGameKeysFromZoneGames(adminZone?.games);
+    }, [adminZone?.games, selectedAdminBranch?.games]);
 
     const selectableTeamMembers = useMemo(() => {
         if (!resolvedTeam) return [];
@@ -351,6 +474,67 @@ export default function CreateMatchroom() {
         refreshSelectedTeam(selectedTeamId);
     }, [selectedTeamId, refreshSelectedTeam]);
 
+    useEffect(() => {
+        if (!isZoneWalkInAdmin) return;
+        if (!adminZone?.id) return;
+
+        setLocationMode('zone');
+        setSelectedZoneId(adminZone.id);
+        setSelectedZoneName(adminZone.venueBrandName || null);
+        setSelectedZone(adminZone as Zone);
+    }, [adminZone, isZoneWalkInAdmin]);
+
+    useEffect(() => {
+        if (!isZoneWalkInAdmin) return;
+        if (adminBranches.length === 0) {
+            setWalkInBranchId(null);
+            return;
+        }
+
+        const explicitParamBranch = typeof params.branchId === 'string' ? params.branchId.trim() : '';
+        if (explicitParamBranch && adminBranches.some((branch) => branch.id === explicitParamBranch)) {
+            setWalkInBranchId(explicitParamBranch);
+            return;
+        }
+
+        if (adminBranches.length === 1) {
+            setWalkInBranchId(adminBranches[0].id);
+        } else if (walkInBranchId && !adminBranches.some((branch) => branch.id === walkInBranchId)) {
+            setWalkInBranchId(null);
+        }
+    }, [adminBranches, isZoneWalkInAdmin, params.branchId, walkInBranchId]);
+
+    useEffect(() => {
+        if (!isZoneWalkInAdmin) return;
+        const walkInSeries = WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType)
+            ? (seriesType as WalkInSeriesType)
+            : 'BO1';
+        if (seriesType !== walkInSeries) {
+            setSeriesType(walkInSeries);
+            return;
+        }
+
+        const nextDurationHours = walkInSeries === 'BO1' ? 1 : walkInSeries === 'BO3' ? 1.5 : 2;
+        setDuration((prev) => (prev === nextDurationHours ? prev : nextDurationHours));
+        setFormData((prev) => {
+            const nextSeries = walkInSeries;
+            if (prev.seriesType === nextSeries) return prev;
+            return { ...prev, seriesType: nextSeries };
+        });
+    }, [isZoneWalkInAdmin, seriesType]);
+
+    useEffect(() => {
+        if (!isZoneWalkInAdmin || !selectedGame) return;
+        setSeriesType('BO1');
+    }, [isZoneWalkInAdmin, selectedGame]);
+
+    useEffect(() => {
+        if (!isZoneWalkInAdmin || !selectedGame) return;
+        if (!walkInSupportedGameKeys.length) return;
+        if (walkInSupportedGameKeys.includes(selectedGame)) return;
+        setSelectedGame(null);
+    }, [isZoneWalkInAdmin, selectedGame, walkInSupportedGameKeys]);
+
     useFocusEffect(
         useCallback(() => {
             if (selectedTeamId) {
@@ -359,7 +543,7 @@ export default function CreateMatchroom() {
         }, [selectedTeamId, refreshSelectedTeam])
     );
 
-    const minLeadDays = teamMode === 'team' ? 2 : 3;
+    const minLeadDays = isZoneWalkInAdmin ? 0 : (teamMode === 'team' ? 2 : 3);
     const minAllowedDate = (() => {
         const d = new Date();
         d.setHours(0, 0, 0, 0);
@@ -375,11 +559,12 @@ export default function CreateMatchroom() {
     })();
 
     useEffect(() => {
+        if (isZoneWalkInAdmin) return;
         if (!formData.date) return;
         if (!isDateAllowed) {
             setFormData(prev => ({ ...prev, date: '' }));
         }
-    }, [teamMode]);
+    }, [isZoneWalkInAdmin, teamMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -508,8 +693,12 @@ export default function CreateMatchroom() {
     // Format-specific defaults are now applied in handleFieldChange to avoid duplicated effects
 
     useEffect(() => {
+        if (isZoneWalkInAdmin) {
+            setLoading(false);
+            return;
+        }
         loadUserProfile();
-    }, [user]);
+    }, [isZoneWalkInAdmin, user]);
 
     // Reset skill state when game changes
     useEffect(() => {
@@ -520,6 +709,7 @@ export default function CreateMatchroom() {
 
     // Check if user has games configured that match the venue's offerings
     useEffect(() => {
+        if (isZoneWalkInAdmin) return;
         if (!userProfile || !params.zoneSupportedGames) return;
 
         try {
@@ -589,7 +779,7 @@ export default function CreateMatchroom() {
         } catch (e) {
             Logger.error('CreateMatchroom', 'Error parsing zoneSupportedGames', e);
         }
-    }, [userProfile, params.zoneSupportedGames]);
+    }, [isZoneWalkInAdmin, userProfile, params.zoneSupportedGames]);
 
     const loadUserProfile = async () => {
         if (!user?.uid) {
@@ -741,8 +931,8 @@ export default function CreateMatchroom() {
         setDuration(1); // Reset duration
         setTitleTouched(false);
 
-        // Phase 2: Load teams for this game
-        if (user) {
+        // Phase 2: Load teams for this game (player mode only)
+        if (user && !isZoneWalkInAdmin) {
             const result = await getUserTeamsForGame(user.uid, gameKey as any);
             if (result.ok && result.data) {
                 setTeams(result.data);
@@ -752,6 +942,12 @@ export default function CreateMatchroom() {
                 setReservedSlots(1);
                 setSelectedTeamMemberUids([]);
             }
+        } else if (isZoneWalkInAdmin) {
+            setTeams([]);
+            setTeamMode('solo');
+            setSelectedTeamId(null);
+            setReservedSlots(1);
+            setSelectedTeamMemberUids([]);
         }
 
         // Phase 4: Enforce CS2 Rules
@@ -869,6 +1065,44 @@ export default function CreateMatchroom() {
             return false;
         };
 
+        if (isZoneWalkInAdmin) {
+            if (!adminZone?.id) {
+                return fail('Zone Not Found', 'Unable to resolve your venue. Please try again.', 'admin_zone_missing');
+            }
+            if (!selectedGame) {
+                return fail('Missing Game', 'Please select a game/sport', 'missing_game');
+            }
+            if (!formData.title?.trim()) {
+                return fail('Missing Title', 'Please enter a match title', 'missing_title');
+            }
+            if (!formData.date || !formData.time) {
+                return fail('Missing Date/Time', 'Please enter date and time', 'missing_date_time');
+            }
+
+            const seatCount = Number.parseInt(walkInSeatCount, 10);
+            const maxSeats = Math.max(1, Number(formData.maxPlayers || 0));
+            if (!Number.isFinite(seatCount) || seatCount < 0) {
+                return fail('Invalid Seats', 'Booked seats cannot be negative.', 'invalid_walkin_seat_count_negative');
+            }
+            if (seatCount > maxSeats) {
+                return fail('Invalid Seats', `Booked seats cannot exceed total seats (${maxSeats}).`, 'invalid_walkin_seat_count_exceeds');
+            }
+
+            if (!WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType)) {
+                return fail('Missing Series', 'Please select series type (BO1, BO3, or BO5).', 'invalid_walkin_series');
+            }
+
+            if (zoneRateOptions.length > 0 && !selectedZoneRateKey) {
+                return fail('Missing Rate Type', 'Please select a rate type to calculate price per player.', 'walkin_zone_rate_type_missing');
+            }
+
+            if (adminBranches.length > 1 && !walkInBranchId) {
+                return fail('Missing Branch', 'Select a branch for this walk-in booking.', 'walkin_branch_missing');
+            }
+
+            return true;
+        }
+
         if (!selectedGame) {
             return fail('Missing Game', 'Please select a game/sport', 'missing_game');
         }
@@ -937,7 +1171,78 @@ export default function CreateMatchroom() {
     };
 
     const handleSubmit = async () => {
-        if (!user || !userProfile) return;
+        if (!user) return;
+
+        if (isZoneWalkInAdmin) {
+            setSubmitting(true);
+            try {
+                if (!adminZone?.id) {
+                    Alert.alert('Zone Not Found', 'Unable to resolve zone context.');
+                    return;
+                }
+
+                const seatCount = Number.parseInt(walkInSeatCount, 10);
+                const walkInSeries = WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType)
+                    ? (seriesType as WalkInSeriesType)
+                    : 'BO1';
+                const durationMinutes = getWalkInDurationMinutes(selectedGame, walkInSeries, formData.overs);
+                const pricePerPlayer = Math.max(0, Math.ceil(Number(formData.pricePerPlayer || 0)));
+                const branch = selectedAdminBranch || (adminBranches.length === 1 ? adminBranches[0] : null);
+                const totalSeats = Math.max(1, Number(formData.maxPlayers || 0));
+                const bookedSeats = Number.isFinite(seatCount)
+                    ? Math.max(0, Math.min(totalSeats, Math.floor(seatCount)))
+                    : totalSeats;
+
+                const result = await createZoneWalkInMatchroom({
+                    zoneId: adminZone.id,
+                    zoneOwnerUid: adminZone.ownerUid || user.uid,
+                    branchId: branch?.id || null,
+                    branchName: branch?.label || null,
+                    adminUid: user.uid,
+                    adminName: user.displayName || adminZone.ownerFullName || 'Zone Admin',
+                    gameKey: selectedGame || 'unknown',
+                    title: formData.title.trim() || 'Walk-in Matchroom',
+                    scheduledDate: formData.date,
+                    scheduledTime: formData.time,
+                    durationMinutes,
+                    seriesType: walkInSeries,
+                    seatCount: totalSeats,
+                    bookedSeatCount: bookedSeats,
+                    paymentMode: walkInPaymentMode,
+                    pricePerPlayer,
+                    currency: 'PKR',
+                    knownPlayers: [],
+                });
+
+                if (!result.ok) {
+                    Alert.alert('Walk-in failed', result.message || 'Failed to create walk-in matchroom.');
+                    return;
+                }
+
+                Alert.alert('Walk-in created', 'Walk-in matchroom created successfully.', [
+                    {
+                        text: 'Open',
+                        onPress: () => router.replace(`/matchrooms/${result.id}` as any),
+                    },
+                    {
+                        text: 'Back to Walk-ins',
+                        onPress: () =>
+                            router.replace({
+                                pathname: '/zone/modules/bookings',
+                                params: { segment: 'walkins', t: Date.now().toString() },
+                            } as any),
+                    },
+                ]);
+            } catch (error) {
+                Logger.error('CreateMatchroom', 'Error creating admin walk-in', error);
+                Alert.alert('Error', 'Something went wrong while creating walk-in matchroom.');
+            } finally {
+                setSubmitting(false);
+            }
+            return;
+        }
+
+        if (!userProfile) return;
 
         setSubmitting(true);
         try {
@@ -1175,6 +1480,21 @@ export default function CreateMatchroom() {
     };
 
     const submitBlockers = useMemo(() => {
+        if (isZoneWalkInAdmin) {
+            const blockers: string[] = [];
+            if (!selectedGame) blockers.push('Select a game');
+            if (!formData.title?.trim()) blockers.push('Enter match title');
+            if (!formData.date || !formData.time) blockers.push('Pick date and time');
+            const seatCount = Number.parseInt(walkInSeatCount, 10);
+            const maxSeats = Math.max(1, Number(formData.maxPlayers || 0));
+            if (!Number.isFinite(seatCount) || seatCount < 0) blockers.push('Booked seats cannot be negative');
+            if (Number.isFinite(seatCount) && seatCount > maxSeats) blockers.push(`Booked seats cannot exceed ${maxSeats}`);
+            if (!WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType)) blockers.push('Select series type');
+            if (zoneRateOptions.length > 0 && !selectedZoneRateKey) blockers.push('Select zone rate type');
+            if (adminBranches.length > 1 && !walkInBranchId) blockers.push('Select branch');
+            return blockers;
+        }
+
         const blockers: string[] = [];
         if (!selectedGame) blockers.push('Select a game');
         if (!formData.title?.trim()) blockers.push('Enter match title');
@@ -1194,6 +1514,7 @@ export default function CreateMatchroom() {
         }
         return blockers;
     }, [
+        isZoneWalkInAdmin,
         selectedGame,
         formData.title,
         formData.format,
@@ -1209,9 +1530,18 @@ export default function CreateMatchroom() {
         selectedTeamId,
         selectedTeamMemberUids.length,
         reservedSlots,
+        walkInSeatCount,
+        seriesType,
+        adminBranches.length,
+        walkInBranchId,
     ]);
 
     const canSubmit = submitBlockers.length === 0;
+    const walkInComputedPrice = Math.max(0, Math.ceil(Number(formData.pricePerPlayer || 0)));
+    const walkInSeries = WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType)
+        ? (seriesType as WalkInSeriesType)
+        : 'BO1';
+    const walkInEstimatedDurationMinutes = getWalkInDurationMinutes(selectedGame, walkInSeries, formData.overs);
 
     if (loading) {
         return (
@@ -1219,6 +1549,218 @@ export default function CreateMatchroom() {
                 <View style={styles.centered}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
+            </Screen>
+        );
+    }
+
+    if (isZoneWalkInAdmin) {
+        return (
+            <Screen
+                style={styles.screen}
+                scroll
+                keyboardAvoiding
+                contentStyle={styles.scrollContent}
+                scrollProps={{
+                    showsVerticalScrollIndicator: false,
+                    keyboardShouldPersistTaps: 'always',
+                }}
+            >
+                <AppHeader
+                    title="Create Matchroom"
+                    subtitle="Walk-in mode for zone admin"
+                    onBack={() => router.back()}
+                />
+
+                <GameSelector
+                    selectedGame={selectedGame}
+                    onSelectGame={handleGameSelect}
+                    userProfile={userProfile}
+                    allowAllGames
+                    allowedGameKeys={walkInSupportedGameKeys}
+                />
+
+                {selectedGame && (
+                    <>
+                        <BasicFields
+                            formData={formData}
+                            onChange={handleFieldChange}
+                            selectedGame={selectedGame || undefined}
+                            minimumDate={minAllowedDate}
+                            dateHelperText="Select start date and time for walk-in matchroom."
+                        />
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>
+                                Branch
+                                {adminBranches.length > 1 ? <Text style={styles.requiredAsterisk}>*</Text> : null}
+                            </Text>
+                            {adminBranches.length === 0 ? (
+                                <Text style={styles.helperTextTiny}>No branch data found. Primary zone context will be used.</Text>
+                            ) : (
+                                <View style={styles.chipRow}>
+                                    {adminBranches.map((branch) => {
+                                        const active = walkInBranchId === branch.id;
+                                        return (
+                                            <Pressable
+                                                key={branch.id}
+                                                style={[styles.optionChip, active && styles.optionChipActive]}
+                                                onPress={() => setWalkInBranchId(branch.id)}
+                                            >
+                                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                                    {branch.label}
+                                                </Text>
+                                            </Pressable>
+                                        );
+                                    })}
+                                </View>
+                            )}
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>
+                                Payment Mode<Text style={styles.requiredAsterisk}>*</Text>
+                            </Text>
+                            <View style={styles.chipRow}>
+                                {(['venue_pay', 'guest_pay'] as const).map((mode) => {
+                                    const active = walkInPaymentMode === mode;
+                                    return (
+                                        <Pressable
+                                            key={mode}
+                                            style={[styles.optionChip, active && styles.optionChipActive]}
+                                            onPress={() => setWalkInPaymentMode(mode)}
+                                        >
+                                            <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                                {mode === 'venue_pay' ? 'Paid by Venue' : 'Guests Pay'}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                        </View>
+
+                        {zoneRateOptions.length > 0 ? (
+                            <View style={styles.section}>
+                                <Text style={styles.fieldLabel}>
+                                    Rate type<Text style={styles.requiredAsterisk}>*</Text>
+                                </Text>
+                                <View style={styles.chipRow}>
+                                    {zoneRateOptions.map((opt) => {
+                                        const active = selectedZoneRateKey === opt.key;
+                                        return (
+                                            <Pressable
+                                                key={opt.key}
+                                                style={[styles.optionChip, active && styles.optionChipActive]}
+                                                onPress={() => {
+                                                    setSelectedZoneRateKey(opt.key);
+                                                    setZoneRate(opt.price);
+                                                }}
+                                            >
+                                                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                                    {opt.label}
+                                                </Text>
+                                            </Pressable>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        ) : null}
+
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>
+                                Walk-in Setup<Text style={styles.requiredAsterisk}>*</Text>
+                            </Text>
+                            <View style={styles.tabContainer}>
+                                <View style={styles.flex1}>
+                                    <Text style={styles.fieldLabel}>
+                                        Booked seats<Text style={styles.requiredAsterisk}>*</Text>
+                                    </Text>
+                                    <View style={styles.inputBox}>
+                                        <TextInput
+                                            style={styles.input}
+                                            placeholder="6"
+                                            placeholderTextColor="#757575"
+                                            keyboardType="number-pad"
+                                            value={walkInSeatCount}
+                                            onChangeText={setWalkInSeatCount}
+                                        />
+                                    </View>
+                                    <Text style={styles.helperTextTiny}>
+                                        Total seats: {Math.max(1, Number(formData.maxPlayers || 0))}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.fieldLabel}>
+                                Series type<Text style={styles.requiredAsterisk}>*</Text>
+                            </Text>
+                            <View style={styles.chipRow}>
+                                {WALKIN_SERIES_OPTIONS.map((option) => {
+                                    const active = seriesType === option;
+                                    return (
+                                        <Pressable
+                                            key={option}
+                                            style={[styles.optionChip, active && styles.optionChipActive]}
+                                            onPress={() => setSeriesType(option)}
+                                        >
+                                            <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                                                {option}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                            <Text style={styles.helperTextTiny}>
+                                Estimated duration: {Math.floor(walkInEstimatedDurationMinutes / 60)}h
+                                {walkInEstimatedDurationMinutes % 60
+                                    ? ` ${walkInEstimatedDurationMinutes % 60}m`
+                                    : ''}
+                            </Text>
+                        </View>
+
+                        <View style={styles.section}>
+                            <Text style={styles.fieldLabel}>Price per player (PKR)</Text>
+                            <View style={styles.inputBox}>
+                                <TextInput
+                                    style={styles.input}
+                                    editable={false}
+                                    selectTextOnFocus={false}
+                                    value={`${walkInComputedPrice}`}
+                                />
+                            </View>
+                            <Text style={styles.helperTextTiny}>
+                                Calculated automatically from game format, series type, and selected rate.
+                            </Text>
+                        </View>
+
+                        <View style={styles.buttonWrapper}>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.primaryButton,
+                                    (!canSubmit || submitting) && styles.primaryButtonDisabled,
+                                    pressed && canSubmit && !submitting && styles.primaryButtonPressed,
+                                ]}
+                                onPress={() => {
+                                    if (!validateForm()) return;
+                                    handleSubmit();
+                                }}
+                                disabled={submitting}
+                            >
+                                {submitting ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <Text style={styles.primaryButtonText}>Create Walk-in Matchroom</Text>
+                                )}
+                            </Pressable>
+                            {!canSubmit && (
+                                <Text style={[styles.helperTextTiny, styles.submitHintText]}>
+                                    Complete required fields: {submitBlockers[0]}
+                                </Text>
+                            )}
+                        </View>
+                    </>
+                )}
             </Screen>
         );
     }

@@ -174,6 +174,23 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontWeight: 'bold',
     },
+    walkInOnlyBadge: {
+        height: 20,
+        paddingHorizontal: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 193, 7, 0.55)',
+        backgroundColor: 'rgba(255, 193, 7, 0.14)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    walkInOnlyBadgeText: {
+        color: COLORS.warning,
+        fontSize: 10,
+        fontFamily: FONTS.heading,
+        fontWeight: '700',
+        letterSpacing: 0.3,
+    },
 
     // -------------------------------------------------------------------------
     // New Matchroom Card Styles (Replicating NearbyCard from Dashboard)

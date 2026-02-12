@@ -42,6 +42,12 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.label - 1,
         marginBottom: SPACING.sm,
     },
+    fieldLabel: {
+        color: 'rgba(253, 253, 253, 0.85)',
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+        marginBottom: 6,
+    },
     requiredAsterisk: {
         color: COLORS.error,
     },

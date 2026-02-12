@@ -123,7 +123,7 @@ export default function DiscoverScreen() {
     const fullBleed = { marginHorizontal: -screenPadding };
     const fullBleedContent = { paddingHorizontal: screenPadding };
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
-    const bottomPadding = HIDE_PLAYER_TAB_BAR ? (insets.bottom + 16) : (tabBarHeight + 16);
+    const bottomPadding = HIDE_PLAYER_TAB_BAR ? (insets.bottom + 16) : 16;
 
     const handleSegmentChange = (segment: DiscoverSegment) => {
         setActiveSegment(segment);

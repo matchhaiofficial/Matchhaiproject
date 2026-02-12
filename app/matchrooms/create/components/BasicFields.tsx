@@ -96,7 +96,7 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 <View style={styles.inputBox}>
                     <TextInput
                         style={styles.input}
-                        placeholder="e.g., Competitive 5v5"
+                        placeholder="Competitive 5v5"
                         placeholderTextColor="#757575"
                         value={formData.title || ''}
                         onChangeText={(text) => onChange('title', text)}
@@ -110,7 +110,7 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 <View style={styles.inputBox}>
                     <TextInput
                         style={[styles.input, { minHeight: 60 }]}
-                        placeholder="Add any special rules or requirements..."
+                        placeholder="Special rules and requirements"
                         placeholderTextColor="#757575"
                         value={formData.description || ''}
                         onChangeText={(text) => onChange('description', text)}
@@ -360,7 +360,7 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                     <View style={styles.inputBox}>
                         <TextInput
                             style={styles.input}
-                            placeholder="e.g., 10"
+                            placeholder="10"
                             placeholderTextColor="#757575"
                             value={formData.maxPlayers ? String(formData.maxPlayers) : ''}
                             onChangeText={(text) => onChange('maxPlayers', text ? parseInt(text, 10) : '')}

@@ -272,7 +272,7 @@ export default function Profile() {
             scroll
             contentStyle={[
                 styles.scrollContent,
-                { paddingBottom: (process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1') ? 24 : (tabBarHeight + 16) },
+                { paddingBottom: 24 },
             ]}
             edges={['top']}
             scrollProps={{
