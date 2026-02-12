@@ -11,7 +11,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
-import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
+import { getCaptainedTeams } from "../../src/services/teamMatchService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -459,17 +459,10 @@ export default function TeamDetails() {
             Alert.alert("Captain team required", `Captain a ${String(team.game || "").toUpperCase()} team first to challenge.`);
             return;
         }
-        const challenger = candidates[0];
-        const result = await sendTeamMatchChallenge({
-            challengerTeamId: challenger.id!,
-            opponentTeamId: team.id,
-            maxPlayers: Math.max(Number(challenger.maxMembers || 0) + Number(team.maxMembers || 0), 2),
-        });
-        if (!result.ok) {
-            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
-            return;
-        }
-        Alert.alert("Challenge sent", `${challenger.name} challenged ${team.name}.`);
+        router.push({
+            pathname: "/teams/challenge-create" as any,
+            params: { opponentTeamId: team.id },
+        } as any);
     };
 
     // Button State Logic
@@ -704,12 +697,13 @@ export default function TeamDetails() {
                         isCaptain={isCaptain}
                         game={team.game}
                         onEmptySlotPress={handleEmptySlotPress}
-                        onMemberPress={isCaptain ? (member) => {
-                            if (member.uid !== user?.uid) {
+                        onMemberPress={(member) => {
+                            if (isCaptain && member.uid !== user?.uid) {
                                 Alert.alert(
                                     member.username,
                                     "Choose an action",
                                     [
+                                        { text: "View Profile", onPress: () => router.push(`/(player)/profile/${member.uid}` as any) },
                                         { text: "Cancel", style: "cancel" },
                                         {
                                             text: "Transfer Captaincy",
@@ -722,8 +716,10 @@ export default function TeamDetails() {
                                         }
                                     ]
                                 );
+                                return;
                             }
-                        } : undefined}
+                            router.push(`/(player)/profile/${member.uid}` as any);
+                        }}
                     />
                 </View>
                 <View style={styles.footerSpacer} />

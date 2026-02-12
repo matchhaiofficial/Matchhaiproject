@@ -44,6 +44,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const lockAt = getRoomLockAt(room);
     const expiryLabel = (() => {
         if (isExpired) return "EXPIRED";
+        if (isLocked) return "LOCKED";
         if (isFull) {
             if (!lockAt) return null;
             const diff = lockAt.getTime() - nowMs;

@@ -72,6 +72,7 @@ export default function CreateMatchroom() {
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reservedSlots, setReservedSlots] = useState(1);
     const [selectedTeamMemberUids, setSelectedTeamMemberUids] = useState<string[]>([]);
+    const [teamPaymentMode, setTeamPaymentMode] = useState<'captain_pays_all' | 'captain_pays_self'>('captain_pays_all');
     const [selectedTeamDetails, setSelectedTeamDetails] = useState<Team | null>(null);
     const [memberSportRoleByUid, setMemberSportRoleByUid] = useState<Record<string, string | null>>({});
 
@@ -940,7 +941,10 @@ export default function CreateMatchroom() {
 
         setSubmitting(true);
         try {
-            const seatsPaid = teamMode === 'team' ? reservedSlots : 1;
+            const seatsPaid =
+                teamMode === 'team'
+                    ? (teamPaymentMode === 'captain_pays_all' ? reservedSlots : 1)
+                    : 1;
             const amountDue = Math.ceil((formData.pricePerPlayer || 0) * seatsPaid);
             const paymentChoice = await promptPaymentChoice(amountDue);
             if (paymentChoice === 'cancel') {
@@ -980,6 +984,7 @@ export default function CreateMatchroom() {
                     teamMode: teamMode,
                     teamId: teamMode === 'team' ? (selectedTeamId || null) : null,
                     reservedSlots: teamMode === 'team' ? reservedSlots : 1,
+                    teamPaymentMode: teamMode === 'team' ? teamPaymentMode : undefined,
                     preferredDate: formData.date || undefined,
                     preferredTime: formData.time || undefined,
                     flexibilityWindow: 'Exact time',
@@ -1107,6 +1112,7 @@ export default function CreateMatchroom() {
                 teamId: teamMode === 'team' ? (selectedTeamId || null) : null,
                 teamName: teamMode === 'team' ? (teams.find((t: Team) => t.id === selectedTeamId)?.name || null) : null,
                 reservedSlots: teamMode === 'team' ? reservedSlots : 1,
+                teamPaymentMode: teamMode === 'team' ? teamPaymentMode : undefined,
                 assignedTeamMembers: (teamMode === 'team' && resolvedTeam) ?
                     ([
                         {
@@ -1386,8 +1392,33 @@ export default function CreateMatchroom() {
                                                         </View>
                                                     )}
                                                     <Text style={[styles.helperTextTiny, styles.marginTop8]}>
-                                                        Placeholder: captain pays for {reservedSlots} booked seats.
+                                                        {teamPaymentMode === 'captain_pays_all'
+                                                            ? `Captain pays for ${reservedSlots} slots now.`
+                                                            : 'Captain pays only own slot now. Teammate slots confirm when they are paid/confirmed.'}
                                                     </Text>
+                                                    <View style={[styles.chipRow, styles.marginTop8]}>
+                                                        {([
+                                                            { key: 'captain_pays_all', label: `Captain pays all (${reservedSlots})` },
+                                                            { key: 'captain_pays_self', label: 'Captain pays self only' },
+                                                        ] as const).map((opt) => {
+                                                            const isActive = teamPaymentMode === opt.key;
+                                                            return (
+                                                                <Pressable
+                                                                    key={opt.key}
+                                                                    style={({ pressed }) => [
+                                                                        styles.optionChip,
+                                                                        isActive && styles.optionChipActive,
+                                                                        pressed && { opacity: 0.9 },
+                                                                    ]}
+                                                                    onPress={() => setTeamPaymentMode(opt.key)}
+                                                                >
+                                                                    <Text style={[styles.optionChipText, isActive && styles.optionChipTextActive]}>
+                                                                        {opt.label}
+                                                                    </Text>
+                                                                </Pressable>
+                                                            );
+                                                        })}
+                                                    </View>
                                                 </View>
                                             )}
                                         </>
