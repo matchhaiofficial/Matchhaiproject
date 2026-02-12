@@ -7,7 +7,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     container: {
-        paddingBottom: SPACING.md,
+        paddingBottom: 0,
     },
     loadingContainer: {
         flex: 1,

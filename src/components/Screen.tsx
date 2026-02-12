@@ -9,6 +9,7 @@ import {
     type StyleProp,
     type ViewStyle,
 } from 'react-native';
+import { useSegments } from 'expo-router';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { COLORS, SPACING } from '../theme';
 import { useScreenPadding } from '../hooks/useScreenPadding';
@@ -32,17 +33,22 @@ export default function Screen({
     style,
     contentStyle,
     scrollProps,
-    edges = ['top', 'bottom'],
+    edges,
     debugTag,
 }: ScreenProps) {
+    const segments = useSegments() as string[];
+    const isTabsScreen = segments.includes('(tabs)');
     const horizontalPadding = useScreenPadding();
     const { contentContainerStyle: scrollContentStyle, ...restScrollProps } = scrollProps || {};
     const scrollKeyboardShouldPersistTaps = restScrollProps.keyboardShouldPersistTaps ?? 'handled';
     const scrollKeyboardDismissMode = restScrollProps.keyboardDismissMode ?? (Platform.OS === 'ios' ? 'interactive' : 'on-drag');
+    const resolvedEdges: Edge[] = edges ?? (isTabsScreen ? ['top'] : ['top', 'bottom']);
+    const resolvedBottomPadding = isTabsScreen ? 0 : SPACING.xxl;
 
     const contentContainerStyles = [
         styles.content,
         { paddingHorizontal: horizontalPadding },
+        { paddingBottom: resolvedBottomPadding },
         scrollContentStyle,
         contentStyle,
     ];
@@ -57,7 +63,14 @@ export default function Screen({
             {children}
         </ScrollView>
     ) : (
-        <View style={[styles.content, styles.contentView, { paddingHorizontal: horizontalPadding }, contentStyle]}>
+        <View
+            style={[
+                styles.content,
+                styles.contentView,
+                { paddingHorizontal: horizontalPadding, paddingBottom: resolvedBottomPadding },
+                contentStyle,
+            ]}
+        >
             {children}
         </View>
     );
@@ -74,7 +87,7 @@ export default function Screen({
 
     if (keyboardAvoiding) {
         return (
-            <SafeAreaView style={[styles.container, style]} edges={edges} {...touchDebugProps}>
+            <SafeAreaView style={[styles.container, style]} edges={resolvedEdges} {...touchDebugProps}>
                 <KeyboardAvoidingView
                     style={styles.flex1}
                     behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -86,7 +99,7 @@ export default function Screen({
     }
 
     return (
-        <SafeAreaView style={[styles.container, style]} edges={edges} {...touchDebugProps}>
+        <SafeAreaView style={[styles.container, style]} edges={resolvedEdges} {...touchDebugProps}>
             {body}
         </SafeAreaView>
     );
@@ -100,7 +113,6 @@ const styles = StyleSheet.create({
     content: {
         flexGrow: 1,
         paddingTop: SPACING.lg,
-        paddingBottom: SPACING.xxl,
     },
     contentView: {
         flex: 1,
