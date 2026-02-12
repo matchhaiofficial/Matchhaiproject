@@ -1,5 +1,4 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useRouter } from "expo-router";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -97,7 +96,6 @@ const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: 
 export default function ZoneDashboardHome() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const tabBarHeight = useBottomTabBarHeight();
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
 
@@ -428,7 +426,7 @@ export default function ZoneDashboardHome() {
                 <ScrollView
                     contentContainerStyle={[
                         styles.container,
-                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : 16 },
+                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : 0 },
                     ]}
                     showsVerticalScrollIndicator={false}
                 >
