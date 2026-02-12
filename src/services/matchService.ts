@@ -125,6 +125,7 @@ export interface Matchroom {
     teamId?: string | null;
     teamName?: string | null;
     reservedSlots?: number;
+    teamPaymentMode?: 'captain_pays_all' | 'captain_pays_self';
     assignedTeamMembers?: Array<{
         uid: string;
         username: string;
@@ -269,12 +270,41 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             }
         }
 
-        const players = roomData.players || [{
+        const assignedMembers = Array.isArray(roomData.assignedTeamMembers) ? roomData.assignedTeamMembers : [];
+        const uniqueAssigned = assignedMembers.filter((member, index, list) => {
+            const uid = String(member?.uid || "");
+            return uid && list.findIndex((item) => String(item?.uid || "") === uid) === index;
+        });
+        const reservedCount = Math.max(1, Number(roomData.reservedSlots || 1));
+        const shouldPrefillTeammates =
+            roomData.teamMode === "team" &&
+            roomData.teamPaymentMode === "captain_pays_all" &&
+            roomData.paymentStatus === "paid";
+        const prefilledTeam = (shouldPrefillTeammates ? uniqueAssigned : []).slice(0, reservedCount);
+        const hostMissing = !prefilledTeam.some((member) => member.uid === roomData.hostUid);
+        if (hostMissing) {
+            prefilledTeam.unshift({
+                uid: roomData.hostUid,
+                username: roomData.hostName,
+                role: roomData.hostRole || "Captain",
+            });
+        }
+        const prefilledPlayers = prefilledTeam
+            .slice(0, reservedCount)
+            .map((member: any) => ({
+                uid: member.uid,
+                username: member.username || "Player",
+                joinedAt: new Date(),
+                role: member.role || "Player",
+            }));
+
+        const players = roomData.players || (prefilledPlayers.length > 0 ? prefilledPlayers : [{
             uid: roomData.hostUid,
             username: roomData.hostName,
             joinedAt: new Date(),
             role: 'Host'
-        }];
+        }]);
+        const playerUids = roomData.playerUids || players.map((player) => player.uid);
 
         // Initialize 5v5 Slots if it's a 10 player room
         let slotsA = roomData.slotsA || [];
@@ -298,17 +328,19 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
                 role: 'Player'
             }));
 
-            // Assign Host to first slot of Team A
-            slotsA[0] = {
-                slotId: 'A1',
-                uid: roomData.hostUid,
-                user: {
-                    uid: roomData.hostUid,
-                    username: roomData.hostName,
-                },
-                status: 'confirmed' as const,
-                role: roomData.hostRole || 'Captain'
-            };
+            // Prefill Team A slots immediately for reserved team members (captain + selected teammates).
+            players.slice(0, teamSize).forEach((player, index) => {
+                slotsA[index] = {
+                    slotId: `A${index + 1}`,
+                    uid: player.uid,
+                    user: {
+                        uid: player.uid,
+                        username: player.username,
+                    },
+                    status: 'confirmed' as const,
+                    role: player.role || (index === 0 ? (roomData.hostRole || 'Captain') : 'Player'),
+                };
+            });
         }
 
         // Resolve zone owner (for chat participants)
@@ -342,7 +374,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             slotsB,
             captainUidA,
             currentPlayers: players.length,
-            playerUids: roomData.playerUids || [roomData.hostUid],
+            playerUids,
             zoneOwnerUid: zoneOwnerUid || undefined,
             scheduledStartAt: scheduledStartAt || null,
             lockAt: lockAt || null,
@@ -355,7 +387,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
         try {
             const participantUids = Array.from(new Set([
                 roomData.hostUid,
-                ...(roomData.playerUids || [roomData.hostUid]),
+                ...playerUids,
                 ...(zoneOwnerUid ? [zoneOwnerUid] : []),
             ]));
             const rolesByUid: Record<string, string> = {};
@@ -769,49 +801,44 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
             playerUids: arrayUnion(user.uid)
         };
 
+        // As soon as room is full, lock it immediately.
+        if (willBeFull) {
+            updateData.status = "locked";
+            updateData.isLocked = true;
+            updateData.lockedAt = serverTimestamp();
+        }
+
         await updateDoc(roomRef, updateData);
 
-        // If the lobby becomes full before lock time, create (or upsert) a booking request for venue admin.
+        // If the lobby becomes full, create (or upsert) a booking request for venue admin immediately.
         // Deterministic ID keeps it idempotent across clients.
         if (willBeFull && room.bookingSource !== "walkin" && room.locationMode === "zone" && room.zoneId) {
             try {
-                const lockAt = (room as any).lockAt ? (room as any).lockAt : null;
-                const lockAtMs =
-                    typeof lockAt?.toMillis === "function"
-                        ? lockAt.toMillis()
-                        : typeof lockAt?.seconds === "number"
-                            ? lockAt.seconds * 1000
-                            : lockAt instanceof Date
-                                ? lockAt.getTime()
-                                : null;
-
-                if (lockAtMs && Date.now() < lockAtMs) {
-                    const requestId = `matchroom_request_${roomId}`;
-                    await setDoc(doc(db, "booking_requests", requestId), {
-                        userId: room.hostUid,
-                        userName: room.hostName || "Player",
-                        gameKey: room.game || "unknown",
-                        title: room.title || "Matchroom Booking",
-                        description: "Lobby filled. Awaiting venue admin confirmation.",
-                        maxPlayers: Number(room.maxPlayers || 0),
-                        reservedSlots: Number(room.maxPlayers || 0),
-                        teamMode: room.teamMode || "solo",
-                        teamId: room.teamId || null,
-                        preferredDate: (room as any).scheduledDate || null,
-                        preferredTime: (room as any).scheduledTime || null,
-                        flexibilityWindow: (room as any).flexibility || "Exact time",
-                        preferredAreas: room.location ? [room.location] : [],
-                        budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
-                        currency: room.pricing?.currency || "PKR",
-                        locationMode: "zone",
-                        zoneId: room.zoneId,
-                        status: "open",
-                        paymentStatus: room.paymentStatus || "unpaid",
-                        lifecycleStatus: "matchroom_full_admin_pending",
-                        matchroomId: roomId,
-                        updatedAt: serverTimestamp(),
-                    }, { merge: true });
-                }
+                const requestId = `matchroom_request_${roomId}`;
+                await setDoc(doc(db, "booking_requests", requestId), {
+                    userId: room.hostUid,
+                    userName: room.hostName || "Player",
+                    gameKey: room.game || "unknown",
+                    title: room.title || "Matchroom Booking",
+                    description: "Lobby filled. Awaiting venue admin confirmation.",
+                    maxPlayers: Number(room.maxPlayers || 0),
+                    reservedSlots: Number(room.maxPlayers || 0),
+                    teamMode: room.teamMode || "solo",
+                    teamId: room.teamId || null,
+                    preferredDate: (room as any).scheduledDate || null,
+                    preferredTime: (room as any).scheduledTime || null,
+                    flexibilityWindow: (room as any).flexibility || "Exact time",
+                    preferredAreas: room.location ? [room.location] : [],
+                    budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
+                    currency: room.pricing?.currency || "PKR",
+                    locationMode: "zone",
+                    zoneId: room.zoneId,
+                    status: "open",
+                    paymentStatus: room.paymentStatus || "unpaid",
+                    lifecycleStatus: "matchroom_full_admin_pending",
+                    matchroomId: roomId,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
             } catch (e) {
                 Logger.warn("matchService", "Failed to create booking request on fill", e);
             }

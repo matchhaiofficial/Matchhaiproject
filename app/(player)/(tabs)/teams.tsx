@@ -21,7 +21,7 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../src/services/teamService";
-import { getCaptainedTeams, sendTeamMatchChallenge } from "../../../src/services/teamMatchService";
+import { getCaptainedTeams } from "../../../src/services/teamMatchService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./teams.styles";
@@ -228,17 +228,10 @@ export default function Teams() {
             return;
         }
 
-        const challenger = captainedForGame[0];
-        const result = await sendTeamMatchChallenge({
-            challengerTeamId: challenger.id!,
-            opponentTeamId: opponent.id,
-            maxPlayers: Math.max(Number(challenger.maxMembers || 0) + Number(opponent.maxMembers || 0), 2),
-        });
-        if (!result.ok) {
-            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
-            return;
-        }
-        Alert.alert("Challenge sent", `${challenger.name} challenged ${opponent.name}.`);
+        router.push({
+            pathname: "/teams/challenge-create" as any,
+            params: { opponentTeamId: opponent.id },
+        } as any);
     };
 
     const handleOpenChallenges = () => {

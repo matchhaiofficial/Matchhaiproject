@@ -55,6 +55,33 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
     },
+    sectionTitleSpacing: {
+        marginTop: SPACING.sm,
+    },
+    highlightCard: {
+        marginTop: SPACING.xs,
+        borderWidth: 1,
+        borderColor: COLORS.success,
+        borderRadius: RADII.sm,
+        padding: SPACING.sm,
+        backgroundColor: "rgba(34, 197, 94, 0.12)",
+    },
+    highlightTitle: {
+        color: COLORS.successBright || COLORS.success,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+        marginBottom: 4,
+    },
+    highlightText: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    highlightSubtext: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
     chatButton: {
         flexDirection: "row",
         alignItems: "center",
@@ -81,6 +108,34 @@ export default StyleSheet.create({
     },
     primaryButtonText: {
         color: "#FFF",
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    secondaryButton: {
+        marginTop: SPACING.sm,
+        borderWidth: 1,
+        borderColor: COLORS.accent,
+        borderRadius: RADII.md,
+        paddingVertical: SPACING.md,
+        alignItems: "center",
+        backgroundColor: "rgba(66,165,245,0.1)",
+    },
+    secondaryButtonText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    rejectButton: {
+        marginTop: SPACING.sm,
+        borderWidth: 1,
+        borderColor: COLORS.error,
+        borderRadius: RADII.md,
+        paddingVertical: SPACING.md,
+        alignItems: "center",
+        backgroundColor: "rgba(255,82,82,0.1)",
+    },
+    rejectButtonText: {
+        color: COLORS.error,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.body,
     },

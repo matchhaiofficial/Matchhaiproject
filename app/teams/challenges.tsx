@@ -15,6 +15,7 @@ import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import {
     getChallengesForCaptain,
+    repairTeamChallengesForCaptain,
     type TeamMatchChallenge,
 } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
@@ -42,6 +43,7 @@ export default function TeamChallengesScreen() {
             setLoading(false);
             return;
         }
+        await repairTeamChallengesForCaptain(user.uid);
         const result = await getChallengesForCaptain(user.uid);
         if (result.ok && result.data) {
             setRows(result.data);
