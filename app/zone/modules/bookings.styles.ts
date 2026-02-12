@@ -10,8 +10,8 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
     },
     tabTitle: {
-        fontSize: 13,
-        fontFamily: FONTS.body,
+        fontSize: 12,
+        fontFamily: FONTS.clean,
     },
     errorBox: {
         flexDirection: "row",
@@ -157,6 +157,16 @@ export default StyleSheet.create({
         borderRadius: 20,
         padding: SPACING.md,
     },
+    inlineActionsCard: {
+        backgroundColor: COLORS.cardDark,
+        borderColor: COLORS.cardBorder,
+        borderWidth: 1,
+        borderTopWidth: 0,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+    },
     detailsTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
@@ -275,12 +285,23 @@ export default StyleSheet.create({
         backgroundColor: "rgba(66, 165, 245, 0.1)",
     },
     matchroomFocusedWrap: {
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: COLORS.accent,
-        borderRadius: 16,
-        padding: 4,
+        borderRadius: 20, // Match card radius exactly
+        padding: 0,
         marginBottom: SPACING.sm,
-        backgroundColor: "rgba(66, 165, 245, 0.08)",
+        backgroundColor: "rgba(66, 165, 245, 0.05)",
+        overflow: "hidden",
+    },
+    resultsCount: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    resultsCountText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
     },
     walkinChipOverlay: {
         marginTop: -6,
@@ -472,6 +493,45 @@ export default StyleSheet.create({
     timeOptionTextActive: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
+    },
+    // Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.85)",
+        justifyContent: "flex-end",
+    },
+    modalContent: {
+        backgroundColor: COLORS.cardBackground,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        minHeight: "50%",
+        maxHeight: "90%",
+        paddingBottom: 40,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+    },
+    modalHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: 24,
+        borderBottomWidth: 1,
+        borderColor: COLORS.cardBorder,
+    },
+    modalTitle: {
+        color: COLORS.text,
+        fontSize: 20,
+        fontFamily: FONTS.heading,
+        fontWeight: "bold",
+    },
+    modalSubtitle: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        marginTop: 2,
+    },
+    counterForm: {
+        padding: 24,
     },
 });
 

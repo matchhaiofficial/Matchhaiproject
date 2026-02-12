@@ -10,7 +10,9 @@ import {
     ScrollView,
     Share,
     Text,
+    TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     useWindowDimensions,
     View
 } from "react-native";
@@ -27,10 +29,16 @@ import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
 import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
+import { submitMatchroomComplain } from "../../src/services/reportService";
+import {
+    acceptZoneBookingRequest,
+    rejectZoneBookingRequest,
+    sendZoneCounterOffer,
+} from "../../src/services/zoneAdminBookingService";
 import { GameSkillScore } from "../../src/services/skillRatingService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
-import { isRoomExpired, isRoomLocked } from "../../src/utils/matchroomLifecycle";
+import { isRoomExpired, isRoomLocked, canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import styles from "./detail.styles";
 
 const DEFAULT_SKILL_RATING = 45;
@@ -58,12 +66,35 @@ export default function MatchroomDetails() {
 
     const [playerRatings, setPlayerRatings] = useState<Record<string, GameSkillScore | null>>({});
 
+    // Complain State
+    const [showComplainModal, setShowComplainModal] = useState(false);
+    const [complainReason, setComplainReason] = useState("");
+    const [complainDescription, setComplainDescription] = useState("");
+    const [submittingComplain, setSubmittingComplain] = useState(false);
+
+    const COMPLAIN_REASONS = [
+        "Toxic Behavior",
+        "Cheating/Hacking",
+        "AFK/Griefing",
+        "Impersonation",
+        "Inappropriate Name",
+        "Other"
+    ];
+
     // Invitation State
     const [showInviteModal, setShowInviteModal] = useState(false);
     const [friends, setFriends] = useState<any[]>([]);
     const [loadingFriends, setLoadingFriends] = useState(false);
     const [invitingSlot, setInvitingSlot] = useState<{ team: 'A' | 'B', slotId: string } | null>(null);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+
+    // Zone Admin Inline Actions State
+    const [showSuggestModal, setShowSuggestModal] = useState(false);
+    const [counterPrice, setCounterPrice] = useState("");
+    const [counterMessage, setCounterMessage] = useState("");
+    const [counterExpiryMinutes, setCounterExpiryMinutes] = useState("10");
+    const [counterDateValue, setCounterDateValue] = useState<Date>(new Date(Date.now() + 2 * 60 * 60 * 1000));
+    const [adminProcessing, setAdminProcessing] = useState<"accept" | "reject" | "counter" | null>(null);
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -171,6 +202,130 @@ export default function MatchroomDetails() {
             },
         } as any);
     };
+
+    // ── Zone Admin Inline Handlers ──────────────────────────────────
+    const handleZoneAccept = async () => {
+        if (!room?.zoneId || !user?.uid || !bookingRequestId) {
+            Alert.alert("Missing data", "Cannot accept — booking request or zone info not found.");
+            return;
+        }
+        setAdminProcessing("accept");
+        try {
+            const result = await acceptZoneBookingRequest({
+                requestId: bookingRequestId,
+                adminUid: user.uid,
+                zoneId: room.zoneId,
+                requestOwnerUid: room.hostUid,
+                location: room.location || undefined,
+                note: "Accepted from matchroom detail",
+            });
+            if (!result.ok) {
+                Alert.alert("Accept failed", result.message);
+            } else {
+                Alert.alert("Accepted", "Booking request has been confirmed.");
+                fetchRoom();
+            }
+        } catch (e: any) {
+            Logger.error("MatchroomDetails", "Zone accept error", e);
+            Alert.alert("Error", "An unexpected error occurred.");
+        } finally {
+            setAdminProcessing(null);
+        }
+    };
+
+    const handleZoneReject = () => {
+        if (!room?.zoneId || !user?.uid || !bookingRequestId) {
+            Alert.alert("Missing data", "Cannot reject — booking request or zone info not found.");
+            return;
+        }
+        Alert.alert(
+            "Reject Booking",
+            "Are you sure you want to reject this booking request?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Reject",
+                    style: "destructive",
+                    onPress: async () => {
+                        setAdminProcessing("reject");
+                        try {
+                            const result = await rejectZoneBookingRequest({
+                                requestId: bookingRequestId,
+                                adminUid: user!.uid,
+                                zoneId: room!.zoneId!,
+                                requestOwnerUid: room!.hostUid,
+                                reason: "fully_booked",
+                                note: "Rejected from matchroom detail",
+                            });
+                            if (!result.ok) {
+                                Alert.alert("Reject failed", result.message);
+                            } else {
+                                Alert.alert("Rejected", "Booking request has been declined.");
+                                fetchRoom();
+                            }
+                        } catch (e: any) {
+                            Logger.error("MatchroomDetails", "Zone reject error", e);
+                            Alert.alert("Error", "An unexpected error occurred.");
+                        } finally {
+                            setAdminProcessing(null);
+                        }
+                    },
+                },
+            ],
+        );
+    };
+
+    const handleZoneSuggest = async () => {
+        if (!room?.zoneId || !user?.uid || !bookingRequestId) return;
+
+        const parsedPrice = Number.parseInt(counterPrice, 10);
+        const parsedExpiry = Number.parseInt(counterExpiryMinutes, 10);
+        if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+            Alert.alert("Invalid price", "Enter a valid counter-offer price.");
+            return;
+        }
+
+        const counterDate = counterDateValue.toISOString().slice(0, 10);
+        const counterTime = counterDateValue.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        setAdminProcessing("counter");
+        try {
+            const result = await sendZoneCounterOffer({
+                requestId: bookingRequestId,
+                requestOwnerUid: room.hostUid,
+                zoneId: room.zoneId,
+                zoneName: room.location || "Zone",
+                zoneOwnerUid: user.uid,
+                proposedDate: counterDate,
+                proposedTime: counterTime,
+                pricePerPlayer: parsedPrice,
+                currency: room.pricing?.currency || "PKR",
+                location: room.location || "",
+                message: counterMessage.trim(),
+                expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
+            });
+
+            if (!result.ok) {
+                Alert.alert("Counter-offer failed", result.message);
+                return;
+            }
+
+            Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
+            setShowSuggestModal(false);
+            setCounterPrice("");
+            setCounterMessage("");
+        } catch (e: any) {
+            Logger.error("MatchroomDetails", "Zone suggest error", e);
+            Alert.alert("Error", "An unexpected error occurred.");
+        } finally {
+            setAdminProcessing(null);
+        }
+    };
+
+    const toDateDisplay = (d: Date) =>
+        `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    const toTimeDisplay = (d: Date) =>
+        d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
 
     // Fetch ratings when players list updates
     useEffect(() => {
@@ -340,6 +495,35 @@ export default function MatchroomDetails() {
 
     const handleVote = () => {
         router.push(`/matchrooms/vote?id=${id}`);
+    };
+
+    const handleComplain = async () => {
+        if (!user || !room) return;
+        if (!complainReason) {
+            Alert.alert("Reason Required", "Please select a reason for your complaint.");
+            return;
+        }
+
+        setSubmittingComplain(true);
+        const result = await submitMatchroomComplain({
+            matchroomId: room.id!,
+            game: room.game,
+            title: room.title,
+            reason: complainReason,
+            description: complainDescription,
+            reporterUid: user.uid,
+            reporterUsername: user.displayName || "Anonymous"
+        });
+
+        setSubmittingComplain(false);
+        if (result.ok) {
+            Alert.alert("Submitted", result.message);
+            setShowComplainModal(false);
+            setComplainReason("");
+            setComplainDescription("");
+        } else {
+            Alert.alert("Error", result.message);
+        }
     };
 
     const handleLeave = () => {
@@ -723,11 +907,23 @@ export default function MatchroomDetails() {
                         >
                             <MaterialIcons name="share" size={24} color={COLORS.accent} />
                         </TouchableOpacity>
+                        {room && (isJoined || isZoneAdmin) && canSubmitComplain(room) && (
+                            <TouchableOpacity
+                                onPress={() => setShowComplainModal(true)}
+                                activeOpacity={0.7}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <MaterialIcons name="flag" size={24} color={COLORS.error} />
+                            </TouchableOpacity>
+                        )}
                     </View>
                 )}
             />
 
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                contentContainerStyle={[styles.content, isZoneAdmin ? styles.adminContent : null]}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Expired Banner */}
                 {isExpired && (
                     <View style={[styles.banner, styles.expiredBanner]}>
@@ -1165,28 +1361,42 @@ export default function MatchroomDetails() {
                         <View style={styles.footerRow}>
                             <TouchableOpacity
                                 style={[styles.joinButton, { flex: 1 }]}
-                                onPress={openBookingQueue}
+                                onPress={handleZoneAccept}
+                                disabled={adminProcessing !== null}
                                 activeOpacity={0.85}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
-                                <Text style={styles.joinButtonText}>Accept</Text>
+                                {adminProcessing === "accept" ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <Text style={styles.joinButtonText}>Accept</Text>
+                                )}
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.secondaryButton, { flex: 1 }]}
-                                onPress={openBookingQueue}
+                                onPress={handleZoneReject}
+                                disabled={adminProcessing !== null}
                                 activeOpacity={0.85}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
-                                <Text style={styles.secondaryButtonText}>Reject</Text>
+                                {adminProcessing === "reject" ? (
+                                    <ActivityIndicator size="small" color={COLORS.error} />
+                                ) : (
+                                    <Text style={styles.secondaryButtonText}>Reject</Text>
+                                )}
                             </TouchableOpacity>
                         </View>
                         <TouchableOpacity
                             style={[styles.joinButton, { backgroundColor: COLORS.warning }]}
-                            onPress={openBookingQueue}
+                            onPress={() => setShowSuggestModal(true)}
+                            disabled={adminProcessing !== null}
                             activeOpacity={0.85}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                            <Text style={styles.joinButtonText}>Suggest Alternative</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <MaterialIcons name="edit" size={18} color="#FFF" />
+                                <Text style={styles.joinButtonText}>Suggest Alternative</Text>
+                            </View>
                         </TouchableOpacity>
                     </View>
                 ) : isExpired ? (
@@ -1361,6 +1571,18 @@ export default function MatchroomDetails() {
                         )}
                     </View>
                 )}
+
+                {/* Complain Button (Visible for In-Progress or Completed 24h) */}
+                {room && (isJoined || isZoneAdmin) && canSubmitComplain(room) && (
+                    <TouchableOpacity
+                        style={styles.complainBtn}
+                        onPress={() => setShowComplainModal(true)}
+                        activeOpacity={0.7}
+                    >
+                        <MaterialIcons name="report-problem" size={20} color={COLORS.error} />
+                        <Text style={styles.complainBtnText}>Complain</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             {/* Invite Friends Modal */}
@@ -1418,6 +1640,174 @@ export default function MatchroomDetails() {
                         )}
                     </Pressable>
                 </Pressable>
+            </Modal>
+
+            {/* Complain Modal */}
+            <Modal
+                visible={showComplainModal}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setShowComplainModal(false)}
+            >
+                <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => !submittingComplain && setShowComplainModal(false)}
+                >
+                    <Pressable style={[styles.modalContent, { maxHeight: '80%' }]}>
+                        <View style={styles.modalHeader}>
+                            <View>
+                                <Text style={styles.modalTitle}>Report Matchroom</Text>
+                                <Text style={styles.modalSubtitle}>Help us keep MatchHai safe</Text>
+                            </View>
+                            <TouchableOpacity onPress={() => setShowComplainModal(false)} disabled={submittingComplain}>
+                                <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            style={{ marginTop: 8 }}
+                            contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            <Text style={[styles.cardLabel, { marginBottom: 12, marginTop: 16 }]}>Select Reason</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {COMPLAIN_REASONS.map((reason) => (
+                                    <TouchableOpacity
+                                        key={reason}
+                                        style={[
+                                            styles.reasonChip,
+                                            complainReason === reason && styles.reasonChipActive
+                                        ]}
+                                        onPress={() => setComplainReason(reason)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={[
+                                            styles.reasonText,
+                                            complainReason === reason && styles.reasonTextActive
+                                        ]}>{reason}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <Text style={[styles.cardLabel, { marginTop: 20, marginBottom: 10 }]}>Additional Details (Optional)</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea]}
+                                placeholder="Provide more context to help our moderators..."
+                                placeholderTextColor={COLORS.muted}
+                                multiline
+                                value={complainDescription}
+                                onChangeText={setComplainDescription}
+                                selectionColor={COLORS.accent}
+                            />
+
+                            <TouchableOpacity
+                                style={[styles.modalActionButton, (submittingComplain || !complainReason) && { opacity: 0.6 }]}
+                                onPress={handleComplain}
+                                disabled={submittingComplain || !complainReason}
+                                activeOpacity={0.8}
+                            >
+                                {submittingComplain ? (
+                                    <ActivityIndicator color="#FFF" size="small" />
+                                ) : (
+                                    <Text style={styles.modalActionText}>Submit Report</Text>
+                                )}
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </Pressable>
+                </Pressable>
+            </Modal>
+
+            {/* Suggest Alternative Modal (Zone Admin) */}
+            <Modal
+                visible={showSuggestModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => !adminProcessing && setShowSuggestModal(false)}
+            >
+                <TouchableWithoutFeedback onPress={() => !adminProcessing && setShowSuggestModal(false)}>
+                    <View style={styles.modalOverlay}>
+                        <TouchableWithoutFeedback>
+                            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+                                <View style={styles.modalHeader}>
+                                    <View>
+                                        <Text style={styles.modalTitle}>Suggest Alternative</Text>
+                                        <Text style={styles.modalSubtitle}>Propose a different time or price</Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={() => setShowSuggestModal(false)}
+                                        disabled={adminProcessing !== null}
+                                    >
+                                        <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                                    </Pressable>
+                                </View>
+
+                                <ScrollView
+                                    style={{ marginTop: 8 }}
+                                    contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+                                    showsVerticalScrollIndicator={false}
+                                >
+                                    <Text style={[styles.cardLabel, { marginBottom: 8, marginTop: 16 }]}>Counter Price (PKR)</Text>
+                                    <TextInput
+                                        value={counterPrice}
+                                        onChangeText={setCounterPrice}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 1500"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={[styles.cardLabel, { marginBottom: 8, marginTop: 12 }]}>Suggested Date & Time</Text>
+                                    <View style={styles.suggestDateRow}>
+                                        <View style={styles.suggestDateField}>
+                                            <MaterialIcons name="calendar-today" size={16} color={COLORS.accent} />
+                                            <Text style={styles.suggestDateFieldText}>{toDateDisplay(counterDateValue)}</Text>
+                                        </View>
+                                        <View style={styles.suggestDateField}>
+                                            <MaterialIcons name="access-time" size={16} color={COLORS.accent} />
+                                            <Text style={styles.suggestDateFieldText}>{toTimeDisplay(counterDateValue)}</Text>
+                                        </View>
+                                    </View>
+
+                                    <Text style={[styles.cardLabel, { marginBottom: 8, marginTop: 12 }]}>Offer Expires In (Minutes)</Text>
+                                    <TextInput
+                                        value={counterExpiryMinutes}
+                                        onChangeText={setCounterExpiryMinutes}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 15"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={[styles.cardLabel, { marginBottom: 8, marginTop: 12 }]}>Note to Player</Text>
+                                    <TextInput
+                                        value={counterMessage}
+                                        onChangeText={setCounterMessage}
+                                        style={[styles.input, styles.textArea]}
+                                        placeholder="e.g. We have slots available at 10 PM instead..."
+                                        placeholderTextColor={COLORS.muted}
+                                        multiline
+                                    />
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.suggestSubmitButton,
+                                            (adminProcessing || !counterPrice) && { opacity: 0.6 },
+                                        ]}
+                                        onPress={handleZoneSuggest}
+                                        disabled={adminProcessing !== null || !counterPrice}
+                                        activeOpacity={0.8}
+                                    >
+                                        {adminProcessing === "counter" ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={styles.modalActionText}>Send Suggestion</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </ScrollView>
+                            </View>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
             </Modal>
         </Screen>
     );
