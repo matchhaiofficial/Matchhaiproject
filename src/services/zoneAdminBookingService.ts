@@ -762,14 +762,25 @@ export async function createZoneWalkInMatchroom(input: {
     scheduledDate: string;
     scheduledTime: string;
     durationMinutes: number;
+    seriesType?: string | null;
     seatCount: number;
-    paymentMode: "venue_pay" | "guest_pay" | "mixed";
+    bookedSeatCount?: number;
+    paymentMode: "venue_pay" | "guest_pay";
     pricePerPlayer?: number;
     currency?: string;
     knownPlayers?: Array<{ uid: string; username: string }>;
 }) {
     try {
-        const knownPlayers = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
+        const knownPlayersRaw = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
+        const totalSeats = Math.max(1, Math.floor(input.seatCount));
+        const knownPlayers = knownPlayersRaw.slice(0, totalSeats);
+        const explicitBookedSeatCount = Number.isFinite(input.bookedSeatCount)
+            ? Math.max(0, Math.floor(Number(input.bookedSeatCount)))
+            : 0;
+        const bookedSeatCount = Math.min(
+            totalSeats,
+            Math.max(knownPlayers.length, explicitBookedSeatCount),
+        );
         const pricePerPlayer = Number.isFinite(input.pricePerPlayer)
             ? Math.max(0, Number(input.pricePerPlayer))
             : 0;
@@ -777,9 +788,48 @@ export async function createZoneWalkInMatchroom(input: {
         const paymentStatus =
             input.paymentMode === "venue_pay"
                 ? "paid"
-                : input.paymentMode === "mixed"
-                    ? "partial"
-                    : "unpaid";
+                : "unpaid";
+        const isPaymentSuccessful = paymentStatus === "paid";
+
+        const createOpenSlot = (slotId: string) => ({
+            slotId,
+            status: "open" as const,
+            role: "Player",
+        });
+
+        const hydrateSlots = (slotsA: any[], slotsB: any[]) => {
+            const allSlots = [...slotsA, ...slotsB];
+            for (let index = 0; index < allSlots.length; index += 1) {
+                const slot = allSlots[index];
+                if (index < knownPlayers.length) {
+                    const player = knownPlayers[index];
+                    slot.status = isPaymentSuccessful ? "confirmed" : "reserved";
+                    slot.uid = player.uid;
+                    slot.user = {
+                        uid: player.uid,
+                        username: player.username,
+                    };
+                    if (!isPaymentSuccessful) {
+                        slot.role = "Booked";
+                    }
+                } else if (index < bookedSeatCount) {
+                    slot.status = "reserved";
+                    slot.role = "Booked";
+                }
+            }
+            return { slotsA, slotsB };
+        };
+
+        const { slotsA, slotsB } = (() => {
+            if (totalSeats % 2 !== 0) {
+                const localSlotsA = Array.from({ length: totalSeats }, (_, idx) => createOpenSlot(`A${idx + 1}`));
+                return hydrateSlots(localSlotsA, []);
+            }
+            const teamSize = Math.max(1, totalSeats / 2);
+            const localSlotsA = Array.from({ length: teamSize }, (_, idx) => createOpenSlot(`A${idx + 1}`));
+            const localSlotsB = Array.from({ length: teamSize }, (_, idx) => createOpenSlot(`B${idx + 1}`));
+            return hydrateSlots(localSlotsA, localSlotsB);
+        })();
 
         const created = await addDoc(collection(db, "matchrooms"), {
             hostUid: input.adminUid,
@@ -789,8 +839,8 @@ export async function createZoneWalkInMatchroom(input: {
             description: "Created from admin walk-in flow",
             status: "open",
             bookingSource: "walkin",
-            maxPlayers: Math.max(1, Math.floor(input.seatCount)),
-            currentPlayers: knownPlayers.length,
+            maxPlayers: totalSeats,
+            currentPlayers: bookedSeatCount,
             players: knownPlayers.map((player) => ({
                 uid: player.uid,
                 username: player.username,
@@ -806,6 +856,9 @@ export async function createZoneWalkInMatchroom(input: {
             scheduledDate: input.scheduledDate,
             scheduledTime: input.scheduledTime,
             durationMinutes: Math.max(30, Math.floor(input.durationMinutes)),
+            seriesType: input.seriesType || null,
+            slotsA,
+            slotsB,
             pricing: {
                 perPlayer: pricePerPlayer,
                 currency: input.currency || "PKR",
@@ -813,9 +866,9 @@ export async function createZoneWalkInMatchroom(input: {
             paymentStatus,
             walkIn: {
                 paymentMode: input.paymentMode,
-                seatCount: Math.max(1, Math.floor(input.seatCount)),
+                seatCount: totalSeats,
                 knownPlayerCount: knownPlayers.length,
-                unknownSeatCount: Math.max(0, Math.floor(input.seatCount) - knownPlayers.length),
+                unknownSeatCount: Math.max(0, totalSeats - knownPlayers.length),
                 branchId: input.branchId || null,
                 branchName: input.branchName || null,
                 createdBy: input.adminUid,

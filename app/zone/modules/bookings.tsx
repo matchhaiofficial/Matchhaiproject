@@ -24,7 +24,6 @@ import { db } from "../../../src/config/firebaseConfig";
 import { type Matchroom } from "../../../src/services/matchService";
 import {
     acceptZoneBookingRequest,
-    createZoneWalkInMatchroom,
     rejectZoneBookingRequest,
     sendZoneCounterOffer,
     subscribeZoneBookingQueue,
@@ -33,26 +32,17 @@ import {
     type ZoneBookingQueueItem,
     type ZoneMatchroomListItem,
 } from "../../../src/services/zoneAdminBookingService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./bookings.styles";
 
 type Segment = "requests" | "matchrooms" | "walkins";
 type RequestFilter = "all" | "open" | "pending_payment" | "accepted";
 type AssetFilter = "all" | ZoneBookingAssetType;
-type WalkInPaymentMode = "venue_pay" | "guest_pay" | "mixed";
 
 const REQUEST_FILTERS: RequestFilter[] = ["all", "open", "pending_payment", "accepted"];
 const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "court", "mixed", "unknown"];
 const ACTIVE_QUEUE_STATUSES = new Set(["open", "pending_payment", "accepted"]);
-const WALKIN_GAMES = [
-    { key: "cs2", label: "CS2" },
-    { key: "fc26", label: "FC26" },
-    { key: "tekken8", label: "Tekken 8" },
-    { key: "futsal", label: "Futsal" },
-    { key: "padel", label: "Padel" },
-    { key: "pickleball", label: "Pickleball" },
-];
 
 const toMillis = (value: any) => {
     if (!value) return 0;
@@ -117,22 +107,6 @@ const formatDateTime = (value: Date) => ({
     date: value.toISOString().slice(0, 10),
     time: value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
 });
-
-const toDateDisplay = (value: Date) =>
-    `${String(value.getDate()).padStart(2, "0")}/${String(value.getMonth() + 1).padStart(2, "0")}/${value.getFullYear()}`;
-
-const toTimeDisplay = (value: Date) =>
-    value.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
-
-const parseTimeToDraft = (date: Date) => {
-    const hour24 = date.getHours();
-    const period: "AM" | "PM" = hour24 >= 12 ? "PM" : "AM";
-    return {
-        hour: hour24 % 12 || 12,
-        minute: date.getMinutes() >= 30 ? 30 : 0,
-        period,
-    };
-};
 
 const formatDate = (value: any) => {
     const millis = toMillis(value);
@@ -205,6 +179,7 @@ const toMatchroomCardData = (room: ZoneMatchroomListItem, fallbackLocation?: str
     slotsA: room.slotsA || [],
     slotsB: room.slotsB || [],
     paymentStatus: (room.paymentStatus || "unpaid") as any,
+    bookingSource: room.bookingSource || undefined,
 });
 
 export default function ZoneBookingsModule() {
@@ -228,7 +203,7 @@ export default function ZoneBookingsModule() {
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
-    const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | "walkin" | null>(null);
+    const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
     const [backfillInProgress, setBackfillInProgress] = useState(false);
@@ -238,35 +213,9 @@ export default function ZoneBookingsModule() {
     const [rejectAlternative, setRejectAlternative] = useState("");
 
     const [counterPrice, setCounterPrice] = useState("");
-    const [counterDateValue, setCounterDateValue] = useState<Date>(new Date(Date.now() + 2 * 60 * 60 * 1000));
     const [counterMessage, setCounterMessage] = useState("");
     const [counterExpiryMinutes, setCounterExpiryMinutes] = useState("10");
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
-
-    const [walkInTitle, setWalkInTitle] = useState("Walk-in Matchroom");
-    const [walkInGame, setWalkInGame] = useState("cs2");
-    const [walkInSeatCount, setWalkInSeatCount] = useState("10");
-    const [walkInDuration, setWalkInDuration] = useState("60");
-    const [walkInKnownPlayers, setWalkInKnownPlayers] = useState("0");
-    const [walkInPrice, setWalkInPrice] = useState("0");
-    const [walkInPaymentMode, setWalkInPaymentMode] = useState<WalkInPaymentMode>("venue_pay");
-    const [walkInDateValue, setWalkInDateValue] = useState<Date>(new Date(Date.now() + 60 * 60 * 1000));
-    const [showDatePicker, setShowDatePicker] = useState(false);
-    const [showTimePicker, setShowTimePicker] = useState(false);
-    const [dateTarget, setDateTarget] = useState<null | "counter" | "walkin">(null);
-    const [timeTarget, setTimeTarget] = useState<null | "counter" | "walkin">(null);
-    const [dateDraft, setDateDraft] = useState<Date | null>(null);
-    const [monthCursor, setMonthCursor] = useState<Date>(() => {
-        const base = new Date();
-        base.setDate(1);
-        base.setHours(0, 0, 0, 0);
-        return base;
-    });
-    const [timeDraft, setTimeDraft] = useState<{ hour: number; minute: number; period: "AM" | "PM" }>({
-        hour: 12,
-        minute: 0,
-        period: "PM",
-    });
 
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
@@ -294,6 +243,10 @@ export default function ZoneBookingsModule() {
 
     const walkInCount = useMemo(
         () => matchrooms.filter((item) => item.bookingSource === "walkin").length,
+        [matchrooms],
+    );
+    const walkInRooms = useMemo(
+        () => matchrooms.filter((item) => item.bookingSource === "walkin"),
         [matchrooms],
     );
 
@@ -579,7 +532,7 @@ export default function ZoneBookingsModule() {
             return;
         }
 
-        const counterDateTime = formatDateTime(counterDateValue);
+        const counterDateTime = formatDateTime(new Date(Date.now() + 2 * 60 * 60 * 1000));
         setProcessingAction("counter");
         try {
             const result = await sendZoneCounterOffer({
@@ -615,145 +568,6 @@ export default function ZoneBookingsModule() {
             setProcessingAction(null);
         }
     };
-
-    const handleCreateWalkIn = async () => {
-        if (!zone?.id || !zone?.ownerUid || !user?.uid) return;
-        const seatCount = Number.parseInt(walkInSeatCount, 10);
-        const durationMinutes = Number.parseInt(walkInDuration, 10);
-        const knownPlayers = Number.parseInt(walkInKnownPlayers, 10);
-        const walkInPriceValue = Number.parseInt(walkInPrice, 10);
-
-        if (!Number.isFinite(seatCount) || seatCount <= 0) {
-            Alert.alert("Invalid seats", "Enter a valid seat count.");
-            return;
-        }
-        if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-            Alert.alert("Invalid duration", "Enter a valid duration in minutes.");
-            return;
-        }
-        if (!Number.isFinite(knownPlayers) || knownPlayers < 0) {
-            Alert.alert("Invalid known players", "Enter a valid known players count.");
-            return;
-        }
-
-        const walkInDateTime = formatDateTime(walkInDateValue);
-        setProcessingAction("walkin");
-        const result = await createZoneWalkInMatchroom({
-            zoneId: zone.id,
-            zoneOwnerUid: zone.ownerUid,
-            branchId: primaryBranch?.id || null,
-            branchName: primaryBranch?.branchDisplayName || null,
-            adminUid: user.uid,
-            adminName: user.displayName || zone.ownerFullName || "Zone Admin",
-            gameKey: walkInGame,
-            title: walkInTitle.trim() || "Walk-in Matchroom",
-            scheduledDate: walkInDateTime.date,
-            scheduledTime: walkInDateTime.time,
-            durationMinutes,
-            seatCount,
-            paymentMode: walkInPaymentMode,
-            pricePerPlayer: Number.isFinite(walkInPriceValue) ? walkInPriceValue : 0,
-            currency: "PKR",
-        });
-        setProcessingAction(null);
-
-        if (!result.ok) {
-            Alert.alert("Walk-in failed", result.message);
-            return;
-        }
-
-        Alert.alert("Walk-in created", "Matchroom created from admin dashboard.");
-        setSegment("matchrooms");
-    };
-
-    const openDatePicker = (target: "counter" | "walkin") => {
-        const sourceDate = target === "counter" ? counterDateValue : walkInDateValue;
-        const monthStart = new Date(sourceDate);
-        monthStart.setDate(1);
-        monthStart.setHours(0, 0, 0, 0);
-        setDateTarget(target);
-        setDateDraft(sourceDate);
-        setMonthCursor(monthStart);
-        setShowDatePicker(true);
-    };
-
-    const openTimePicker = (target: "counter" | "walkin") => {
-        const sourceDate = target === "counter" ? counterDateValue : walkInDateValue;
-        setTimeTarget(target);
-        setTimeDraft(parseTimeToDraft(sourceDate));
-        setShowTimePicker(true);
-    };
-
-    const applyDateDraft = () => {
-        if (!dateDraft || !dateTarget) {
-            setShowDatePicker(false);
-            return;
-        }
-        if (dateTarget === "counter") {
-            setCounterDateValue((prev) => new Date(
-                dateDraft.getFullYear(),
-                dateDraft.getMonth(),
-                dateDraft.getDate(),
-                prev.getHours(),
-                prev.getMinutes(),
-                0,
-                0,
-            ));
-        } else {
-            setWalkInDateValue((prev) => new Date(
-                dateDraft.getFullYear(),
-                dateDraft.getMonth(),
-                dateDraft.getDate(),
-                prev.getHours(),
-                prev.getMinutes(),
-                0,
-                0,
-            ));
-        }
-        setShowDatePicker(false);
-    };
-
-    const applyTimeDraft = () => {
-        if (!timeTarget) {
-            setShowTimePicker(false);
-            return;
-        }
-        const normalizedHour = timeDraft.hour % 12;
-        const hour24 = timeDraft.period === "PM" ? normalizedHour + 12 : normalizedHour;
-        if (timeTarget === "counter") {
-            setCounterDateValue((prev) => new Date(
-                prev.getFullYear(),
-                prev.getMonth(),
-                prev.getDate(),
-                hour24,
-                timeDraft.minute,
-                0,
-                0,
-            ));
-        } else {
-            setWalkInDateValue((prev) => new Date(
-                prev.getFullYear(),
-                prev.getMonth(),
-                prev.getDate(),
-                hour24,
-                timeDraft.minute,
-                0,
-                0,
-            ));
-        }
-        setShowTimePicker(false);
-    };
-
-    const monthYearLabel = monthCursor.toLocaleString("en-US", { month: "long", year: "numeric" });
-    const daysInMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0).getDate();
-    const firstWeekday = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).getDay();
-    const hours12 = Array.from({ length: 12 }).map((_, idx) => idx + 1);
-    const minutes = [0, 30];
-    const periods: Array<"AM" | "PM"> = ["AM", "PM"];
-    const isSameDay = (a: Date, b: Date) =>
-        a.getFullYear() === b.getFullYear() &&
-        a.getMonth() === b.getMonth() &&
-        a.getDate() === b.getDate();
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -939,11 +753,18 @@ export default function ZoneBookingsModule() {
                         <>
                             <View style={styles.resultsCount}>
                                 <Text style={styles.resultsCountText}>
-                                    {matchrooms.length} matchroom{matchrooms.length !== 1 ? 's' : ''} found
+                                    {matchrooms.length} matchroom{matchrooms.length !== 1 ? "s" : ""} found
                                 </Text>
                             </View>
                             {matchrooms.map((item) => (
-                                <View key={item.id} style={focusedMatchroomId === item.id ? styles.matchroomFocusedWrap : undefined}>
+                                <View
+                                    key={item.id}
+                                    style={
+                                        focusedMatchroomId === item.id
+                                            ? styles.matchroomFocusedWrap
+                                            : styles.walkinMatchroomItem
+                                    }
+                                >
                                     <MatchroomCard
                                         room={toMatchroomCardData(
                                             item,
@@ -951,15 +772,6 @@ export default function ZoneBookingsModule() {
                                         )}
                                         containerStyle={focusedMatchroomId === item.id ? { marginBottom: 0 } : undefined}
                                     />
-                                    {item.bookingSource === "walkin" ? (
-                                        <View style={styles.walkinChipOverlay}>
-                                            <View style={styles.walkinChip}>
-                                                <Text style={styles.flagText}>
-                                                    walk-in / {item.walkInPaymentMode || "venue_pay"}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    ) : null}
                                 </View>
                             ))}
                         </>
@@ -972,281 +784,53 @@ export default function ZoneBookingsModule() {
                     <View style={styles.walkinCard}>
                         <Text style={styles.walkinTitle}>Create Walk-in Matchroom</Text>
                         <Text style={styles.walkinSubtitle}>
-                            Create booking for walk-ins with venue-pay, guest-pay, or mixed mode.
+                            Use the same Create Matchroom flow as player dashboard, with admin walk-in controls.
                         </Text>
-
-                        <Text style={styles.formLabel}>Matchroom Title</Text>
-                        <TextInput
-                            value={walkInTitle}
-                            onChangeText={setWalkInTitle}
-                            style={styles.input}
-                            placeholder="e.g. Walk-in Futsal 5v5"
-                            placeholderTextColor={COLORS.muted}
-                        />
-
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                            {WALKIN_GAMES.map((item) => (
-                                <Pressable
-                                    key={item.key}
-                                    onPress={() => setWalkInGame(item.key)}
-                                    style={[styles.filterChip, walkInGame === item.key && styles.filterChipActive]}
-                                >
-                                    <Text style={[styles.filterChipText, walkInGame === item.key && styles.filterChipTextActive]}>
-                                        {item.label}
-                                    </Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                            {(["venue_pay", "guest_pay", "mixed"] as WalkInPaymentMode[]).map((mode) => (
-                                <Pressable
-                                    key={mode}
-                                    onPress={() => setWalkInPaymentMode(mode)}
-                                    style={[styles.filterChip, walkInPaymentMode === mode && styles.filterChipActive]}
-                                >
-                                    <Text style={[styles.filterChipText, walkInPaymentMode === mode && styles.filterChipTextActive]}>
-                                        {mode}
-                                    </Text>
-                                </Pressable>
-                            ))}
-                        </ScrollView>
-
-                        <View style={styles.formGrid}>
-                            <View style={styles.halfInput}>
-                                <Text style={styles.formLabel}>Seat Count</Text>
-                                <TextInput
-                                    value={walkInSeatCount}
-                                    onChangeText={setWalkInSeatCount}
-                                    keyboardType="numeric"
-                                    style={styles.input}
-                                    placeholder="e.g. 10"
-                                    placeholderTextColor={COLORS.muted}
-                                />
-                            </View>
-                            <View style={styles.halfInput}>
-                                <Text style={styles.formLabel}>Duration (Mins)</Text>
-                                <TextInput
-                                    value={walkInDuration}
-                                    onChangeText={setWalkInDuration}
-                                    keyboardType="numeric"
-                                    style={styles.input}
-                                    placeholder="e.g. 90"
-                                    placeholderTextColor={COLORS.muted}
-                                />
-                            </View>
-                        </View>
-
-                        <View style={styles.formGrid}>
-                            <View style={styles.halfInput}>
-                                <Text style={styles.formLabel}>Known Players</Text>
-                                <TextInput
-                                    value={walkInKnownPlayers}
-                                    onChangeText={setWalkInKnownPlayers}
-                                    keyboardType="numeric"
-                                    style={styles.input}
-                                    placeholder="e.g. 4"
-                                    placeholderTextColor={COLORS.muted}
-                                />
-                            </View>
-                            <View style={styles.halfInput}>
-                                <Text style={styles.formLabel}>Price Per Player</Text>
-                                <TextInput
-                                    value={walkInPrice}
-                                    onChangeText={setWalkInPrice}
-                                    keyboardType="numeric"
-                                    style={styles.input}
-                                    placeholder="e.g. 1500"
-                                    placeholderTextColor={COLORS.muted}
-                                />
-                            </View>
-                        </View>
-
-                        <View style={styles.dateRow}>
-                            <Pressable style={styles.dateField} onPress={() => openDatePicker("walkin")}>
-                                <MaterialIcons name="event" size={16} color={COLORS.accent} />
-                                <Text style={styles.dateFieldText}>{toDateDisplay(walkInDateValue)}</Text>
-                            </Pressable>
-                            <Pressable style={styles.dateField} onPress={() => openTimePicker("walkin")}>
-                                <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
-                                <Text style={styles.dateFieldText}>{toTimeDisplay(walkInDateValue)}</Text>
-                            </Pressable>
-                        </View>
-
-                        <Text style={styles.walkinInfo}>
-                            Branch: {primaryBranch?.branchDisplayName || zone?.primaryBranch?.branchDisplayName || "Primary"}
-                        </Text>
-
                         <Pressable
                             style={[styles.actionButton, styles.walkinCreateButton]}
-                            onPress={handleCreateWalkIn}
+                            onPress={() =>
+                                router.push({
+                                    pathname: "/matchrooms/create",
+                                    params: {
+                                        mode: "zone_walkin_admin",
+                                        zoneId: zone?.id || "",
+                                        zoneName: zone?.venueBrandName || "",
+                                        branchId: primaryBranch?.id || zone?.primaryBranch?.id || "",
+                                        t: Date.now().toString(),
+                                    },
+                                } as any)
+                            }
                             disabled={processingAction !== null}
                         >
-                            {processingAction === "walkin" ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Text style={styles.actionText}>Create Walk-in Matchroom</Text>
-                            )}
+                            <Text style={styles.actionText}>Create Walk-in Matchroom</Text>
                         </Pressable>
                     </View>
+
+                    <View style={[styles.counterHeader, { marginTop: SPACING.lg }]}>
+                        <Text style={styles.detailsTitle}>Existing Walk-ins</Text>
+                        <Text style={styles.emptyText}>{walkInRooms.length}</Text>
+                    </View>
+                    {walkInRooms.length === 0 ? (
+                        <Text style={styles.emptyText}>No walk-in matchrooms yet.</Text>
+                    ) : (
+                        walkInRooms.map((item) => (
+                            <View key={`walkin-${item.id}`} style={styles.walkinMatchroomItem}>
+                                <MatchroomCard
+                                    room={toMatchroomCardData(
+                                        item,
+                                        zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
+                                    )}
+                                />
+                            </View>
+                        ))
+                    )}
                 </ScrollView>
             ) : null}
 
             <Modal
-                visible={showDatePicker}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowDatePicker(false)}
-            >
-                <View style={styles.pickerOverlay}>
-                    <TouchableWithoutFeedback onPress={() => setShowDatePicker(false)}>
-                        <View style={styles.pickerBackdrop} />
-                    </TouchableWithoutFeedback>
-                    <View style={styles.pickerSheet}>
-                        <View style={styles.pickerHandle} />
-                        <View style={styles.pickerHeader}>
-                            <Pressable onPress={() => setShowDatePicker(false)}>
-                                <Text style={styles.pickerAction}>Cancel</Text>
-                            </Pressable>
-                            <Text style={styles.pickerTitle}>Select Date</Text>
-                            <Pressable onPress={applyDateDraft}>
-                                <Text style={styles.pickerAction}>Done</Text>
-                            </Pressable>
-                        </View>
-                        <View style={styles.calendarContainer}>
-                            <View style={styles.calendarHeader}>
-                                <Pressable
-                                    style={styles.calendarNavButton}
-                                    onPress={() => {
-                                        const prev = new Date(monthCursor);
-                                        prev.setMonth(prev.getMonth() - 1);
-                                        setMonthCursor(prev);
-                                    }}
-                                >
-                                    <Text style={styles.calendarNavText}>{"<"}</Text>
-                                </Pressable>
-                                <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
-                                <Pressable
-                                    style={styles.calendarNavButton}
-                                    onPress={() => {
-                                        const next = new Date(monthCursor);
-                                        next.setMonth(next.getMonth() + 1);
-                                        setMonthCursor(next);
-                                    }}
-                                >
-                                    <Text style={styles.calendarNavText}>{">"}</Text>
-                                </Pressable>
-                            </View>
-                            <View style={styles.weekdayRow}>
-                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                                    <Text key={label} style={styles.weekdayLabel}>{label}</Text>
-                                ))}
-                            </View>
-                            <View style={styles.calendarGrid}>
-                                {Array.from({ length: firstWeekday }).map((_, idx) => (
-                                    <View key={`empty-${idx}`} style={styles.dayCell} />
-                                ))}
-                                {Array.from({ length: daysInMonth }).map((_, idx) => {
-                                    const dayNumber = idx + 1;
-                                    const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
-                                    const selected = dateDraft ? isSameDay(dateDraft, date) : false;
-                                    return (
-                                        <Pressable
-                                            key={`day-${dayNumber}`}
-                                            style={[styles.dayCell, selected && styles.dayCellSelected]}
-                                            onPress={() => setDateDraft(date)}
-                                        >
-                                            <Text style={[styles.dayText, selected && styles.dayTextSelected]}>
-                                                {dayNumber}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            <Modal
-                visible={showTimePicker}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowTimePicker(false)}
-            >
-                <View style={styles.pickerOverlay}>
-                    <TouchableWithoutFeedback onPress={() => setShowTimePicker(false)}>
-                        <View style={styles.pickerBackdrop} />
-                    </TouchableWithoutFeedback>
-                    <View style={styles.pickerSheet}>
-                        <View style={styles.pickerHandle} />
-                        <View style={styles.pickerHeader}>
-                            <Pressable onPress={() => setShowTimePicker(false)}>
-                                <Text style={styles.pickerAction}>Cancel</Text>
-                            </Pressable>
-                            <Text style={styles.pickerTitle}>Select Time</Text>
-                            <Pressable onPress={applyTimeDraft}>
-                                <Text style={styles.pickerAction}>Done</Text>
-                            </Pressable>
-                        </View>
-                        <View style={styles.timePickerRow}>
-                            <View style={styles.timeColumn}>
-                                {hours12.map((hour) => {
-                                    const selected = timeDraft.hour === hour;
-                                    return (
-                                        <Pressable
-                                            key={`h-${hour}`}
-                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                            onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}
-                                        >
-                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                {String(hour).padStart(2, "0")}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
-                            <View style={styles.timeColumn}>
-                                {minutes.map((minute) => {
-                                    const selected = timeDraft.minute === minute;
-                                    return (
-                                        <Pressable
-                                            key={`m-${minute}`}
-                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                            onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}
-                                        >
-                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                {String(minute).padStart(2, "0")}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
-                            <View style={styles.timeColumn}>
-                                {periods.map((period) => {
-                                    const selected = timeDraft.period === period;
-                                    return (
-                                        <Pressable
-                                            key={`p-${period}`}
-                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                            onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}
-                                        >
-                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                                {period}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-            {/* Counter Offer Modal */}
-            <Modal
                 visible={showCounterModal}
                 animationType="slide"
-                transparent={true}
+                transparent
                 onRequestClose={() => !processingAction && setShowCounterModal(false)}
             >
                 <TouchableWithoutFeedback onPress={() => !processingAction && setShowCounterModal(false)}>
@@ -1256,7 +840,7 @@ export default function ZoneBookingsModule() {
                                 <View style={styles.modalHeader}>
                                     <View>
                                         <Text style={styles.modalTitle}>Suggest Alternative</Text>
-                                        <Text style={styles.modalSubtitle}>Propose a different time or price</Text>
+                                        <Text style={styles.modalSubtitle}>Price and note</Text>
                                     </View>
                                     <Pressable
                                         onPress={() => setShowCounterModal(false)}
@@ -1273,20 +857,14 @@ export default function ZoneBookingsModule() {
                                         onChangeText={setCounterPrice}
                                         keyboardType="numeric"
                                         style={styles.input}
-                                        placeholder="e.g. 1500"
+                                        placeholder="1500"
                                         placeholderTextColor={COLORS.muted}
                                     />
 
-                                    <Text style={styles.formLabel}>Suggested Time</Text>
-                                    <View style={styles.dateRow}>
-                                        <Pressable style={styles.dateField} onPress={() => openDatePicker("counter")}>
-                                            <MaterialIcons name="calendar-today" size={16} color={COLORS.accent} />
-                                            <Text style={styles.dateFieldText}>{toDateDisplay(counterDateValue)}</Text>
-                                        </Pressable>
-                                        <Pressable style={styles.dateField} onPress={() => openTimePicker("counter")}>
-                                            <MaterialIcons name="access-time" size={16} color={COLORS.accent} />
-                                            <Text style={styles.dateFieldText}>{toTimeDisplay(counterDateValue)}</Text>
-                                        </Pressable>
+                                    <View style={{ marginBottom: SPACING.sm }}>
+                                        <Text style={styles.emptyText}>
+                                            Suggested time is auto-set (2 hours from now).
+                                        </Text>
                                     </View>
 
                                     <Text style={styles.formLabel}>Offer Expires In (Minutes)</Text>
@@ -1295,7 +873,7 @@ export default function ZoneBookingsModule() {
                                         onChangeText={setCounterExpiryMinutes}
                                         keyboardType="numeric"
                                         style={styles.input}
-                                        placeholder="e.g. 15"
+                                        placeholder="10"
                                         placeholderTextColor={COLORS.muted}
                                     />
 
@@ -1304,7 +882,7 @@ export default function ZoneBookingsModule() {
                                         value={counterMessage}
                                         onChangeText={setCounterMessage}
                                         style={[styles.input, styles.inputMultiline]}
-                                        placeholder="e.g. We have slots available at 10 PM instead..."
+                                        placeholder="Optional note"
                                         placeholderTextColor={COLORS.muted}
                                         multiline
                                     />
@@ -1313,8 +891,8 @@ export default function ZoneBookingsModule() {
                                         style={[
                                             styles.actionButton,
                                             styles.counterButton,
-                                            { marginTop: 20, height: 54, width: '100%' },
-                                            (processingAction || !counterPrice) && { opacity: 0.6 }
+                                            { marginTop: 20, height: 54, width: "100%" },
+                                            (processingAction || !counterPrice) && { opacity: 0.6 },
                                         ]}
                                         onPress={handleCounterOffer}
                                         disabled={processingAction !== null || !counterPrice}

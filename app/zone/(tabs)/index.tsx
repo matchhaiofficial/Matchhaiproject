@@ -345,7 +345,7 @@ export default function ZoneDashboardHome() {
 
     if (!zone || zone.status === "pending-review") {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']}>
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -364,7 +364,7 @@ export default function ZoneDashboardHome() {
 
     if (zone.status === "rejected") {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']}>
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -410,7 +410,7 @@ export default function ZoneDashboardHome() {
     );
 
     return (
-        <Screen style={styles.screen} scroll={false} edges={['top']}>
+        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
             <AppHeader
                 title="Dashboard"
                 subtitle={zone.venueBrandName}
@@ -428,7 +428,7 @@ export default function ZoneDashboardHome() {
                 <ScrollView
                     contentContainerStyle={[
                         styles.container,
-                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : tabBarHeight + 16 },
+                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : 16 },
                     ]}
                     showsVerticalScrollIndicator={false}
                 >

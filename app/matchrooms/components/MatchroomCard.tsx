@@ -22,6 +22,7 @@ interface MatchroomCardProps {
 
 const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel, onPress, containerStyle }: MatchroomCardProps) => {
     const router = useRouter();
+    const isWalkInRoom = String((room as any).bookingSource || "").toLowerCase() === "walkin";
 
     // Check if room is locked/full
     const isLocked = isRoomLocked(room);
@@ -123,7 +124,14 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         >
             {/* Row 1: Game Name, Skill Score & Lock Badge */}
             <View style={[styles.nearbyTitleRow, { marginBottom: 6 }]}>
-                <Text style={[styles.nearbyGame, { marginBottom: 0 }]}>{room.game}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={[styles.nearbyGame, { marginBottom: 0 }]}>{room.game}</Text>
+                    {isWalkInRoom ? (
+                        <View style={styles.walkInOnlyBadge}>
+                            <Text style={styles.walkInOnlyBadgeText}>WALK-IN</Text>
+                        </View>
+                    ) : null}
+                </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     {/* LOCKED/FULL Badge */}
                     {isLocked && (

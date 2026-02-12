@@ -303,18 +303,8 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
     },
-    walkinChipOverlay: {
-        marginTop: -6,
-        alignSelf: "flex-start",
-        marginLeft: SPACING.sm,
-    },
-    walkinChip: {
-        borderRadius: RADII.pill,
-        borderWidth: 1,
-        borderColor: "rgba(255, 193, 7, 0.35)",
-        backgroundColor: "rgba(255, 193, 7, 0.12)",
-        paddingHorizontal: SPACING.sm,
-        paddingVertical: 3,
+    walkinMatchroomItem: {
+        marginBottom: SPACING.sm,
     },
     walkinCard: {
         backgroundColor: COLORS.cardDark,

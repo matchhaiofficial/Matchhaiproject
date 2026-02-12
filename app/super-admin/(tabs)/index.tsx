@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     },
     listContent: {
         padding: SPACING.md,
-        paddingBottom: 40,
+        paddingBottom: SPACING.lg,
     },
     card: {
         backgroundColor: COLORS.cardBackground,

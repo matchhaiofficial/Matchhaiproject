@@ -772,6 +772,10 @@ export default function MatchroomDetails() {
 
     const isHost = useMemo(() => user?.uid === room?.hostUid, [user?.uid, room?.hostUid]);
     const playersArr = useMemo(() => room?.players || [], [room?.players]);
+    const isWalkInRoom = useMemo(
+        () => String((room as any)?.bookingSource || '').toLowerCase() === 'walkin',
+        [room],
+    );
     const participantUids = useMemo(() => {
         const slots = [...(room?.slotsA || []), ...(room?.slotsB || [])];
         const slotUids = slots
@@ -785,21 +789,68 @@ export default function MatchroomDetails() {
         ].filter(Boolean));
     }, [room]);
     const isJoined = useMemo(() => !!user?.uid && participantUids.has(user.uid), [participantUids, user?.uid]);
-    const isFull = useMemo(() => playersArr.length >= (room?.maxPlayers || 0), [playersArr.length, room?.maxPlayers]);
 
     // Lifecycle states
     const isExpired = useMemo(() => (room ? isRoomExpired(room) : false), [room]);
     const isLocked = useMemo(() => (room ? isRoomLocked(room) : false), [room]);
-    const canJoin = useMemo(() => !isExpired && !isLocked && !isJoined && !isFull, [isExpired, isLocked, isJoined, isFull]);
-    const matchCode = room?.matchCode || (room?.id ? room.id.slice(-6).toUpperCase() : '');
-    const qrValue = room?.id ? `matchhai://matchrooms/${room.id}` : '';
-
     const { displaySlotsA, displaySlotsB } = useMemo(() => {
         const slotsA = room?.slotsA || [];
         const slotsB = room?.slotsB || [];
-        if (slotsA.length === 0 && slotsB.length === 0) {
+
+        const hasStoredSlots = slotsA.length > 0 || slotsB.length > 0;
+        if (!hasStoredSlots && isWalkInRoom && (room?.maxPlayers || 0) > 0) {
+            const totalSeats = Math.max(1, Number(room?.maxPlayers || 0));
+            const bookedSeats = Math.min(
+                totalSeats,
+                Math.max(Number((room as any)?.currentPlayers || 0), (room?.players || []).length),
+            );
+            const knownPlayers = (room?.players || []).slice(0, totalSeats);
+
+            type LobbySlot = {
+                slotId: string;
+                status: 'open' | 'confirmed' | 'reserved';
+                role: string;
+                uid?: string;
+                user?: { uid: string; username: string };
+            };
+
+            const createSlot = (slotId: string): LobbySlot => ({
+                slotId,
+                status: 'open' as const,
+                role: 'Player',
+            });
+
+            const localSlotsA =
+                totalSeats % 2 === 0
+                    ? Array.from({ length: Math.max(1, totalSeats / 2) }, (_, idx) => createSlot(`A${idx + 1}`))
+                    : Array.from({ length: totalSeats }, (_, idx) => createSlot(`A${idx + 1}`));
+            const localSlotsB =
+                totalSeats % 2 === 0
+                    ? Array.from({ length: Math.max(1, totalSeats / 2) }, (_, idx) => createSlot(`B${idx + 1}`))
+                    : [];
+
+            const allSlots = [...localSlotsA, ...localSlotsB];
+            for (let index = 0; index < allSlots.length; index += 1) {
+                const slot = allSlots[index];
+                if (index < knownPlayers.length) {
+                    const player = knownPlayers[index];
+                    slot.status = 'confirmed';
+                    slot.uid = player.uid;
+                    slot.user = { uid: player.uid, username: player.username };
+                    slot.role = player.role || 'Player';
+                } else if (index < bookedSeats) {
+                    slot.status = 'reserved';
+                    slot.role = 'Booked';
+                }
+            }
+
+            return { displaySlotsA: localSlotsA, displaySlotsB: localSlotsB };
+        }
+
+        if (!hasStoredSlots) {
             return { displaySlotsA: slotsA, displaySlotsB: slotsB };
         }
+
         const assigned = new Set<string>();
         slotsA.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
         slotsB.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
@@ -821,7 +872,23 @@ export default function MatchroomDetails() {
                 return slot;
             });
         return { displaySlotsA: fill(slotsA), displaySlotsB: fill(slotsB) };
-    }, [room]);
+    }, [isWalkInRoom, room]);
+
+    const occupiedSeatCount = useMemo(() => {
+        const allSlots = [...(displaySlotsA || []), ...(displaySlotsB || [])];
+        if (allSlots.length > 0) {
+            return allSlots.filter((slot: any) => {
+                const state = String(slot?.status || '').toLowerCase();
+                return Boolean(slot?.user || slot?.uid || state === 'confirmed' || state === 'reserved');
+            }).length;
+        }
+        return Math.max(Number((room as any)?.currentPlayers || 0), playersArr.length);
+    }, [displaySlotsA, displaySlotsB, playersArr.length, room]);
+
+    const isFull = useMemo(() => occupiedSeatCount >= (room?.maxPlayers || 0), [occupiedSeatCount, room?.maxPlayers]);
+    const canJoin = useMemo(() => !isExpired && !isLocked && !isJoined && !isFull, [isExpired, isLocked, isJoined, isFull]);
+    const matchCode = room?.matchCode || (room?.id ? room.id.slice(-6).toUpperCase() : '');
+    const qrValue = room?.id ? `matchhai://matchrooms/${room.id}` : '';
 
     if (loading) {
         return (
@@ -1073,16 +1140,16 @@ export default function MatchroomDetails() {
                 {/* Squad Section */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md }}>
                     <Text style={styles.sectionTitle}>
-                        {(room.slotsA?.length || 0) > 0 ? 'Teams' : `Squad (${room.players?.length || 0}/${room.maxPlayers})`}
+                        {(displaySlotsA?.length || 0) > 0 ? 'Teams' : `Squad (${occupiedSeatCount}/${room.maxPlayers})`}
                     </Text>
-                    {(room.slotsA?.length || 0) > 0 && (
+                    {(displaySlotsA?.length || 0) > 0 && (
                         <Text style={[styles.dateText, { fontSize: 12 }]}>
-                            {room.players?.length || 0}/{room.maxPlayers} Players
+                            {occupiedSeatCount}/{room.maxPlayers} Players
                         </Text>
                     )}
                 </View>
 
-                {(room.slotsA?.length || 0) > 0 ? (
+                {(displaySlotsA?.length || 0) > 0 ? (
                     <View style={[styles.teamsWrapper, { flexDirection: width < 600 ? 'column' : 'row' }]}>
                         {/* Team A */}
                         <View style={[styles.teamContainer, { flex: width < 600 ? 0 : 1, width: width < 600 ? '100%' : 'auto' }]}>
@@ -1135,13 +1202,25 @@ export default function MatchroomDetails() {
                                                 </View>
                                             </View>
                                         ) : (
-                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                <MaterialIcons name="add-circle-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 6, opacity: 0.5 }} />
-                                                <Text style={styles.emptySlotName}>Available Slot</Text>
-                                            </View>
+                                            (() => {
+                                                const isBookedPlaceholder = slot.status === 'reserved' || slot.status === 'confirmed';
+                                                return (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                        <MaterialIcons
+                                                            name={isBookedPlaceholder ? "event-seat" : "add-circle-outline"}
+                                                            size={14}
+                                                            color={COLORS.textSecondary}
+                                                            style={{ marginRight: 6, opacity: 0.5 }}
+                                                        />
+                                                        <Text style={styles.emptySlotName}>
+                                                            {isBookedPlaceholder ? 'Booked Seat' : 'Available Slot'}
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            })()
                                         )}
                                     </TouchableOpacity>
-                                    {!slot.user && (
+                                    {!slot.user && slot.status === 'open' && (
                                         <View style={{ flexDirection: 'row', gap: 8 }}>
                                             {canInviteTeamA && (
                                                 <TouchableOpacity
@@ -1246,13 +1325,25 @@ export default function MatchroomDetails() {
                                                 </View>
                                             </View>
                                         ) : (
-                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                <MaterialIcons name="add-circle-outline" size={14} color={COLORS.textSecondary} style={{ marginRight: 6, opacity: 0.5 }} />
-                                                <Text style={styles.emptySlotName}>Available Slot</Text>
-                                            </View>
+                                            (() => {
+                                                const isBookedPlaceholder = slot.status === 'reserved' || slot.status === 'confirmed';
+                                                return (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                        <MaterialIcons
+                                                            name={isBookedPlaceholder ? "event-seat" : "add-circle-outline"}
+                                                            size={14}
+                                                            color={COLORS.textSecondary}
+                                                            style={{ marginRight: 6, opacity: 0.5 }}
+                                                        />
+                                                        <Text style={styles.emptySlotName}>
+                                                            {isBookedPlaceholder ? 'Booked Seat' : 'Available Slot'}
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            })()
                                         )}
                                     </TouchableOpacity>
-                                    {!slot.user && (
+                                    {!slot.user && slot.status === 'open' && (
                                         <View style={{ flexDirection: 'row', gap: 8 }}>
                                             {canInviteTeamB && (
                                                 <TouchableOpacity

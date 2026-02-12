@@ -6,11 +6,79 @@ import setNotificationChannelAsync from "expo-notifications/build/setNotificatio
 import { AndroidImportance } from "expo-notifications/build/NotificationChannelManager.types";
 import scheduleNotificationAsync from "expo-notifications/build/scheduleNotificationAsync";
 import cancelScheduledNotificationAsync from "expo-notifications/build/cancelScheduledNotificationAsync";
+import getAllScheduledNotificationsAsync from "expo-notifications/build/getAllScheduledNotificationsAsync";
 
 const ANDROID_CHANNEL_ID = "default";
 const STORAGE_KEY = "local_notifications.matchroom_reminders.v1";
 
-type StoredReminderMap = Record<string, string>;
+type StoredReminderRecord = {
+    notificationId: string;
+    triggerAtMs: number;
+    title: string;
+    minutesBefore: number;
+};
+
+type StoredReminderMap = Record<string, StoredReminderRecord>;
+
+const roomOps = new Map<string, Promise<unknown>>();
+
+const runSerializedForRoom = async <T>(roomId: string, task: () => Promise<T>): Promise<T> => {
+    const previous = roomOps.get(roomId) || Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    roomOps.set(roomId, next);
+    return next.finally(() => {
+        if (roomOps.get(roomId) === next) {
+            roomOps.delete(roomId);
+        }
+    });
+};
+
+const normalizeStoredEntry = (entry: any): StoredReminderRecord | null => {
+    if (typeof entry === "string" && entry) {
+        return {
+            notificationId: entry,
+            triggerAtMs: 0,
+            title: "",
+            minutesBefore: 15,
+        };
+    }
+
+    if (!entry || typeof entry !== "object") return null;
+
+    const notificationId = typeof entry.notificationId === "string" ? entry.notificationId : "";
+    if (!notificationId) return null;
+
+    return {
+        notificationId,
+        triggerAtMs: Number(entry.triggerAtMs) || 0,
+        title: typeof entry.title === "string" ? entry.title : "",
+        minutesBefore: Number(entry.minutesBefore) || 15,
+    };
+};
+
+const cancelDuplicateRemindersForRoom = async (roomId: string, keepNotificationId?: string) => {
+    try {
+        const scheduled = await getAllScheduledNotificationsAsync();
+        const targets = scheduled.filter((item: any) => {
+            const identifier = String(item?.identifier || item?.id || "");
+            if (!identifier || (keepNotificationId && identifier === keepNotificationId)) return false;
+            const scheduledRoomId = String(
+                item?.content?.data?.roomId ||
+                item?.request?.content?.data?.roomId ||
+                "",
+            );
+            return scheduledRoomId === roomId;
+        });
+
+        await Promise.all(
+            targets.map((item: any) =>
+                cancelScheduledNotificationAsync(String(item?.identifier || item?.id || "")).catch(() => null),
+            ),
+        );
+    } catch {
+        // noop
+    }
+};
 
 const readReminderMap = async (): Promise<StoredReminderMap> => {
     try {
@@ -18,7 +86,13 @@ const readReminderMap = async (): Promise<StoredReminderMap> => {
         if (!raw) return {};
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== "object") return {};
-        return parsed as StoredReminderMap;
+
+        const normalized: StoredReminderMap = {};
+        for (const [roomId, entry] of Object.entries(parsed)) {
+            const next = normalizeStoredEntry(entry);
+            if (next) normalized[roomId] = next;
+        }
+        return normalized;
     } catch {
         return {};
     }
@@ -58,15 +132,20 @@ export async function requestLocalNotificationPermissions() {
 }
 
 export async function cancelMatchroomReminder(roomId: string) {
-    const map = await readReminderMap();
-    const notificationId = map[roomId];
-    if (!notificationId) return;
-    try {
-        await cancelScheduledNotificationAsync(notificationId);
-    } finally {
-        delete map[roomId];
-        await writeReminderMap(map);
-    }
+    return runSerializedForRoom(roomId, async () => {
+        const map = await readReminderMap();
+        const existing = map[roomId];
+        try {
+            if (existing?.notificationId) {
+                await cancelScheduledNotificationAsync(existing.notificationId);
+            }
+        } finally {
+            delete map[roomId];
+            await writeReminderMap(map);
+        }
+
+        await cancelDuplicateRemindersForRoom(roomId);
+    });
 }
 
 export async function scheduleMatchroomReminder(input: {
@@ -76,43 +155,67 @@ export async function scheduleMatchroomReminder(input: {
     minutesBefore?: number;
     href?: string;
 }) {
-    const minutesBefore = Math.max(0, Math.min(120, input.minutesBefore ?? 15));
-    const triggerAtMs = input.startAt.getTime() - minutesBefore * 60 * 1000;
-    const now = Date.now();
+    return runSerializedForRoom(input.roomId, async () => {
+        const minutesBefore = Math.max(0, Math.min(120, input.minutesBefore ?? 15));
+        const triggerAtMs = input.startAt.getTime() - minutesBefore * 60 * 1000;
+        const now = Date.now();
+        const map = await readReminderMap();
+        const existing = map[input.roomId];
 
-    // Too late to schedule (or already started).
-    if (!Number.isFinite(triggerAtMs) || triggerAtMs <= now + 30 * 1000) {
-        await cancelMatchroomReminder(input.roomId);
-        return { ok: false as const, reason: "too_late" as const };
-    }
-
-    const map = await readReminderMap();
-    const existingId = map[input.roomId];
-    if (existingId) {
-        try {
-            await cancelScheduledNotificationAsync(existingId);
-        } catch {
-            // ignore
+        // Too late to schedule (or already started).
+        if (!Number.isFinite(triggerAtMs) || triggerAtMs <= now + 30 * 1000) {
+            try {
+                if (existing?.notificationId) {
+                    await cancelScheduledNotificationAsync(existing.notificationId);
+                }
+            } catch {
+                // noop
+            } finally {
+                delete map[input.roomId];
+                await writeReminderMap(map);
+            }
+            await cancelDuplicateRemindersForRoom(input.roomId);
+            return { ok: false as const, reason: "too_late" as const };
         }
-    }
 
-    const notificationId = await scheduleNotificationAsync({
-        content: {
-            title: input.title,
-            body: minutesBefore > 0 ? `Starts in ${minutesBefore} minutes.` : "Starting soon.",
-            sound: true,
-            data: {
-                href: input.href || `/matchrooms/${input.roomId}`,
-                roomId: input.roomId,
+        // Idempotent scheduling: keep existing reminder when trigger stays the same.
+        if (existing?.notificationId && existing.triggerAtMs === triggerAtMs) {
+            await cancelDuplicateRemindersForRoom(input.roomId, existing.notificationId);
+            return { ok: true as const, notificationId: existing.notificationId, skipped: true as const };
+        }
+
+        if (existing?.notificationId) {
+            try {
+                await cancelScheduledNotificationAsync(existing.notificationId);
+            } catch {
+                // noop
+            }
+        }
+
+        const notificationId = await scheduleNotificationAsync({
+            content: {
+                title: input.title,
+                body: minutesBefore > 0 ? `Starts in ${minutesBefore} minutes.` : "Starting soon.",
+                sound: true,
+                data: {
+                    href: input.href || `/matchrooms/${input.roomId}`,
+                    roomId: input.roomId,
+                },
             },
-        },
-        trigger: {
-            date: new Date(triggerAtMs),
-            channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
-        } as any,
-    });
+            trigger: {
+                date: new Date(triggerAtMs),
+                channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
+            } as any,
+        });
 
-    map[input.roomId] = notificationId;
-    await writeReminderMap(map);
-    return { ok: true as const, notificationId };
+        map[input.roomId] = {
+            notificationId,
+            triggerAtMs,
+            title: input.title,
+            minutesBefore,
+        };
+        await writeReminderMap(map);
+        await cancelDuplicateRemindersForRoom(input.roomId, notificationId);
+        return { ok: true as const, notificationId };
+    });
 }
