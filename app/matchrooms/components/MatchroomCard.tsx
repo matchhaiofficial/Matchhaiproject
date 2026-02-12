@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { memo, useEffect, useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from "react-native";
 
 import { Matchroom } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
@@ -10,13 +10,17 @@ import styles from "../matchrooms.styles";
 
 interface MatchroomCardProps {
     room: Matchroom;
+    isJoined?: boolean;
     onJoinPress?: () => void;
     onCancelJoinPress?: () => void;
     isRequested?: boolean;
-    isJoined?: boolean;
+    onAcceptPress?: () => void;
+    acceptLabel?: string;
+    onPress?: () => void;
+    containerStyle?: StyleProp<ViewStyle>;
 }
 
-const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined }: MatchroomCardProps) => {
+const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested, isJoined, onAcceptPress, acceptLabel, onPress, containerStyle }: MatchroomCardProps) => {
     const router = useRouter();
 
     // Check if room is locked/full
@@ -88,6 +92,10 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const remainingCount = displayRoles.length - 2;
 
     const handlePress = () => {
+        if (onPress) {
+            onPress();
+            return;
+        }
         router.push({ pathname: "/matchrooms/[id]" as any, params: { id: room.id! } });
     };
 
@@ -109,7 +117,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
 
     return (
         <TouchableOpacity
-            style={styles.nearbyCard}
+            style={[styles.nearbyCard, containerStyle]}
             onPress={handlePress}
             activeOpacity={0.7}
         >
@@ -151,11 +159,6 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             <Text style={styles.joinedBtnText}>Joined</Text>
                         </View>
                     )}
-                    {isRequested && (
-                        <View style={styles.requestedBtn}>
-                            <Text style={styles.requestedBtnText}>Requested</Text>
-                        </View>
-                    )}
                     {!isJoined && !isRequested && onJoinPress && (room.status !== 'in-progress' && room.status !== 'completed') && (
                         <TouchableOpacity
                             style={styles.requestBtn}
@@ -165,6 +168,17 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             }}
                         >
                             <Text style={styles.requestBtnText}>Request</Text>
+                        </TouchableOpacity>
+                    )}
+                    {onAcceptPress && (
+                        <TouchableOpacity
+                            style={styles.acceptBtn}
+                            onPress={(e) => {
+                                e.stopPropagation();
+                                onAcceptPress();
+                            }}
+                        >
+                            <Text style={styles.acceptBtnText}>{acceptLabel || "Accept"}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -217,7 +231,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     </Text>
                 </View>
             </View>
-        </TouchableOpacity>
+        </TouchableOpacity >
     );
 });
 

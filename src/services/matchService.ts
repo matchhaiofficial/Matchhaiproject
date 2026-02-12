@@ -58,6 +58,7 @@ export interface Matchroom {
     }>;
     playerUids?: string[]; // For efficient querying
     createdAt: any;
+    completedAt?: any; // When status became 'completed'
 
     // Location fields
     location?: string;

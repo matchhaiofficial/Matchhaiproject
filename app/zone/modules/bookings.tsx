@@ -34,6 +34,7 @@ import {
     type ZoneMatchroomListItem,
 } from "../../../src/services/zoneAdminBookingService";
 import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 import styles from "./bookings.styles";
 
 type Segment = "requests" | "matchrooms" | "walkins";
@@ -139,10 +140,46 @@ const formatDate = (value: any) => {
     return new Date(millis).toLocaleString();
 };
 
+const toDateString = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length >= 8) return trimmed;
+    }
+    const millis = toMillis(value);
+    if (!millis) return undefined;
+    return new Date(millis).toISOString().slice(0, 10);
+};
+
+const requestToMatchroomCardData = (item: ZoneBookingQueueItem): Matchroom => ({
+    id: getRequestMatchroomId(item) || item.id,
+    hostUid: item.userId,
+    hostName: item.userName,
+    game: item.gameKey.toUpperCase(),
+    title: item.title,
+    description: "Booking request",
+    status: item.status as any,
+    maxPlayers: item.maxPlayers,
+    currentPlayers: item.reservedSlots || item.maxPlayers,
+    players: [],
+    playerUids: [],
+    createdAt: item.createdAt || new Date(),
+    location: item.preferredAreas?.[0] || "Zone Venue",
+    pricing: {
+        perPlayer: item.budgetPerPlayer || 0,
+        currency: item.currency || "PKR",
+    },
+    scheduledDate: toDateString(item.preferredDate),
+    scheduledTime: item.preferredTime,
+    slotsA: [],
+    slotsB: [],
+    paymentStatus: (item.paymentStatus || "unpaid") as any,
+});
+
 const toMatchroomCardData = (room: ZoneMatchroomListItem, fallbackLocation?: string): Matchroom => ({
     id: room.id,
-    hostUid: room.zoneOwnerUid || "",
-    hostName: "Zone Host",
+    hostUid: room.hostUid || room.zoneOwnerUid || "",
+    hostName: room.hostName || "Zone Host",
     game: room.game,
     title: room.title,
     description: "Zone booking matchroom",
@@ -154,13 +191,19 @@ const toMatchroomCardData = (room: ZoneMatchroomListItem, fallbackLocation?: str
     createdAt: room.createdAt || new Date(),
     location: room.location || fallbackLocation || "Zone Venue",
     pricing: {
-        perPlayer: 0,
-        currency: "PKR",
+        perPlayer: room.pricePerPlayer || 0,
+        currency: room.currency || "PKR",
     },
     scheduledDate: room.scheduledDate,
     scheduledTime: room.scheduledTime,
-    slotsA: [],
-    slotsB: [],
+    hostSkillTier: room.hostSkillTier as any,
+    hostSkillScore: room.hostSkillScore,
+    format: room.format,
+    seriesType: room.seriesType,
+    durationHours: room.durationHours,
+    overs: room.overs,
+    slotsA: room.slotsA || [],
+    slotsB: room.slotsB || [],
     paymentStatus: (room.paymentStatus || "unpaid") as any,
 });
 
@@ -178,6 +221,7 @@ export default function ZoneBookingsModule() {
     const [showFilters, setShowFilters] = useState(true);
     const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
     const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
+    const [showCounterModal, setShowCounterModal] = useState(false);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
     const [linkedRequests, setLinkedRequests] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
@@ -337,7 +381,7 @@ export default function ZoneBookingsModule() {
                         where("matchroomId", "in", batch),
                     );
                     const snapshot = await getDocs(q);
-                    snapshot.docs.forEach((docSnap) => {
+                    snapshot.docs.forEach((docSnap: any) => {
                         const data = docSnap.data() as Record<string, any>;
                         const status = String(data.status || "open");
                         if (data.matchroomId) {
@@ -482,14 +526,15 @@ export default function ZoneBookingsModule() {
         });
     }, [combinedQueue]);
 
-    const handleAccept = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
+    const handleAccept = async (targetRequest?: ZoneBookingQueueItem) => {
+        const req = targetRequest || selectedRequest;
+        if (!zone?.id || !user?.uid || !req) return;
         setProcessingAction("accept");
         const result = await acceptZoneBookingRequest({
-            requestId: selectedRequest.id,
+            requestId: req.id,
             adminUid: user.uid,
             zoneId: zone.id,
-            requestOwnerUid: selectedRequest.userId,
+            requestOwnerUid: req.userId,
             branchId: primaryBranch?.id || undefined,
             branchName: primaryBranch?.branchDisplayName || undefined,
             location: zone.primaryBranch?.areaLabel || zone.venueBrandName || undefined,
@@ -536,29 +581,39 @@ export default function ZoneBookingsModule() {
 
         const counterDateTime = formatDateTime(counterDateValue);
         setProcessingAction("counter");
-        const result = await sendZoneCounterOffer({
-            requestId: selectedRequest.id,
-            requestOwnerUid: selectedRequest.userId,
-            zoneId: zone.id,
-            zoneName: zone.venueBrandName || "Zone",
-            zoneOwnerUid: user.uid,
-            branchId: primaryBranch?.id || undefined,
-            branchName: primaryBranch?.branchDisplayName || null,
-            proposedDate: counterDateTime.date,
-            proposedTime: counterDateTime.time,
-            pricePerPlayer: parsedPrice,
-            currency: selectedRequest.currency || "PKR",
-            location: zone.primaryBranch?.areaLabel || "",
-            message: counterMessage.trim(),
-            expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
-        });
-        setProcessingAction(null);
-        if (!result.ok) {
-            Alert.alert("Counter-offer failed", result.message);
-            return;
-        }
+        try {
+            const result = await sendZoneCounterOffer({
+                requestId: selectedRequest.id,
+                requestOwnerUid: selectedRequest.userId,
+                zoneId: zone.id,
+                zoneName: zone.venueBrandName || "Zone",
+                zoneOwnerUid: user.uid,
+                branchId: primaryBranch?.id || undefined,
+                branchName: primaryBranch?.branchDisplayName || null,
+                proposedDate: counterDateTime.date,
+                proposedTime: counterDateTime.time,
+                pricePerPlayer: parsedPrice,
+                currency: selectedRequest.currency || "PKR",
+                location: zone.primaryBranch?.areaLabel || "",
+                message: counterMessage.trim(),
+                expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
+            });
 
-        Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
+            if (!result.ok) {
+                Alert.alert("Counter-offer failed", result.message);
+                return;
+            }
+
+            Alert.alert("Alternative sent", "Player can accept this from their offers inbox.");
+            setShowCounterModal(false);
+            setCounterPrice(""); // Reset on success
+            setCounterMessage("");
+        } catch (error: any) {
+            Logger.error("bookings", "handleCounterOffer crashed", error);
+            Alert.alert("Error", "An unexpected error occurred while sending the offer.");
+        } finally {
+            setProcessingAction(null);
+        }
     };
 
     const handleCreateWalkIn = async () => {
@@ -803,128 +858,73 @@ export default function ZoneBookingsModule() {
                             const selected = selectedRequestId === item.id;
                             const matchroomId = getRequestMatchroomId(item);
                             return (
-                                <Pressable
-                                    key={item.id}
-                                    style={[styles.requestCard, selected && styles.requestCardActive]}
-                                    onPress={() => {
-                                        setSelectedRequestId(item.id);
-                                        if (matchroomId) {
-                                            router.push({
-                                                pathname: "/matchrooms/[id]" as any,
-                                                params: { id: matchroomId },
-                                            } as any);
-                                        }
-                                    }}
-                                >
-                                    <View style={styles.requestTopRow}>
-                                        <Text style={styles.requestTitle} numberOfLines={1}>
-                                            {item.title}
-                                        </Text>
-                                        <Text style={styles.requestStatus}>{item.status}</Text>
-                                    </View>
-                                    <Text style={styles.requestMeta}>
-                                        {item.userName} / {item.gameKey.toUpperCase()} / {item.assetType}
-                                    </Text>
-                                    <Text style={styles.requestMeta}>
-                                        Players: {item.maxPlayers} / Budget: {item.currency || "PKR"} {item.budgetPerPlayer || 0}
-                                    </Text>
-                                    {item.priorityFlags.length ? (
-                                        <View style={styles.flagRow}>
-                                            {item.priorityFlags.map((flag) => (
-                                                <View key={`${item.id}_${flag}`} style={styles.flagPill}>
-                                                    <Text style={styles.flagText}>{flag}</Text>
-                                                </View>
-                                            ))}
+                                <View key={item.id} style={selected ? styles.matchroomFocusedWrap : undefined}>
+                                    <MatchroomCard
+                                        room={requestToMatchroomCardData(item)}
+                                        onAcceptPress={() => {
+                                            setSelectedRequestId(item.id);
+                                            handleAccept(item);
+                                        }}
+                                        onPress={() => {
+                                            setSelectedRequestId(selected ? null : item.id);
+                                        }}
+                                        acceptLabel="Accept"
+                                        containerStyle={selected ? { marginBottom: 0 } : undefined}
+                                    />
+                                    {/* Inline actions inside the room card when selected */}
+                                    {selected && (
+                                        <View style={styles.inlineActionsCard}>
+                                            <View style={styles.actionsRow}>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.counterButton]}
+                                                    onPress={() => setShowCounterModal(true)}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        <MaterialIcons name="edit" size={16} color="#FFF" />
+                                                        <Text style={[styles.actionText, { marginLeft: 6 }]}>Suggest Alternative</Text>
+                                                    </View>
+                                                </Pressable>
+                                            </View>
+                                            <View style={styles.actionsRow}>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.acceptButton]}
+                                                    onPress={() => handleAccept()}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        {processingAction === "accept" ? (
+                                                            <ActivityIndicator size="small" color="#FFF" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialIcons name="check" size={16} color="#FFF" />
+                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
+                                                            </>
+                                                        )}
+                                                    </View>
+                                                </Pressable>
+                                                <Pressable
+                                                    style={[styles.actionButton, styles.rejectButton]}
+                                                    onPress={handleReject}
+                                                    disabled={processingAction !== null}
+                                                >
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        {processingAction === "reject" ? (
+                                                            <ActivityIndicator size="small" color="#FFF" />
+                                                        ) : (
+                                                            <>
+                                                                <MaterialIcons name="close" size={16} color="#FFF" />
+                                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
+                                                            </>
+                                                        )}
+                                                    </View>
+                                                </Pressable>
+                                            </View>
                                         </View>
-                                    ) : null}
-                                </Pressable>
+                                    )}
+                                </View>
                             );
                         })
-                    )}
-
-                    {selectedRequest && (
-                        <View style={styles.detailsCard}>
-                            <Text style={styles.detailsTitle}>Manage Request</Text>
-                            <Text style={styles.detailsLine}>User: {selectedRequest.userName}</Text>
-                            <Text style={styles.detailsLine}>Game: {selectedRequest.gameKey.toUpperCase()}</Text>
-                            <Text style={styles.detailsLine}>Status: {selectedRequest.status}</Text>
-
-                            <View style={styles.counterHeader}>
-                                <Text style={styles.detailsTitle}>Counter Offer</Text>
-                            </View>
-
-                            <Text style={styles.formLabel}>Counter Price (PKR)</Text>
-                            <TextInput
-                                value={counterPrice}
-                                onChangeText={setCounterPrice}
-                                keyboardType="numeric"
-                                style={styles.input}
-                                placeholder="e.g. 1500"
-                                placeholderTextColor={COLORS.muted}
-                            />
-
-                            <Text style={styles.formLabel}>Expires In (Minutes)</Text>
-                            <TextInput
-                                value={counterExpiryMinutes}
-                                onChangeText={setCounterExpiryMinutes}
-                                keyboardType="numeric"
-                                style={styles.input}
-                                placeholder="e.g. 10"
-                                placeholderTextColor={COLORS.muted}
-                            />
-
-                            <Text style={styles.formLabel}>Message (Optional)</Text>
-                            <TextInput
-                                value={counterMessage}
-                                onChangeText={setCounterMessage}
-                                style={[styles.input, styles.inputMultiline]}
-                                placeholder="e.g. Alternative timing available..."
-                                placeholderTextColor={COLORS.muted}
-                                multiline
-                            />
-
-                            <View style={styles.actionsRow}>
-                                <Pressable
-                                    style={[styles.actionButton, styles.counterButton]}
-                                    onPress={handleCounterOffer}
-                                    disabled={processingAction !== null}
-                                >
-                                    <Text style={styles.actionText}>Send Counter</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.actionButton, styles.acceptButton]}
-                                    onPress={handleAccept}
-                                    disabled={processingAction !== null}
-                                >
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                        {processingAction === "accept" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <>
-                                                <MaterialIcons name="check" size={16} color="#FFF" />
-                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Accept</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.actionButton, styles.rejectButton]}
-                                    onPress={handleReject}
-                                    disabled={processingAction !== null}
-                                >
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                        {processingAction === "reject" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <>
-                                                <MaterialIcons name="close" size={16} color="#FFF" />
-                                                <Text style={[styles.actionText, { marginLeft: 4 }]}>Reject</Text>
-                                            </>
-                                        )}
-                                    </View>
-                                </Pressable>
-                            </View>
-                        </View>
                     )}
                 </ScrollView>
             ) : null}
@@ -936,25 +936,33 @@ export default function ZoneBookingsModule() {
                     ) : matchrooms.length === 0 ? (
                         <Text style={styles.emptyText}>No matchrooms found for this zone.</Text>
                     ) : (
-                        matchrooms.map((item) => (
-                            <View key={item.id} style={focusedMatchroomId === item.id ? styles.matchroomFocusedWrap : undefined}>
-                                <MatchroomCard
-                                    room={toMatchroomCardData(
-                                        item,
-                                        zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
-                                    )}
-                                />
-                                {item.bookingSource === "walkin" ? (
-                                    <View style={styles.walkinChipOverlay}>
-                                        <View style={styles.walkinChip}>
-                                            <Text style={styles.flagText}>
-                                                walk-in / {item.walkInPaymentMode || "venue_pay"}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                ) : null}
+                        <>
+                            <View style={styles.resultsCount}>
+                                <Text style={styles.resultsCountText}>
+                                    {matchrooms.length} matchroom{matchrooms.length !== 1 ? 's' : ''} found
+                                </Text>
                             </View>
-                        ))
+                            {matchrooms.map((item) => (
+                                <View key={item.id} style={focusedMatchroomId === item.id ? styles.matchroomFocusedWrap : undefined}>
+                                    <MatchroomCard
+                                        room={toMatchroomCardData(
+                                            item,
+                                            zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
+                                        )}
+                                        containerStyle={focusedMatchroomId === item.id ? { marginBottom: 0 } : undefined}
+                                    />
+                                    {item.bookingSource === "walkin" ? (
+                                        <View style={styles.walkinChipOverlay}>
+                                            <View style={styles.walkinChip}>
+                                                <Text style={styles.flagText}>
+                                                    walk-in / {item.walkInPaymentMode || "venue_pay"}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    ) : null}
+                                </View>
+                            ))}
+                        </>
                     )}
                 </ScrollView>
             ) : null}
@@ -1233,6 +1241,95 @@ export default function ZoneBookingsModule() {
                         </View>
                     </View>
                 </View>
+            </Modal>
+            {/* Counter Offer Modal */}
+            <Modal
+                visible={showCounterModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => !processingAction && setShowCounterModal(false)}
+            >
+                <TouchableWithoutFeedback onPress={() => !processingAction && setShowCounterModal(false)}>
+                    <View style={styles.modalOverlay}>
+                        <TouchableWithoutFeedback>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <View>
+                                        <Text style={styles.modalTitle}>Suggest Alternative</Text>
+                                        <Text style={styles.modalSubtitle}>Propose a different time or price</Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={() => setShowCounterModal(false)}
+                                        disabled={processingAction !== null}
+                                    >
+                                        <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                                    </Pressable>
+                                </View>
+
+                                <ScrollView style={styles.counterForm} showsVerticalScrollIndicator={false}>
+                                    <Text style={styles.formLabel}>Counter Price (PKR)</Text>
+                                    <TextInput
+                                        value={counterPrice}
+                                        onChangeText={setCounterPrice}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 1500"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={styles.formLabel}>Suggested Time</Text>
+                                    <View style={styles.dateRow}>
+                                        <Pressable style={styles.dateField} onPress={() => openDatePicker("counter")}>
+                                            <MaterialIcons name="calendar-today" size={16} color={COLORS.accent} />
+                                            <Text style={styles.dateFieldText}>{toDateDisplay(counterDateValue)}</Text>
+                                        </Pressable>
+                                        <Pressable style={styles.dateField} onPress={() => openTimePicker("counter")}>
+                                            <MaterialIcons name="access-time" size={16} color={COLORS.accent} />
+                                            <Text style={styles.dateFieldText}>{toTimeDisplay(counterDateValue)}</Text>
+                                        </Pressable>
+                                    </View>
+
+                                    <Text style={styles.formLabel}>Offer Expires In (Minutes)</Text>
+                                    <TextInput
+                                        value={counterExpiryMinutes}
+                                        onChangeText={setCounterExpiryMinutes}
+                                        keyboardType="numeric"
+                                        style={styles.input}
+                                        placeholder="e.g. 15"
+                                        placeholderTextColor={COLORS.muted}
+                                    />
+
+                                    <Text style={styles.formLabel}>Note to Player</Text>
+                                    <TextInput
+                                        value={counterMessage}
+                                        onChangeText={setCounterMessage}
+                                        style={[styles.input, styles.inputMultiline]}
+                                        placeholder="e.g. We have slots available at 10 PM instead..."
+                                        placeholderTextColor={COLORS.muted}
+                                        multiline
+                                    />
+
+                                    <Pressable
+                                        style={[
+                                            styles.actionButton,
+                                            styles.counterButton,
+                                            { marginTop: 20, height: 54, width: '100%' },
+                                            (processingAction || !counterPrice) && { opacity: 0.6 }
+                                        ]}
+                                        onPress={handleCounterOffer}
+                                        disabled={processingAction !== null || !counterPrice}
+                                    >
+                                        {processingAction === "counter" ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={[styles.actionText, { fontSize: 16 }]}>Send Suggestion</Text>
+                                        )}
+                                    </Pressable>
+                                </ScrollView>
+                            </View>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
             </Modal>
         </Screen>
     );
