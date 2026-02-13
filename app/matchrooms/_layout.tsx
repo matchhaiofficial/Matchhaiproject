@@ -11,7 +11,7 @@ export default function MatchroomsLayout() {
                 animation: "slide_from_right",
             }}
         >
-            <Stack.Screen name="create/index" options={{ presentation: "modal" }} />
+            <Stack.Screen name="create/index" options={{ presentation: "card" }} />
             <Stack.Screen name="[id]" />
         </Stack>
     );

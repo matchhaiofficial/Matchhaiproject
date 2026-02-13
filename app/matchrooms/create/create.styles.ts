@@ -1,6 +1,6 @@
 // app/matchrooms/create/create.styles.ts
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
@@ -9,6 +9,21 @@ export default StyleSheet.create({
     },
     scrollContent: {
         flexGrow: 1,
+    },
+    createNonScrollContent: {
+        flex: 1,
+        paddingBottom: 0,
+    },
+    createPageLayout: {
+        flex: 1,
+        position: 'relative',
+    },
+    createScrollView: {
+        flex: 1,
+    },
+    createScrollContent: {
+        flexGrow: 1,
+        paddingBottom: SPACING.xxl,
     },
 
     // Header
@@ -163,28 +178,37 @@ export default StyleSheet.create({
 
     // Button
     buttonWrapper: {
-        marginTop: SPACING.lg + SPACING.md,
-        marginBottom: SPACING.xxl,
+        marginTop: SPACING.md,
+        marginBottom: SPACING.lg,
+    },
+    submitSummaryWrapper: {
+        marginTop: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    stickyFooter: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 30,
+        elevation: 30,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.cardBorder,
+        backgroundColor: COLORS.background,
+        paddingTop: SPACING.md,
+        paddingHorizontal: 0,
     },
     primaryButton: {
-        backgroundColor: COLORS.accent,
-        borderRadius: RADII.lg,
-        paddingVertical: SPACING.lg - 2,
-        alignItems: 'center',
-        ...SHADOWS.accentStrong,
+        ...CTA.primaryButton,
     },
     primaryButtonDisabled: {
-        backgroundColor: COLORS.inputBorder,
-        ...SHADOWS.cardElevated,
+        ...CTA.primaryButtonDisabled,
     },
     primaryButtonPressed: {
-        opacity: 0.9,
+        ...CTA.primaryButtonPressed,
     },
     primaryButtonText: {
-        color: COLORS.background,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
-        fontWeight: '700',
+        ...CTA.primaryButtonText,
     },
 
     // Zone Cards (New)
@@ -372,6 +396,33 @@ export default StyleSheet.create({
         color: COLORS.muted,
         fontSize: 11,
     },
+    walkInRosterWrap: {
+        marginTop: SPACING.md,
+    },
+    walkInPlayerCard: {
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        borderRadius: RADII.md,
+        backgroundColor: COLORS.cardBackground,
+        padding: SPACING.md,
+        marginBottom: SPACING.sm,
+    },
+    walkInPlayerHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: SPACING.sm,
+    },
+    walkInPlayerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption + 1,
+    },
+    walkInCaptainChip: {
+        marginRight: 0,
+        marginBottom: 0,
+        paddingVertical: 6,
+    },
     submitHintText: {
         marginTop: 10,
         textAlign: 'center',
@@ -390,12 +441,18 @@ export default StyleSheet.create({
 
     // Info Boxes
     infoBox: {
-        marginBottom: 16,
+        marginBottom: SPACING.sm,
         padding: 12,
         backgroundColor: 'rgba(66, 165, 245, 0.1)',
         borderRadius: 8,
         borderWidth: 1,
         borderColor: 'rgba(66, 165, 245, 0.3)',
+    },
+    summaryCard: {
+        marginBottom: SPACING.sm,
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
     },
     infoBoxText: {
         color: COLORS.text,

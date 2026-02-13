@@ -139,6 +139,49 @@ export const SHADOWS = {
   },
 };
 
+// Primary CTA button system (shared across player/admin create flows)
+export const CTA = {
+  primaryButton: {
+    minHeight: 54,
+    borderRadius: RADII.xl,
+    paddingHorizontal: SPACING.lg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: COLORS.accent,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    ...SHADOWS.accentStrong,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: COLORS.disabled,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  primaryButtonPressed: {
+    opacity: 0.94,
+    transform: [{ scale: 0.988 }],
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontFamily: FONTS.interSemiBold,
+    fontSize: TEXT_SIZES.body + 1,
+    letterSpacing: 0.2,
+  },
+  fabButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: COLORS.accent,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    ...SHADOWS.accentStrong,
+  },
+};
+
 // 📦 Input Padding (for inputs with right-side icons)
 export const INPUT_PADDING = {
   default: 12, // No icon on right

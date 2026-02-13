@@ -343,7 +343,7 @@ export default function ZoneDashboardHome() {
 
     if (!zone || zone.status === "pending-review") {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -362,7 +362,7 @@ export default function ZoneDashboardHome() {
 
     if (zone.status === "rejected") {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
                 <AppHeader title="Zone Dashboard" />
                 <View style={styles.noZoneContainer}>
                     <View style={styles.noZoneCard}>
@@ -389,7 +389,7 @@ export default function ZoneDashboardHome() {
             onPress={() => setSidebarOpen(true)}
             style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
         >
-            <MaterialIcons name="menu" size={20} color={COLORS.text} />
+            <MaterialIcons name="menu" size={24} color={COLORS.text} />
         </Pressable>
     );
 
@@ -398,7 +398,7 @@ export default function ZoneDashboardHome() {
             onPress={() => router.push("/zone/modules/notifications" as any)}
             style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
         >
-            <MaterialIcons name="notifications-none" size={20} color={COLORS.text} />
+            <MaterialIcons name="notifications-none" size={24} color={COLORS.text} />
             {notificationCount > 0 ? (
                 <View style={styles.notificationBadge}>
                     <Text style={styles.notificationBadgeText}>{notificationCount > 9 ? "9+" : notificationCount}</Text>
@@ -408,7 +408,7 @@ export default function ZoneDashboardHome() {
     );
 
     return (
-        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
+        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
             <AppHeader
                 title="Dashboard"
                 subtitle={zone.venueBrandName}

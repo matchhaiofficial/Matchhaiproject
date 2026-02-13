@@ -40,6 +40,20 @@ const formatTime = (value: any) => {
     return new Date(ms).toLocaleString();
 };
 
+const getTypeLabel = (value?: string) =>
+    String(value || "notification")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const getTypeIcon = (value?: string): keyof typeof MaterialIcons.glyphMap => {
+    const type = String(value || "").toLowerCase();
+    if (type.includes("booking")) return "event-available";
+    if (type.includes("resource")) return "dns";
+    if (type.includes("security")) return "security";
+    if (type.includes("admin")) return "admin-panel-settings";
+    return "notifications-active";
+};
+
 export default function ZoneNotificationsModule() {
     const router = useRouter();
     const { user } = useAuth();
@@ -99,7 +113,7 @@ export default function ZoneNotificationsModule() {
         [items, statusFilter],
     );
 
-    const openNotification = async (item: AdminNotification) => {
+    const markSeenIfPending = async (item: AdminNotification) => {
         try {
             if (item.status === "pending") {
                 await updateDoc(doc(db, "notifications", item.id), {
@@ -109,35 +123,47 @@ export default function ZoneNotificationsModule() {
         } catch (error) {
             Logger.warn("ZoneNotifications", "Unable to mark notification seen", error);
         }
+    };
+
+    const openBookings = (params: Record<string, any>) => {
+        router.push({
+            pathname: "/zone/modules/bookings",
+            params,
+        } as any);
+    };
+
+    const openResources = (params: Record<string, any>) => {
+        router.push({
+            pathname: "/zone/modules/resources",
+            params,
+        } as any);
+    };
+
+    const openNotification = async (item: AdminNotification) => {
+        await markSeenIfPending(item);
 
         const meta = item.meta || {};
         const type = String(item.type || "").toLowerCase();
 
         if (meta.requestId || meta.matchroomId || type.includes("booking")) {
-            router.push({
-                pathname: "/zone/modules/bookings",
-                params: {
-                    segment: meta.matchroomId ? "matchrooms" : "requests",
-                    requestId: meta.requestId,
-                    matchroomId: meta.matchroomId,
-                },
-            } as any);
+            openBookings({
+                segment: meta.matchroomId ? "matchrooms" : "requests",
+                requestId: meta.requestId,
+                matchroomId: meta.matchroomId,
+            });
             return;
         }
 
         if (meta.branchId || meta.resourceId || type.includes("resource")) {
-            router.push({
-                pathname: "/zone/modules/resources",
-                params: {
-                    branchId: meta.branchId,
-                    requestId: meta.requestId,
-                    resourceId: meta.resourceId,
-                },
-            } as any);
+            openResources({
+                branchId: meta.branchId,
+                requestId: meta.requestId,
+                resourceId: meta.resourceId,
+            });
             return;
         }
 
-        router.push("/zone/modules/bookings" as any);
+        openBookings({});
     };
 
     return (
@@ -171,26 +197,124 @@ export default function ZoneNotificationsModule() {
                 ) : filteredItems.length === 0 ? (
                     <Text style={styles.emptyText}>No admin notifications yet.</Text>
                 ) : (
-                    filteredItems.map((item) => (
-                        <Pressable
-                            key={item.id}
-                            onPress={() => openNotification(item)}
-                            style={styles.card}
-                        >
-                            <View style={styles.cardTop}>
-                                <Text style={styles.cardTitle} numberOfLines={1}>
-                                    {item.title || item.message || "Admin Alert"}
-                                </Text>
-                                <Text style={styles.cardStatus}>{item.status || "new"}</Text>
-                            </View>
-                            <Text style={styles.cardType}>{item.type || "notification"}</Text>
-                            <Text style={styles.cardTime}>{formatTime(item.createdAt)}</Text>
-                            <View style={styles.openRow}>
-                                <MaterialIcons name="open-in-new" size={14} color={COLORS.accent} />
-                                <Text style={styles.openText}>Open context</Text>
-                            </View>
-                        </Pressable>
-                    ))
+                    filteredItems.map((item) => {
+                        const meta = item.meta || {};
+                        const status = String(item.status || "new").toLowerCase();
+                        const typeLabel = getTypeLabel(item.type);
+                        const iconName = getTypeIcon(item.type);
+                        const title = item.title || item.message || "Admin Alert";
+                        const message =
+                            item.message && item.message !== item.title
+                                ? item.message
+                                : "";
+                        const requestId = String(meta.requestId || meta.requestRef || "").trim();
+                        const requestLabel = requestId || "";
+                        const matchroomId = String(meta.matchroomId || "").trim();
+                        const matchroomLabel = String(meta.matchroomTitle || matchroomId || "").trim();
+                        const hasResourceContext = !!meta.resourceId || !!meta.branchId;
+                        const resourceLabel = String(meta.resourceName || meta.resourceId || "Resources").trim();
+                        const playerLabel = String(meta.userName || meta.playerName || meta.requesterName || "").trim();
+
+                        return (
+                            <Pressable
+                                key={item.id}
+                                onPress={() => openNotification(item)}
+                                style={styles.card}
+                            >
+                                <View style={styles.cardTop}>
+                                    <View style={styles.cardIconWrap}>
+                                        <MaterialIcons name={iconName} size={18} color={COLORS.accent} />
+                                    </View>
+                                    <View style={styles.cardHeaderText}>
+                                        <Text style={styles.cardTitle} numberOfLines={1}>
+                                            {title}
+                                        </Text>
+                                        <Text style={styles.cardType}>{typeLabel}</Text>
+                                    </View>
+                                    <Text style={[styles.cardStatus, status === "pending" ? styles.statusPending : styles.statusSeen]}>
+                                        {status}
+                                    </Text>
+                                </View>
+                                {!!message && (
+                                    <Text style={styles.cardMessage}>{message}</Text>
+                                )}
+                                <Text style={styles.cardTime}>{formatTime(item.createdAt)}</Text>
+
+                                <View style={styles.metaRow}>
+                                    {!!playerLabel && (
+                                        <Pressable style={styles.metaChip} onPress={() => openNotification(item)}>
+                                            <MaterialIcons name="person-outline" size={12} color={COLORS.accent} />
+                                            <Text style={styles.metaChipText} numberOfLines={1}>
+                                                {playerLabel}
+                                            </Text>
+                                        </Pressable>
+                                    )}
+                                    {!!requestId && (
+                                        <Pressable
+                                            style={styles.metaChip}
+                                            onPress={async () => {
+                                                await markSeenIfPending(item);
+                                                openBookings({ segment: "requests", requestId });
+                                            }}
+                                        >
+                                            <MaterialIcons name="fact-check" size={12} color={COLORS.accent} />
+                                            <Text style={styles.metaChipText} numberOfLines={1}>
+                                                {requestLabel}
+                                            </Text>
+                                        </Pressable>
+                                    )}
+                                    {!!matchroomId && (
+                                        <Pressable
+                                            style={styles.metaChip}
+                                            onPress={async () => {
+                                                await markSeenIfPending(item);
+                                                openBookings({ segment: "matchrooms", matchroomId });
+                                            }}
+                                        >
+                                            <MaterialIcons name="sports-esports" size={12} color={COLORS.accent} />
+                                            <Text style={styles.metaChipText} numberOfLines={1}>
+                                                {matchroomLabel}
+                                            </Text>
+                                        </Pressable>
+                                    )}
+                                    {hasResourceContext && (
+                                        <Pressable
+                                            style={styles.metaChip}
+                                            onPress={async () => {
+                                                await markSeenIfPending(item);
+                                                openResources({
+                                                    branchId: meta.branchId,
+                                                    requestId: meta.requestId,
+                                                    resourceId: meta.resourceId,
+                                                });
+                                            }}
+                                        >
+                                            <MaterialIcons name="dns" size={12} color={COLORS.accent} />
+                                            <Text style={styles.metaChipText} numberOfLines={1}>
+                                                {resourceLabel}
+                                            </Text>
+                                        </Pressable>
+                                    )}
+                                </View>
+
+                                <View style={styles.actionRow}>
+                                    <Pressable style={styles.primaryAction} onPress={() => openNotification(item)}>
+                                        <MaterialIcons name="open-in-new" size={14} color="#FFFFFF" />
+                                        <Text style={styles.primaryActionText}>Open Context</Text>
+                                    </Pressable>
+                                    {status === "pending" && (
+                                        <Pressable
+                                            style={styles.secondaryAction}
+                                            onPress={() => markSeenIfPending(item)}
+                                        >
+                                            <MaterialIcons name="done" size={14} color={COLORS.accent} />
+                                            <Text style={styles.secondaryActionText}>Mark Seen</Text>
+                                        </Pressable>
+                                    )}
+                                </View>
+                            </Pressable>
+                        );
+                    })
                 )}
             </ScrollView>
         </Screen>

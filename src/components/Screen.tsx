@@ -78,7 +78,7 @@ export default function Screen({
     const touchDebugEnabled = __DEV__ && (process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1');
     const touchDebugProps = touchDebugEnabled
         ? {
-            onTouchEnd: (e: any) => {
+            onTouchEndCapture: (e: any) => {
                 const { pageX, pageY } = e.nativeEvent;
                 Logger.debug('TouchDebug', 'touch', { tag: debugTag || 'screen', pageX, pageY });
             },

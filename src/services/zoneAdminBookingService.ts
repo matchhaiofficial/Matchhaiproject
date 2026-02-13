@@ -768,12 +768,32 @@ export async function createZoneWalkInMatchroom(input: {
     paymentMode: "venue_pay" | "guest_pay";
     pricePerPlayer?: number;
     currency?: string;
-    knownPlayers?: Array<{ uid: string; username: string }>;
+    captainSeatNumber?: number | null;
+    knownPlayers?: Array<{
+        uid: string;
+        username: string;
+        skillTier?: "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+        seatNumber?: number;
+        isCaptain?: boolean;
+    }>;
 }) {
     try {
         const knownPlayersRaw = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
         const totalSeats = Math.max(1, Math.floor(input.seatCount));
-        const knownPlayers = knownPlayersRaw.slice(0, totalSeats);
+        const allowedSkillTiers = new Set(["Beginner", "Intermediate", "Advanced", "Pro", "Elite"]);
+        const knownPlayers = knownPlayersRaw.slice(0, totalSeats).map((player, index) => {
+            const rawTier = String(player?.skillTier || "").trim();
+            const normalizedTier = allowedSkillTiers.has(rawTier) ? rawTier : "Beginner";
+            return {
+                uid: String(player?.uid || `walkin_guest_${index + 1}`),
+                username: String(player?.username || "").trim() || `Player ${index + 1}`,
+                skillTier: normalizedTier as "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite",
+                seatNumber: Number.isFinite(player?.seatNumber)
+                    ? Math.max(1, Math.floor(Number(player.seatNumber)))
+                    : index + 1,
+                isCaptain: Boolean(player?.isCaptain),
+            };
+        });
         const explicitBookedSeatCount = Number.isFinite(input.bookedSeatCount)
             ? Math.max(0, Math.floor(Number(input.bookedSeatCount)))
             : 0;
@@ -808,6 +828,7 @@ export async function createZoneWalkInMatchroom(input: {
                     slot.user = {
                         uid: player.uid,
                         username: player.username,
+                        skillTier: player.skillTier,
                     };
                     if (!isPaymentSuccessful) {
                         slot.role = "Booked";
@@ -830,6 +851,25 @@ export async function createZoneWalkInMatchroom(input: {
             const localSlotsB = Array.from({ length: teamSize }, (_, idx) => createOpenSlot(`B${idx + 1}`));
             return hydrateSlots(localSlotsA, localSlotsB);
         })();
+
+        const captainSeatByInput = Number.isFinite(input.captainSeatNumber)
+            ? Math.max(1, Math.min(totalSeats, Math.floor(Number(input.captainSeatNumber))))
+            : null;
+        const captainByFlag = knownPlayers.find((player) => player.isCaptain) || null;
+        const captainBySeat = captainSeatByInput ? knownPlayers[captainSeatByInput - 1] || null : null;
+        const selectedCaptain = captainByFlag || captainBySeat || knownPlayers[0] || null;
+
+        let captainUidA: string | null = null;
+        let captainUidB: string | null = null;
+        if (selectedCaptain?.uid) {
+            const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === selectedCaptain.uid);
+            const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === selectedCaptain.uid);
+            if (inTeamA || slotsB.length === 0) {
+                captainUidA = selectedCaptain.uid;
+            } else if (inTeamB) {
+                captainUidB = selectedCaptain.uid;
+            }
+        }
 
         const created = await addDoc(collection(db, "matchrooms"), {
             hostUid: input.adminUid,
@@ -859,6 +899,8 @@ export async function createZoneWalkInMatchroom(input: {
             seriesType: input.seriesType || null,
             slotsA,
             slotsB,
+            captainUidA: captainUidA || null,
+            captainUidB: captainUidB || null,
             pricing: {
                 perPlayer: pricePerPlayer,
                 currency: input.currency || "PKR",
@@ -867,8 +909,18 @@ export async function createZoneWalkInMatchroom(input: {
             walkIn: {
                 paymentMode: input.paymentMode,
                 seatCount: totalSeats,
+                bookedSeatCount,
                 knownPlayerCount: knownPlayers.length,
                 unknownSeatCount: Math.max(0, totalSeats - knownPlayers.length),
+                captainSeatNumber: selectedCaptain?.seatNumber || null,
+                captainUid: selectedCaptain?.uid || null,
+                roster: knownPlayers.map((player) => ({
+                    uid: player.uid,
+                    username: player.username,
+                    skillTier: player.skillTier,
+                    seatNumber: player.seatNumber,
+                    isCaptain: selectedCaptain?.uid === player.uid,
+                })),
                 branchId: input.branchId || null,
                 branchName: input.branchName || null,
                 createdBy: input.adminUid,

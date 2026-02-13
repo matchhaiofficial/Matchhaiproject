@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
@@ -97,16 +97,6 @@ export default StyleSheet.create({
         pointerEvents: 'box-none',
     },
     fab: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: COLORS.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 8, // Explicit elevation for Android
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
+        ...CTA.fabButton,
     },
 });

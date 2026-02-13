@@ -6,6 +6,10 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingTop: SPACING.sm,
+        paddingBottom: 0,
+    },
     container: {
         paddingBottom: 0,
     },

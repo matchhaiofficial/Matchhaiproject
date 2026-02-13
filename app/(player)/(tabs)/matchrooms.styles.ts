@@ -1,5 +1,5 @@
 import { Dimensions, StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -397,14 +397,7 @@ export default StyleSheet.create({
         pointerEvents: 'box-none',
     },
     fab: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: COLORS.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.cardElevated,
-        elevation: 10,
+        ...CTA.fabButton,
     },
     resetButton: {
         padding: 5,

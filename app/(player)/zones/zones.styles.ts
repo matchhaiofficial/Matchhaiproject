@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
@@ -148,19 +148,11 @@ export default StyleSheet.create({
 
     // Action Button
     actionButton: {
-        backgroundColor: COLORS.accent,
-        padding: 16,
-        borderRadius: RADII.md,
-        alignItems: 'center',
+        ...CTA.primaryButton,
         marginTop: SPACING.xl,
-        ...SHADOWS.accentSoft,
     },
     actionButtonText: {
-        color: '#FFF',
-        fontSize: 16,
-        fontFamily: FONTS.bold,
-        textTransform: 'uppercase',
-        letterSpacing: 1,
+        ...CTA.primaryButtonText,
     },
 
     loadingContainer: {

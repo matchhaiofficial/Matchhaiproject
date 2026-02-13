@@ -35,7 +35,7 @@ import {
     rejectZoneBookingRequest,
     sendZoneCounterOffer,
 } from "../../src/services/zoneAdminBookingService";
-import { GameSkillScore } from "../../src/services/skillRatingService";
+import { GameSkillScore, SkillTier } from "../../src/services/skillRatingService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { isRoomExpired, isRoomLocked, canSubmitComplain } from "../../src/utils/matchroomLifecycle";
@@ -43,6 +43,12 @@ import styles from "./detail.styles";
 
 const DEFAULT_SKILL_RATING = 45;
 const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+const WALKIN_SKILL_TIERS: SkillTier[] = ['Beginner', 'Intermediate', 'Advanced', 'Pro', 'Elite'];
+const normalizeWalkInSkillTier = (value: unknown): SkillTier | null => {
+    if (typeof value !== 'string') return null;
+    const match = WALKIN_SKILL_TIERS.find((tier) => tier === value);
+    return match || null;
+};
 
 export default function MatchroomDetails() {
     const { id } = useLocalSearchParams();
@@ -805,13 +811,24 @@ export default function MatchroomDetails() {
                 Math.max(Number((room as any)?.currentPlayers || 0), (room?.players || []).length),
             );
             const knownPlayers = (room?.players || []).slice(0, totalSeats);
+            const walkInRosterRaw = Array.isArray((room as any)?.walkIn?.roster) ? (room as any).walkIn.roster : [];
+            if (knownPlayers.length === 0 && walkInRosterRaw.length > 0) {
+                walkInRosterRaw.slice(0, totalSeats).forEach((entry: any, idx: number) => {
+                    knownPlayers.push({
+                        uid: String(entry?.uid || `walkin_guest_${idx + 1}`),
+                        username: String(entry?.username || '').trim() || `Player ${idx + 1}`,
+                        role: 'Player',
+                        skillTier: normalizeWalkInSkillTier(entry?.skillTier) || undefined,
+                    } as any);
+                });
+            }
 
             type LobbySlot = {
                 slotId: string;
                 status: 'open' | 'confirmed' | 'reserved';
                 role: string;
                 uid?: string;
-                user?: { uid: string; username: string };
+                user?: { uid: string; username: string; skillTier?: SkillTier };
             };
 
             const createSlot = (slotId: string): LobbySlot => ({
@@ -836,7 +853,11 @@ export default function MatchroomDetails() {
                     const player = knownPlayers[index];
                     slot.status = 'confirmed';
                     slot.uid = player.uid;
-                    slot.user = { uid: player.uid, username: player.username };
+                    slot.user = {
+                        uid: player.uid,
+                        username: player.username,
+                        skillTier: normalizeWalkInSkillTier((player as any)?.skillTier) || undefined,
+                    };
                     slot.role = player.role || 'Player';
                 } else if (index < bookedSeats) {
                     slot.status = 'reserved';
@@ -906,6 +927,24 @@ export default function MatchroomDetails() {
     const canManageTeamB = isHost || (!!captainUidBResolved && user?.uid === captainUidBResolved) || (!captainUidBResolved && isHost);
     const canInviteTeamA = !!captainUidAResolved && user?.uid === captainUidAResolved;
     const canInviteTeamB = !!user?.uid && (user.uid === captainUidBResolved || (!captainUidBResolved && isHost));
+
+    const getSkillBadgeProps = (uid?: string, fallbackTierRaw?: unknown) => {
+        if (uid && playerRatings[uid]) {
+            return {
+                tier: playerRatings[uid]!.tier,
+                rating: playerRatings[uid]!.rating,
+                showRating: true as const,
+            };
+        }
+        const walkInTier = normalizeWalkInSkillTier(fallbackTierRaw);
+        if (walkInTier) {
+            return {
+                tier: walkInTier,
+                showRating: false as const,
+            };
+        }
+        return null;
+    };
 
     if (!room) return null;
 
@@ -1190,15 +1229,23 @@ export default function MatchroomDetails() {
                                                     <Text style={styles.slotRoleName}>
                                                         {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
                                                     </Text>
-                                                    {playerRatings[slot.user.uid] && (
-                                                        <View style={{ marginLeft: 8 }}>
-                                                            <SkillBadge
-                                                                tier={playerRatings[slot.user.uid]!.tier}
-                                                                rating={playerRatings[slot.user.uid]!.rating}
-                                                                size="compact"
-                                                            />
-                                                        </View>
-                                                    )}
+                                                    {(() => {
+                                                        const badge = getSkillBadgeProps(
+                                                            slot.user?.uid,
+                                                            (slot.user as any)?.skillTier,
+                                                        );
+                                                        if (!badge) return null;
+                                                        return (
+                                                            <View style={{ marginLeft: 8 }}>
+                                                                <SkillBadge
+                                                                    tier={badge.tier}
+                                                                    rating={badge.rating}
+                                                                    size="compact"
+                                                                    showRating={badge.showRating}
+                                                                />
+                                                            </View>
+                                                        );
+                                                    })()}
                                                 </View>
                                             </View>
                                         ) : (
@@ -1313,15 +1360,23 @@ export default function MatchroomDetails() {
                                                     <Text style={styles.slotRoleName}>
                                                         {slot.role && slot.role !== 'Captain' && slot.role !== 'Player' && !slot.role.startsWith('Team') ? slot.role : 'Flex'}
                                                     </Text>
-                                                    {playerRatings[slot.user.uid] && (
-                                                        <View style={{ marginLeft: 8 }}>
-                                                            <SkillBadge
-                                                                tier={playerRatings[slot.user.uid]!.tier}
-                                                                rating={playerRatings[slot.user.uid]!.rating}
-                                                                size="compact"
-                                                            />
-                                                        </View>
-                                                    )}
+                                                    {(() => {
+                                                        const badge = getSkillBadgeProps(
+                                                            slot.user?.uid,
+                                                            (slot.user as any)?.skillTier,
+                                                        );
+                                                        if (!badge) return null;
+                                                        return (
+                                                            <View style={{ marginLeft: 8 }}>
+                                                                <SkillBadge
+                                                                    tier={badge.tier}
+                                                                    rating={badge.rating}
+                                                                    size="compact"
+                                                                    showRating={badge.showRating}
+                                                                />
+                                                            </View>
+                                                        );
+                                                    })()}
                                                 </View>
                                             </View>
                                         ) : (
@@ -1424,15 +1479,23 @@ export default function MatchroomDetails() {
                                                 {player.role && player.role !== 'Captain' && player.role !== 'Player' && !player.role.startsWith('Team') ? player.role : 'Flex'}
                                             </Text>
                                         )}
-                                        {playerRatings[player.uid] && (
-                                            <View style={{ marginLeft: 8 }}>
-                                                <SkillBadge
-                                                    tier={playerRatings[player.uid]!.tier}
-                                                    rating={playerRatings[player.uid]!.rating}
-                                                    size="compact"
-                                                />
-                                            </View>
-                                        )}
+                                        {(() => {
+                                            const badge = getSkillBadgeProps(
+                                                player.uid,
+                                                (player as any)?.skillTier,
+                                            );
+                                            if (!badge) return null;
+                                            return (
+                                                <View style={{ marginLeft: 8 }}>
+                                                    <SkillBadge
+                                                        tier={badge.tier}
+                                                        rating={badge.rating}
+                                                        size="compact"
+                                                        showRating={badge.showRating}
+                                                    />
+                                                </View>
+                                            );
+                                        })()}
                                     </View>
                                 </View>
                             </View>

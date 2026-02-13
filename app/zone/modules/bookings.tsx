@@ -802,7 +802,7 @@ export default function ZoneBookingsModule() {
                             }
                             disabled={processingAction !== null}
                         >
-                            <Text style={styles.actionText}>Create Walk-in Matchroom</Text>
+                            <Text style={styles.walkinCreateText}>Create Walk-in Matchroom</Text>
                         </Pressable>
                     </View>
 

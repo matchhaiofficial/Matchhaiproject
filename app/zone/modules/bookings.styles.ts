@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, CTA, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -205,13 +205,18 @@ export default StyleSheet.create({
         paddingHorizontal: SPACING.sm,
     },
     walkinCreateButton: {
-        backgroundColor: COLORS.accent,
+        ...CTA.primaryButton,
         marginTop: SPACING.sm,
+        minHeight: 52,
     },
     actionText: {
         color: "#FFF",
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.caption,
+    },
+    walkinCreateText: {
+        ...CTA.primaryButtonText,
+        fontSize: TEXT_SIZES.label,
     },
     formLabel: {
         color: COLORS.text,
