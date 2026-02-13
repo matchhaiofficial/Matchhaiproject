@@ -31,11 +31,9 @@ export interface SendFriendRequestData {
     toUid: string;
 }
 
-export interface ServerResponse {
-    ok: boolean;
-    message?: string;
-    [key: string]: any;
-}
+export type ServerResponse =
+    | { ok: true; message?: string;[key: string]: any }
+    | { ok: false; message: string;[key: string]: any };
 
 export const sendFriendRequest = async (data: SendFriendRequestData): Promise<ServerResponse> => {
     try {
@@ -70,6 +68,7 @@ export const sendFriendRequest = async (data: SendFriendRequestData): Promise<Se
             fromUsername: currentUser.displayName || "Unknown",
             toUid: data.toUid,
             status: "pending",
+            isRead: false,
             createdAt: serverTimestamp(),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
         });
@@ -92,7 +91,7 @@ export const respondFriendRequest = async (data: RespondFriendRequestData): Prom
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error("Not authenticated");
 
-        await runTransaction(db, async (transaction) => {
+        await runTransaction(db, async (transaction: any) => {
             const notifRef = doc(db, "notifications", data.notificationId);
             const notifSnap = await transaction.get(notifRef);
 
@@ -398,6 +397,7 @@ export const requestToJoinTeam = async (data: { teamId: string }): Promise<Serve
                 fromUid: currentUser.uid,
                 fromUsername: snapshot?.username || 'Unknown',
                 status: 'pending',
+                isRead: false,
                 createdAt: now,
                 updatedAt: now,
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
@@ -521,6 +521,7 @@ export const respondToJoinRequest = async (data: { notificationId: string; decis
                 fromUid: currentUser.uid,
                 fromUsername: teamData.captainUsername,
                 status: 'accepted',
+                isRead: false,
                 createdAt: now,
                 meta: {
                     teamId: teamRef.id,
@@ -726,6 +727,7 @@ export const inviteToTeam = async (data: { teamId: string; toUid: string }): Pro
             fromUid: currentUser.uid,
             fromUsername: teamData.captainUsername || 'Captain',
             status: 'pending',
+            isRead: false,
             createdAt: serverTimestamp(),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             meta: {
@@ -911,6 +913,7 @@ export const deleteTeam = async (data: { teamId: string }): Promise<ServerRespon
                     fromUid: currentUser.uid,
                     content: `Team "${teamData.name}" has been disbanded by the captain.`,
                     status: 'unread',
+                    isRead: false,
                     createdAt: now,
                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
                 });
@@ -1402,6 +1405,7 @@ export const inviteToMatchroom = async (data: {
             fromUid: currentUser.uid,
             fromUsername: data.fromUsername || currentUser.displayName || 'Captain',
             status: 'pending',
+            isRead: false,
             createdAt: serverTimestamp(),
             expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 48 hours
             meta: {

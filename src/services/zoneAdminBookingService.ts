@@ -518,7 +518,7 @@ export async function acceptZoneBookingRequest(input: {
     branchName?: string;
     location?: string;
     zoneName?: string;
-}) {
+}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         const requestSnap = await getDoc(doc(db, "booking_requests", input.requestId));
         if (!requestSnap.exists()) {
@@ -613,6 +613,7 @@ export async function acceptZoneBookingRequest(input: {
                 fromUid: input.adminUid,
                 toUid: input.requestOwnerUid,
                 status: "pending",
+                isRead: false,
                 createdAt: serverTimestamp(),
                 title: "Booking request accepted",
                 message: "Your booking request was accepted by the venue.",
@@ -639,7 +640,7 @@ export async function rejectZoneBookingRequest(input: {
     reason: string;
     note?: string;
     alternative?: string;
-}) {
+}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         await updateDoc(doc(db, "booking_requests", input.requestId), {
             status: "cancelled",
@@ -661,6 +662,7 @@ export async function rejectZoneBookingRequest(input: {
                 fromUid: input.adminUid,
                 toUid: input.requestOwnerUid,
                 status: "pending",
+                isRead: false,
                 createdAt: serverTimestamp(),
                 title: "Booking request declined",
                 message: input.alternative
@@ -694,12 +696,12 @@ export async function sendZoneCounterOffer(input: {
     location?: string;
     message?: string;
     expiresInMinutes?: number;
-}) {
+}): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
     try {
         const expiresInMinutes = Math.max(1, Math.min(120, input.expiresInMinutes || 10));
         const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-        await addDoc(collection(db, "booking_offers"), {
+        const offerRef = await addDoc(collection(db, "booking_offers"), {
             requestId: input.requestId,
             requestOwnerUid: input.requestOwnerUid,
             zoneId: input.zoneId,
@@ -731,6 +733,7 @@ export async function sendZoneCounterOffer(input: {
             fromUid: input.zoneOwnerUid,
             toUid: input.requestOwnerUid,
             status: "pending",
+            isRead: false,
             createdAt: serverTimestamp(),
             title: "Counter-offer received",
             message: `New offer: ${input.currency || "PKR"} ${input.pricePerPlayer} per player`,
@@ -743,7 +746,7 @@ export async function sendZoneCounterOffer(input: {
             },
         });
 
-        return { ok: true as const };
+        return { ok: true as const, id: offerRef.id };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to send counter offer", error);
         return { ok: false as const, message: error?.message || "Failed to send counter-offer." };
@@ -776,7 +779,7 @@ export async function createZoneWalkInMatchroom(input: {
         seatNumber?: number;
         isCaptain?: boolean;
     }>;
-}) {
+}): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
     try {
         const knownPlayersRaw = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
         const totalSeats = Math.max(1, Math.floor(input.seatCount));
@@ -884,7 +887,7 @@ export async function createZoneWalkInMatchroom(input: {
             players: knownPlayers.map((player) => ({
                 uid: player.uid,
                 username: player.username,
-                joinedAt: serverTimestamp(),
+                joinedAt: new Date(),
                 role: "Player",
             })),
             playerUids: knownPlayers.map((player) => player.uid),

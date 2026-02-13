@@ -224,7 +224,7 @@ export interface OnboardingStep2Prefs {
  */
 export async function saveOnboardingStep2(
   prefs: OnboardingStep2Prefs
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
   const user = auth.currentUser;
 
   if (!user) {
@@ -290,7 +290,7 @@ export interface OnboardingSummary {
 
 /** Load basic profile + step 2 prefs for Step 3 screen */
 export async function fetchOnboardingSummary(): Promise<
-  { ok: true; data: OnboardingSummary } | { ok: false; message: string }
+  { ok: true; data: OnboardingSummary; message?: string } | { ok: false; message: string }
 > {
   const user = auth.currentUser;
   if (!user) {
@@ -351,7 +351,7 @@ export interface OnboardingStep3Platforms {
  */
 export async function saveOnboardingStep3Platforms(
   platforms: OnboardingStep3Platforms
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
   const user = auth.currentUser;
   if (!user) {
     return { ok: false, message: "Not signed in. Please log in again." };
@@ -524,7 +524,7 @@ function normalizeSkillScores(
  */
 export async function getUserProfile(
   uid: string
-): Promise<{ ok: true; data: UserProfile } | { ok: false; message: string }> {
+): Promise<{ ok: true; data: UserProfile; message?: string } | { ok: false; message: string }> {
   try {
     const userRef = doc(db, "users", uid);
     const snap = await getDoc(userRef);
@@ -698,7 +698,7 @@ export const getUserSportRoleLabel = (profile: UserProfile, gameKey: string): st
  */
 export async function refreshUserStats(
   userId: string
-): Promise<{ ok: true; data: Partial<UserProfile> } | { ok: false; message: string }> {
+): Promise<{ ok: true; data: Partial<UserProfile>; message?: string } | { ok: false; message: string }> {
   try {
     const userRef = doc(db, "users", userId);
     const snap = await getDoc(userRef);
@@ -788,12 +788,12 @@ export async function refreshUserStats(
 /**
  * Get all friends of a specific user.
  */
-export async function getUserFriends(uid: string): Promise<{ ok: true; data: Array<{ uid: string; username: string }> } | { ok: false; message: string }> {
+export async function getUserFriends(uid: string): Promise<{ ok: true; data: Array<{ uid: string; username: string }>; message?: string } | { ok: false; message: string }> {
   try {
     const friendsRef = collection(db, "users", uid, "friends");
     const snap = await getDocs(friendsRef);
 
-    const friends = snap.docs.map(doc => ({
+    const friends = snap.docs.map((doc: any) => ({
       uid: doc.id,
       username: doc.data().username || 'Unknown'
     }));
