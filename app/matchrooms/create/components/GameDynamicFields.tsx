@@ -24,6 +24,7 @@ interface GameDynamicFieldsProps {
     gameKey: string;
     formData: Record<string, any>;
     onChange: (field: string, value: any) => void;
+    scope?: 'global' | 'player';
 }
 
 type ModalType =
@@ -35,10 +36,13 @@ type ModalType =
     | 'indoorCricketComposition'
     | null;
 
+// ... imports and other code ...
+
 export default function GameDynamicFields({
     gameKey,
     formData,
     onChange,
+    scope = 'global',
 }: GameDynamicFieldsProps) {
     const fields: any = getGameFields(gameKey as any);
 
@@ -301,61 +305,117 @@ export default function GameDynamicFields({
     if (gameKey === 'fc26') {
         return (
             <>
-                {renderChips('Format', 'format', fields.formats, false)}
+                {scope === 'global' && renderChips('Format', 'format', fields.formats, false)}
 
-                <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Favourite Club</Text>
-                    <TouchableOpacity
-                        style={[styles.inputBox, styles.inputPicker]}
-                        onPress={() => openModal('club_league')}
-                    >
-                        <Text
-                            style={[
-                                styles.input,
-                                !formData.favouriteClub && styles.mutedText,
-                            ]}
-                        >
-                            {formData.favouriteClub || 'Select Club'}
-                        </Text>
-                        <MaterialIcons
-                            name="arrow-drop-down"
-                            size={24}
-                            color={COLORS.muted}
-                        />
-                    </TouchableOpacity>
-                    <Text style={styles.italicHelper}>
-                        Note: You can choose any team in the actual match. This is just your preferred club.
-                    </Text>
-                </View>
+                {scope === 'player' && (
+                    <>
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>Favourite Club <Text style={styles.helperTextTiny}>(Optional)</Text></Text>
+                            <TouchableOpacity
+                                style={[styles.inputBox, styles.inputPicker]}
+                                onPress={() => openModal('club_league')}
+                            >
+                                <Text
+                                    style={[
+                                        styles.input,
+                                        !formData.favouriteClub && styles.mutedText,
+                                    ]}
+                                >
+                                    {formData.favouriteClub || 'Select Club'}
+                                </Text>
+                                <MaterialIcons
+                                    name="arrow-drop-down"
+                                    size={24}
+                                    color={COLORS.muted}
+                                />
+                            </TouchableOpacity>
+                        </View>
 
-                <View style={styles.section}>
-                    <Text style={styles.sectionLabel}>Preferred Formation</Text>
-                    <TouchableOpacity
-                        style={[
-                            styles.inputBox,
-                            {
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                            },
-                        ]}
-                        onPress={() => openModal('formation')}
-                    >
-                        <Text
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>Preferred Formation <Text style={styles.helperTextTiny}>(Optional)</Text></Text>
+                            <TouchableOpacity
+                                style={[
+                                    styles.inputBox,
+                                    {
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                    },
+                                ]}
+                                onPress={() => openModal('formation')}
+                            >
+                                <Text
+                                    style={[
+                                        styles.input,
+                                        !formData.formation && { color: '#757575' },
+                                    ]}
+                                >
+                                    {formData.formation || 'Select Formation'}
+                                </Text>
+                                <MaterialIcons
+                                    name="arrow-drop-down"
+                                    size={24}
+                                    color={COLORS.muted}
+                                />
+                            </TouchableOpacity>
+                        </View>
+                    </>
+                )}
+
+                <Modal
+                    visible={modalVisible}
+                    animationType="slide"
+                    transparent={true}
+                    onRequestClose={closeModal}
+                >
+                    <TouchableWithoutFeedback onPress={closeModal}>
+                        <View style={styles.modalOverlay}>
+                            <TouchableWithoutFeedback>
+                                {renderModalContent()}
+                            </TouchableWithoutFeedback>
+                        </View>
+                    </TouchableWithoutFeedback>
+                </Modal>
+            </>
+        );
+    }
+
+    // Tekken 8 Fields
+    if (gameKey === 'tekken8') {
+        return (
+            <>
+                {scope === 'global' && renderChips('Format', 'format', fields.formats, false)}
+
+                {scope === 'player' && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionLabel}>Preferred Character <Text style={styles.helperTextTiny}>(Optional)</Text></Text>
+                        <TouchableOpacity
                             style={[
-                                styles.input,
-                                !formData.formation && { color: '#757575' },
+                                styles.inputBox,
+                                {
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                },
                             ]}
+                            onPress={() => openModal('tekken_character')}
                         >
-                            {formData.formation || 'Select Formation'}
-                        </Text>
-                        <MaterialIcons
-                            name="arrow-drop-down"
-                            size={24}
-                            color={COLORS.muted}
-                        />
-                    </TouchableOpacity>
-                </View>
+                            <Text
+                                style={[
+                                    styles.input,
+                                    !formData.character && { color: '#757575' },
+                                ]}
+                            >
+                                {formData.character || 'Select Character'}
+                            </Text>
+                            <MaterialIcons
+                                name="arrow-drop-down"
+                                size={24}
+                                color={COLORS.muted}
+                            />
+                        </TouchableOpacity>
+                    </View>
+                )}
 
                 <Modal
                     visible={modalVisible}

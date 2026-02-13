@@ -239,7 +239,7 @@ async function backfillStructuredFormat(room: Matchroom) {
     return room;
 }
 
-export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
     try {
         const parseScheduledStartAt = () => {
             const date = String((roomData as any).scheduledDate || "").trim();
@@ -301,49 +301,106 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
                 role: member.role || "Player",
             }));
 
-        const players = roomData.players || (prefilledPlayers.length > 0 ? prefilledPlayers : [{
-            uid: roomData.hostUid,
-            username: roomData.hostName,
-            joinedAt: new Date(),
-            role: 'Host'
-        }]);
+        // Handle Walk-in Roster (Validation & Player Array Population)
+        const walkInRoster = (roomData as any).walkIn?.roster || [];
+        const isWalkIn = (roomData as any).bookingSource === 'walkin' && walkInRoster.length > 0;
+
+        let players = roomData.players || [];
+
+        if (players.length === 0) {
+            if (prefilledPlayers.length > 0) {
+                players = prefilledPlayers;
+            } else if (isWalkIn) {
+                // For walk-in, convert roster to players
+                players = walkInRoster.map((p: any, idx: number) => ({
+                    uid: p.uid || `walkin_${Date.now()}_${idx}`, // Fallback if no UID
+                    username: p.name || `Player ${idx + 1}`,
+                    joinedAt: new Date(),
+                    role: 'Player',
+                    skillTier: p.skillTier,
+                    // Persist extra fields for display
+                    character: p.character,
+                    favouriteClub: p.favouriteClub,
+                    formation: p.formation
+                }));
+            } else {
+                // Default host-only
+                players = [{
+                    uid: roomData.hostUid,
+                    username: roomData.hostName,
+                    joinedAt: new Date(),
+                    role: 'Host'
+                }];
+            }
+        }
+
         const playerUids = roomData.playerUids || players.map((player) => player.uid);
 
-        // Initialize 5v5 Slots if it's a 10 player room
+        // Initialize 5v5 Slots if it's a 10 player room (or generic even split)
         let slotsA = roomData.slotsA || [];
         let slotsB = roomData.slotsB || [];
         let captainUidA = roomData.captainUidA || roomData.hostUid;
 
-        // Generic Slot Initialization for ANY even-numbered team game
+        // Walk-in Captain Logic
+        if (isWalkIn && (roomData as any).walkIn?.captainSeatNumber) {
+            const capSeat = (roomData as any).walkIn.captainSeatNumber; // 1-based
+            // If captain is in Team A (1-5)
+            if (capSeat <= 5) {
+                captainUidA = players[capSeat - 1]?.uid;
+            }
+            // If captain is in Team B (6-10), we might need a B captain? 
+            // For now, let's just ensure A is set if possible.
+        }
+
+        // Generic Slot Initialization
         if ((!slotsA.length || !slotsB.length) && roomData.maxPlayers && roomData.maxPlayers % 2 === 0) {
             const teamSize = roomData.maxPlayers / 2;
 
             // Create slots for Team A
-            slotsA = Array.from({ length: teamSize }, (_, i) => ({
-                slotId: `A${i + 1}`,
-                status: 'open' as const,
-                role: 'Player'
-            }));
-            // Create slots for Team B
-            slotsB = Array.from({ length: teamSize }, (_, i) => ({
-                slotId: `B${i + 1}`,
-                status: 'open' as const,
-                role: 'Player'
-            }));
-
-            // Prefill Team A slots immediately for reserved team members (captain + selected teammates).
-            players.slice(0, teamSize).forEach((player, index) => {
-                slotsA[index] = {
-                    slotId: `A${index + 1}`,
-                    uid: player.uid,
-                    user: {
-                        uid: player.uid,
-                        username: player.username,
-                    },
-                    status: 'confirmed' as const,
-                    role: player.role || (index === 0 ? (roomData.hostRole || 'Captain') : 'Player'),
-                };
+            slotsA = Array.from({ length: teamSize }, (_, i) => {
+                const seatNum = i + 1;
+                // Try to find player for this seat
+                const p = isWalkIn ? players[i] : null; // Players 0 to teamSize-1
+                return {
+                    slotId: `A${seatNum}`,
+                    status: p ? 'confirmed' : 'open',
+                    role: p ? (p.uid === captainUidA ? 'Captain' : 'Player') : 'Player',
+                    uid: p?.uid,
+                    user: p ? { uid: p.uid, username: p.username, skillTier: p.skillTier } : undefined
+                } as Slot;
             });
+
+            // Create slots for Team B
+            slotsB = Array.from({ length: teamSize }, (_, i) => {
+                const seatNum = i + 1;
+                // Try to find player for this seat (offset by teamSize)
+                const p = isWalkIn ? players[i + teamSize] : null;
+                return {
+                    slotId: `B${seatNum}`,
+                    status: p ? 'confirmed' : 'open',
+                    role: 'Player',
+                    uid: p?.uid,
+                    user: p ? { uid: p.uid, username: p.username, skillTier: p.skillTier } : undefined
+                } as Slot;
+            });
+
+            // If NOT walk-in, perform standard prefill for reserved members
+            if (!isWalkIn) {
+                players.slice(0, teamSize).forEach((player, index) => {
+                    if (index < slotsA.length) {
+                        slotsA[index] = {
+                            ...slotsA[index],
+                            uid: player.uid,
+                            user: {
+                                uid: player.uid,
+                                username: player.username,
+                            },
+                            status: 'confirmed',
+                            role: player.role || (index === 0 ? (roomData.hostRole || 'Captain') : 'Player'),
+                        };
+                    }
+                });
+            }
         }
 
         // Resolve zone owner (for chat participants)
@@ -422,6 +479,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
                     fromUsername: roomData.hostName,
                     toUid: zoneOwnerUid,
                     status: "pending",
+                    isRead: false,
                     createdAt: serverTimestamp(),
                     title: "New direct zone booking",
                     message: `${roomData.hostName} created ${roomData.title || roomData.game} at your venue.`,
@@ -445,7 +503,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
     }
 }
 
-export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: Matchroom[] } | { ok: false; message: string }> {
+export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: Matchroom[]; message?: string } | { ok: false; message: string }> {
     try {
         if (!auth.currentUser) {
             return { ok: false, message: "Not authenticated" };
@@ -467,7 +525,7 @@ export async function getMatchrooms(limitCount = 20): Promise<{ ok: true; data: 
     }
 }
 
-export async function getMatchroom(id: string): Promise<{ ok: true; data: Matchroom } | { ok: false; message: string }> {
+export async function getMatchroom(id: string): Promise<{ ok: true; data: Matchroom; message?: string } | { ok: false; message: string }> {
     try {
         if (!auth.currentUser) {
             return { ok: false, message: "Not authenticated" };
@@ -495,7 +553,7 @@ export async function submitCaptainReport(
     matchroomId: string,
     captainUid: string,
     winner: 'team1' | 'team2'
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
 
@@ -543,7 +601,7 @@ export async function submitParticipantVote(
     matchroomId: string,
     participantUid: string,
     vote: 'team1' | 'team2' | 'unknown'
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
 
@@ -561,7 +619,7 @@ export async function submitParticipantVote(
     }
 }
 
-export async function leaveMatchroom(roomId: string, userUid: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function leaveMatchroom(roomId: string, userUid: string): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
@@ -699,7 +757,7 @@ export async function requestJoinMatchroom(
     role?: string,
     targetTeam?: string,
     slotId?: string // NEW: Optional slot targeting
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
     try {
         const roomId = room.id;
         if (!roomId) throw "Matchroom ID missing";
@@ -726,6 +784,7 @@ export async function requestJoinMatchroom(
             fromUid: user.uid,
             fromUsername: user.username,
             status: 'pending',
+            isRead: false,
             createdAt: now,
             updatedAt: now,
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
@@ -750,7 +809,7 @@ export async function requestJoinMatchroom(
 /**
  * Deletes a join request notification.
  */
-export async function cancelMatchJoinRequest(roomId: string, userId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function cancelMatchJoinRequest(roomId: string, userId: string): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         const requestId = `match_join_request_${roomId}_${userId}`;
         await deleteDoc(doc(db, 'notifications', requestId));
@@ -762,7 +821,7 @@ export async function cancelMatchJoinRequest(roomId: string, userId: string): Pr
     }
 }
 
-export async function joinMatchroom(roomId: string, user: { uid: string; username: string }, role?: string, joinCode?: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function joinMatchroom(roomId: string, user: { uid: string; username: string }, role?: string, joinCode?: string): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
@@ -864,7 +923,7 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
     }
 }
 
-export async function deleteMatchroom(roomId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function deleteMatchroom(roomId: string): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         Logger.info("matchService", "Deleting matchroom", { roomId });
         await deleteDoc(doc(db, COLLECTION_NAME, roomId));
@@ -880,7 +939,7 @@ export async function startMatch(
     ratings: Record<string, number>,
     hostUid: string,
     team2Captain?: string
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
     try {
         const roomRef = doc(db, COLLECTION_NAME, roomId);
 
@@ -900,7 +959,7 @@ export async function startMatch(
     }
 }
 
-export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: { hosted: Matchroom[]; joined: Matchroom[] } } | { ok: false; message: string }> {
+export async function getUserMatchrooms(uid: string): Promise<{ ok: true; data: { hosted: Matchroom[]; joined: Matchroom[] }; message?: string } | { ok: false; message: string }> {
     try {
         const hostedQuery = query(
             collection(db, COLLECTION_NAME),

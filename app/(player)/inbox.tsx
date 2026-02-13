@@ -25,6 +25,7 @@ interface Notification {
     status: 'pending' | 'accepted' | 'declined' | 'rejected';
     createdAt: any;
     expiresAt?: any;
+    isRead?: boolean;
     meta?: {
         teamId?: string;
         teamName?: string;
@@ -112,6 +113,29 @@ export default function Inbox() {
 
         return () => unsubscribe();
     }, [user]);
+
+    // Auto-mark notifications as read when viewing the inbox
+    useEffect(() => {
+        const unreadIds = notifications
+            .filter(n => n.isRead === false)
+            .map(n => n.id);
+
+        if (unreadIds.length > 0) {
+            const markAsRead = async () => {
+                try {
+                    const batch = writeBatch(db);
+                    unreadIds.forEach(id => {
+                        batch.update(doc(db, "notifications", id), { isRead: true });
+                    });
+                    await batch.commit();
+                    Logger.info("Inbox", `Marked ${unreadIds.length} notifications as read`);
+                } catch (e) {
+                    Logger.error("Inbox", "Error auto-marking notifications as read", e);
+                }
+            };
+            markAsRead();
+        }
+    }, [notifications]);
 
     const handleFriendResponse = async (notifId: string, decision: 'accept' | 'decline') => {
         if (processing) return;
@@ -285,6 +309,22 @@ export default function Inbox() {
                 }
             ]
         );
+    };
+
+    const handleMarkAllRead = async () => {
+        const unreadNotifs = notifications.filter(n => n.isRead === false);
+        if (unreadNotifs.length === 0) return;
+
+        try {
+            const batch = writeBatch(db);
+            unreadNotifs.forEach(n => {
+                batch.update(doc(db, "notifications", n.id), { isRead: true });
+            });
+            await batch.commit();
+        } catch (e) {
+            Logger.error("Inbox", "Error marking all as read", e);
+            Alert.alert("Error", "Failed to mark all as read.");
+        }
     };
 
     const pendingCount = notifications.filter(n => {
@@ -564,6 +604,18 @@ export default function Inbox() {
                             color={iconColor}
                         />
                     </View>
+                    {item.isRead === false && (
+                        <View style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor: COLORS.accent,
+                            position: 'absolute',
+                            left: -4,
+                            top: '50%',
+                            marginTop: -4,
+                        }} />
+                    )}
                     <View style={styles.headerInfo}>
                         <Text style={styles.typeText}>{typeLabel}</Text>
                         <Text style={styles.timeText}>{getTimeAgo(item.createdAt)}</Text>
@@ -804,7 +856,18 @@ export default function Inbox() {
     return (
         <Screen style={styles.screen} scroll={false}>
             <StatusBar barStyle="light-content" />
-            <AppHeader title="Inbox" onBack={() => router.back()} inlineTitle />
+            <AppHeader
+                title="Inbox"
+                onBack={() => router.back()}
+                inlineTitle
+                rightAction={
+                    notifications.some(n => n.isRead === false) ? (
+                        <TouchableOpacity onPress={handleMarkAllRead} activeOpacity={0.7} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
+                            <Text style={{ color: COLORS.accent, fontSize: 13, fontWeight: '700' }}>Mark all read</Text>
+                        </TouchableOpacity>
+                    ) : undefined
+                }
+            />
 
             <SegmentedTabs
                 items={[
@@ -824,30 +887,30 @@ export default function Inbox() {
                 if (isRejectedChallengeNotification) return false;
                 return n.status !== 'pending';
             }).length > 0 && (
-                <TouchableOpacity
-                    onPress={handleClearAllHistory}
-                    onPressIn={() => {
-                        if (touchDebugEnabled) {
-                            Logger.debug("TouchDebug", "pressIn", { tag: "inbox_clear_history" });
-                        }
-                    }}
-                    disabled={deleting}
-                    style={styles.clearHistoryButton}
-                    activeOpacity={0.85}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    {deleting ? (
-                        <ActivityIndicator size="small" color={COLORS.error} />
-                    ) : (
-                        <>
-                            <MaterialIcons name="delete-sweep" size={20} color={COLORS.error} />
-                            <Text style={styles.clearHistoryText}>
-                                Clear All History
-                            </Text>
-                        </>
-                    )}
-                </TouchableOpacity>
-            )}
+                    <TouchableOpacity
+                        onPress={handleClearAllHistory}
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "inbox_clear_history" });
+                            }
+                        }}
+                        disabled={deleting}
+                        style={styles.clearHistoryButton}
+                        activeOpacity={0.85}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        {deleting ? (
+                            <ActivityIndicator size="small" color={COLORS.error} />
+                        ) : (
+                            <>
+                                <MaterialIcons name="delete-sweep" size={20} color={COLORS.error} />
+                                <Text style={styles.clearHistoryText}>
+                                    Clear All History
+                                </Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                )}
 
             {loading ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

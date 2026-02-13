@@ -237,6 +237,7 @@ export async function allocateResourcesToBookingRequest(input: {
                     fromUid: input.adminUid,
                     toUid: requestOwnerUid,
                     status: "pending",
+                    isRead: false,
                     createdAt: serverTimestamp(),
                     title: "Resources allocated",
                     message: `Your booking has been allocated ${input.resourceIds.length} resource(s).`,
