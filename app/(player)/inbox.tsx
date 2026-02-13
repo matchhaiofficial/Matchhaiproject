@@ -10,7 +10,6 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
 import { respondFriendRequest, respondToJoinRequest, respondToMatchroomInvite, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
-import { respondToTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
@@ -30,6 +29,7 @@ interface Notification {
         teamId?: string;
         teamName?: string;
         game?: string;
+        gameKey?: string;
         requesterSnapshot?: {
             city?: string;
             skillTier?: Record<string, string>;
@@ -60,6 +60,23 @@ const getTimeAgo = (timestamp: any): string => {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return then.toLocaleDateString();
+};
+
+const GAME_LABELS: Record<string, string> = {
+    cs2: "CS2",
+    fc26: "FC26",
+    fc25: "FC25",
+    tekken8: "Tekken 8",
+    futsal: "Futsal",
+    indoor_cricket: "Indoor Cricket",
+    padel: "Padel",
+    pickleball: "Pickleball",
+};
+
+const formatGameLabel = (value?: string | null) => {
+    const key = String(value || "").trim().toLowerCase();
+    if (!key || key === "match") return "match";
+    return GAME_LABELS[key] || key.toUpperCase();
 };
 
 export default function Inbox() {
@@ -141,25 +158,6 @@ export default function Inbox() {
         try {
             const res = await respondToTeamInvite({ notificationId: notifId, decision });
             if (!res.ok) alert(res.message || 'Failed to respond.');
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setProcessing(null);
-        }
-    };
-
-    const handleTeamChallengeResponse = async (notifId: string, decision: 'accept' | 'reject') => {
-        if (processing) return;
-        setProcessing(notifId);
-        try {
-            const res = await respondToTeamMatchChallenge({ notificationId: notifId, decision });
-            if (!res.ok) {
-                alert(res.message || 'Failed to respond to challenge.');
-                return;
-            }
-            if (decision === 'accept' && res.challengeId) {
-                router.push(`/teams/challenge?id=${res.challengeId}` as any);
-            }
         } catch (e) {
             console.error(e);
         } finally {
@@ -321,6 +319,26 @@ export default function Inbox() {
         if (activeTab === 'pending') return isPending;
         return !isPending;
     });
+
+    const openProfile = (uid?: string) => {
+        if (!uid) return;
+        router.push(`/(player)/profile/${uid}` as any);
+    };
+
+    const openTeam = (teamId?: string) => {
+        if (!teamId) return;
+        router.push(`/teams/${teamId}` as any);
+    };
+
+    const openMatchroom = (matchroomId?: string) => {
+        if (!matchroomId) return;
+        router.push(`/matchrooms/${matchroomId}` as any);
+    };
+
+    const openChallenge = (challengeId?: string) => {
+        if (!challengeId) return;
+        router.push(`/teams/challenge?id=${challengeId}` as any);
+    };
 
     // Swipeable row component for delete action
     const SwipeableRow = ({ children, onDelete, canSwipe }: { children: React.ReactNode; onDelete: () => void; canSwipe: boolean }) => {
@@ -513,6 +531,7 @@ export default function Inbox() {
         const isTeamChallengeUpdate = item.type === 'team_match_challenge_update';
         const isPending = item.status === 'pending';
         const isProcessing = processing === item.id;
+        const challengeGameLabel = formatGameLabel(item.meta?.gameKey || item.meta?.game);
         const typeLabel = isRequest
             ? "Friend Request"
             : isJoinRequest
@@ -565,8 +584,8 @@ export default function Inbox() {
                 </View>
 
                 <View style={styles.cardBody}>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <Pressable onPress={() => router.push(`/(player)/profile/${item.fromUid}` as any)}>
+                    <View style={styles.messageWrap}>
+                        <Pressable onPress={() => openProfile(item.fromUid)} disabled={!item.fromUid}>
                             <Text style={styles.highlightText}>{item.fromUsername}</Text>
                         </Pressable>
                         <Text style={styles.messageText}>
@@ -574,38 +593,55 @@ export default function Inbox() {
                             {isTeamInvite && (
                                 <>
                                     {" invited you to join "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.teamName}</Text>
+                                    <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                                        {item.meta?.teamName || "team"}
+                                    </Text>
                                 </>
                             )}
                             {isJoinRequest && (
                                 <>
                                     {" wants to join "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.teamName}</Text>
+                                    <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                                        {item.meta?.teamName || "team"}
+                                    </Text>
                                 </>
                             )}
                             {isDecision && (
                                 <>
                                     {item.status === 'accepted' ? " accepted your request to join " : " declined your request for "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.teamName}</Text>
+                                    <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                                        {item.meta?.teamName || "team"}
+                                    </Text>
                                 </>
                             )}
                             {isBookingApproval && (
                                 <>
-                                    {" requested to book multiple seats in your matchroom."}
+                                    {" requested to book multiple seats in your matchroom"}
+                                    {!!item.meta?.matchroomTitle && (
+                                        <>
+                                            {" "}
+                                            <Text style={styles.inlineLinkText} onPress={() => openMatchroom(item.meta?.matchroomId)}>
+                                                {item.meta.matchroomTitle}
+                                            </Text>
+                                        </>
+                                    )}
+                                    {"."}
                                 </>
                             )}
                             {isMatchJoinRequest && (
                                 <>
                                     {" wants to join your matchroom "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.matchroomTitle}</Text>
+                                    <Text style={styles.inlineLinkText} onPress={() => openMatchroom(item.meta?.matchroomId)}>
+                                        {item.meta?.matchroomTitle || "matchroom"}
+                                    </Text>
                                     {" as "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.role}</Text>
+                                    <Text style={styles.inlineLinkText}>{item.meta?.role || "player"}</Text>
                                 </>
                             )}
                             {isSeatInv && (
                                 <>
                                     {" invited you to join a squad for a "}
-                                    <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.game}</Text>
+                                    <Text style={styles.inlineLinkText}>{item.meta?.game}</Text>
                                     {" match."}
                                 </>
                             )}
@@ -613,14 +649,14 @@ export default function Inbox() {
                                 <>
                                     {item.status === 'pending' ? (
                                         <>
-                                            {" challenged your team for a "}
-                                            <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.meta?.game || "match"}</Text>
-                                            {" match."}
+                                            {" challenged your team for "}
+                                            <Text style={styles.challengeGameText}>{challengeGameLabel}</Text>
+                                            {"."}
                                         </>
                                     ) : (
                                         <>
                                             {" challenge has been marked as "}
-                                            <Text style={{ color: COLORS.text, fontWeight: '600' }}>{item.status}</Text>
+                                            <Text style={styles.inlineLinkText}>{item.status}</Text>
                                             {"."}
                                         </>
                                     )}
@@ -643,16 +679,41 @@ export default function Inbox() {
                     </View>
 
                     {isJoinRequest && isPending && item.meta?.requesterSnapshot && (
-                        <View style={{ marginTop: 8, padding: 8, backgroundColor: COLORS.background, borderRadius: 4 }}>
-                            <Text style={{ fontSize: 12, color: COLORS.muted }}>
-                                City: {item.meta.requesterSnapshot.city || 'N/A'} •
-                                Tier: {item.meta.requesterSnapshot.skillTier?.[item.meta.game || ''] || 'No rank'}
+                        <View style={styles.requestMetaBox}>
+                            <Text style={styles.requestMetaText}>
+                                City: {item.meta.requesterSnapshot.city || 'N/A'} | Tier: {item.meta.requesterSnapshot.skillTier?.[item.meta.game || ''] || 'No rank'}
                             </Text>
                         </View>
                     )}
+                    <View style={styles.contextChipsRow}>
+                        {!!item.fromUid && (
+                            <Pressable style={styles.contextChip} onPress={() => openProfile(item.fromUid)}>
+                                <MaterialIcons name="person-outline" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextChipText}>Profile</Text>
+                            </Pressable>
+                        )}
+                        {!!item.meta?.teamId && (
+                            <Pressable style={styles.contextChip} onPress={() => openTeam(item.meta?.teamId)}>
+                                <MaterialIcons name="groups-2" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextChipText}>Team</Text>
+                            </Pressable>
+                        )}
+                        {!!item.meta?.matchroomId && (
+                            <Pressable style={styles.contextChip} onPress={() => openMatchroom(item.meta?.matchroomId)}>
+                                <MaterialIcons name="sports-esports" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextChipText}>Matchroom</Text>
+                            </Pressable>
+                        )}
+                        {!!item.meta?.challengeId && (
+                            <Pressable style={styles.contextChip} onPress={() => openChallenge(item.meta?.challengeId)}>
+                                <MaterialIcons name="bolt" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextChipText}>Challenge</Text>
+                            </Pressable>
+                        )}
+                    </View>
                 </View>
 
-                {isPending && (isRequest || isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv || isTeamChallenge) && (
+                {isPending && (isRequest || isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv) && (
                     <View style={styles.actionRow}>
                         <TouchableOpacity
                             disabled={!!processing}
@@ -668,7 +729,6 @@ export default function Inbox() {
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'accept');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'approved');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'accept');
-                                else if (isTeamChallenge) handleTeamChallengeResponse(item.id, 'accept');
                             }}
                             style={styles.acceptButton}
                             activeOpacity={0.85}
@@ -678,7 +738,7 @@ export default function Inbox() {
                                 <ActivityIndicator color="#FFF" size="small" />
                             ) : (
                                 <Text style={styles.buttonText}>
-                                    {isSeatInv ? "Claim Seat" : (isTeamChallenge ? "Accept" : "Approve")}
+                                    {isSeatInv ? "Claim Seat" : "Approve"}
                                 </Text>
                             )}
                         </TouchableOpacity>
@@ -697,7 +757,6 @@ export default function Inbox() {
                                 else if (isTeamInvite) handleInviteResponse(item.id, 'decline');
                                 else if (isBookingApproval) handleBookingApproval(item.id, item.meta!.intentId!, 'rejected');
                                 else if (isSeatInv) handleSeatInvitation(item.id, item.meta?.matchroomId || '', item.meta?.intentId, item.meta?.side || '', item.meta?.role || 'Flex', 'decline');
-                                else if (isTeamChallenge) handleTeamChallengeResponse(item.id, 'reject');
                             }}
                             style={styles.declineButton}
                             activeOpacity={0.85}
@@ -710,8 +769,8 @@ export default function Inbox() {
                 {(item.meta?.challengeId && (isTeamChallenge || isTeamChallengeUpdate || item.status !== 'pending')) && (
                     <View style={styles.actionRow}>
                         <TouchableOpacity
-                            style={styles.acceptButton}
-                            onPress={() => router.push(`/teams/challenge?id=${item.meta?.challengeId}` as any)}
+                            style={styles.openChallengeButton}
+                            onPress={() => openChallenge(item.meta?.challengeId)}
                             activeOpacity={0.85}
                         >
                             <Text style={styles.buttonText}>Open Challenge</Text>
@@ -719,7 +778,7 @@ export default function Inbox() {
                         {!!item.meta?.matchroomId && (
                             <TouchableOpacity
                                 style={styles.acceptButton}
-                                onPress={() => router.push(`/matchrooms/${item.meta?.matchroomId}` as any)}
+                                onPress={() => openMatchroom(item.meta?.matchroomId)}
                                 activeOpacity={0.85}
                             >
                                 <Text style={styles.buttonText}>View Matchroom</Text>

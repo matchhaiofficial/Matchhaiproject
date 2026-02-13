@@ -126,7 +126,7 @@ export default function MatchroomsIndex() {
             );
             const snap = await getDocs(q);
             const requested = new Set<string>();
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
             });

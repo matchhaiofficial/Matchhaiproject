@@ -29,6 +29,7 @@ export interface Slot {
         uid: string;
         username: string;
         photoURL?: string;
+        skillTier?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
     }; // snapshot of occupant
     status: 'open' | 'reserved' | 'confirmed';
     reservedFor?: {
@@ -55,6 +56,7 @@ export interface Matchroom {
         username: string;
         joinedAt: any;
         role?: string; // Role the player filled
+        skillTier?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
     }>;
     playerUids?: string[]; // For efficient querying
     createdAt: any;

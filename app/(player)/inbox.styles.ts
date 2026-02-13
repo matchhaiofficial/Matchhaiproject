@@ -40,10 +40,10 @@ export default StyleSheet.create({
     notificationCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: RADII.lg,
-        padding: SPACING.md,
+        padding: SPACING.md + 2,
         marginBottom: SPACING.md,
         borderWidth: 1,
-        borderColor: COLORS.cardBorder,
+        borderColor: 'rgba(255,255,255,0.08)',
         ...SHADOWS.cardSoft,
     },
     cardHeader: {
@@ -87,10 +87,16 @@ export default StyleSheet.create({
 
     // Body
     cardBody: {
-        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+        backgroundColor: 'rgba(255, 255, 255, 0.035)',
         padding: SPACING.md,
-        borderRadius: RADII.md,
+        borderRadius: RADII.md + 2,
         marginBottom: SPACING.sm,
+    },
+    messageWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 4,
     },
     messageText: {
         color: COLORS.textSecondary,
@@ -101,6 +107,52 @@ export default StyleSheet.create({
     highlightText: {
         color: COLORS.accent,
         fontWeight: '700',
+    },
+    inlineLinkText: {
+        color: COLORS.text,
+        fontWeight: '600',
+        textDecorationLine: 'underline',
+        textDecorationColor: 'rgba(255,255,255,0.3)',
+    },
+    challengeGameText: {
+        color: COLORS.accent,
+        fontWeight: '700',
+    },
+    requestMetaBox: {
+        marginTop: 8,
+        padding: 8,
+        backgroundColor: 'rgba(255,255,255,0.04)',
+        borderRadius: RADII.sm,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
+    },
+    requestMetaText: {
+        fontSize: 12,
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+    },
+    contextChipsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 10,
+    },
+    contextChip: {
+        minHeight: 32,
+        borderRadius: RADII.pill,
+        paddingHorizontal: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(66, 165, 245, 0.3)',
+        backgroundColor: 'rgba(66, 165, 245, 0.12)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: 5,
+    },
+    contextChipText: {
+        color: COLORS.accent,
+        fontSize: 12,
+        fontFamily: FONTS.bold,
     },
 
     // Actions
@@ -133,6 +185,15 @@ export default StyleSheet.create({
         fontFamily: FONTS.bold,
         fontSize: 13,
         textTransform: 'uppercase',
+    },
+    openChallengeButton: {
+        flex: 1,
+        minHeight: 44,
+        borderRadius: RADII.md,
+        backgroundColor: COLORS.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...SHADOWS.accentSoft,
     },
     declineButtonText: {
         color: COLORS.error,
@@ -176,10 +237,11 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        alignSelf: 'stretch',
+        width: '100%',
         minHeight: 44,
         paddingVertical: SPACING.sm - 1,
         paddingHorizontal: SPACING.lg,
-        marginHorizontal: SPACING.screenPadding,
         marginTop: SPACING.md,
         backgroundColor: 'rgba(239, 83, 80, 0.08)',
         borderRadius: RADII.md,

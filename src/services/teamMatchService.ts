@@ -298,32 +298,30 @@ const maybeCreateMatchroomForChallenge = async (
         return { ok: false as const, message: "Captains have not confirmed the same venue yet." };
     }
 
-    const [{ team: teamA, memberUids: memberUidsA, usernameByUid: usernameByUidA }, { team: teamB, memberUids: memberUidsB, usernameByUid: usernameByUidB }] = await Promise.all([
+    const [{ team: teamA, memberUids: memberUidsA, usernameByUid: usernameByUidA }, { team: teamB }] = await Promise.all([
         getTeamMembers(challenge.challengerTeamId),
         getTeamMembers(challenge.opponentTeamId),
     ]);
 
-    const maxPlayers = Number(challenge.maxPlayers || teamA.memberCount || 0) + Number(teamB.memberCount || 0);
-    const teamSize = Math.max(1, Math.floor(Math.max(2, maxPlayers || 10) / 2));
+    const normalizedGame = String(challenge.gameKey || "").toLowerCase();
+    const challengePlayers = Number(challenge.maxPlayers || 0);
+    const fallbackPlayers = Number(teamA.maxMembers || 0) + Number(teamB.maxMembers || 0);
+    const computedPlayers = Math.max(2, challengePlayers > 0 ? challengePlayers : fallbackPlayers);
+    const maxPlayers = normalizedGame === "cs2" ? 10 : computedPlayers;
+    const teamSize = Math.max(1, Math.ceil(maxPlayers / 2));
 
     const teamAUids = dedupe([challenge.captainAUid, ...memberUidsA.filter((uid) => uid !== challenge.captainAUid)]).slice(0, teamSize);
-    const teamBUids = dedupe([challenge.captainBUid, ...memberUidsB.filter((uid) => uid !== challenge.captainBUid)]).slice(0, teamSize);
-    const allPrefilledUids = dedupe([...teamAUids, ...teamBUids]);
-    const players = allPrefilledUids.map((uid) => ({
+    const players = teamAUids.map((uid) => ({
         uid,
         username:
             (uid === challenge.captainAUid ? challenge.captainAName : null) ||
-            (uid === challenge.captainBUid ? challenge.captainBName : null) ||
             usernameByUidA[uid] ||
-            usernameByUidB[uid] ||
             "Player",
         joinedAt: new Date(),
         role:
             uid === challenge.captainAUid
                 ? "Captain A"
-                : uid === challenge.captainBUid
-                    ? "Captain B"
-                    : "Player",
+                : "Player",
     }));
     const prefilledByUid = new Map(players.map((p) => [p.uid, p]));
 
@@ -349,24 +347,10 @@ const maybeCreateMatchroomForChallenge = async (
         };
     });
     const slotsB = Array.from({ length: teamSize }, (_, index) => {
-        const uid = teamBUids[index];
-        const player = uid ? prefilledByUid.get(uid) : null;
-        if (!uid || !player) {
-            return {
-                slotId: `B${index + 1}`,
-                status: "open" as const,
-                role: "Player",
-            };
-        }
         return {
             slotId: `B${index + 1}`,
-            uid,
-            user: {
-                uid,
-                username: player.username,
-            },
-            status: "confirmed" as const,
-            role: player.role,
+            status: "open" as const,
+            role: "Player",
         };
     });
 
@@ -377,7 +361,7 @@ const maybeCreateMatchroomForChallenge = async (
         title: toChallengeTitle(challenge.challengerTeamName, challenge.opponentTeamName),
         description: challenge.message || "Team challenge match",
         status: "open",
-        maxPlayers: Math.max(2, maxPlayers || 10),
+        maxPlayers: Math.max(2, teamSize * 2),
         currentPlayers: players.length,
         players,
         playerUids: players.map((player) => player.uid),
@@ -425,7 +409,7 @@ const maybeCreateMatchroomForChallenge = async (
         maxPlayers: Math.max(2, maxPlayers || 10),
         teamMode: "team",
         teamId: challenge.challengerTeamId,
-        reservedSlots: Math.max(1, Number(teamA.memberCount || 1)),
+        reservedSlots: Math.max(1, players.length),
         preferredDate: challenge.scheduledDate || null,
         preferredTime: challenge.scheduledTime || null,
         flexibilityWindow: "Exact time",
@@ -526,12 +510,15 @@ export const sendTeamMatchChallenge = async (input: {
             return { ok: false as const, message: "Team challenge can only be sent when both teams are full." };
         }
 
-        const maxPlayers = Number(input.maxPlayers || teamA.maxMembers || 0) + Number(teamB.maxMembers || 0);
+        const fallbackPlayers = Number(teamA.maxMembers || 0) + Number(teamB.maxMembers || 0);
+        const requestedPlayers = Number(input.maxPlayers || 0);
+        const computedPlayers = Math.max(2, requestedPlayers > 0 ? requestedPlayers : fallbackPlayers);
+        const maxPlayers = String(teamA.game || "").toLowerCase() === "cs2" ? 10 : computedPlayers;
         const computedPricePerPlayer = await computeChallengePricePerPlayer({
             zoneId: input.proposedVenueByCaptainA.zoneId,
             gameKey: teamA.game,
             seriesType: input.seriesType,
-            maxPlayers: Math.max(2, maxPlayers || 10),
+            maxPlayers,
         });
         if (computedPricePerPlayer <= 0) {
             return { ok: false as const, message: "Unable to derive price per player from selected zone and series." };
@@ -549,7 +536,7 @@ export const sendTeamMatchChallenge = async (input: {
             gameKey: teamA.game,
             format: input.format || null,
             seriesType: input.seriesType || null,
-            maxPlayers: Math.max(2, maxPlayers || 10),
+            maxPlayers,
             scheduledDate: input.scheduledDate || null,
             scheduledTime: input.scheduledTime || null,
             pricePerPlayer: computedPricePerPlayer,
@@ -687,7 +674,8 @@ export const acceptTeamMatchChallenge = async (input: {
         }
         const challenge = { id: challengeSnap.id, ...challengeSnap.data() } as TeamMatchChallenge;
         if (challenge.status !== "pending") {
-            return { ok: false as const, message: "Challenge already resolved." };
+            const statusText = String(challenge.status || "resolved").replace(/_/g, " ");
+            return { ok: false as const, message: `Challenge is already ${statusText}.` };
         }
 
         const hasAlternative = !!challenge.alternativeVenueByCaptainB?.zoneId;
@@ -728,7 +716,8 @@ export const rejectTeamMatchChallenge = async (input: {
         }
         const challenge = { id: challengeSnap.id, ...challengeSnap.data() } as TeamMatchChallenge;
         if (challenge.status !== "pending") {
-            return { ok: false as const, message: "Challenge already resolved." };
+            const statusText = String(challenge.status || "resolved").replace(/_/g, " ");
+            return { ok: false as const, message: `Challenge is already ${statusText}.` };
         }
         if (![challenge.captainAUid, challenge.captainBUid].includes(currentUser.uid)) {
             return { ok: false as const, message: "Only captains can reject challenge." };
@@ -857,7 +846,8 @@ export const respondToTeamMatchChallenge = async (input: {
             return { ok: false as const, message: "Only challenged captain can respond." };
         }
         if (challenge.status !== "pending") {
-            return { ok: false as const, message: "Challenge already resolved." };
+            const statusText = String(challenge.status || "resolved").replace(/_/g, " ");
+            return { ok: false as const, message: `Challenge is already ${statusText}.` };
         }
 
         if (input.decision === "reject") {
@@ -957,6 +947,14 @@ export const repairTeamMatchChallenge = async (challengeId: string) => {
         }
 
         const patch: Record<string, any> = {};
+        let repairedMatchroom = false;
+        const normalizedGame = String(challenge.gameKey || "").toLowerCase();
+        const normalizedChallengePlayers = normalizedGame === "cs2"
+            ? 10
+            : Math.max(2, Number(challenge.maxPlayers || 0));
+        if (normalizedGame === "cs2" && Number(challenge.maxPlayers || 0) !== 10) {
+            patch.maxPlayers = 10;
+        }
         if (!isValidVenueChoice(challenge.proposedVenueByCaptainA)) {
             const fallback = challenge.captainVenueChoices?.[challenge.captainAUid] || challenge.confirmedVenue || null;
             if (isValidVenueChoice(fallback)) {
@@ -973,7 +971,7 @@ export const repairTeamMatchChallenge = async (challengeId: string) => {
             }
         }
         if ((!challenge.pricePerPlayer || Number(challenge.pricePerPlayer) <= 0) && isValidVenueChoice(challenge.proposedVenueByCaptainA)) {
-            const candidatePlayers = Math.max(2, Number(challenge.maxPlayers || 0));
+            const candidatePlayers = normalizedChallengePlayers;
             const computed = await computeChallengePricePerPlayer({
                 zoneId: challenge.proposedVenueByCaptainA.zoneId,
                 gameKey: challenge.gameKey,
@@ -981,6 +979,66 @@ export const repairTeamMatchChallenge = async (challengeId: string) => {
                 maxPlayers: candidatePlayers,
             });
             if (computed > 0) patch.pricePerPlayer = computed;
+        }
+
+        if (challenge.matchroomId && String(challenge.status || "").trim().toLowerCase() === "pending") {
+            const matchRef = doc(db, "matchrooms", challenge.matchroomId);
+            const matchSnap = await getDoc(matchRef);
+            if (matchSnap.exists()) {
+                const match = matchSnap.data() as any;
+                const teamSize = Math.max(1, Math.ceil(normalizedChallengePlayers / 2));
+                const { memberUids: memberUidsA, usernameByUid: usernameByUidA } = await getTeamMembers(challenge.challengerTeamId);
+                const teamAUids = dedupe([challenge.captainAUid, ...memberUidsA.filter((uid) => uid !== challenge.captainAUid)]).slice(0, teamSize);
+                const repairedPlayers = teamAUids.map((uid) => ({
+                    uid,
+                    username: (uid === challenge.captainAUid ? challenge.captainAName : null) || usernameByUidA[uid] || "Player",
+                    joinedAt: new Date(),
+                    role: uid === challenge.captainAUid ? "Captain A" : "Player",
+                }));
+                const repairedSlotsA = Array.from({ length: teamSize }, (_, index) => {
+                    const uid = teamAUids[index];
+                    const player = uid ? repairedPlayers.find((entry) => entry.uid === uid) : null;
+                    if (!uid || !player) {
+                        return { slotId: `A${index + 1}`, status: "open", role: "Player" };
+                    }
+                    return {
+                        slotId: `A${index + 1}`,
+                        uid,
+                        user: { uid, username: player.username },
+                        status: "confirmed",
+                        role: player.role,
+                    };
+                });
+                const repairedSlotsB = Array.from({ length: teamSize }, (_, index) => ({
+                    slotId: `B${index + 1}`,
+                    status: "open",
+                    role: "Player",
+                }));
+
+                const hasWrongSize =
+                    Number(match?.maxPlayers || 0) !== teamSize * 2 ||
+                    !Array.isArray(match?.slotsA) ||
+                    !Array.isArray(match?.slotsB) ||
+                    match.slotsA.length !== teamSize ||
+                    match.slotsB.length !== teamSize;
+                const teamBHasFilledSlots = Array.isArray(match?.slotsB)
+                    ? match.slotsB.some((slot: any) =>
+                        Boolean(slot?.uid || slot?.user?.uid || String(slot?.status || "").toLowerCase() === "confirmed"))
+                    : false;
+
+                if (hasWrongSize || teamBHasFilledSlots) {
+                    await updateDoc(matchRef, {
+                        maxPlayers: teamSize * 2,
+                        currentPlayers: repairedPlayers.length,
+                        players: repairedPlayers,
+                        playerUids: repairedPlayers.map((entry) => entry.uid),
+                        slotsA: repairedSlotsA,
+                        slotsB: repairedSlotsB,
+                        updatedAt: serverTimestamp(),
+                    });
+                    repairedMatchroom = true;
+                }
+            }
         }
 
         if (Object.keys(patch).length > 0) {
@@ -997,7 +1055,7 @@ export const repairTeamMatchChallenge = async (challengeId: string) => {
             return { ok: true as const, repaired: true, rejected: true };
         }
 
-        return { ok: true as const, repaired: Object.keys(patch).length > 0, rejected: false };
+        return { ok: true as const, repaired: Object.keys(patch).length > 0 || repairedMatchroom, rejected: false };
     } catch (error: any) {
         Logger.error("teamMatchService", "repairTeamMatchChallenge failed", error);
         return { ok: false as const, message: error?.message || "Failed to repair challenge." };
@@ -1028,9 +1086,6 @@ export const getTeamMatchChallengeById = async (challengeId: string) => {
         const snap = await getDoc(doc(db, "team_match_challenges", challengeId));
         if (!snap.exists()) return { ok: false as const, message: "Challenge not found." };
         const data = { id: snap.id, ...snap.data() } as TeamMatchChallenge;
-        if (data.status === "rejected") {
-            return { ok: false as const, message: "Challenge not found." };
-        }
         return { ok: true as const, data };
     } catch (error: any) {
         Logger.error("teamMatchService", "getTeamMatchChallengeById failed", error);
@@ -1051,10 +1106,6 @@ export const subscribeTeamMatchChallenge = (
                 return;
             }
             const data = { id: snap.id, ...snap.data() } as TeamMatchChallenge;
-            if (data.status === "rejected") {
-                onData(null);
-                return;
-            }
             onData(data);
         },
         (error: any) => {
