@@ -27,7 +27,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
-import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
+import { cancelMatchJoinRequest, deleteMatchroom, adminCancelMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
 import { submitMatchroomComplain } from "../../src/services/reportService";
 import {
@@ -104,7 +104,21 @@ export default function MatchroomDetails() {
     const [counterMessage, setCounterMessage] = useState("");
     const [counterExpiryMinutes, setCounterExpiryMinutes] = useState("10");
     const [counterDateValue, setCounterDateValue] = useState<Date>(new Date(Date.now() + 2 * 60 * 60 * 1000));
-    const [adminProcessing, setAdminProcessing] = useState<"accept" | "reject" | "counter" | null>(null);
+    const [adminProcessing, setAdminProcessing] = useState<"accept" | "reject" | "counter" | "cancel" | null>(null);
+
+    // Admin Cancel State
+    const [showAdminCancelModal, setShowAdminCancelModal] = useState(false);
+    const [adminCancelReason, setAdminCancelReason] = useState("");
+    const [adminCancelNote, setAdminCancelNote] = useState("");
+
+    const ADMIN_CANCEL_REASONS = [
+        "PC Issue",
+        "Electricity Issue",
+        "Internet/Network Issue",
+        "Venue Overbooked",
+        "Maintenance",
+        "Other"
+    ];
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -664,10 +678,8 @@ export default function MatchroomDetails() {
                             const res = await deleteMatchroom(id as string);
                             if (res.ok) {
                                 if (isZoneAdmin) {
-                                    // Admins should stay in their dashboard context
                                     router.replace("/zone/modules/bookings");
                                 } else {
-                                    // Explicitly target the tabs route to avoid conflict with /matchrooms stack
                                     router.replace("/(player)/(tabs)/matchrooms");
                                 }
                             } else {
@@ -682,6 +694,39 @@ export default function MatchroomDetails() {
                 }
             ]
         );
+    };
+
+    const handleAdminForceCancel = async () => {
+        if (!user || !id || !room) return;
+        if (!adminCancelReason) {
+            Alert.alert("Reason Required", "Please select a reason for cancellation.");
+            return;
+        }
+
+        setAdminProcessing("cancel");
+        try {
+            const res = await adminCancelMatchroom(
+                id as string,
+                user.uid,
+                adminCancelReason,
+                adminCancelNote.trim()
+            );
+
+            if (res.ok) {
+                Alert.alert("Lobby Cancelled", res.message);
+                setShowAdminCancelModal(false);
+                setAdminCancelReason("");
+                setAdminCancelNote("");
+                fetchRoom(); // Refresh to show status update
+            } else {
+                Alert.alert("Error", res.message);
+            }
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Force cancel error", e);
+            Alert.alert("Error", "Failed to cancel lobby.");
+        } finally {
+            setAdminProcessing(null);
+        }
     };
 
     const handleTransferCaptain = async (team: 'A' | 'B', newCaptainUid: string, teammateName: string) => {
@@ -1742,6 +1787,17 @@ export default function MatchroomDetails() {
                                 <Text style={styles.joinButtonText}>Suggest Alternative</Text>
                             </View>
                         </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.secondaryButton, { borderColor: COLORS.error, marginTop: SPACING.xs }]}
+                            onPress={() => setShowAdminCancelModal(true)}
+                            disabled={adminProcessing !== null}
+                            activeOpacity={0.85}
+                        >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <MaterialIcons name="cancel" size={18} color={COLORS.error} />
+                                <Text style={styles.secondaryButtonText}>Force Cancel (Admin)</Text>
+                            </View>
+                        </TouchableOpacity>
                     </View>
                 ) : isExpired ? (
                     <View style={[styles.fullButton, styles.expiredBanner]}>
@@ -2133,27 +2189,106 @@ export default function MatchroomDetails() {
                                         placeholderTextColor={COLORS.muted}
                                         multiline
                                     />
-
+                                </ScrollView>
+                                <View style={{ paddingHorizontal: 24, paddingBottom: 20 }}>
                                     <TouchableOpacity
-                                        style={[
-                                            styles.suggestSubmitButton,
-                                            (adminProcessing || !counterPrice) && { opacity: 0.6 },
-                                        ]}
+                                        style={styles.suggestSubmitButton}
                                         onPress={handleZoneSuggest}
-                                        disabled={adminProcessing !== null || !counterPrice}
-                                        activeOpacity={0.8}
+                                        disabled={adminProcessing === "counter"}
                                     >
                                         {adminProcessing === "counter" ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
+                                            <ActivityIndicator color="#FFF" />
                                         ) : (
-                                            <Text style={styles.modalActionText}>Send Suggestion</Text>
+                                            <Text style={styles.joinButtonText}>Send Counter-Offer</Text>
                                         )}
                                     </TouchableOpacity>
-                                </ScrollView>
+                                </View>
                             </View>
                         </TouchableWithoutFeedback>
                     </View>
                 </TouchableWithoutFeedback>
+            </Modal>
+
+            {/* Admin Force Cancel Modal */}
+            <Modal
+                visible={showAdminCancelModal}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => !adminProcessing && setShowAdminCancelModal(false)}
+            >
+                <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => !adminProcessing && setShowAdminCancelModal(false)}
+                >
+                    <Pressable style={[styles.modalContent, { maxHeight: '80%' }]}>
+                        <View style={styles.modalHeader}>
+                            <View>
+                                <Text style={styles.modalTitle}>Force Cancel Matchroom</Text>
+                                <Text style={styles.modalSubtitle}>Select a reason for venue cancellation</Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => setShowAdminCancelModal(false)}
+                                disabled={adminProcessing === "cancel"}
+                            >
+                                <MaterialIcons name="close" size={24} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            style={{ marginTop: 8 }}
+                            contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            <Text style={[styles.cardLabel, { marginBottom: 12, marginTop: 16 }]}>Cancellation Reason</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {ADMIN_CANCEL_REASONS.map((reason) => (
+                                    <TouchableOpacity
+                                        key={reason}
+                                        style={[
+                                            styles.reasonChip,
+                                            adminCancelReason === reason && styles.reasonChipActive
+                                        ]}
+                                        onPress={() => setAdminCancelReason(reason)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={[
+                                            styles.reasonText,
+                                            adminCancelReason === reason && styles.reasonTextActive
+                                        ]}>{reason}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+
+                            <Text style={[styles.cardLabel, { marginTop: 20, marginBottom: 10 }]}>Internal Note (Optional)</Text>
+                            <TextInput
+                                style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                                placeholder="Any extra details for the players..."
+                                placeholderTextColor={COLORS.muted}
+                                multiline
+                                value={adminCancelNote}
+                                onChangeText={setAdminCancelNote}
+                                selectionColor={COLORS.accent}
+                            />
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalActionButton,
+                                    { backgroundColor: COLORS.error },
+                                    (adminProcessing === "cancel" || !adminCancelReason) && { opacity: 0.6 }
+                                ]}
+                                onPress={handleAdminForceCancel}
+                                disabled={adminProcessing === "cancel" || !adminCancelReason}
+                                activeOpacity={0.8}
+                            >
+                                {adminProcessing === "cancel" ? (
+                                    <ActivityIndicator color="#FFF" size="small" />
+                                ) : (
+                                    <Text style={styles.modalActionText}>Confirm Cancellation</Text>
+                                )}
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </Pressable>
+                </Pressable>
             </Modal>
         </Screen>
     );

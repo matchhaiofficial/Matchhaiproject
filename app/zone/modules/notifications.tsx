@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, updateDoc, where, doc, getDocs, writeBatch } from "firebase/firestore";
+import { collection, onSnapshot, query, updateDoc, where, doc, getDocs, writeBatch, deleteDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 
@@ -12,6 +12,10 @@ import { useAuth } from "../../../src/context/AuthContext";
 import { respondToMatchJoinRequest } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import {
+    acceptZoneBookingRequest,
+    rejectZoneBookingRequest,
+} from "../../../src/services/zoneAdminBookingService";
 import styles from "./notifications.styles";
 
 type AdminNotification = {
@@ -106,7 +110,7 @@ export default function ZoneNotificationsModule() {
     }, [user?.uid]);
 
     const pendingCount = useMemo(
-        () => items.filter((item) => item.status === "pending").length,
+        () => items.filter((item) => item.status !== "seen").length,
         [items],
     );
     const seenCount = useMemo(
@@ -146,23 +150,36 @@ export default function ZoneNotificationsModule() {
 
     const handleClearAll = async () => {
         if (!user?.uid || items.length === 0) return;
+
+        const hasPending = pendingCount > 0;
+        const alertTitle = hasPending ? "Mark All as Seen" : "Clear Notification History";
+        const alertMsg = hasPending
+            ? "This will mark all notifications as seen."
+            : "This will permanently delete all seen notifications.";
+
         Alert.alert(
-            "Clear All Notifications",
-            "Are you sure? This will mark all notifications as seen.",
+            alertTitle,
+            alertMsg,
             [
                 { text: "Cancel", style: "cancel" },
                 {
-                    text: "Clear All",
-                    style: "destructive",
+                    text: hasPending ? "Mark Seen" : "Delete All",
+                    style: hasPending ? "default" : "destructive",
                     onPress: async () => {
                         setClearing(true);
                         try {
                             const batch = writeBatch(db);
-                            items.forEach((item) => {
-                                if (item.status === "pending") {
-                                    batch.update(doc(db, "notifications", item.id), { status: "seen", isRead: true });
-                                }
-                            });
+                            if (hasPending) {
+                                items.forEach((item) => {
+                                    if (item.status !== "seen") {
+                                        batch.update(doc(db, "notifications", item.id), { status: "seen", isRead: true });
+                                    }
+                                });
+                            } else {
+                                items.forEach((item) => {
+                                    batch.delete(doc(db, "notifications", item.id));
+                                });
+                            }
                             await batch.commit();
                         } catch (e) {
                             Logger.error("ZoneNotifications", "Clear all failed", e);
@@ -173,6 +190,49 @@ export default function ZoneNotificationsModule() {
                 },
             ],
         );
+    };
+
+    const handleAcceptRejectBooking = async (item: AdminNotification, decision: 'accept' | 'reject') => {
+        if (!user?.uid || !item.meta?.requestId) return;
+        setProcessingId(item.id);
+        try {
+            const requestId = item.meta.requestId;
+            const zoneId = item.meta.zoneId || (user as any).zoneId; // Fallback if meta missing info
+
+            if (!zoneId) {
+                Alert.alert("Error", "Zone ID not found. Cannot process request.");
+                return;
+            }
+
+            let res;
+            if (decision === 'accept') {
+                res = await acceptZoneBookingRequest({
+                    requestId,
+                    adminUid: user.uid,
+                    zoneId,
+                    requestOwnerUid: item.fromUid
+                });
+            } else {
+                res = await rejectZoneBookingRequest({
+                    requestId,
+                    adminUid: user.uid,
+                    zoneId,
+                    requestOwnerUid: item.fromUid,
+                    reason: "Declined by admin"
+                });
+            }
+
+            if (res.ok) {
+                await updateDoc(doc(db, "notifications", item.id), { status: "seen", isRead: true });
+                Alert.alert("Success", `Request has been ${decision}ed.`);
+            } else {
+                Alert.alert("Error", res.message);
+            }
+        } catch (e) {
+            Logger.error("ZoneNotifications", "Booking Action failed", e);
+        } finally {
+            setProcessingId(null);
+        }
     };
 
     const handleAcceptReject = async (item: AdminNotification, decision: 'accept' | 'reject') => {
@@ -258,22 +318,33 @@ export default function ZoneNotificationsModule() {
             {items.length > 0 && (
                 <Pressable
                     onPress={handleClearAll}
-                    disabled={clearing || pendingCount === 0}
+                    disabled={clearing}
                     style={{
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'flex-end',
                         paddingHorizontal: 16,
                         paddingVertical: 8,
-                        opacity: pendingCount === 0 ? 0.4 : 1,
+                        opacity: clearing ? 0.4 : 1,
                     }}
                 >
                     {clearing ? (
                         <ActivityIndicator size="small" color={COLORS.error} />
                     ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <MaterialIcons name="delete-sweep" size={18} color={COLORS.error} />
-                            <Text style={{ color: COLORS.error, fontSize: 13, fontWeight: '600', marginLeft: 4 }}>Clear All</Text>
+                            <MaterialIcons
+                                name={pendingCount > 0 ? "done-all" : "delete-sweep"}
+                                size={18}
+                                color={pendingCount > 0 ? COLORS.accent : COLORS.error}
+                            />
+                            <Text style={{
+                                color: pendingCount > 0 ? COLORS.accent : COLORS.error,
+                                fontSize: 13,
+                                fontWeight: '600',
+                                marginLeft: 4
+                            }}>
+                                {pendingCount > 0 ? "Mark All Seen" : "Clear History"}
+                            </Text>
                         </View>
                     )}
                 </Pressable>
@@ -316,7 +387,7 @@ export default function ZoneNotificationsModule() {
                                     </View>
                                     <View style={styles.cardHeaderText}>
                                         <Text style={styles.cardTitle} numberOfLines={1}>
-                                            {isMatchRequest ? `${item.fromUsername || 'Player'} wants to join` : title}
+                                            {item.type === 'match_join_request' ? `${item.fromUsername || 'Player'} wants to join` : title}
                                         </Text>
                                         <Text style={styles.cardType}>{typeLabel}</Text>
                                     </View>
@@ -399,12 +470,15 @@ export default function ZoneNotificationsModule() {
                                     </View>
                                 )}
 
-                                {/* Action Row */}
-                                {isMatchRequest && status === 'pending' ? (
+                                {(item.type === 'match_join_request' || item.type === 'admin_booking_request') &&
+                                    status !== 'accepted' && status !== 'rejected' ? (
                                     <View style={styles.actionRow}>
                                         <Pressable
                                             style={[styles.primaryAction, { backgroundColor: COLORS.success || '#4CAF50' }]}
-                                            onPress={() => handleAcceptReject(item, 'accept')}
+                                            onPress={() => {
+                                                if (item.type === 'admin_booking_request') handleAcceptRejectBooking(item, 'accept');
+                                                else handleAcceptReject(item, 'accept');
+                                            }}
                                             disabled={processingId === item.id}
                                         >
                                             {processingId === item.id ? (
@@ -418,7 +492,10 @@ export default function ZoneNotificationsModule() {
                                         </Pressable>
                                         <Pressable
                                             style={[styles.primaryAction, { backgroundColor: COLORS.error || '#F44336' }]}
-                                            onPress={() => handleAcceptReject(item, 'reject')}
+                                            onPress={() => {
+                                                if (item.type === 'admin_booking_request') handleAcceptRejectBooking(item, 'reject');
+                                                else handleAcceptReject(item, 'reject');
+                                            }}
                                             disabled={processingId === item.id}
                                         >
                                             {processingId === item.id ? (
