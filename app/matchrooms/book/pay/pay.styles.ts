@@ -199,6 +199,15 @@ export default StyleSheet.create({
         borderColor: COLORS.accent + '40',
         gap: SPACING.md,
     },
+    methodOptionActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent + '12',
+    },
+    methodOptionDisabled: {
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardDark,
+        opacity: 0.75,
+    },
     methodIcon: {
         width: 44,
         height: 44,

@@ -1,5 +1,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import {
+  collection,
+  doc,
+  runTransaction,
+  serverTimestamp,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
+import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import type { BookingRequest } from "../../../src/services/bookingRequestService";
@@ -1630,17 +1637,60 @@ export default function CreateMatchroom() {
   };
 
   const promptPaymentChoice = async (amountDue: number) => {
-    return await new Promise<"paid" | "unpaid" | "cancel">((resolve) => {
+    return await new Promise<"paid" | "cancel">((resolve) => {
       Alert.alert(
-        "Payment Required",
-        `To send this request to the admin, payment is required.\n\nAmount (placeholder): â‚¨ ${amountDue}\n\nChoose an option:`,
+        "Wallet Payment Required",
+        `To continue, pay from your MatchHai wallet.\n\nAmount: PKR ${amountDue}\n\nCard payments are coming soon.`,
         [
           { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-          { text: "Create Pending", onPress: () => resolve("unpaid") },
-          { text: "Pay Now (Placeholder)", onPress: () => resolve("paid") },
+          { text: "Pay with Wallet", onPress: () => resolve("paid") },
         ],
       );
     });
+  };
+  const payWithWallet = async (amountDue: number) => {
+    if (!user?.uid) return { ok: false as const, message: "Not authenticated." };
+    const amount = Math.max(0, Math.ceil(Number(amountDue || 0)));
+    if (amount <= 0) return { ok: true as const };
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const walletTxRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
+      await runTransaction(db, async (transaction) => {
+        const userSnap = await transaction.get(userRef);
+        const currentBalance = userSnap.exists()
+          ? Number(userSnap.data()?.walletBalance || 0)
+          : 0;
+        if (!Number.isFinite(currentBalance) || currentBalance < amount) {
+          throw new Error("insufficient_wallet");
+        }
+        transaction.set(
+          userRef,
+          {
+            walletBalance: currentBalance - amount,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+        transaction.set(walletTxRef, {
+          uid: user.uid,
+          type: "debit",
+          amount,
+          status: "completed",
+          source: "matchroom_create",
+          createdAt: serverTimestamp(),
+        });
+      });
+      return { ok: true as const };
+    } catch (error: any) {
+      if (error?.message === "insufficient_wallet") {
+        return {
+          ok: false as const,
+          message: "Insufficient wallet balance. Please add funds from Wallet.",
+        };
+      }
+      return { ok: false as const, message: "Unable to complete wallet payment." };
+    }
   };
 
   const handleSubmit = async () => {
@@ -1781,7 +1831,16 @@ export default function CreateMatchroom() {
         setSubmitting(false);
         return;
       }
-      const paymentStatus = paymentChoice;
+      const walletPayment = await payWithWallet(amountDue);
+      if (!walletPayment.ok) {
+        Alert.alert(
+          "Payment failed",
+          walletPayment.message || "Wallet payment failed.",
+        );
+        setSubmitting(false);
+        return;
+      }
+      const paymentStatus = "paid";
 
       // Phase 3: If broadcast mode, create booking request instead of matchroom
       if (locationMode === "broadcast") {
@@ -1835,17 +1894,13 @@ export default function CreateMatchroom() {
         };
 
         const result = await createBookingRequest(requestData, {
-          status: paymentStatus === "paid" ? "open" : "pending_payment",
+          status: "open",
         });
 
         if (result.ok) {
           Alert.alert(
-            paymentStatus === "paid"
-              ? "Broadcast Sent!"
-              : "Request Created (Pending Payment)",
-            paymentStatus === "paid"
-              ? 'Zone admins in your preferred areas will send you offers. Check "My Requests" to view offers.'
-              : "This request is pending payment and has not been sent to admins yet (placeholder).",
+            "Broadcast Sent!",
+            'Zone admins in your preferred areas will send you offers. Check "My Requests" to view offers.',
             [{ text: "OK", onPress: () => router.back() }],
           );
         } else {
@@ -1865,7 +1920,7 @@ export default function CreateMatchroom() {
         maxPlayers: selectedGame === 'cs2' ? 10 : formData.maxPlayers,
         bookingSource: isZoneWalkInAdmin ? 'walkin' : undefined,
         status: "open" as const,
-        isLocked: paymentStatus === "unpaid",
+        isLocked: false,
         paymentStatus,
         paymentAmount: amountDue,
         paymentReservedSlots: seatsPaid,
@@ -2024,9 +2079,7 @@ export default function CreateMatchroom() {
       if (result.ok) {
         Alert.alert(
           "Success!",
-          paymentStatus === "paid"
-            ? "Your matchroom has been created"
-            : "Your matchroom is pending payment (placeholder) and is locked until paid.",
+          "Your matchroom has been created",
           [
             {
               text: "View Match",
