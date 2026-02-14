@@ -21,13 +21,13 @@ import QRCode from "react-native-qrcode-svg";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
-import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import SkillBadge from "../../src/components/SkillBadge";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
-import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch } from "../../src/services/matchService";
+import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
 import { submitMatchroomComplain } from "../../src/services/reportService";
 import {
@@ -64,6 +64,10 @@ export default function MatchroomDetails() {
     const [requestedSlots, setRequestedSlots] = useState<Map<string, string>>(new Map());
     const [genericRequestStatus, setGenericRequestStatus] = useState<string | null>(null);
     const [requestLoading, setRequestLoading] = useState(false);
+
+    // Host/Admin Side: Incoming Requests
+    const [incomingRequests, setIncomingRequests] = useState<any[]>([]);
+    const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
 
     // Role Selection State
     const [showRoleModal, setShowRoleModal] = useState(false);
@@ -153,6 +157,52 @@ export default function MatchroomDetails() {
         fetchRoom();
         checkRequestStatus();
     }, [id, user]);
+
+    // Listen for incoming join requests (Host/Admin only)
+    useEffect(() => {
+        if (!id || !user || !room) return;
+        const isHost = user.uid === room.hostUid;
+        const isAdmin = profile?.role === 'zone-admin' || profile?.role === 'super-admin'; // weak check, but okay for visibility
+
+        if (!isHost && !isAdmin) return;
+
+        const q = query(
+            collection(db, 'notifications'),
+            where('meta.matchroomId', '==', id),
+            where('type', '==', 'match_join_request'),
+            where('status', '==', 'pending'),
+            orderBy('createdAt', 'desc')
+        );
+
+        const unsub = onSnapshot(q, (snapshot) => {
+            const reqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setIncomingRequests(reqs);
+        }, (err) => {
+            Logger.warn("MatchroomDetails", "Failed to listen for requests", err);
+        });
+
+        return () => unsub();
+    }, [id, user, room?.hostUid, profile?.role]);
+
+    const handleRespondToRequest = async (req: any, decision: 'accept' | 'reject') => {
+        if (!user) return;
+        setProcessingRequestId(req.id);
+        try {
+            const res = await respondToMatchJoinRequest(req.id, decision, user.uid);
+            if (res.ok) {
+                if (decision === 'accept') {
+                    Alert.alert("Accepted", `${req.fromUsername} has joined.`);
+                    fetchRoom(); // Refresh room to show new player
+                }
+            } else {
+                Alert.alert("Error", res.message);
+            }
+        } catch (e) {
+            Logger.error("MatchroomDetails", "Respond error", e);
+        } finally {
+            setProcessingRequestId(null);
+        }
+    };
 
     useEffect(() => {
         if (!user) return;
@@ -1542,6 +1592,101 @@ export default function MatchroomDetails() {
                                             );
                                         })()}
                                     </View>
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+                )}
+
+                {/* ── Pending Join Requests (Host / Admin only) ── */}
+                {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
+                    <View style={{
+                        marginTop: SPACING.lg,
+                        padding: SPACING.md,
+                        backgroundColor: 'rgba(255,255,255,0.04)',
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: 'rgba(255,255,255,0.08)',
+                    }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm }}>
+                            <MaterialIcons name="person-add" size={18} color={COLORS.accent} />
+                            <Text style={{
+                                color: COLORS.textPrimary,
+                                fontSize: 15,
+                                fontWeight: '700',
+                                marginLeft: 8,
+                            }}>
+                                Pending Join Requests ({incomingRequests.length})
+                            </Text>
+                        </View>
+
+                        {incomingRequests.map((req: any) => (
+                            <View key={req.id} style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                paddingVertical: 10,
+                                borderBottomWidth: 1,
+                                borderBottomColor: 'rgba(255,255,255,0.06)',
+                            }}>
+                                {/* Avatar */}
+                                <View style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: 18,
+                                    backgroundColor: COLORS.accent,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginRight: 10,
+                                }}>
+                                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>
+                                        {(req.fromUsername || 'P').charAt(0).toUpperCase()}
+                                    </Text>
+                                </View>
+
+                                {/* Info */}
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ color: COLORS.textPrimary, fontWeight: '600', fontSize: 14 }}>
+                                        {req.fromUsername || 'Player'}
+                                    </Text>
+                                    <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 2 }}>
+                                        Role: {req.meta?.role || 'Flex'} • Team: {req.meta?.targetTeam || 'Any'}
+                                    </Text>
+                                </View>
+
+                                {/* Accept / Reject Buttons */}
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: COLORS.success || '#4CAF50',
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 6,
+                                            borderRadius: 8,
+                                        }}
+                                        disabled={processingRequestId === req.id}
+                                        onPress={() => handleRespondToRequest(req, 'accept')}
+                                    >
+                                        {processingRequestId === req.id ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>Accept</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: COLORS.error || '#F44336',
+                                            paddingHorizontal: 12,
+                                            paddingVertical: 6,
+                                            borderRadius: 8,
+                                        }}
+                                        disabled={processingRequestId === req.id}
+                                        onPress={() => handleRespondToRequest(req, 'reject')}
+                                    >
+                                        {processingRequestId === req.id ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>Reject</Text>
+                                        )}
+                                    </TouchableOpacity>
                                 </View>
                             </View>
                         ))}
