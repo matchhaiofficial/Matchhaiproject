@@ -282,6 +282,7 @@ export default function Profile() {
         >
             <AppHeader
                 title="Profile"
+                inlineTitle
                 rightAction={(
                     <TouchableOpacity style={styles.headerIcon} onPress={handleSettings}>
                         <MaterialIcons name="settings" size={24} color={COLORS.text} />
