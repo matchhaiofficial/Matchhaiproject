@@ -1057,6 +1057,79 @@ export async function deleteMatchroom(roomId: string): Promise<{ ok: true; messa
     }
 }
 
+/**
+ * Force-cancels a matchroom by an administrator.
+ * Notifies all participating players and records the reason.
+ */
+export async function adminCancelMatchroom(
+    roomId: string,
+    adminUid: string,
+    reason: string,
+    note?: string
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        const roomRef = doc(db, COLLECTION_NAME, roomId);
+        const roomSnap = await getDoc(roomRef);
+        if (!roomSnap.exists()) throw "Matchroom not found";
+        const room = roomSnap.data() as Matchroom;
+
+        const batch = writeBatch(db);
+        const now = serverTimestamp();
+
+        // 1. Update Matchroom Status
+        batch.update(roomRef, {
+            status: 'cancelled',
+            isLocked: true, // Prevent further joins
+            cancelledBy: adminUid,
+            cancelledAt: now,
+            cancelReason: reason,
+            cancelNote: note || "",
+            updatedAt: now
+        });
+
+        // 2. Notify All Players
+        const playerUids = room.playerUids || [];
+        playerUids.forEach((uid) => {
+            const notifId = `match_cancelled_${roomId}_${uid}`;
+            batch.set(doc(db, 'notifications', notifId), {
+                type: 'match_cancelled_admin',
+                toUid: uid,
+                fromUid: adminUid,
+                title: "Matchroom Closed",
+                message: `The matchroom "${room.title}" was closed by venue admin. Reason: ${reason}`,
+                status: 'pending',
+                isRead: false,
+                createdAt: now,
+                meta: {
+                    matchroomId: roomId,
+                    matchroomTitle: room.title,
+                    reason,
+                    note: note || ""
+                }
+            }, { merge: true });
+        });
+
+        // 3. Mark Booking Request as Cancelled if linked
+        const raw: any = room;
+        const bReqId = raw.bookingRequestId || raw.requestId || (room as any).meta?.requestId;
+        if (bReqId) {
+            batch.update(doc(db, 'booking_requests', bReqId), {
+                status: 'cancelled',
+                lifecycleStatus: 'closed',
+                updatedAt: now
+            });
+        }
+
+        await batch.commit();
+        Logger.info("matchService", "Admin force-cancelled room", { roomId, reason });
+        return { ok: true, message: "Lobby cancelled and players notified." };
+
+    } catch (error: any) {
+        Logger.error("matchService", "adminCancelMatchroom error", error);
+        return { ok: false, message: typeof error === 'string' ? error : "Failed to cancel lobby." };
+    }
+}
+
 export async function startMatch(
     roomId: string,
     ratings: Record<string, number>,
