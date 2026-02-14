@@ -303,6 +303,22 @@ const getZoneRateLabel = (zone: Zone) => {
   return `From ${Math.min(...rates)} PKR/hr`;
 };
 
+const getTeamGameLabel = (game?: string) => {
+  const normalized = String(game || "").trim().toLowerCase();
+  if (!normalized) return "TEAM";
+  const labels: Record<string, string> = {
+    cs2: "CS2",
+    fc26: "FC26",
+    fc25: "FC",
+    tekken8: "TEKKEN 8",
+    futsal: "FUTSAL",
+    indoor_cricket: "CRICKET",
+    padel: "PADEL",
+    pickleball: "PICKLEBALL",
+  };
+  return labels[normalized] || normalized.toUpperCase();
+};
+
 const dedupeRooms = (rooms: Matchroom[]) => {
   const byId = new Map<string, Matchroom>();
   rooms.forEach((room) => {
@@ -594,11 +610,11 @@ export default function PlayerDashboard() {
         <View style={styles.notificationMetaRow}>
           <Text style={styles.notificationTime}>{time}</Text>
           <View style={styles.notificationCta}>
-            <Text style={styles.notificationCtaText}>Open</Text>
+            <Text style={styles.notificationCtaText}>View</Text>
             <MaterialIcons
-              name="chevron-right"
-              size={18}
-              color={COLORS.accent}
+              name="arrow-forward"
+              size={14}
+              color="#FFF"
             />
           </View>
         </View>
@@ -960,29 +976,77 @@ export default function PlayerDashboard() {
           </View>
           {myTeams.length > 0 ? (
             myTeams.map((team) => (
-              <Pressable
-                key={team.id}
-                onPress={() => router.push(`/teams/${team.id}` as any)}
-                style={({ pressed }) => [
-                  styles.nearbyCard,
-                  pressed && { opacity: 0.85 },
-                ]}
-              >
-                <View style={styles.nearbyTitleRow}>
-                  <Text style={styles.nearbyTitle} numberOfLines={1}>
-                    {team.name}
-                  </Text>
-                  <View style={styles.priceTag}>
-                    <Text style={styles.priceTagText}>
-                      {(team.game || "").toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.notificationTime}>
-                  {team.memberUids?.length ?? team.memberCount ?? 0}/
-                  {team.maxMembers} members
-                </Text>
-              </Pressable>
+              (() => {
+                const currentMembers =
+                  team.memberUids?.length ?? team.memberCount ?? 0;
+                const maxMembers = Math.max(1, Number(team.maxMembers || 1));
+                const fillPercent = Math.min(
+                  100,
+                  Math.round((currentMembers / maxMembers) * 100),
+                );
+                const wins = Number(team.stats?.wins || 0);
+                const losses = Number(team.stats?.losses || 0);
+                const matchesPlayed = Number(team.stats?.matchesPlayed || 0);
+
+                return (
+                  <Pressable
+                    key={team.id}
+                    onPress={() => router.push(`/teams/${team.id}` as any)}
+                    style={({ pressed }) => [
+                      styles.teamCard,
+                      pressed && styles.teamCardPressed,
+                    ]}
+                  >
+                    <View style={styles.teamTopRow}>
+                      <View style={styles.teamIdentityWrap}>
+                        <View style={styles.teamAvatarWrap}>
+                          <MaterialIcons
+                            name="groups"
+                            size={18}
+                            color={COLORS.accent}
+                          />
+                        </View>
+                        <View style={styles.teamTextWrap}>
+                          <Text style={styles.teamName} numberOfLines={1}>
+                            {team.name}
+                          </Text>
+                          <Text style={styles.teamSubtext} numberOfLines={1}>
+                            {matchesPlayed} matches played
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.teamGamePill}>
+                        <Text style={styles.teamGamePillText}>
+                          {getTeamGameLabel(team.game)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.teamMembersRow}>
+                      <Text style={styles.teamMembersText}>Team Capacity</Text>
+                      <Text style={styles.teamMembersCount}>
+                        {currentMembers}/{maxMembers}
+                      </Text>
+                    </View>
+                    <View style={styles.teamProgressTrack}>
+                      <View
+                        style={[styles.teamProgressFill, { width: `${fillPercent}%` }]}
+                      />
+                    </View>
+
+                    <View style={styles.teamBottomRow}>
+                      <Text style={styles.teamStatsText}>
+                        W {wins} · L {losses}
+                      </Text>
+                      <View style={styles.teamOpenPill}>
+                        <Text style={styles.teamOpenPillText}>
+                          {currentMembers < maxMembers ? "Open Slots" : "Full"}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })()
             ))
           ) : (
             <View style={styles.nearbyCard}>
