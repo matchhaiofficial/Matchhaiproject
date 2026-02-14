@@ -1,6 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import {
-    addDoc,
     collection,
     doc,
     getDoc,
@@ -136,6 +135,7 @@ export default function WalletScreen() {
         setAddingFunds(true);
         try {
             const userRef = doc(db, "users", user.uid);
+            const txRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
             await runTransaction(db, async (transaction: any) => {
                 const userSnap = await transaction.get(userRef);
                 const currentBalance = userSnap.exists()
@@ -150,15 +150,14 @@ export default function WalletScreen() {
                     },
                     { merge: true },
                 );
-            });
-
-            await addDoc(collection(db, "users", user.uid, "wallet_transactions"), {
-                uid: user.uid,
-                type: "credit",
-                amount,
-                status: "completed",
-                source: "manual_topup",
-                createdAt: serverTimestamp(),
+                transaction.set(txRef, {
+                    uid: user.uid,
+                    type: "credit",
+                    amount,
+                    status: "completed",
+                    source: "manual_topup",
+                    createdAt: serverTimestamp(),
+                });
             });
 
             setAddAmount("");

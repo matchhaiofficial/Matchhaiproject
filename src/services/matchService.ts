@@ -170,6 +170,21 @@ export interface Matchroom {
 
 const COLLECTION_NAME = "matchrooms";
 
+const stripUndefinedDeep = (value: any): any => {
+    if (Array.isArray(value)) {
+        return value.map((item) => stripUndefinedDeep(item));
+    }
+    if (value && typeof value === "object") {
+        const result: Record<string, any> = {};
+        Object.entries(value).forEach(([key, nested]) => {
+            if (nested === undefined) return;
+            result[key] = stripUndefinedDeep(nested);
+        });
+        return result;
+    }
+    return value;
+};
+
 function parseFormatExtras(format?: string) {
     if (!format) return null;
     const match = format.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
@@ -428,7 +443,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             : null;
         const lockAt = scheduledStartAt ? new Date(scheduledStartAt.getTime() - ONE_DAY_MS) : null;
 
-        const docRef = await addDoc(collection(db, COLLECTION_NAME), {
+        const payload = stripUndefinedDeep({
             ...roomData,
             players,
             slotsA,
@@ -436,12 +451,13 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
             captainUidA,
             currentPlayers: players.length,
             playerUids,
-            zoneOwnerUid: zoneOwnerUid || undefined,
+            zoneOwnerUid: zoneOwnerUid || null,
             scheduledStartAt: scheduledStartAt || null,
             lockAt: lockAt || null,
             expiresAt: lockAt || null,
             createdAt: serverTimestamp(),
         });
+        const docRef = await addDoc(collection(db, COLLECTION_NAME), payload);
         Logger.info("matchService", "Matchroom created", { id: docRef.id });
 
         // Create chatroom for this matchroom (participants: host + current players + zone owner)

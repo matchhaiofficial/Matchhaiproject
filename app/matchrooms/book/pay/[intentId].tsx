@@ -1,5 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -12,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../../../src/context/AuthContext";
+import { db } from "../../../../src/config/firebaseConfig";
 import {
     BookingIntent,
     confirmBookingTransaction,
@@ -29,6 +31,8 @@ export default function MockPaymentScreen() {
     const [intent, setIntent] = useState<BookingIntent | null>(null);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
+    const [walletBalance, setWalletBalance] = useState(0);
+    const [paymentMethod, setPaymentMethod] = useState<"wallet" | "card">("wallet");
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
     useEffect(() => {
@@ -51,15 +55,30 @@ export default function MockPaymentScreen() {
         fetchIntent();
     }, [intentId]);
 
+    useEffect(() => {
+        const loadWallet = async () => {
+            if (!user?.uid) return;
+            try {
+                const snap = await getDoc(doc(db, "users", user.uid));
+                setWalletBalance(snap.exists() ? Number(snap.data()?.walletBalance || 0) : 0);
+            } catch {
+                setWalletBalance(0);
+            }
+        };
+        loadWallet();
+    }, [user?.uid]);
+
     const handleMockPayment = async () => {
         if (!intentId || !user) return;
+        if (paymentMethod !== "wallet") {
+            Alert.alert("Coming soon", "Card payments are not available yet. Please pay via wallet.");
+            return;
+        }
 
         setProcessing(true);
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
 
         try {
-            const res = await confirmBookingTransaction(intentId, user.uid);
+            const res = await confirmBookingTransaction(intentId, user.uid, paymentMethod);
             if (res.ok) {
                 // Navigate to status screen
                 router.replace({
@@ -86,6 +105,7 @@ export default function MockPaymentScreen() {
     }
 
     if (!intent) return null;
+    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.total || 0);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -110,7 +130,7 @@ export default function MockPaymentScreen() {
                 {/* Secure Payment Info */}
                 <View style={styles.infoBox}>
                     <MaterialIcons name="security" size={20} color={COLORS.success} />
-                    <Text style={styles.infoText}>Mock Secure Checkout</Text>
+                    <Text style={styles.infoText}>Wallet payment is active. Card payment is coming soon.</Text>
                 </View>
 
                 {/* Summary */}
@@ -129,29 +149,59 @@ export default function MockPaymentScreen() {
                 {/* Payment Methods (Mock) */}
                 <View style={styles.card}>
                     <Text style={styles.cardTitle}>PAYMENT METHOD</Text>
-                    <TouchableOpacity style={styles.methodOption} activeOpacity={0.7}>
+                    <TouchableOpacity
+                        style={[
+                            styles.methodOption,
+                            paymentMethod === "wallet" && styles.methodOptionActive,
+                        ]}
+                        activeOpacity={0.7}
+                        onPress={() => setPaymentMethod("wallet")}
+                    >
                         <View style={styles.methodIcon}>
-                            <MaterialIcons name="payment" size={24} color={COLORS.accent} />
+                            <MaterialIcons name="account-balance-wallet" size={24} color={COLORS.accent} />
                         </View>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.methodName}>Simulated MatchHai Wallet</Text>
-                            <Text style={styles.methodDetail}>Balance: Unlimited</Text>
+                            <Text style={styles.methodName}>MatchHai Wallet</Text>
+                            <Text style={styles.methodDetail}>Balance: {intent.pricing.currency} {Math.round(walletBalance)}</Text>
                         </View>
-                        <MaterialIcons name="radio-button-checked" size={20} color={COLORS.accent} />
+                        <MaterialIcons
+                            name={paymentMethod === "wallet" ? "radio-button-checked" : "radio-button-unchecked"}
+                            size={20}
+                            color={COLORS.accent}
+                        />
                     </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.methodOption, styles.methodOptionDisabled]}
+                        activeOpacity={0.7}
+                        onPress={() => Alert.alert("Coming soon", "Card payments are not available yet.")}
+                    >
+                        <View style={styles.methodIcon}>
+                            <MaterialIcons name="credit-card" size={24} color={COLORS.textSecondary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.methodName}>Credit / Debit Card</Text>
+                            <Text style={styles.methodDetail}>Coming soon</Text>
+                        </View>
+                        <MaterialIcons name="lock" size={18} color={COLORS.textSecondary} />
+                    </TouchableOpacity>
+                    {!hasEnoughWallet ? (
+                        <Text style={[styles.methodDetail, { marginTop: 10, color: COLORS.warning }]}>
+                            Insufficient wallet balance. Please add funds from Wallet.
+                        </Text>
+                    ) : null}
                 </View>
             </ScrollView>
 
             <View style={styles.footer}>
                 <TouchableOpacity
-                    style={[styles.payBtn, (processing || !intent) && styles.payBtnDisabled]}
+                    style={[styles.payBtn, (processing || !intent || !hasEnoughWallet) && styles.payBtnDisabled]}
                     onPressIn={() => {
                         if (touchDebugEnabled) {
                             Logger.debug("TouchDebug", "pressIn", { tag: "booking_pay_now" });
                         }
                     }}
                     onPress={handleMockPayment}
-                    disabled={processing || !intent}
+                    disabled={processing || !intent || !hasEnoughWallet}
                     activeOpacity={0.85}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
@@ -159,12 +209,12 @@ export default function MockPaymentScreen() {
                         <ActivityIndicator color="#FFF" />
                     ) : (
                         <>
-                            <Text style={styles.payBtnText}>Pay Now</Text>
+                            <Text style={styles.payBtnText}>Pay with Wallet</Text>
                             <MaterialIcons name="lock" size={18} color="#FFF" />
                         </>
                     )}
                 </TouchableOpacity>
-                <Text style={styles.cancelHint}>No actual charges will be applied in this demo.</Text>
+                <Text style={styles.cancelHint}>Card payments will be enabled after gateway integration.</Text>
             </View>
         </SafeAreaView>
     );
