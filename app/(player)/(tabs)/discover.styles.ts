@@ -11,7 +11,7 @@ export default StyleSheet.create({
         paddingBottom: 0,
     },
     header: {
-        paddingTop: SPACING.sm,
+        paddingTop: 0,
         paddingBottom: SPACING.sm,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
@@ -19,6 +19,10 @@ export default StyleSheet.create({
     },
     headerTopRow: {
         marginBottom: SPACING.md,
+    },
+    headerGhostAction: {
+        width: 40,
+        height: 40,
     },
     headerTitle: {
         color: COLORS.text,
