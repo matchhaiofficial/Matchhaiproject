@@ -270,6 +270,7 @@ export async function createBookingIntentDetailed({
                 fromUid: user.uid,
                 fromUsername: user.displayName || 'Player',
                 status: 'pending',
+                isRead: false,
                 createdAt: new Date(),
                 expiresAt,
                 meta: {
@@ -384,6 +385,7 @@ export async function confirmBookingTransaction(
                     fromUid: userUid,
                     fromUsername: auth.currentUser?.displayName || 'Teammate',
                     status: 'pending',
+                    isRead: false,
                     createdAt: new Date(),
                     expiresAt: intent.expiresAt,
                     meta: {

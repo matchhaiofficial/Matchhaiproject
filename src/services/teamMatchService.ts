@@ -117,6 +117,7 @@ const upsertChallengeAcceptedNotification = async (input: {
         fromUsername: input.fromUsername || "Captain",
         toUid: input.toUid,
         status: "accepted",
+        isRead: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         title: input.title || "Challenge accepted",
@@ -561,6 +562,7 @@ export const sendTeamMatchChallenge = async (input: {
             fromUsername: teamA.captainUsername || currentUser.displayName || "Captain",
             toUid: teamB.captainUid,
             status: "pending",
+            isRead: false,
             createdAt: serverTimestamp(),
             title: "New team challenge",
             message: `${teamA.name} challenged ${teamB.name}`,
@@ -732,6 +734,7 @@ export const rejectTeamMatchChallenge = async (input: {
             fromUsername: fromUsername || "Captain",
             toUid: notifyToUid,
             status: "accepted",
+            isRead: false,
             createdAt: serverTimestamp(),
             title: "Challenge declined",
             message: `${challenge.challengerTeamName} vs ${challenge.opponentTeamName} was declined.`,
@@ -790,6 +793,7 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
             fromUsername: challenge.captainBName || "Captain",
             toUid: challenge.captainAUid,
             status: "pending",
+            isRead: false,
             createdAt: serverTimestamp(),
             title: "Alternative zone proposed",
             message: `${challenge.opponentTeamName} proposed an alternative venue.`,
@@ -1140,8 +1144,8 @@ export const getChallengesForCaptain = async (uid: string) => {
         const rows = Array.from(byId.values())
             .filter((item: TeamMatchChallenge) => item.status !== "rejected")
             .sort(
-            (a: TeamMatchChallenge, b: TeamMatchChallenge) => toMillis(b.createdAt) - toMillis(a.createdAt),
-        );
+                (a: TeamMatchChallenge, b: TeamMatchChallenge) => toMillis(b.createdAt) - toMillis(a.createdAt),
+            );
         return { ok: true as const, data: rows };
     } catch (error: any) {
         Logger.error("teamMatchService", "getChallengesForCaptain failed", error);
