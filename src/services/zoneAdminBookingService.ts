@@ -858,19 +858,36 @@ export async function createZoneWalkInMatchroom(input: {
         const captainSeatByInput = Number.isFinite(input.captainSeatNumber)
             ? Math.max(1, Math.min(totalSeats, Math.floor(Number(input.captainSeatNumber))))
             : null;
-        const captainByFlag = knownPlayers.find((player) => player.isCaptain) || null;
-        const captainBySeat = captainSeatByInput ? knownPlayers[captainSeatByInput - 1] || null : null;
-        const selectedCaptain = captainByFlag || captainBySeat || knownPlayers[0] || null;
+
+        // Find all captains flagged in knownPlayers
+        const captainsByFlag = knownPlayers.filter((player) => player.isCaptain);
 
         let captainUidA: string | null = null;
         let captainUidB: string | null = null;
-        if (selectedCaptain?.uid) {
-            const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === selectedCaptain.uid);
-            const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === selectedCaptain.uid);
-            if (inTeamA || slotsB.length === 0) {
-                captainUidA = selectedCaptain.uid;
-            } else if (inTeamB) {
-                captainUidB = selectedCaptain.uid;
+
+        if (captainsByFlag.length > 0) {
+            // New behavior: respect isCaptain flags for both teams
+            captainsByFlag.forEach(captain => {
+                if (!captain.uid) return;
+                const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === captain.uid);
+                const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === captain.uid);
+
+                if (inTeamA) captainUidA = captain.uid;
+                if (inTeamB) captainUidB = captain.uid;
+            });
+        } else {
+            // Legacy/Fallback behavior: use captainSeatNumber or first player
+            const captainBySeat = captainSeatByInput ? knownPlayers[captainSeatByInput - 1] || null : null;
+            const fallbackCaptain = captainBySeat || knownPlayers[0] || null;
+
+            if (fallbackCaptain?.uid) {
+                const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
+                const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
+                if (inTeamA || slotsB.length === 0) {
+                    captainUidA = fallbackCaptain.uid;
+                } else if (inTeamB) {
+                    captainUidB = fallbackCaptain.uid;
+                }
             }
         }
 
@@ -915,14 +932,14 @@ export async function createZoneWalkInMatchroom(input: {
                 bookedSeatCount,
                 knownPlayerCount: knownPlayers.length,
                 unknownSeatCount: Math.max(0, totalSeats - knownPlayers.length),
-                captainSeatNumber: selectedCaptain?.seatNumber || null,
-                captainUid: selectedCaptain?.uid || null,
+                captainSeatNumber: captainsByFlag[0]?.seatNumber || null,
+                captainUid: captainsByFlag[0]?.uid || null,
                 roster: knownPlayers.map((player) => ({
                     uid: player.uid,
                     username: player.username,
                     skillTier: player.skillTier,
                     seatNumber: player.seatNumber,
-                    isCaptain: selectedCaptain?.uid === player.uid,
+                    isCaptain: player.isCaptain,
                 })),
                 branchId: input.branchId || null,
                 branchName: input.branchName || null,
