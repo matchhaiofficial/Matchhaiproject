@@ -305,7 +305,8 @@ export async function createBookingIntentDetailed({
  */
 export async function confirmBookingTransaction(
     intentId: string,
-    userUid: string
+    userUid: string,
+    paymentMethod: 'wallet' | 'card' = 'wallet',
 ): Promise<{ ok: true } | { ok: false; message: string }> {
     try {
         const intentRef = doc(db, "booking_intents", intentId);
@@ -316,6 +317,8 @@ export async function confirmBookingTransaction(
 
             const intent = intentSnap.data() as BookingIntent;
             if (intent.status === 'expired' || intent.status === 'rejected') throw "Intent invalid/expired";
+            if (intent.createdByUid !== userUid) throw "Only the booking creator can complete payment.";
+            if (paymentMethod !== 'wallet') throw "Card payments are coming soon. Please pay via wallet.";
 
             const expiresAtMillis = getExpiresAtMillis(intent.expiresAt);
             if (expiresAtMillis < Date.now()) {
@@ -329,6 +332,10 @@ export async function confirmBookingTransaction(
 
             const room = roomSnap.data() as Matchroom;
             const slots = (intent.side === 'A' ? room.slotsA : room.slotsB) || [];
+            const totalAmount = Number(intent.pricing?.total || 0);
+            if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+                throw "Invalid payment amount.";
+            }
 
             // If slots are missing, we can't book specific slot IDs that don't exist
             if (slots.length === 0) {
@@ -364,10 +371,37 @@ export async function confirmBookingTransaction(
                 updatedAt: serverTimestamp()
             };
 
+            // Wallet payment (atomic): debit user wallet inside same transaction.
+            const userRef = doc(db, "users", userUid);
+            const userSnap = await transaction.get(userRef);
+            if (!userSnap.exists()) throw "Wallet account not found.";
+            const walletBalance = Number(userSnap.data()?.walletBalance || 0);
+            if (!Number.isFinite(walletBalance) || walletBalance < totalAmount) {
+                throw "Insufficient wallet balance. Please add funds and try again.";
+            }
+            const nextBalance = walletBalance - totalAmount;
+            transaction.set(userRef, {
+                walletBalance: nextBalance,
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+
+            const walletTxRef = doc(collection(db, "users", userUid, "wallet_transactions"));
+            transaction.set(walletTxRef, {
+                uid: userUid,
+                type: "debit",
+                amount: totalAmount,
+                status: "completed",
+                source: "matchroom_booking",
+                intentId,
+                matchroomId: intent.matchroomId,
+                createdAt: serverTimestamp(),
+            });
+
             transaction.update(roomRef, roomUpdates);
             transaction.update(intentRef, {
                 status: 'confirmed',
                 paymentStatus: 'paid',
+                paymentMethod: 'wallet',
                 updatedAt: serverTimestamp()
             });
 

@@ -55,6 +55,14 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
+    // Wallet transactions for each user
+    match /users/{userId}/wallet_transactions/{transactionId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+        request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isOwner(userId);
+    }
+
     // Friends Subcollection
     match /users/{userId}/friends/{friendId} {
       allow read: if isOwner(userId);
