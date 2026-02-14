@@ -19,19 +19,21 @@ const SWIPE_THRESHOLD = -80;
 
 interface Notification {
     id: string;
+    isRead: boolean;
     type:
-        | 'friend_request'
-        | 'team_invite'
-        | 'team_join_request'
-        | 'team_join_decision'
-        | 'match_booking_captain_approval'
-        | 'match_seat_invitation'
-        | 'match_join_request'
-        | 'team_match_challenge'
-        | 'team_match_challenge_update'
-        | 'booking_request_accepted'
-        | 'booking_request_rejected'
-        | 'booking_counter_offer';
+    | 'friend_request'
+    | 'team_invite'
+    | 'team_join_request'
+    | 'team_join_decision'
+    | 'match_booking_captain_approval'
+    | 'match_seat_invitation'
+    | 'match_join_request'
+    | 'team_match_challenge'
+    | 'team_match_challenge_update'
+    | 'booking_request_accepted'
+    | 'booking_request_rejected'
+    | 'booking_counter_offer'
+    | 'match_cancelled_admin';
     fromUid: string;
     fromUsername: string;
     status: 'pending' | 'accepted' | 'declined' | 'rejected';
@@ -58,6 +60,8 @@ interface Notification {
         challengeId?: string;
         challengerTeamName?: string;
         opponentTeamName?: string;
+        reason?: string;
+        note?: string;
     };
 }
 
@@ -618,6 +622,7 @@ export default function Inbox() {
         const isBookingRequestAccepted = item.type === 'booking_request_accepted';
         const isBookingRequestRejected = item.type === 'booking_request_rejected';
         const isBookingCounterOffer = item.type === 'booking_counter_offer';
+        const isMatchCancelledAdmin = item.type === 'match_cancelled_admin';
         const isBookingNotification = isBookingRequestAccepted || isBookingRequestRejected || isBookingCounterOffer;
         const isPending = item.status === 'pending';
         const isProcessing = processing === item.id;
@@ -647,7 +652,8 @@ export default function Inbox() {
             isSeatInv ||
             isTeamChallenge ||
             isTeamChallengeUpdate ||
-            isBookingNotification;
+            isBookingNotification ||
+            isMatchCancelledAdmin;
         const typeLabel = isRequest
             ? "Friend Request"
             : isJoinRequest
@@ -666,11 +672,13 @@ export default function Inbox() {
                                         ? "Booking Declined"
                                         : isBookingCounterOffer
                                             ? "Counter Offer"
-                                : isTeamChallenge
-                                    ? "Team Match Challenge"
-                                    : isTeamChallengeUpdate
-                                        ? "Challenge Update"
-                                        : "Team Update";
+                                            : isTeamChallenge
+                                                ? "Team Match Challenge"
+                                                : isTeamChallengeUpdate
+                                                    ? "Challenge Update"
+                                                    : isMatchCancelledAdmin
+                                                        ? "Matchroom Closed"
+                                                        : "Team Update";
 
         const isInfoType = isJoinRequest || isMatchJoinRequest || isTeamInvite || isBookingApproval || isSeatInv || isTeamChallenge || isTeamChallengeUpdate;
         const iconColor = isInfoType ? COLORS.accent : COLORS.success;
@@ -820,6 +828,16 @@ export default function Inbox() {
                                 </>
                             )}
                             {isBookingCounterOffer && " sent a counter-offer for your booking request."}
+                            {isMatchCancelledAdmin && (
+                                <>
+                                    {" closed the matchroom "}
+                                    <Text style={styles.inlineLinkText}>
+                                        {item.meta?.matchroomTitle || "matchroom"}
+                                    </Text>
+                                    {item.meta?.reason ? ` due to ${item.meta.reason.toLowerCase()}.` : " for maintenance."}
+                                    {!!item.meta?.note && ` Note: ${item.meta.note}`}
+                                </>
+                            )}
                             {!hasKnownMessage && fallbackMessage}
                         </Text>
                     </View>
