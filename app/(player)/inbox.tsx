@@ -19,12 +19,27 @@ const SWIPE_THRESHOLD = -80;
 
 interface Notification {
     id: string;
-    type: 'friend_request' | 'team_invite' | 'team_join_request' | 'team_join_decision' | 'match_booking_captain_approval' | 'match_seat_invitation' | 'match_join_request' | 'team_match_challenge' | 'team_match_challenge_update';
+    type:
+        | 'friend_request'
+        | 'team_invite'
+        | 'team_join_request'
+        | 'team_join_decision'
+        | 'match_booking_captain_approval'
+        | 'match_seat_invitation'
+        | 'match_join_request'
+        | 'team_match_challenge'
+        | 'team_match_challenge_update'
+        | 'booking_request_accepted'
+        | 'booking_request_rejected'
+        | 'booking_counter_offer';
     fromUid: string;
     fromUsername: string;
     status: 'pending' | 'accepted' | 'declined' | 'rejected';
     createdAt: any;
     expiresAt?: any;
+    title?: string;
+    message?: string;
+    reason?: string;
     meta?: {
         teamId?: string;
         teamName?: string;
@@ -77,6 +92,38 @@ const formatGameLabel = (value?: string | null) => {
     const key = String(value || "").trim().toLowerCase();
     if (!key || key === "match") return "match";
     return GAME_LABELS[key] || key.toUpperCase();
+};
+
+const REASON_LABELS: Record<string, string> = {
+    full_booked: "Venue is fully booked",
+    fully_booked: "Venue is fully booked",
+    team_full: "Team is full",
+    room_full: "Room is full",
+    room_locked: "Room is locked",
+    room_expired: "Room has expired",
+    slot_unavailable: "Selected slot is unavailable",
+    time_conflict: "Schedule conflict",
+};
+
+const toTitleCase = (value: string) =>
+    value
+        .split(" ")
+        .filter(Boolean)
+        .map((token) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
+        .join(" ");
+
+const normalizeReasonLabel = (reason?: string | null) => {
+    const key = String(reason || "").trim().toLowerCase();
+    if (!key) return "";
+    if (REASON_LABELS[key]) return REASON_LABELS[key];
+    return toTitleCase(key.replace(/[_-]+/g, " "));
+};
+
+const extractReasonCode = (message?: string | null) => {
+    const text = String(message || "").trim();
+    if (!text) return "";
+    const match = text.match(/reason:\s*([a-z0-9_-]+)/i);
+    return (match?.[1] || "").trim().toLowerCase();
 };
 
 export default function Inbox() {
@@ -529,9 +576,39 @@ export default function Inbox() {
         const isSeatInv = item.type === 'match_seat_invitation';
         const isTeamChallenge = item.type === 'team_match_challenge';
         const isTeamChallengeUpdate = item.type === 'team_match_challenge_update';
+        const isBookingRequestAccepted = item.type === 'booking_request_accepted';
+        const isBookingRequestRejected = item.type === 'booking_request_rejected';
+        const isBookingCounterOffer = item.type === 'booking_counter_offer';
+        const isBookingNotification = isBookingRequestAccepted || isBookingRequestRejected || isBookingCounterOffer;
         const isPending = item.status === 'pending';
         const isProcessing = processing === item.id;
         const challengeGameLabel = formatGameLabel(item.meta?.gameKey || item.meta?.game);
+        const reasonCode = String(item.reason || extractReasonCode(item.message)).trim().toLowerCase();
+        const friendlyReason = normalizeReasonLabel(reasonCode);
+        const senderName = (item.fromUsername || '').trim() || (isBookingNotification ? 'Venue Admin' : 'Someone');
+        const fallbackMessage = (() => {
+            const raw = String(item.message || item.title || '').trim();
+            if (raw) {
+                if (/^reason:/i.test(raw)) {
+                    return friendlyReason ? ` sent an update. Reason: ${friendlyReason}.` : ' sent an update.';
+                }
+                const sentence = /[.!?]$/.test(raw) ? raw : `${raw}.`;
+                return ` ${sentence}`;
+            }
+            if (friendlyReason) return ` sent an update. Reason: ${friendlyReason}.`;
+            return ' sent an update.';
+        })();
+        const hasKnownMessage =
+            isRequest ||
+            isTeamInvite ||
+            isJoinRequest ||
+            isDecision ||
+            isBookingApproval ||
+            isMatchJoinRequest ||
+            isSeatInv ||
+            isTeamChallenge ||
+            isTeamChallengeUpdate ||
+            isBookingNotification;
         const typeLabel = isRequest
             ? "Friend Request"
             : isJoinRequest
@@ -544,6 +621,12 @@ export default function Inbox() {
                             ? "Booking Approval"
                             : isSeatInv
                                 ? "Seat Invitation"
+                                : isBookingRequestAccepted
+                                    ? "Booking Accepted"
+                                    : isBookingRequestRejected
+                                        ? "Booking Declined"
+                                        : isBookingCounterOffer
+                                            ? "Counter Offer"
                                 : isTeamChallenge
                                     ? "Team Match Challenge"
                                     : isTeamChallengeUpdate
@@ -585,10 +668,13 @@ export default function Inbox() {
 
                 <View style={styles.cardBody}>
                     <View style={styles.messageWrap}>
-                        <Pressable onPress={() => openProfile(item.fromUid)} disabled={!item.fromUid}>
-                            <Text style={styles.highlightText}>{item.fromUsername}</Text>
-                        </Pressable>
                         <Text style={styles.messageText}>
+                            <Text
+                                style={styles.highlightText}
+                                onPress={item.fromUid ? () => openProfile(item.fromUid) : undefined}
+                            >
+                                {senderName}
+                            </Text>
                             {isRequest && " wants to connect with you."}
                             {isTeamInvite && (
                                 <>
@@ -675,6 +761,15 @@ export default function Inbox() {
                                     )}
                                 </>
                             )}
+                            {isBookingRequestAccepted && " accepted your booking request."}
+                            {isBookingRequestRejected && (
+                                <>
+                                    {" declined your booking request."}
+                                    {friendlyReason ? ` Reason: ${friendlyReason}.` : ""}
+                                </>
+                            )}
+                            {isBookingCounterOffer && " sent a counter-offer for your booking request."}
+                            {!hasKnownMessage && fallbackMessage}
                         </Text>
                     </View>
 
