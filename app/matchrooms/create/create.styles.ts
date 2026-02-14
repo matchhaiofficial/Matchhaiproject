@@ -57,6 +57,12 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.label - 1,
         marginBottom: SPACING.sm,
     },
+    sectionTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '700',
+    },
     fieldLabel: {
         color: 'rgba(253, 253, 253, 0.85)',
         fontFamily: FONTS.body,
@@ -131,6 +137,7 @@ export default StyleSheet.create({
         paddingVertical: SPACING.xs,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
+        marginBottom: SPACING.lg,
     },
     input: {
         color: COLORS.text,

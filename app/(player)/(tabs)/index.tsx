@@ -207,11 +207,18 @@ export default function PlayerDashboard() {
             let count = 0;
             snapshot.forEach((docSnap: any) => {
                 const data = docSnap.data();
+
+                // Count unread notifications
+                if (data.isRead === false) {
+                    count += 1;
+                }
+
+                // Logic for showing latest notifications in the dashboard
                 if (data.status !== "pending") return;
                 if (data.expiresAt && getMillis(data.expiresAt) < Date.now()) {
                     return;
                 }
-                count += 1;
+
                 items.push({
                     id: docSnap.id,
                     message: data.message || data.title || "New update",

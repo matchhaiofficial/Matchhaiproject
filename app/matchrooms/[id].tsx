@@ -613,8 +613,13 @@ export default function MatchroomDetails() {
                         try {
                             const res = await deleteMatchroom(id as string);
                             if (res.ok) {
-                                // Explicitly target the tabs route to avoid conflict with /matchrooms stack
-                                router.replace("/(player)/(tabs)/matchrooms");
+                                if (isZoneAdmin) {
+                                    // Admins should stay in their dashboard context
+                                    router.replace("/zone/modules/bookings");
+                                } else {
+                                    // Explicitly target the tabs route to avoid conflict with /matchrooms stack
+                                    router.replace("/(player)/(tabs)/matchrooms");
+                                }
                             } else {
                                 Alert.alert("Error", res.message || "Failed to delete");
                                 setLoading(false);
@@ -805,7 +810,11 @@ export default function MatchroomDetails() {
 
         const hasStoredSlots = slotsA.length > 0 || slotsB.length > 0;
         if (!hasStoredSlots && isWalkInRoom && (room?.maxPlayers || 0) > 0) {
-            const totalSeats = Math.max(1, Number(room?.maxPlayers || 0));
+            let totalSeats = Math.max(1, Number(room?.maxPlayers || 0));
+            // Patch for CS2 5v5 erroneously saved as 5 players
+            if (room?.game === 'cs2' && totalSeats === 5) {
+                totalSeats = 10;
+            }
             const bookedSeats = Math.min(
                 totalSeats,
                 Math.max(Number((room as any)?.currentPlayers || 0), (room?.players || []).length),
@@ -869,6 +878,42 @@ export default function MatchroomDetails() {
         }
 
         if (!hasStoredSlots) {
+            // Reconstruct slots if missing but we know maxPlayers (e.g. for structured games like CS2/FC26)
+            const totalPlayers = room?.maxPlayers || 0;
+            if (totalPlayers > 0 && totalPlayers % 2 === 0) {
+                const teamSize = totalPlayers / 2;
+                const localSlotsA = Array.from({ length: teamSize }, (_, idx) => ({
+                    slotId: `A${idx + 1}`,
+                    status: 'open' as const,
+                    role: 'Player',
+                }));
+                const localSlotsB = Array.from({ length: teamSize }, (_, idx) => ({
+                    slotId: `B${idx + 1}`,
+                    status: 'open' as const,
+                    role: 'Player',
+                }));
+
+                const players = room?.players || [];
+                const fillSlots = (slots: any[], startIndex: number) =>
+                    slots.map((slot, idx) => {
+                        const p = players[startIndex + idx];
+                        if (p) {
+                            return {
+                                ...slot,
+                                uid: p.uid,
+                                user: { uid: p.uid, username: p.username },
+                                status: 'confirmed' as const,
+                                role: p.role || 'Player'
+                            };
+                        }
+                        return slot;
+                    });
+
+                return {
+                    displaySlotsA: fillSlots(localSlotsA, 0),
+                    displaySlotsB: fillSlots(localSlotsB, teamSize)
+                };
+            }
             return { displaySlotsA: slotsA, displaySlotsB: slotsB };
         }
 
@@ -1603,24 +1648,26 @@ export default function MatchroomDetails() {
                                         </TouchableOpacity>
                                     </View>
                                 ) : (
-                                    <TouchableOpacity
-                                        style={styles.getRequestButton}
-                                        onPress={() => {
-                                            if (touchDebugEnabled) {
-                                                Logger.debug("TouchDebug", "press", { tag: "lobby_request_join" });
-                                            }
-                                            handleRequestJoin();
-                                        }}
-                                        onPressIn={() => {
-                                            if (touchDebugEnabled) {
-                                                Logger.debug("TouchDebug", "pressIn", { tag: "lobby_request_join" });
-                                            }
-                                        }}
-                                        activeOpacity={0.85}
-                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                    >
-                                        <Text style={styles.getRequestButtonText}>Request to Join</Text>
-                                    </TouchableOpacity>
+                                    !isLocked && !isFull && (
+                                        <TouchableOpacity
+                                            style={styles.getRequestButton}
+                                            onPress={() => {
+                                                if (touchDebugEnabled) {
+                                                    Logger.debug("TouchDebug", "press", { tag: "lobby_request_join" });
+                                                }
+                                                handleRequestJoin();
+                                            }}
+                                            onPressIn={() => {
+                                                if (touchDebugEnabled) {
+                                                    Logger.debug("TouchDebug", "pressIn", { tag: "lobby_request_join" });
+                                                }
+                                            }}
+                                            activeOpacity={0.85}
+                                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                        >
+                                            <Text style={styles.getRequestButtonText}>Request to Join</Text>
+                                        </TouchableOpacity>
+                                    )
                                 )}
                             </View>
                         </View>
