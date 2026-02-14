@@ -1,7 +1,25 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    runTransaction,
+    serverTimestamp,
+    where,
+} from "firebase/firestore";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import {
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
@@ -45,21 +63,26 @@ export default function WalletScreen() {
     const [bookingIntents, setBookingIntents] = useState<BookingIntent[]>([]);
     const [requestsCount, setRequestsCount] = useState(0);
     const [offersCount, setOffersCount] = useState(0);
+    const [walletBalance, setWalletBalance] = useState(0);
+    const [addAmount, setAddAmount] = useState("");
+    const [addingFunds, setAddingFunds] = useState(false);
 
     const fetchWalletData = useCallback(async () => {
         if (!user?.uid) {
             setBookingIntents([]);
             setRequestsCount(0);
             setOffersCount(0);
+            setWalletBalance(0);
             setLoading(false);
             return;
         }
         setLoading(true);
         try {
-            const [intentsSnap, requestsResult, offersResult] = await Promise.all([
+            const [intentsSnap, requestsResult, offersResult, userDoc] = await Promise.all([
                 getDocs(query(collection(db, "booking_intents"), where("createdByUid", "==", user.uid))),
                 getUserRequests(user.uid),
                 getOffersForUser(user.uid),
+                getDoc(doc(db, "users", user.uid)),
             ]);
 
             const intents = intentsSnap.docs
@@ -69,11 +92,13 @@ export default function WalletScreen() {
             setBookingIntents(intents);
             setRequestsCount(requestsResult.ok && requestsResult.data ? requestsResult.data.length : 0);
             setOffersCount(offersResult.ok && offersResult.data ? offersResult.data.length : 0);
+            setWalletBalance(userDoc.exists() ? Number(userDoc.data()?.walletBalance || 0) : 0);
         } catch (error) {
             Logger.error("Wallet", "Failed to fetch wallet data", error);
             setBookingIntents([]);
             setRequestsCount(0);
             setOffersCount(0);
+            setWalletBalance(0);
         } finally {
             setLoading(false);
         }
@@ -98,6 +123,55 @@ export default function WalletScreen() {
         };
     }, [bookingIntents]);
 
+    const quickAmounts = [500, 1000, 2000, 5000];
+
+    const handleAddFunds = async () => {
+        if (!user?.uid || addingFunds) return;
+        const amount = Number(addAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            Alert.alert("Invalid amount", "Enter a valid amount to add funds.");
+            return;
+        }
+
+        setAddingFunds(true);
+        try {
+            const userRef = doc(db, "users", user.uid);
+            await runTransaction(db, async (transaction: any) => {
+                const userSnap = await transaction.get(userRef);
+                const currentBalance = userSnap.exists()
+                    ? Number(userSnap.data()?.walletBalance || 0)
+                    : 0;
+
+                transaction.set(
+                    userRef,
+                    {
+                        walletBalance: currentBalance + amount,
+                        updatedAt: serverTimestamp(),
+                    },
+                    { merge: true },
+                );
+            });
+
+            await addDoc(collection(db, "users", user.uid, "wallet_transactions"), {
+                uid: user.uid,
+                type: "credit",
+                amount,
+                status: "completed",
+                source: "manual_topup",
+                createdAt: serverTimestamp(),
+            });
+
+            setAddAmount("");
+            await fetchWalletData();
+            Alert.alert("Funds added", `Rs ${Math.round(amount)} added to your wallet.`);
+        } catch (error) {
+            Logger.error("Wallet", "Failed to add funds", error);
+            Alert.alert("Failed", "Could not add funds. Please try again.");
+        } finally {
+            setAddingFunds(false);
+        }
+    };
+
     return (
         <Screen style={styles.screen} scroll={false}>
             <AppHeader title="Wallet" onBack={() => router.back()} inlineTitle />
@@ -120,6 +194,58 @@ export default function WalletScreen() {
                 <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                     {activeTab === "overview" ? (
                         <>
+                            <View style={styles.balanceCard}>
+                                <Text style={styles.balanceLabel}>Wallet Balance</Text>
+                                <Text style={styles.balanceValue}>Rs {Math.round(walletBalance)}</Text>
+                            </View>
+
+                            <View style={styles.addFundsCard}>
+                                <Text style={styles.addFundsTitle}>Add Funds</Text>
+                                <Text style={styles.addFundsSubtext}>
+                                    Choose a quick amount or enter a custom amount.
+                                </Text>
+                                <View style={styles.quickAmountRow}>
+                                    {quickAmounts.map((amount) => (
+                                        <Pressable
+                                            key={amount}
+                                            onPress={() => setAddAmount(String(amount))}
+                                            style={({ pressed }) => [
+                                                styles.quickAmountBtn,
+                                                Number(addAmount) === amount && styles.quickAmountBtnActive,
+                                                pressed && styles.quickAmountBtnPressed,
+                                            ]}
+                                        >
+                                            <Text style={styles.quickAmountText}>Rs {amount}</Text>
+                                        </Pressable>
+                                    ))}
+                                </View>
+                                <View style={styles.addFundsRow}>
+                                    <TextInput
+                                        style={styles.amountInput}
+                                        keyboardType="numeric"
+                                        value={addAmount}
+                                        onChangeText={(text) =>
+                                            setAddAmount(text.replace(/[^0-9]/g, ""))
+                                        }
+                                        placeholder="Enter amount"
+                                        placeholderTextColor={COLORS.textSecondary}
+                                    />
+                                    <Pressable
+                                        style={({ pressed }) => [
+                                            styles.addFundsBtn,
+                                            addingFunds && styles.addFundsBtnDisabled,
+                                            pressed && !addingFunds && styles.addFundsBtnPressed,
+                                        ]}
+                                        onPress={handleAddFunds}
+                                        disabled={addingFunds}
+                                    >
+                                        <Text style={styles.addFundsBtnText}>
+                                            {addingFunds ? "Adding..." : "Add Funds"}
+                                        </Text>
+                                    </Pressable>
+                                </View>
+                            </View>
+
                             <View style={styles.summaryCard}>
                                 <Text style={styles.summaryTitle}>Total Spent</Text>
                                 <Text style={styles.summaryValue}>Rs {Math.round(totals.totalSpent)}</Text>
