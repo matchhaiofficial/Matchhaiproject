@@ -93,10 +93,7 @@ export default StyleSheet.create({
         marginBottom: SPACING.sm,
     },
     messageWrap: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: 4,
+        width: '100%',
     },
     messageText: {
         color: COLORS.textSecondary,

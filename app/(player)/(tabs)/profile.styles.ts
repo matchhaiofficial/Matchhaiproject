@@ -19,17 +19,25 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.heading,
     },
     headerIcon: {
-        padding: SPACING.xs,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardDark,
     },
-
-    scrollContent: {},
+    scrollContent: {
+        paddingTop: 0,
+    },
 
     // Profile Card
     profileCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: RADII.lg,
         padding: SPACING.lg,
-        marginTop: SPACING.md,
+        marginTop: 0,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         alignItems: 'center',

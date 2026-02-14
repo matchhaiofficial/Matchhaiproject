@@ -30,6 +30,7 @@ export default function AppHeader({
 }: AppHeaderProps) {
     const showTopRow = Boolean(onBack || leftAction || rightAction);
     const shouldInlineTitle = inlineTitle && showTopRow;
+    const hasLeadingAction = Boolean(leftAction || onBack);
 
     return (
         <View style={[styles.container, style]}>
@@ -49,11 +50,15 @@ export default function AppHeader({
                             <MaterialIcons name="arrow-back" size={22} color={COLORS.text} />
                         </Pressable>
                     ) : (
-                        <View style={styles.backPlaceholder} />
+                        shouldInlineTitle ? null : <View style={styles.backPlaceholder} />
                     )}
                     {shouldInlineTitle && (
                         <Text
-                            style={[styles.inlineTitle, titleStyle]}
+                            style={[
+                                styles.inlineTitle,
+                                !hasLeadingAction && styles.inlineTitleNoLeftInset,
+                                titleStyle,
+                            ]}
                             numberOfLines={1}
                             ellipsizeMode="tail"
                             allowFontScaling={false}
@@ -85,12 +90,14 @@ export default function AppHeader({
 
 const styles = StyleSheet.create({
     container: {
+        paddingTop: SPACING.xs,
         marginBottom: SPACING.lg,
     },
     topRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        minHeight: 40,
         marginBottom: SPACING.sm,
     },
     inlineTitle: {
@@ -100,6 +107,9 @@ const styles = StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.heading,
         fontWeight: '700',
+    },
+    inlineTitleNoLeftInset: {
+        marginLeft: 0,
     },
     backButton: {
         padding: 4,

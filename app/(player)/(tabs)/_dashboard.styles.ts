@@ -7,7 +7,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     screenContent: {
-        paddingTop: SPACING.sm,
+        paddingTop: 0,
         paddingBottom: 0,
     },
     container: {
