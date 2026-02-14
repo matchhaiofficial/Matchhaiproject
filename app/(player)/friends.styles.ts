@@ -1,0 +1,161 @@
+import { StyleSheet } from "react-native";
+import { COLORS, FONTS, RADII, SHADOWS, SPACING } from "../../src/theme";
+
+export default StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.backgroundDark,
+  },
+  loaderWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  listContent: {
+    paddingBottom: SPACING.lg,
+  },
+  summaryCard: {
+    backgroundColor: COLORS.cardDark,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    marginBottom: SPACING.md,
+    ...SHADOWS.cardSoft,
+  },
+  searchWrap: {
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: RADII.md,
+    backgroundColor: COLORS.cardDark,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: SPACING.sm,
+    minHeight: 44,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    paddingVertical: 8,
+    marginLeft: 6,
+  },
+  filterTabs: {
+    marginBottom: SPACING.md,
+  },
+  summaryCol: {
+    flex: 1,
+  },
+  summaryDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: COLORS.cardBorder,
+    marginHorizontal: SPACING.md,
+  },
+  summaryLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontFamily: FONTS.body,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  summaryValue: {
+    color: COLORS.text,
+    fontSize: 24,
+    fontFamily: FONTS.heading,
+  },
+  friendCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.cardDark,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  friendCardPressed: {
+    opacity: 0.86,
+  },
+  avatarWrap: {
+    position: "relative",
+    marginRight: SPACING.md,
+  },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.overlayLight,
+  },
+  statusDot: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: COLORS.backgroundDark,
+  },
+  statusDotOnline: {
+    backgroundColor: COLORS.successBright,
+  },
+  statusDotOffline: {
+    backgroundColor: COLORS.textSecondary,
+  },
+  friendInfo: {
+    flex: 1,
+  },
+  friendName: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  friendStatus: {
+    fontFamily: FONTS.body,
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  onlineText: {
+    color: COLORS.successBright,
+    fontWeight: "700",
+  },
+  offlineText: {
+    color: COLORS.textSecondary,
+    fontWeight: "600",
+  },
+  gamesText: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.body,
+    fontSize: 11,
+  },
+  emptyCard: {
+    backgroundColor: COLORS.cardDark,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    padding: SPACING.lg,
+    alignItems: "center",
+    marginTop: SPACING.md,
+  },
+  emptyTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  emptyText: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    textAlign: "center",
+  },
+});
