@@ -222,9 +222,10 @@ export default function CreateMatchroom() {
   const [walkInSeatPlayers, setWalkInSeatPlayers] = useState<
     WalkInSeatPlayerDraft[]
   >([]);
-  const [walkInCaptainSeatNumber, setWalkInCaptainSeatNumber] = useState<
-    number | null
-  >(1);
+  const [walkInTeamACaptainSeatNumber, setWalkInTeamACaptainSeatNumber] =
+    useState<number | null>(1);
+  const [walkInTeamBCaptainSeatNumber, setWalkInTeamBCaptainSeatNumber] =
+    useState<number | null>(6);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -778,12 +779,21 @@ export default function CreateMatchroom() {
         };
       }),
     );
-    setWalkInCaptainSeatNumber((prev) => {
-      if (seats <= 0) return null;
-      if (prev && prev >= 1 && prev <= seats) return prev;
-      return 1;
+
+    // Auto-reset captains if out of bounds (though defaults 1 and 6 usually work)
+    setWalkInTeamACaptainSeatNumber((prev) => {
+      const teamAEnd = Math.floor(seats / 2); // Split point
+      // If seat count is small (e.g. 5 total), team A is 1-5? Or 1-3?
+      // For CS2 (10 seats): A=1-5, B=6-10.
+      if (seats > 0 && (!prev || prev < 1 || prev > seats)) return 1;
+      return prev;
     });
-  }, [isZoneWalkInAdmin, walkInBookedSeatCount]);
+    setWalkInTeamBCaptainSeatNumber((prev) => {
+      const teamBStart = selectedGame === 'cs2' ? 6 : Math.ceil(seats / 2) + 1;
+      if (seats >= teamBStart && (!prev || prev < teamBStart || prev > seats)) return teamBStart;
+      return prev;
+    });
+  }, [isZoneWalkInAdmin, walkInBookedSeatCount, selectedGame]);
 
   useEffect(() => {
     if (!isZoneWalkInAdmin) return;
@@ -1319,6 +1329,11 @@ export default function CreateMatchroom() {
         skillLevel: skillLevel,
       }));
       setSeriesType("BO1"); // Default series type for CS2
+      if (isZoneWalkInAdmin) {
+        setWalkInSeatCount("10");
+        setWalkInTeamACaptainSeatNumber(1);
+        setWalkInTeamBCaptainSeatNumber(6);
+      }
       // Initialize host role from profile
       if (userProfile?.cs2Role) {
         setHostRole(userProfile.cs2Role);
@@ -1458,26 +1473,27 @@ export default function CreateMatchroom() {
         Math.min(maxSeats, Math.floor(seatCount)),
       );
       if (normalizedBookedSeats > 0) {
-        const missingPlayerNameIndex = walkInSeatPlayers
-          .slice(0, normalizedBookedSeats)
-          .findIndex((player) => !player.name?.trim());
-        if (missingPlayerNameIndex >= 0) {
-          return fail(
-            "Missing User Name",
-            `Please enter player ${missingPlayerNameIndex + 1} User Name.`,
-            "walkin_missing_player_name",
-          );
-        }
-        if (
-          !walkInCaptainSeatNumber ||
-          walkInCaptainSeatNumber < 1 ||
-          walkInCaptainSeatNumber > normalizedBookedSeats
-        ) {
-          return fail(
-            "Missing Captain",
-            "Please select a captain from booked walk-in players.",
-            "walkin_missing_captain",
-          );
+        // [MODIFIED] Partial Roster Logic:
+        // We no longer block if names are missing. We just don't book those slots.
+        // So validation here is relaxed. We only validate captains if applicable.
+
+        if (selectedGame === 'cs2') {
+          // Check if there are any players in Team A (0-4) or Team B (5-9)
+          const hasTeamAPlayers = walkInSeatPlayers.slice(0, 5).some(p => p.name && p.name.trim().length > 0);
+          const hasTeamBPlayers = walkInSeatPlayers.slice(5, 10).some(p => p.name && p.name.trim().length > 0);
+
+          if (hasTeamAPlayers && !walkInTeamACaptainSeatNumber) {
+            return fail("Missing Captain", "Select Team A Captain", "missing_cap_a");
+          }
+          if (hasTeamBPlayers && !walkInTeamBCaptainSeatNumber) {
+            return fail("Missing Captain", "Select Team B Captain", "missing_cap_b");
+          }
+        } else {
+          // Fallback logic
+          const hasAnyPlayers = walkInSeatPlayers.slice(0, normalizedBookedSeats).some(p => p.name && p.name.trim().length > 0);
+          if (hasAnyPlayers && !walkInTeamACaptainSeatNumber && !walkInTeamBCaptainSeatNumber) {
+            return fail("Missing Captain", "Please select at least one captain.", "walkin_missing_captain");
+          }
         }
       }
 
@@ -1661,23 +1677,26 @@ export default function CreateMatchroom() {
           ? Math.max(0, Math.min(totalSeats, Math.floor(seatCount)))
           : totalSeats;
         const walkInSeed = Date.now();
-        const captainSeatNumber =
-          walkInCaptainSeatNumber &&
-            walkInCaptainSeatNumber >= 1 &&
-            walkInCaptainSeatNumber <= bookedSeats
-            ? walkInCaptainSeatNumber
-            : bookedSeats > 0
-              ? 1
-              : null;
-        const knownPlayers = walkInSeatPlayers
+
+        const validPlayers = walkInSeatPlayers
           .slice(0, bookedSeats)
-          .map((player, idx) => ({
-            uid: `walkin_${user.uid}_${walkInSeed}_${idx + 1}`,
-            username: player.name.trim() || `Player ${idx + 1}`,
-            skillTier: player.skillTier,
-            seatNumber: idx + 1,
-            isCaptain: captainSeatNumber === idx + 1,
-          }));
+          .filter(p => p.name && p.name.trim().length > 0);
+
+        // Re-calculate bookedSeats based on ACTUAL valid inputs
+        // This ensures that empty inputs result in "open" slots, not "reserved" placeholders.
+        const actualBookedCount = validPlayers.length;
+
+        const knownPlayers = validPlayers.map((player, idx) => ({
+          uid: `walkin_${user.uid}_${walkInSeed}_${player.seatNumber}`, // Use seatNumber to keep ID stable? Or just idx. 
+          // Better to use a unique index or just let them be distinct.
+          // Note: service uses these to fill slots.
+          username: player.name.trim(),
+          skillTier: player.skillTier,
+          seatNumber: player.seatNumber,
+          isCaptain:
+            player.seatNumber === walkInTeamACaptainSeatNumber ||
+            player.seatNumber === walkInTeamBCaptainSeatNumber,
+        }));
 
         const result = await createZoneWalkInMatchroom({
           zoneId: adminZone.id,
@@ -1694,11 +1713,11 @@ export default function CreateMatchroom() {
           durationMinutes,
           seriesType: walkInSeries,
           seatCount: totalSeats,
-          bookedSeatCount: bookedSeats,
+          bookedSeatCount: actualBookedCount,
           paymentMode: walkInPaymentMode,
           pricePerPlayer,
           currency: "PKR",
-          captainSeatNumber,
+          captainSeatNumber: walkInTeamACaptainSeatNumber, // Use Team A logic for primary key if needed
           knownPlayers,
         });
 
@@ -2042,17 +2061,19 @@ export default function CreateMatchroom() {
         ? Math.max(0, Math.min(maxSeats, Math.floor(seatCount)))
         : 0;
       if (normalizedBookedSeats > 0) {
-        const missingNameIndex = walkInSeatPlayers
-          .slice(0, normalizedBookedSeats)
-          .findIndex((player) => !player.name?.trim());
-        if (missingNameIndex >= 0)
-          blockers.push(`Enter player ${missingNameIndex + 1} name`);
-        if (
-          !walkInCaptainSeatNumber ||
-          walkInCaptainSeatNumber < 1 ||
-          walkInCaptainSeatNumber > normalizedBookedSeats
-        ) {
-          blockers.push("Select captain");
+        // [MODIFIED] Partial Roster Logic for Blockers
+        // We do not block on missing names anymore.
+
+        if (selectedGame === 'cs2') {
+          const hasTeamAPlayers = walkInSeatPlayers.slice(0, 5).some(p => p.name && p.name.trim().length > 0);
+          const hasTeamBPlayers = walkInSeatPlayers.slice(5, 10).some(p => p.name && p.name.trim().length > 0);
+
+          if (hasTeamAPlayers && !walkInTeamACaptainSeatNumber) blockers.push("Select Team A captain");
+          if (hasTeamBPlayers && !walkInTeamBCaptainSeatNumber) blockers.push("Select Team B captain");
+        } else {
+          // Fallback
+          const hasAnyPlayers = walkInSeatPlayers.slice(0, normalizedBookedSeats).some(p => p.name && p.name.trim().length > 0);
+          if (hasAnyPlayers && !walkInTeamACaptainSeatNumber && !walkInTeamBCaptainSeatNumber) blockers.push("Select captain");
         }
       }
       if (!WALKIN_SERIES_OPTIONS.includes(seriesType as WalkInSeriesType))
@@ -2110,7 +2131,8 @@ export default function CreateMatchroom() {
     reservedSlots,
     walkInSeatCount,
     walkInSeatPlayers,
-    walkInCaptainSeatNumber,
+    walkInTeamACaptainSeatNumber,
+    walkInTeamBCaptainSeatNumber,
     seriesType,
     adminBranches.length,
     walkInBranchId,
@@ -2319,10 +2341,11 @@ export default function CreateMatchroom() {
               </View>
               {walkInBookedSeatCount > 0 ? (
                 <View style={styles.walkInRosterWrap}>
+
                   {selectedGame === 'cs2' && walkInBookedSeatCount > 0 ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                      {/* Team A Column */}
-                      <View style={{ width: '48%' }}>
+                    <View style={{ flexDirection: 'column', gap: 16 }}>
+                      {/* Team A Section (Full Width) */}
+                      <View style={{ width: '100%' }}>
                         <Text style={[styles.sectionTitle, { marginBottom: 8, color: COLORS.accent }]}>Team A</Text>
                         {walkInSeatPlayers.slice(0, 5).map((player, idx) => {
                           const originalIdx = idx;
@@ -2331,13 +2354,29 @@ export default function CreateMatchroom() {
                               <View style={styles.walkInPlayerHeader}>
                                 <Text style={styles.walkInPlayerTitle}>Player {originalIdx + 1}</Text>
                                 <Pressable
-                                  style={[styles.optionChip, styles.walkInCaptainChip, walkInCaptainSeatNumber === originalIdx + 1 && styles.optionChipActive]}
-                                  onPress={() => setWalkInCaptainSeatNumber(originalIdx + 1)}
+                                  style={[
+                                    styles.optionChip,
+                                    styles.walkInCaptainChip,
+                                    walkInTeamACaptainSeatNumber === originalIdx + 1 &&
+                                    styles.optionChipActive,
+                                  ]}
+                                  onPress={() => setWalkInTeamACaptainSeatNumber(originalIdx + 1)}
                                 >
-                                  <Text style={[styles.optionChipText, walkInCaptainSeatNumber === originalIdx + 1 && styles.optionChipTextActive]}>C</Text>
+                                  <Text
+                                    style={[
+                                      styles.optionChipText,
+                                      walkInTeamACaptainSeatNumber === originalIdx + 1 &&
+                                      styles.optionChipTextActive,
+                                    ]}
+                                  >
+                                    Captain
+                                  </Text>
                                 </Pressable>
                               </View>
-                              <Text style={styles.fieldLabel}>Name*</Text>
+
+                              <Text style={styles.fieldLabel}>
+                                Name<Text style={styles.requiredAsterisk}>*</Text>
+                              </Text>
                               <View style={styles.inputBox}>
                                 <TextInput
                                   style={styles.input}
@@ -2346,34 +2385,62 @@ export default function CreateMatchroom() {
                                   value={player.name}
                                   onChangeText={(value) =>
                                     setWalkInSeatPlayers((prev) =>
-                                      prev.map((item) => (item.seatNumber === player.seatNumber ? { ...item, name: value } : item))
+                                      prev.map((item) =>
+                                        item.seatNumber === player.seatNumber
+                                          ? { ...item, name: value }
+                                          : item,
+                                      ),
                                     )
                                   }
                                 />
                               </View>
-                              <Text style={styles.fieldLabel}>Rank*</Text>
+
+                              <Text style={styles.fieldLabel}>
+                                Rank<Text style={styles.requiredAsterisk}>*</Text>
+                              </Text>
                               <View style={styles.chipRow}>
-                                {WALKIN_SKILL_TIER_OPTIONS.map((tier) => (
-                                  <Pressable
-                                    key={`${player.seatNumber}-${tier}`}
-                                    style={[styles.optionChip, player.skillTier === tier && styles.optionChipActive, { paddingHorizontal: 8, minWidth: 0 }]}
-                                    onPress={() =>
-                                      setWalkInSeatPlayers((prev) =>
-                                        prev.map((item) => (item.seatNumber === player.seatNumber ? { ...item, skillTier: tier } : item))
-                                      )
-                                    }
-                                  >
-                                    <Text style={[styles.optionChipText, player.skillTier === tier && styles.optionChipTextActive, { fontSize: 10 }]}>{tier}</Text>
-                                  </Pressable>
-                                ))}
+                                {WALKIN_SKILL_TIER_OPTIONS.map((tier) => {
+                                  const isSelected = player.skillTier === tier;
+                                  return (
+                                    <Pressable
+                                      key={`${player.seatNumber}-${tier}`}
+                                      style={[
+                                        styles.optionChip,
+                                        isSelected && styles.optionChipActive,
+                                        {
+                                          paddingHorizontal: 12,
+                                        },
+                                      ]}
+                                      onPress={() =>
+                                        setWalkInSeatPlayers((prev) =>
+                                          prev.map((item) =>
+                                            item.seatNumber === player.seatNumber
+                                              ? { ...item, skillTier: tier }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.optionChipText,
+                                          isSelected && styles.optionChipTextActive,
+                                          { fontSize: 10 },
+                                        ]}
+                                      >
+                                        {tier}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
                               </View>
                             </View>
                           );
                         })}
                       </View>
 
-                      {/* Team B Column */}
-                      <View style={{ width: '48%' }}>
+                      {/* Team B Section (Full Width) */}
+                      <View style={{ width: '100%' }}>
                         <Text style={[styles.sectionTitle, { marginBottom: 8, color: COLORS.error }]}>Team B</Text>
                         {walkInSeatPlayers.slice(5, 10).map((player, idx) => {
                           const originalIdx = idx + 5;
@@ -2382,13 +2449,29 @@ export default function CreateMatchroom() {
                               <View style={styles.walkInPlayerHeader}>
                                 <Text style={styles.walkInPlayerTitle}>Player {originalIdx + 1}</Text>
                                 <Pressable
-                                  style={[styles.optionChip, styles.walkInCaptainChip, walkInCaptainSeatNumber === originalIdx + 1 && styles.optionChipActive]}
-                                  onPress={() => setWalkInCaptainSeatNumber(originalIdx + 1)}
+                                  style={[
+                                    styles.optionChip,
+                                    styles.walkInCaptainChip,
+                                    walkInTeamBCaptainSeatNumber === originalIdx + 1 &&
+                                    styles.optionChipActive,
+                                  ]}
+                                  onPress={() => setWalkInTeamBCaptainSeatNumber(originalIdx + 1)}
                                 >
-                                  <Text style={[styles.optionChipText, walkInCaptainSeatNumber === originalIdx + 1 && styles.optionChipTextActive]}>C</Text>
+                                  <Text
+                                    style={[
+                                      styles.optionChipText,
+                                      walkInTeamBCaptainSeatNumber === originalIdx + 1 &&
+                                      styles.optionChipTextActive,
+                                    ]}
+                                  >
+                                    Captain
+                                  </Text>
                                 </Pressable>
                               </View>
-                              <Text style={styles.fieldLabel}>Name*</Text>
+
+                              <Text style={styles.fieldLabel}>
+                                Name<Text style={styles.requiredAsterisk}>*</Text>
+                              </Text>
                               <View style={styles.inputBox}>
                                 <TextInput
                                   style={styles.input}
@@ -2397,26 +2480,54 @@ export default function CreateMatchroom() {
                                   value={player.name}
                                   onChangeText={(value) =>
                                     setWalkInSeatPlayers((prev) =>
-                                      prev.map((item) => (item.seatNumber === player.seatNumber ? { ...item, name: value } : item))
+                                      prev.map((item) =>
+                                        item.seatNumber === player.seatNumber
+                                          ? { ...item, name: value }
+                                          : item,
+                                      ),
                                     )
                                   }
                                 />
                               </View>
-                              <Text style={styles.fieldLabel}>Rank*</Text>
+
+                              <Text style={styles.fieldLabel}>
+                                Rank<Text style={styles.requiredAsterisk}>*</Text>
+                              </Text>
                               <View style={styles.chipRow}>
-                                {WALKIN_SKILL_TIER_OPTIONS.map((tier) => (
-                                  <Pressable
-                                    key={`${player.seatNumber}-${tier}`}
-                                    style={[styles.optionChip, player.skillTier === tier && styles.optionChipActive, { paddingHorizontal: 8, minWidth: 0 }]}
-                                    onPress={() =>
-                                      setWalkInSeatPlayers((prev) =>
-                                        prev.map((item) => (item.seatNumber === player.seatNumber ? { ...item, skillTier: tier } : item))
-                                      )
-                                    }
-                                  >
-                                    <Text style={[styles.optionChipText, player.skillTier === tier && styles.optionChipTextActive, { fontSize: 10 }]}>{tier}</Text>
-                                  </Pressable>
-                                ))}
+                                {WALKIN_SKILL_TIER_OPTIONS.map((tier) => {
+                                  const isSelected = player.skillTier === tier;
+                                  return (
+                                    <Pressable
+                                      key={`${player.seatNumber}-${tier}`}
+                                      style={[
+                                        styles.optionChip,
+                                        isSelected && styles.optionChipActive,
+                                        {
+                                          paddingHorizontal: 12,
+                                        },
+                                      ]}
+                                      onPress={() =>
+                                        setWalkInSeatPlayers((prev) =>
+                                          prev.map((item) =>
+                                            item.seatNumber === player.seatNumber
+                                              ? { ...item, skillTier: tier }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.optionChipText,
+                                          isSelected && styles.optionChipTextActive,
+                                          { fontSize: 10 },
+                                        ]}
+                                      >
+                                        {tier}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
                               </View>
                             </View>
                           );
@@ -2444,15 +2555,15 @@ export default function CreateMatchroom() {
                                 style={[
                                   styles.optionChip,
                                   styles.walkInCaptainChip,
-                                  walkInCaptainSeatNumber === idx + 1 &&
+                                  walkInTeamACaptainSeatNumber === idx + 1 &&
                                   styles.optionChipActive,
                                 ]}
-                                onPress={() => setWalkInCaptainSeatNumber(idx + 1)}
+                                onPress={() => setWalkInTeamACaptainSeatNumber(idx + 1)}
                               >
                                 <Text
                                   style={[
                                     styles.optionChipText,
-                                    walkInCaptainSeatNumber === idx + 1 &&
+                                    walkInTeamACaptainSeatNumber === idx + 1 &&
                                     styles.optionChipTextActive,
                                   ]}
                                 >
