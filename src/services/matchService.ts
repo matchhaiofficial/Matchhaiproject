@@ -14,7 +14,8 @@ import {
     serverTimestamp,
     setDoc,
     updateDoc,
-    where
+    where,
+    writeBatch
 } from "firebase/firestore";
 import { auth, db } from "../config/firebaseConfig";
 import Logger from "../utils/logger";
@@ -803,6 +804,112 @@ export async function requestJoinMatchroom(
     } catch (error) {
         Logger.error("matchService", "Error requesting to join", error);
         return { ok: false, message: "Failed to send request." };
+    }
+}
+
+/**
+ * Responds to a join request (Accept/Reject).
+ * Handles auto-rejection of other candidates if the room becomes full.
+ */
+export async function respondToMatchJoinRequest(
+    requestId: string,
+    decision: 'accept' | 'reject',
+    adminUid: string
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        const notifRef = doc(db, 'notifications', requestId);
+
+        const result = await runTransaction(db, async (transaction: any) => {
+            const notifSnap = await transaction.get(notifRef);
+            if (!notifSnap.exists()) throw "Request not found";
+            const notif = notifSnap.data();
+
+            if (notif.status !== 'pending') throw "Request already handled";
+
+            const roomId = notif.meta.matchroomId;
+            const roomRef = doc(db, 'matchrooms', roomId);
+            const roomSnap = await transaction.get(roomRef);
+            if (!roomSnap.exists()) throw "Matchroom not found";
+            const room = roomSnap.data() as Matchroom;
+
+            // Authorization
+            // Allow Host OR Zone Owner (if linked)
+            if (room.hostUid !== adminUid && room.zoneOwnerUid !== adminUid) {
+                throw "Unauthorized";
+            }
+
+            if (decision === 'reject') {
+                transaction.update(notifRef, { status: 'rejected' });
+                return { ok: true, message: "Request rejected" };
+            }
+
+            // JOIN LOGIC
+            if (isRoomLocked(room)) throw "Room is locked/full";
+            if (isRoomExpired(room)) throw "Room returned expired";
+
+            const newPlayerCount = (room.currentPlayers || 0) + 1;
+            const willBeFull = newPlayerCount >= (room.maxPlayers || 10);
+            const playerUid = notif.fromUid;
+
+            // Check if already joined
+            if ((room.playerUids || []).includes(playerUid)) {
+                transaction.update(notifRef, { status: 'accepted', message: 'Already joined' });
+                return { ok: true, message: "User is already in the room" };
+            }
+
+            // Update Room
+            const updateData: any = {
+                currentPlayers: newPlayerCount,
+                players: arrayUnion({
+                    uid: playerUid,
+                    username: notif.fromUsername || 'Player',
+                    joinedAt: new Date(),
+                    role: notif.meta.role || 'Flex'
+                }),
+                playerUids: arrayUnion(playerUid)
+            };
+
+            if (willBeFull) {
+                updateData.status = "locked";
+                updateData.isLocked = true;
+                updateData.lockedAt = serverTimestamp();
+            }
+
+            transaction.update(roomRef, updateData);
+            transaction.update(notifRef, { status: 'accepted' });
+
+            return { ok: true, message: "Request accepted", willBeFull, roomId };
+        });
+
+        if (result.ok && (result as any).willBeFull) {
+            // Auto-reject other pending requests for this room
+            try {
+                const q = query(
+                    collection(db, 'notifications'),
+                    where('meta.matchroomId', '==', (result as any).roomId),
+                    where('type', '==', 'match_join_request'),
+                    where('status', '==', 'pending')
+                );
+                const snaps = await getDocs(q);
+                const batch = writeBatch(db);
+                let count = 0;
+                snaps.forEach((doc: any) => {
+                    if (doc.id !== requestId) {
+                        batch.update(doc.ref, { status: 'rejected', reason: 'Room Full' });
+                        count++;
+                    }
+                });
+                if (count > 0) await batch.commit();
+            } catch (cleanupErr) {
+                Logger.warn("matchService", "Failed to auto-reject others", cleanupErr);
+            }
+        }
+
+        return result;
+
+    } catch (error: any) {
+        Logger.error("matchService", "respondToMatchJoinRequest error", error);
+        return { ok: false, message: typeof error === 'string' ? error : "Failed to process request" };
     }
 }
 
