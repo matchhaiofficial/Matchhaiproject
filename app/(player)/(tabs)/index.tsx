@@ -455,7 +455,20 @@ export default function PlayerDashboard() {
         pendingAmount: Math.round(totals.pendingAmount),
         transactions: intentsSnapshot.docs.length,
       });
-      setFriendCount(friendsSnapshot.size || 0);
+      const friendUids = friendsSnapshot.docs.map((docSnap: any) => docSnap.id);
+      if (friendUids.length > 0) {
+        const profileResults = await Promise.all(
+          friendUids.map((friendUid: string) => getUserProfile(friendUid)),
+        );
+        const onlineFriends = profileResults.reduce(
+          (count, result) =>
+            count + (result.ok && result.data?.isOnline ? 1 : 0),
+          0,
+        );
+        setFriendCount(onlineFriends);
+      } else {
+        setFriendCount(0);
+      }
     } catch (error) {
       Logger.error("Dashboard", "Failed loading dashboard feed", error);
       setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
