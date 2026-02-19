@@ -30,7 +30,11 @@ class Logger {
             if (error instanceof Error) {
                 errorDetails = `\nMessage: ${error.message}\nStack: ${error.stack}`;
             } else if (typeof error === 'object') {
-                errorDetails = `\nData: ${JSON.stringify(error, null, 2)}`;
+                try {
+                    errorDetails = `\nData: ${JSON.stringify(error, null, 2)}`;
+                } catch (stringifyError) {
+                    errorDetails = `\nData: [unserializable] ${String(error)}`;
+                }
             } else {
                 errorDetails = `\nError: ${String(error)}`;
             }

@@ -1,8 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -20,21 +18,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
-import { auth, db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
-import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
-import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
+import type { FaceitProfileSummary } from "../../../src/services/faceitApi";
+import type { PsnVerificationResult } from "../../../src/services/psnApi";
+import type { SteamProfileSummary } from "../../../src/services/steamApi";
 import Logger from "../../../src/utils/logger";
-import {
-    isFaceitIdAvailable,
-    isPhoneAvailable,
-    isPsnIdAvailable,
-    isSteamIdAvailable,
-    isUsernameAvailable,
-} from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import styles from "./edit.styles";
 
 // FACEIT Level Icons (matching register-step3 logic)
@@ -86,6 +78,14 @@ export default function EditProfile() {
     const { user } = useAuth();
     const { showToast } = useToast();
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const convex = useConvex();
+    const profileQuery = useQuery(api.users.getCurrentUser);
+    const updateProfile = useMutation(api.users.updateProfile);
+    const updatePlatformLinks = useMutation(api.users.updatePlatformLinks);
+    const fetchSteamProfile = useAction(api.integrations.fetchSteamProfileFromUrl);
+    const fetchFaceitProfile = useAction(api.integrations.fetchFaceitProfileFromUrl);
+    const verifyPsnProfileAction = useAction(api.integrations.verifyPsnProfile);
+    const hydratedRef = useRef<string | null>(null);
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -186,17 +186,14 @@ export default function EditProfile() {
     const isPasswordValid = hasUpper && hasLower && hasNumber && hasSpecial && isLengthValid;
 
     // Memoized Phone & Email Format Validation
-    const { isPhoneFormatValid, isEmailValid } = useMemo(() => {
+    const { isPhoneFormatValid } = useMemo(() => {
         const phoneTrimmed = phone.trim();
         const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
         const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
         const phoneFormatValid = phoneRegex.test(normalizedPhone);
 
-        const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
-        const emailValid = emailRegex.test(email.trim());
-
-        return { isPhoneFormatValid: phoneFormatValid, isEmailValid: emailValid };
-    }, [phone, email]);
+        return { isPhoneFormatValid: phoneFormatValid };
+    }, [phone]);
 
     // New email validation
     const isNewEmailValid = useMemo(() => {
@@ -206,140 +203,70 @@ export default function EditProfile() {
     }, [newEmail, email]);
 
     useEffect(() => {
-        const fetchProfile = async () => {
-            if (!user?.uid) return;
-            try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
-                    console.log("EditProfile loaded data:", JSON.stringify(data, null, 2));
-                    setFullName(data.fullName || "");
-                    setUsername(data.username || "");
-                    setOriginalUsername(data.username || "");
-                    setCity(data.city || "Karachi");
-                    setAgeRange(data.ageRange || "");
-                    // Store full email as-is
-                    const userEmail = auth.currentUser?.email || "";
-                    setEmail(userEmail);
-                    setOriginalEmail(userEmail);
-                    setPhone(data.phone || "");
-                    setOriginalPhone(data.phone || "");
-                    setSelectedAreas(data.areasPreferred || []);
+        if (profileQuery === undefined) return;
+        if (!profileQuery) {
+            setLoading(false);
+            return;
+        }
+        if (hydratedRef.current === profileQuery._id) {
+            setLoading(false);
+            return;
+        }
+        hydratedRef.current = profileQuery._id;
 
-                    // Load pending email if exists
-                    setPendingEmail(data.pendingEmail || "");
+        const data: any = profileQuery;
+        console.log("EditProfile loaded data:", JSON.stringify(data, null, 2));
+        setFullName(data.fullName || "");
+        setUsername(data.username || "");
+        setOriginalUsername(data.username || "");
+        setCity(data.city || "Karachi");
+        setAgeRange(data.ageRange || "");
+        setEmail(data.email || "");
+        setOriginalEmail(data.email || "");
+        setPhone(data.phone || "");
+        setOriginalPhone(data.phone || "");
+        setSelectedAreas(data.areasPreferred || []);
 
-                    setSteamProfileUrl(data.steamProfileUrl || "");
-                    setFaceitProfileUrl(data.faceitProfileUrl || "");
-                    setPsnOnlineId(data.psnOnlineId || "");
+        // Load pending email if exists
+        setPendingEmail(data.pendingEmail || "");
 
-                    setHideAreasPublicly(data.hideAreasPublicly || false);
-                    setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
-                    setRestrictInvitesToFriends(data.restrictInvitesToFriends || false);
+        setSteamProfileUrl(data.steamProfileUrl || "");
+        setFaceitProfileUrl(data.faceitProfileUrl || "");
+        setPsnOnlineId(data.psnOnlineId || "");
 
-                    // Hydrate verified profiles if available
-                    if (data.steamId) {
-                        setSteamProfile({
-                            steamId: data.steamId,
-                            personaName: data.steamPersonaName,
-                            cs2Hours: data.steamCs2Hours,
-                        } as SteamProfileSummary);
-                        setSteamStatus("available");
-                    }
+        setHideAreasPublicly(data.hideAreasPublicly || false);
+        setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
+        setRestrictInvitesToFriends(data.restrictInvitesToFriends || false);
 
-                    if (data.faceitId) {
-                        setFaceitProfile({
-                            faceitId: data.faceitId,
-                            nickname: data.faceitNickname,
-                            game: data.faceitGame,
-                            elo: data.faceitElo,
-                            skillLevel: data.faceitSkillLevel,
-                        } as FaceitProfileSummary);
-                        setFaceitStatus("available");
-                    }
+        // Hydrate verified profiles if available
+        if (data.steamId) {
+            setSteamProfile({
+                steamId: data.steamId,
+                personaName: data.steamPersonaName,
+                cs2Hours: data.steamCs2Hours,
+                stats: data.steamStats,
+            } as SteamProfileSummary);
+            setSteamStatus("available");
+        }
 
-                    if (data.psnStats) {
-                        setPsnStats(data.psnStats);
-                        setPsnStatus("available");
-                    }
+        if (data.faceitId) {
+            setFaceitProfile({
+                faceitId: data.faceitId,
+                nickname: data.faceitNickname,
+                game: data.faceitGame,
+                elo: data.faceitElo,
+                skillLevel: data.faceitSkillLevel,
+            } as FaceitProfileSummary);
+            setFaceitStatus("available");
+        }
 
-                }
-            } catch (e) {
-                console.error("Failed to load profile", e);
-                showToast({ type: "error", title: "Error", message: "Failed to load profile" });
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchProfile();
-    }, [user?.uid]);
+        if (data.psnStats) {
+            setPsnStats(data.psnStats);
+            setPsnStatus("available");
+        }
 
-    // Auto-refresh auth state to check for email verification
-    useEffect(() => {
-        if (!user?.uid || !pendingEmail) return;
-
-        const checkEmailUpdate = async () => {
-            try {
-                if (!auth.currentUser) return;
-
-                // Reload auth state
-                await reload(auth.currentUser);
-
-                // Check if email has been updated
-                const currentEmail = auth.currentUser.email || "";
-                if (currentEmail === pendingEmail) {
-                    // Email verified and updated!
-                    console.log("Email verified! Updating Firestore...");
-
-                    // Clear pending email from Firestore
-                    const userRef = doc(db, "users", user.uid);
-                    await updateDoc(userRef, {
-                        pendingEmail: null,
-                        updatedAt: new Date()
-                    });
-
-                    // Update local state
-                    setEmail(currentEmail);
-                    setOriginalEmail(currentEmail);
-                    setPendingEmail("");
-
-                    showToast({
-                        type: "success",
-                        title: "Email Updated",
-                        message: "Your email has been successfully updated."
-                    });
-                }
-            } catch (e: any) {
-                // Handle token expiration - common when email is verified
-                if (e?.code === 'auth/user-token-expired' || e?.code === 'auth/requires-recent-login') {
-                    // Clear the pending email state
-                    setPendingEmail("");
-
-                    // Show helpful message
-                    showToast({
-                        type: "info",
-                        title: "Email Verified",
-                        message: "Your email was updated. Please log out and log back in to continue."
-                    });
-
-                    // Stop checking
-                    return;
-                }
-                // Log other unexpected errors
-                console.error("Error checking email update:", e);
-            }
-        };
-
-        // Check immediately
-        checkEmailUpdate();
-
-        // Then check every 5 seconds
-        const interval = setInterval(checkEmailUpdate, 5000);
-
-        return () => clearInterval(interval);
-    }, [user?.uid, pendingEmail]);
-
+        setLoading(false);
+    }, [profileQuery]);
 
     // Username check (unchanged)
     const handleUsernameBlur = async () => {
@@ -354,7 +281,10 @@ export default function EditProfile() {
         }
         try {
             setUsernameStatus("checking");
-            const available = await isUsernameAvailable(trimmed);
+            const available = await convex.query(api.users.isUsernameAvailable, {
+                username: trimmed,
+                excludeUid: user?.uid,
+            });
             setUsernameStatus(available ? "available" : "taken");
         } catch {
             setUsernameStatus("idle");
@@ -381,7 +311,10 @@ export default function EditProfile() {
 
         try {
             setPhoneStatus("checking");
-            const available = await isPhoneAvailable(normalizedPhone);
+            const available = await convex.query(api.users.isPhoneAvailable, {
+                phone: normalizedPhone,
+                excludeUid: user?.uid,
+            });
             setPhoneStatus(available ? "available" : "taken");
         } catch {
             setPhoneStatus("idle");
@@ -401,6 +334,12 @@ export default function EditProfile() {
     };
 
     // --- API Verification Handlers ---
+    const getErrorMessage = (error: any) => {
+        if (!error) return "Unknown error";
+        if (typeof error === "string") return error;
+        if (error instanceof Error) return error.message;
+        return String(error);
+    };
 
     const handleSteamLookup = async () => {
         const url = steamProfileUrl.trim();
@@ -409,32 +348,30 @@ export default function EditProfile() {
             return;
         }
         setSteamLoading(true);
-        const res = await fetchSteamProfileFromUrl(url);
-        setSteamLoading(false);
+        try {
+            const res = await fetchSteamProfile({ profileUrl: url });
+            if (!res.ok) {
+                showToast({ type: "error", title: "Steam lookup failed", message: res.message || "Verification failed." });
+                setSteamProfile(null);
+                setSteamStatus("idle");
+                return;
+            }
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "Steam lookup failed", message: res.message || "Verification failed." });
-            setSteamProfile(null);
-            setSteamStatus("idle");
-            return;
-        }
-
-        // Check uniqueness
-        const available = await isSteamIdAvailable(res.data.steamId, user?.uid);
-        if (!available) {
-            setSteamStatus("taken");
+            setSteamStatus("available");
+            setSteamProfile(res.data);
+            showToast({ type: "success", title: "Verified", message: `Steam profile found: ${res.data.personaName}` });
+        } catch (e) {
+            const message = getErrorMessage(e);
+            setSteamStatus(message.toLowerCase().includes("already linked") ? "taken" : "idle");
             setSteamProfile(null);
             showToast({
                 type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
+                title: "Steam lookup failed",
+                message,
             });
-            return;
+        } finally {
+            setSteamLoading(false);
         }
-
-        setSteamStatus("available");
-        setSteamProfile(res.data);
-        showToast({ type: "success", title: "Verified", message: `Steam profile found: ${res.data.personaName}` });
     };
 
     const handleFaceitLookup = async () => {
@@ -444,32 +381,30 @@ export default function EditProfile() {
             return;
         }
         setFaceitLoading(true);
-        const res = await fetchFaceitProfileFromUrl(value);
-        setFaceitLoading(false);
+        try {
+            const res = await fetchFaceitProfile({ value, game: "cs2" });
+            if (!res.ok) {
+                showToast({ type: "error", title: "FACEIT lookup failed", message: res.message || "Verification failed." });
+                setFaceitProfile(null);
+                setFaceitStatus("idle");
+                return;
+            }
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "FACEIT lookup failed", message: res.message || "Verification failed." });
-            setFaceitProfile(null);
-            setFaceitStatus("idle");
-            return;
-        }
-
-        // Check uniqueness
-        const available = await isFaceitIdAvailable(res.data.faceitId, user?.uid);
-        if (!available) {
-            setFaceitStatus("taken");
+            setFaceitStatus("available");
+            setFaceitProfile(res.data);
+            showToast({ type: "success", title: "Verified", message: `FACEIT profile found: ${res.data.nickname}` });
+        } catch (e) {
+            const message = getErrorMessage(e);
+            setFaceitStatus(message.toLowerCase().includes("already linked") ? "taken" : "idle");
             setFaceitProfile(null);
             showToast({
                 type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
+                title: "FACEIT lookup failed",
+                message,
             });
-            return;
+        } finally {
+            setFaceitLoading(false);
         }
-
-        setFaceitStatus("available");
-        setFaceitProfile(res.data);
-        showToast({ type: "success", title: "Verified", message: `FACEIT profile found: ${res.data.nickname}` });
     };
 
     const handlePsnLookup = async () => {
@@ -479,113 +414,47 @@ export default function EditProfile() {
             return;
         }
         setPsnLoading(true);
-        // Request stats for both games as we are in profile setup
-        const res = await verifyPsnProfile(id, true, true);
-        setPsnLoading(false);
+        try {
+            const res = await verifyPsnProfileAction({ psnOnlineId: id, wantsTekken: true, wantsFc: true });
+            if (!res.ok) {
+                showToast({ type: "error", title: "PSN lookup failed", message: res.message || "Verification failed." });
+                setPsnStats(null);
+                setPsnStatus("idle");
+                return;
+            }
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "PSN lookup failed", message: res.message || "Verification failed." });
-            setPsnStats(null);
-            setPsnStatus("idle");
-            return;
-        }
-
-        // Check uniqueness
-        const available = await isPsnIdAvailable(res.data.psnAccountId, user?.uid);
-        if (!available) {
-            setPsnStatus("taken");
+            setPsnStatus("available");
+            setPsnStats(res.data);
+            showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
+        } catch (e) {
+            const message = getErrorMessage(e);
+            setPsnStatus(message.toLowerCase().includes("already linked") ? "taken" : "idle");
             setPsnStats(null);
             showToast({
                 type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
+                title: "PSN lookup failed",
+                message,
             });
-            return;
+        } finally {
+            setPsnLoading(false);
         }
-
-        setPsnStatus("available");
-        setPsnStats(res.data);
-        showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
     };
 
     const handleUpdatePassword = async () => {
-        if (!currentPassword) {
-            showToast({ type: "error", title: "Current Password Required", message: "Enter your current password." });
-            return;
-        }
-        if (!password) {
-            showToast({ type: "error", title: "New Password Required", message: "Enter a new password." });
-            return;
-        }
-        if (!isPasswordValid) {
-            showToast({ type: "error", title: "Weak Password", message: "New password does not meet security requirements." });
-            return;
-        }
-
-        setPasswordUpdating(true);
-        try {
-            if (!auth.currentUser || !auth.currentUser.email) return;
-
-            // Re-authenticate
-            const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-            await reauthenticateWithCredential(auth.currentUser, cred);
-
-            // Update
-            await updatePassword(auth.currentUser, password);
-
-            showToast({ type: "success", title: "Success", message: "Password updated successfully." });
-
-            // Clean up
-            setCurrentPassword("");
-            setPassword("");
-            setIsPasswordChanging(false);
-        } catch (e: any) {
-            console.error("Password update failed", e);
-            let msg = "Failed to update password.";
-            if (e.code === 'auth/wrong-password') msg = "Current password is incorrect.";
-            if (e.code === 'auth/requires-recent-login') msg = "Session too old. Please re-login.";
-            showToast({ type: "error", title: "Error", message: msg });
-        } finally {
-            setPasswordUpdating(false);
-        }
+        showToast({
+            type: "info",
+            title: "Coming soon",
+            message: "Password changes are not available in v1.",
+        });
     };
 
     // Email update handler
     const handleUpdateEmail = async () => {
-        if (!auth.currentUser || !isNewEmailValid || !user?.uid) return;
-
-        try {
-            setEmailUpdating(true);
-            await verifyBeforeUpdateEmail(auth.currentUser, newEmail.trim());
-
-            // Store pending email in Firestore
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, {
-                pendingEmail: newEmail.trim(),
-                updatedAt: new Date()
-            });
-
-            // Update local state
-            setPendingEmail(newEmail.trim());
-
-            showToast({
-                type: "success",
-                title: "Verification Sent",
-                message: "Check your new email for the verification link. Click it to complete the change."
-            });
-
-            setIsEmailChanging(false);
-            setNewEmail("");
-        } catch (e: any) {
-            console.error("Email update failed", e);
-            let msg = "Failed to send verification email";
-            if (e.code === 'auth/invalid-email') msg = "Invalid email format.";
-            if (e.code === 'auth/email-already-in-use') msg = "This email is already in use.";
-            if (e.code === 'auth/requires-recent-login') msg = "Please re-login to change your email.";
-            showToast({ type: "error", title: "Error", message: msg });
-        } finally {
-            setEmailUpdating(false);
-        }
+        showToast({
+            type: "info",
+            title: "Coming soon",
+            message: "Email changes are not available in v1.",
+        });
     };
 
     const handleSave = async () => {
@@ -620,16 +489,6 @@ export default function EditProfile() {
             return;
         }
 
-        // Email validation if changed
-        const localPart = email.trim();
-        const fullEmail = localPart.length > 0 ? `${localPart}@gmail.com` : "";
-        if (fullEmail !== originalEmail) {
-            if (!fullEmail.includes("@gmail.com")) {
-                showToast({ type: "error", title: "Invalid Email", message: "Only @gmail.com addresses allowed." });
-                return;
-            }
-        }
-
         if (selectedAreas.length === 0) {
             showToast({ type: "error", title: "Areas Required", message: "Select at least 1 area." });
             return;
@@ -639,80 +498,74 @@ export default function EditProfile() {
 
         setSaving(true);
         try {
-            const updates: any = {
+            const profileRes = await updateProfile({
                 fullName: fullName.trim(),
+                displayName: fullName.trim(),
+                username: username.trim() !== originalUsername ? username.trim() : undefined,
                 city,
                 ageRange,
                 phone: phone.trim(),
                 areasPreferred: selectedAreas,
-                steamProfileUrl: steamProfileUrl.trim() || null,
-                faceitProfileUrl: faceitProfileUrl.trim() || null,
-                psnOnlineId: psnOnlineId.trim() || null,
                 hideAreasPublicly,
                 hidePlatformsPublicly,
                 restrictInvitesToFriends,
-                updatedAt: new Date(),
+            });
+
+            if (!profileRes?.ok) {
+                showToast({ type: "error", title: "Error", message: profileRes?.message || "Failed to save profile" });
+                return;
+            }
+
+            const platformUpdates: any = {
+                steamProfileUrl: steamProfileUrl.trim() || null,
+                faceitProfileUrl: faceitProfileUrl.trim() || null,
+                psnOnlineId: psnOnlineId.trim() || null,
             };
 
-            // Username update
-            if (username.trim() !== originalUsername) {
-                updates.username = username.trim();
-                updates.usernameLower = username.trim().toLowerCase();
-            }
-
-            // Persist Verified Steam Profile
             if (steamProfile && steamProfileUrl.trim()) {
-                updates.steamId = steamProfile.steamId ?? null;
-                updates.steamPersonaName = steamProfile.personaName ?? null;
-                updates.steamCs2Hours = steamProfile.cs2Hours ?? null;
-                // Note: steamTekken8Hours and steamFc26Hours come from Steam API separately
+                platformUpdates.steamId = steamProfile.steamId ?? null;
+                platformUpdates.steamPersonaName = steamProfile.personaName ?? null;
+                platformUpdates.steamCs2Hours = steamProfile.cs2Hours ?? null;
+                platformUpdates.steamStats = steamProfile.stats ?? null;
             } else if (!steamProfileUrl.trim()) {
-                // Clear ALL Steam data if URL is cleared
-                updates.steamId = null;
-                updates.steamPersonaName = null;
-                updates.steamCs2Hours = null;
-                updates.steamTekken8Hours = null;
-                updates.steamFc26Hours = null;
-                updates.steamStats = null;
+                platformUpdates.steamId = null;
+                platformUpdates.steamPersonaName = null;
+                platformUpdates.steamCs2Hours = null;
+                platformUpdates.steamTekken8Hours = null;
+                platformUpdates.steamFc26Hours = null;
+                platformUpdates.steamStats = null;
             }
 
-            // Persist Verified FACEIT Profile
             if (faceitProfile && faceitProfileUrl.trim()) {
-                updates.faceitId = faceitProfile.faceitId ?? null;
-                updates.faceitNickname = faceitProfile.nickname ?? null;
-                updates.faceitGame = faceitProfile.game ?? null;
-                updates.faceitElo = faceitProfile.elo ?? null;
-                updates.faceitSkillLevel = faceitProfile.skillLevel ?? null;
+                platformUpdates.faceitId = faceitProfile.faceitId ?? null;
+                platformUpdates.faceitNickname = faceitProfile.nickname ?? null;
+                platformUpdates.faceitGame = faceitProfile.game ?? null;
+                platformUpdates.faceitElo = faceitProfile.elo ?? null;
+                platformUpdates.faceitSkillLevel = faceitProfile.skillLevel ?? null;
             } else if (!faceitProfileUrl.trim()) {
-                // Clear ALL FACEIT data if URL is cleared
-                updates.faceitId = null;
-                updates.faceitNickname = null;
-                updates.faceitGame = null;
-                updates.faceitElo = null;
-                updates.faceitSkillLevel = null;
+                platformUpdates.faceitId = null;
+                platformUpdates.faceitNickname = null;
+                platformUpdates.faceitGame = null;
+                platformUpdates.faceitElo = null;
+                platformUpdates.faceitSkillLevel = null;
             }
 
-            // Persist Verified PSN Stats
             if (psnStats && psnOnlineId.trim()) {
-                updates.psnStats = psnStats;
+                platformUpdates.psnStats = psnStats;
             } else if (!psnOnlineId.trim()) {
-                // Clear ALL PSN data if ID is cleared
-                updates.psnStats = null;
+                platformUpdates.psnStats = null;
             }
 
-            // Auth Updates - Email is read-only, no updates needed
-
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            await updatePlatformLinks(platformUpdates);
 
             showToast({ type: "success", title: "Saved", message: "Profile updated successfully" });
             router.back();
         } catch (e: any) {
             console.error("Save failed", e);
             let msg = "Failed to save changes";
-            if (e.code === 'auth/requires-recent-login') msg = "Please re-login to change sensitive data.";
-            if (e.code === 'auth/wrong-password') msg = "Current password is incorrect.";
-            if (e.code === 'auth/operation-not-allowed') msg = "Email change requires verification. Please contact support or use the current email.";
+            if (typeof e?.message === "string" && e.message.length > 0) {
+                msg = e.message;
+            }
             showToast({ type: "error", title: "Error", message: msg });
         } finally {
             setSaving(false);

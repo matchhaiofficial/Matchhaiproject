@@ -31,6 +31,19 @@ function normalizeUsername(raw?: string | null): { username: string | null; user
   return { username: trimmed, usernameLower: trimmed.toLowerCase() };
 }
 
+function displayNameFromEmail(email?: string | null): string | null {
+  if (!email) return null;
+  const handle = email.split("@")[0]?.trim();
+  if (!handle) return null;
+  const cleaned = handle.replace(/[._-]+/g, " ").trim();
+  if (!cleaned) return handle;
+  return cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 type Ctx = MutationCtx | QueryCtx;
 
 async function assertUniqueByIndex(
@@ -67,6 +80,63 @@ export const getCurrentUser = query({
   },
 });
 
+export const listPlayers = query({
+  args: {
+    limit: v.optional(v.number()),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 100, 1), 200);
+    const search = String(args.search ?? "").trim();
+
+    if (search) {
+      const searchResults = await ctx.db
+        .query("users")
+        .withSearchIndex("search_displayName", (q) =>
+          q.search("displayName", search).eq("accountType", "player"),
+        )
+        .take(limit);
+
+      if (searchResults.length >= limit) {
+        return searchResults;
+      }
+
+      const fallbackPool = await ctx.db
+        .query("users")
+        .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
+        .order("desc")
+        .take(200);
+
+      const searchLower = search.toLowerCase();
+      const fallbackMatches = fallbackPool.filter((user) => {
+        const username = String(user.username || "").toLowerCase();
+        const displayName = String(user.displayName || "").toLowerCase();
+        const fullName = String(user.fullName || "").toLowerCase();
+        const email = String(user.email || "").toLowerCase();
+        return (
+          username.includes(searchLower) ||
+          displayName.includes(searchLower) ||
+          fullName.includes(searchLower) ||
+          email.includes(searchLower)
+        );
+      });
+
+      const merged = new Map<string, any>();
+      searchResults.forEach((user) => merged.set(String(user._id), user));
+      fallbackMatches.forEach((user) => merged.set(String(user._id), user));
+      return Array.from(merged.values()).slice(0, limit);
+    }
+
+    const items = await ctx.db
+      .query("users")
+      .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
+      .order("desc")
+      .take(200);
+
+    return items.slice(0, limit);
+  },
+});
+
 export const upsertCurrentUser = mutation({
   args: {
     accountType: v.optional(v.union(v.string(), v.null())),
@@ -87,12 +157,26 @@ export const upsertCurrentUser = mutation({
       if (!existing.uid) {
         updates.uid = identity.subject;
       }
+      const identityEmail = normalizeEmail(identity.email);
+      if (!existing.email && identityEmail) {
+        updates.email = identityEmail;
+      }
 
       if (args.fullName !== undefined) {
         updates.fullName = args.fullName ? args.fullName.trim() : null;
       }
       if (args.displayName !== undefined) {
         updates.displayName = args.displayName ? args.displayName.trim() : null;
+      } else if (!existing.displayName) {
+        const fallback =
+          updates.fullName ||
+          existing.fullName ||
+          identity.name ||
+          existing.username ||
+          displayNameFromEmail(identityEmail);
+        if (fallback) {
+          updates.displayName = String(fallback).trim();
+        }
       }
       if (args.username !== undefined) {
         const { username, usernameLower } = normalizeUsername(args.username);
@@ -135,11 +219,19 @@ export const upsertCurrentUser = mutation({
       await assertUniqueByIndex(ctx, "phone", "phone", normalizedPhone, null, "Phone already in use.");
     }
 
+    const email = normalizeEmail(identity.email) ?? undefined;
+    const fullName =
+      args.fullName ? args.fullName.trim() : identity.name ?? undefined;
+    const displayName =
+      args.displayName && args.displayName.trim().length > 0
+        ? args.displayName.trim()
+        : fullName || displayNameFromEmail(email);
+
     const userId = await ctx.db.insert("users", {
       uid: identity.subject,
-      email: normalizeEmail(identity.email) ?? undefined,
-      fullName: args.fullName ? args.fullName.trim() : identity.name ?? undefined,
-      displayName: args.displayName ? args.displayName.trim() : undefined,
+      email,
+      fullName,
+      displayName: displayName || undefined,
       username: username ?? undefined,
       usernameLower: usernameLower ?? undefined,
       phone: normalizedPhone ?? undefined,
@@ -347,6 +439,7 @@ export const updateGamePreferences = mutation({
     indoorCricketBattingStyle: v.optional(v.union(v.string(), v.null())),
     padelRole: v.optional(v.union(v.string(), v.null())),
     pickleballRole: v.optional(v.union(v.string(), v.null())),
+    skillScores: v.optional(v.any()),
   },
   handler: async (ctx, args): Promise<ServerResponse> => {
     const { user } = await requireUser(ctx);
@@ -380,6 +473,7 @@ export const updateGamePreferences = mutation({
     }
     if (args.padelRole !== undefined) updates.padelRole = args.padelRole ?? null;
     if (args.pickleballRole !== undefined) updates.pickleballRole = args.pickleballRole ?? null;
+    if (args.skillScores !== undefined) updates.skillScores = args.skillScores ?? null;
 
     await ctx.db.patch(user._id, updates);
     return { ok: true };

@@ -2,7 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useConvexSignOut } from "../../../src/utils/convexAuth";
 import {
     ActivityIndicator,
     FlatList,
@@ -23,7 +23,7 @@ export default function PendingApprovals() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const { showToast } = useToast();
-    const { signOut } = useAuthActions();
+    const signOut = useConvexSignOut();
 
     const fetchPending = async () => {
         setLoading(true);

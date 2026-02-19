@@ -11,7 +11,7 @@ import {
   addNotificationResponseReceivedListener,
   getLastNotificationResponseAsync,
 } from "expo-notifications/build/NotificationsEmitter";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { ConvexAuthProvider, useAuthActions } from "@convex-dev/auth/react";
 
 // Suppress the keep-awake error in development (Expo internal issue)
 LogBox.ignoreLogs([
@@ -61,6 +61,26 @@ import { COLORS } from "../src/theme";
 import { toastConfig } from "../src/ui/toastConfig";
 import { convex } from "../src/config/convexClient";
 import { convexAuthStorage } from "../src/config/convexAuthStorage";
+import { clearConvexAuthStorage } from "../src/utils/convexAuth";
+
+function ForceSignOutOnStart() {
+  const { signOut } = useAuthActions();
+  const ranRef = React.useRef(false);
+
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_FORCE_SIGN_OUT !== "1") return;
+    if (ranRef.current) return;
+    ranRef.current = true;
+
+    void signOut()
+      .catch(() => null)
+      .finally(() => {
+        void clearConvexAuthStorage();
+      });
+  }, [signOut]);
+
+  return null;
+}
 
 export default function RootLayout() {
   const [montLoaded] = useMontserrat({
@@ -214,6 +234,7 @@ export default function RootLayout() {
   return (
     <ConvexAuthProvider client={convex} storage={convexAuthStorage}>
       <AuthProvider>
+        <ForceSignOutOnStart />
         <View style={{ flex: 1, backgroundColor: COLORS.background }}>
           <StatusBar style="light" translucent backgroundColor="transparent" />
           <InAppNotificationBridge />

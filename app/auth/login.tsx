@@ -311,7 +311,7 @@ export default function Login() {
         message: "You're now signed in.",
       });
 
-      router.replace("/");
+      // Let AuthContext finish bootstrapping the user and handle routing.
     } catch (e) {
       console.error("[Login] signIn threw error", e);
       setLoading(false);

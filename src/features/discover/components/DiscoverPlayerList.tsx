@@ -1,9 +1,10 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { useConvex, useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import type { Doc } from "../../../../convex/_generated/dataModel";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
@@ -100,7 +101,16 @@ interface DiscoverPlayerListProps {
 export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadding, bottomPadding }: DiscoverPlayerListProps) {
     const router = useRouter();
     const { user } = useAuth();
-    const [players, setPlayers] = useState<Player[]>([]);
+    const convex = useConvex();
+    const searchTerm = searchQuery.trim();
+    const playersQuery = useQuery(api.users.listPlayers, { limit: 200, search: searchTerm || undefined });
+    const friendsQuery = useQuery(api.users.listFriends, user ? {} : "skip");
+    const outgoingRequestsQuery = useQuery(
+        api.notifications.listOutgoingByType,
+        user ? { type: "friend_request", status: "pending" } : "skip",
+    );
+    const sendFriendRequest = useMutation(api.users.sendFriendRequest);
+
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -115,84 +125,69 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
     const [pendingUids, setPendingUids] = useState<Set<string>>(new Set()); // Outgoing requests
     const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-    const fetchSocialState = async () => {
-        if (!user) return;
-        try {
-            // 1. Fetch Friends
-            const friendsSnap = await getDocs(collection(db, "users", user.uid, "friends"));
-            const friends = new Set<string>();
-            friendsSnap.forEach(doc => friends.add(doc.id));
-            setFriendUids(friends);
-
-            // 2. Fetch Pending Outgoing Requests
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "friend_request"),
-                where("status", "==", "pending")
-            );
-            const pendingSnap = await getDocs(q);
-            const pending = new Set<string>();
-            pendingSnap.forEach(doc => pending.add(doc.data().toUid));
-            setPendingUids(pending);
-
-        } catch (e) {
-            console.error("Error fetching social state", e);
-        }
-    };
-
-    const fetchPlayers = async () => {
-        if (!user) return;
-        try {
-            let q = query(collection(db, "users"), where("accountType", "==", "player"));
-
-            const snapshot = await getDocs(q);
-            const loadedPlayers: Player[] = [];
-
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                // Exclude self
-                if (doc.id === user?.uid) return;
-
-                // Construct roles object from flattened fields
+    const players = useMemo<Player[]>(() => {
+        const source = playersQuery ?? [];
+        return source
+            .filter((doc: Doc<"users">) => {
+                const docUid = doc.uid || String(doc._id);
+                return user?.uid ? docUid !== user.uid : true;
+            })
+            .map((doc: Doc<"users">) => {
                 const roles: Record<string, string> = {};
-                if (data.cs2Role) roles.cs2Role = data.cs2Role;
-                if (data.fc26Role) roles.fc26Role = data.fc26Role;
-                if (data.padelRole) roles.padelRole = data.padelRole;
-                if (data.pickleballRole) roles.pickleballRole = data.pickleballRole;
-                const futsalPositions = Array.isArray(data.futsalPositions) ? data.futsalPositions.filter(Boolean) : [];
-                const futsalRole = futsalPositions[0] || data.futsalPosition;
-                if (futsalRole) roles.futsalRole = futsalRole; // Futsal uses 'position(s)'
-                if (data.indoorCricketRole) roles.indoor_cricketRole = data.indoorCricketRole;
-                // Add other roles as needed
+                if (doc.cs2Role) roles.cs2Role = doc.cs2Role;
+                if (doc.padelRole) roles.padelRole = doc.padelRole;
+                if (doc.pickleballRole) roles.pickleballRole = doc.pickleballRole;
+                const futsalPositions = Array.isArray(doc.futsalPositions) ? doc.futsalPositions.filter(Boolean) : [];
+                const futsalRole = futsalPositions[0] || doc.futsalPosition;
+                if (futsalRole) roles.futsalRole = futsalRole;
+                if (doc.indoorCricketRole) roles.indoor_cricketRole = doc.indoorCricketRole;
 
-                loadedPlayers.push({
-                    uid: doc.id,
-                    username: data.username || "Unknown",
-                    primaryGames: data.primaryGames || [],
-                    skillLevel: data.skillLevel || "Beginner",
-                    isOnline: data.isOnline || false,
-                    roles: roles,
-                    faceitElo: data.faceitElo,
-                    skillScores: data.skillScores || {},
-                    fcTeam: data.fcTeam,
-                    tekkenFavorites: data.tekkenFavorites || []
-                });
+                const primaryGames: string[] = [];
+                if (doc.playsCs2) primaryGames.push("cs2");
+                if (doc.playsFc) primaryGames.push("fc26");
+                if (doc.playsTekken) primaryGames.push("tekken8");
+                if (doc.playsFutsal) primaryGames.push("futsal");
+                if (doc.playsIndoorCricket) primaryGames.push("indoor_cricket");
+                if (doc.playsPadel) primaryGames.push("padel");
+                if (doc.playsPickleball) primaryGames.push("pickleball");
+
+                return {
+                    uid: doc.uid || String(doc._id),
+                    username: doc.username || doc.displayName || doc.fullName || "Unknown",
+                    primaryGames,
+                    skillLevel: "Beginner",
+                    isOnline: doc.isOnline || false,
+                    roles,
+                    faceitElo: doc.faceitElo,
+                    skillScores: doc.skillScores || {},
+                    fcTeam: doc.fcTeam,
+                    tekkenFavorites: doc.tekkenFavorites || [],
+                };
             });
-
-            setPlayers(loadedPlayers);
-        } catch (error) {
-            Logger.error("DiscoverPlayers", "Error fetching players", error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+    }, [playersQuery, user?.uid]);
 
     useEffect(() => {
-        fetchPlayers();
-        fetchSocialState();
-    }, [user]);
+        if (playersQuery === undefined) return;
+        setLoading(false);
+    }, [playersQuery]);
+
+    useEffect(() => {
+        if (!friendsQuery) return;
+        const friends = new Set<string>();
+        friendsQuery.forEach((friend: any) => {
+            if (friend?.friendId) friends.add(String(friend.friendId));
+        });
+        setFriendUids(friends);
+    }, [friendsQuery]);
+
+    useEffect(() => {
+        if (!outgoingRequestsQuery) return;
+        const pending = new Set<string>();
+        outgoingRequestsQuery.forEach((notif: any) => {
+            if (notif?.toUid) pending.add(String(notif.toUid));
+        });
+        setPendingUids(pending);
+    }, [outgoingRequestsQuery]);
 
     // Reset filters
     useEffect(() => {
@@ -204,20 +199,32 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
         }
     }, [selectedGame]);
 
-    const onRefresh = () => {
+    const onRefresh = async () => {
         setRefreshing(true);
-        fetchPlayers();
-        fetchSocialState();
+        try {
+            await Promise.all([
+                convex.query(api.users.listPlayers, { limit: 200, search: searchTerm || undefined }),
+                user ? convex.query(api.users.listFriends, {}) : Promise.resolve(),
+                user
+                    ? convex.query(api.notifications.listOutgoingByType, {
+                        type: "friend_request",
+                        status: "pending",
+                    })
+                    : Promise.resolve(),
+            ]);
+        } catch (error) {
+            Logger.error("DiscoverPlayers", "Refresh failed", error);
+        } finally {
+            setRefreshing(false);
+        }
     };
 
     const handleAddFriend = async (targetUid: string) => {
         if (actionLoading) return;
         setActionLoading(targetUid);
         try {
-            // Dynamic import to avoid cycles or ensure freshness
-            const { sendFriendRequest } = require("../../../../src/services/functions");
             const res = await sendFriendRequest({ toUid: targetUid });
-            if (res.ok) {
+            if (res?.ok !== false) {
                 // Optimistic update
                 const newPending = new Set(pendingUids);
                 newPending.add(targetUid);
@@ -233,7 +240,10 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
     };
 
     const filteredPlayers = players.filter(player => {
-        const matchesSearch = player.username.toLowerCase().includes(searchQuery.toLowerCase());
+        const applySearchFilter = searchTerm.length === 0;
+        const matchesSearch = applySearchFilter
+            ? player.username.toLowerCase().includes(searchTerm.toLowerCase())
+            : true;
 
         // Game Match
         const matchesGame = selectedGame !== 'all'

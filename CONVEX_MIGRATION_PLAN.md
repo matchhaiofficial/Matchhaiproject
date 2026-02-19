@@ -210,18 +210,18 @@ Guideline: migrate one vertical slice at a time; remove Firebase usage in that s
   - [x] Decide what to do with `app/auth/forgot-password.tsx` for v1 (hide/remove or show “coming soon”).
 
 ### Slice B: Profile
-- [ ] `app/(player)/(tabs)/profile.tsx` reads user via `useQuery`.
-- [ ] `app/(player)/profile/edit.tsx` uses mutations to update profile fields.
-- [ ] `app/(player)/profile/game-details.tsx` uses mutations for games/roles.
-- [ ] Platform verification UX calls Convex actions (no direct HTTP to Node services).
+- [x] `app/(player)/(tabs)/profile.tsx` reads user via `useQuery`.
+- [x] `app/(player)/profile/edit.tsx` uses mutations to update profile fields.
+- [x] `app/(player)/profile/game-details.tsx` uses mutations for games/roles.
+- [x] Platform verification UX calls Convex actions (no direct HTTP to Node services).
 
 ### Slice C: Discover + Search
-- [ ] Migrate `src/features/discover/*` lists to Convex queries:
-  - [ ] Matchrooms.
-  - [ ] Teams.
-  - [ ] Zones.
-  - [ ] Players.
-- [ ] Implement Convex search indexes + UI wiring for search matchmaking.
+- [x] Migrate `src/features/discover/*` lists to Convex queries:
+  - [x] Matchrooms.
+  - [x] Teams.
+  - [x] Zones.
+  - [x] Players.
+- [x] Implement Convex search indexes + UI wiring for search matchmaking.
 
 ### Slice D: Matchrooms + Chat
 - [ ] Migrate `app/(player)/(tabs)/matchrooms.tsx`, `app/matchrooms/[id].tsx` to Convex queries/mutations.

@@ -42,6 +42,22 @@ const normalizePhone = (raw?: string | null): string | null => {
   return digits.length > 0 ? digits : null;
 };
 
+const buildZoneSearchText = (zone: {
+  venueBrandName?: string | null;
+  primaryBranch?: { city?: string | null; areaLabel?: string | null } | null;
+  primaryArea?: string | null;
+}) => {
+  const parts = [
+    zone.venueBrandName,
+    zone.primaryBranch?.city,
+    zone.primaryBranch?.areaLabel,
+    zone.primaryArea,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return parts.join(" ");
+};
+
 const isRuleDateMatch = (rule: any, at: Date) => {
   const currentDate = toDateOnlyKey(at);
   if (rule.validFrom && currentDate < rule.validFrom) return false;
@@ -332,6 +348,13 @@ export const registerZone = mutation({
       capacity,
       pricing: mappedBranches[0]?.pricing ?? null,
       notes: String(primaryBranch?.notes || "").trim() || undefined,
+      searchText: buildZoneSearchText({
+        venueBrandName: String(step1.venueBrandName || "").trim(),
+        primaryBranch: {
+          city: String(primaryBranch?.city || "").trim() || null,
+          areaLabel: String(primaryBranch?.areaLabel || "").trim() || null,
+        },
+      }),
       createdAt: now,
       updatedAt: now,
     });
@@ -360,6 +383,10 @@ export const createZone = mutation({
       type: args.type ?? undefined,
       status: "draft",
       primaryArea: args.primaryArea ?? undefined,
+      searchText: buildZoneSearchText({
+        venueBrandName: args.venueBrandName ?? null,
+        primaryArea: args.primaryArea ?? null,
+      }),
       createdAt: now,
       updatedAt: now,
     });
@@ -394,6 +421,17 @@ export const updateZone = mutation({
     if (args.rejectionReason !== undefined) updates.rejectionReason = args.rejectionReason ?? null;
     if (args.primaryArea !== undefined) updates.primaryArea = args.primaryArea ?? null;
     if (args.notes !== undefined) updates.notes = args.notes ?? null;
+
+    const nextVenueBrandName =
+      args.venueBrandName !== undefined ? args.venueBrandName : zone.venueBrandName;
+    const nextPrimaryArea =
+      args.primaryArea !== undefined ? args.primaryArea : zone.primaryArea;
+    const nextPrimaryBranch = zone.primaryBranch ?? null;
+    updates.searchText = buildZoneSearchText({
+      venueBrandName: nextVenueBrandName ?? null,
+      primaryBranch: nextPrimaryBranch ?? null,
+      primaryArea: nextPrimaryArea ?? null,
+    });
 
     await ctx.db.patch(args.zoneId, updates);
     return { ok: true };
@@ -715,9 +753,51 @@ export const getZoneAnalytics = query({
 });
 
 export const listActiveZones = query({
-  args: { limit: v.optional(v.number()) },
+  args: {
+    limit: v.optional(v.number()),
+    search: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
+    const search = String(args.search ?? "").trim();
+
+    if (search) {
+      const searchResults = await ctx.db
+        .query("zones")
+        .withSearchIndex("search_text", (q) =>
+          q.search("searchText", search).eq("status", "active"),
+        )
+        .take(limit);
+
+      if (searchResults.length >= limit) {
+        return searchResults;
+      }
+
+      const fallbackPool = await ctx.db
+        .query("zones")
+        .withIndex("by_status", (q) => q.eq("status", "active"))
+        .order("desc")
+        .take(200);
+
+      const searchLower = search.toLowerCase();
+      const fallbackMatches = fallbackPool.filter((zone) => {
+        const name = String(zone.venueBrandName || "").toLowerCase();
+        const city = String(zone.primaryBranch?.city || "").toLowerCase();
+        const area = String(zone.primaryBranch?.areaLabel || "").toLowerCase();
+        return (
+          name.includes(searchLower) ||
+          city.includes(searchLower) ||
+          area.includes(searchLower)
+        );
+      });
+
+      const merged = new Map<string, any>();
+      searchResults.forEach((zone) => merged.set(String(zone._id), zone));
+      fallbackMatches.forEach((zone) => merged.set(String(zone._id), zone));
+
+      return Array.from(merged.values()).slice(0, limit);
+    }
+
     return await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "active"))

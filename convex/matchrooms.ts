@@ -19,6 +19,25 @@ const parseScheduledAt = (date?: string | null, time?: string | null) => {
   return Number.isNaN(dt.getTime()) ? null : dt.getTime();
 };
 
+const buildSearchText = (args: {
+  title?: string | null;
+  game?: string | null;
+  location?: string | null;
+  format?: string | null;
+  seriesType?: string | null;
+}) => {
+  const parts = [
+    args.title,
+    args.game,
+    args.location,
+    args.format,
+    args.seriesType,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return parts.join(" ");
+};
+
 const ensureHostInPlayers = (
   players: Array<any>,
   hostUid: string,
@@ -239,6 +258,13 @@ export const createMatchroom = mutation({
       paymentReservedSlots: args.paymentReservedSlots ?? undefined,
       paymentCurrency: args.paymentCurrency ?? undefined,
       walkIn: args.walkIn ?? undefined,
+      searchText: buildSearchText({
+        title: args.title,
+        game: args.game,
+        location: args.location,
+        format: args.format,
+        seriesType: args.seriesType,
+      }),
     });
 
     const participantUids = Array.from(new Set([user.uid, ...playerUids, ...(zoneOwnerUid ? [zoneOwnerUid] : [])]));
@@ -264,14 +290,67 @@ const sortByCreatedAtDesc = (rooms: Array<Record<string, any>>) =>
   [...rooms].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 
 export const listRecentMatchrooms = query({
-  args: { limit: v.optional(v.number()) },
+  args: {
+    limit: v.optional(v.number()),
+    search: v.optional(v.string()),
+    game: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(args.limit ?? 40, 1), 100);
-    return await ctx.db
+    const search = String(args.search ?? "").trim();
+    const gameFilter = args.game && args.game !== "all" ? args.game : null;
+
+    if (search) {
+      const searchResults = await ctx.db
+        .query("matchrooms")
+        .withSearchIndex("search_text", (q) => {
+          let builder = q.search("searchText", search);
+          if (gameFilter) builder = builder.eq("game", gameFilter);
+          return builder;
+        })
+        .take(limit);
+
+      if (searchResults.length >= limit) {
+        return searchResults;
+      }
+
+      const fallbackPool = await ctx.db
+        .query("matchrooms")
+        .withIndex("by_createdAt")
+        .order("desc")
+        .take(200);
+
+      const searchLower = search.toLowerCase();
+      const fallbackMatches = fallbackPool.filter((room) => {
+        const title = String(room.title || "").toLowerCase();
+        const game = String(room.game || "").toLowerCase();
+        const location = String(room.location || "").toLowerCase();
+        const matches =
+          title.includes(searchLower) ||
+          game.includes(searchLower) ||
+          location.includes(searchLower);
+        if (!matches) return false;
+        if (gameFilter && room.game !== gameFilter) return false;
+        return true;
+      });
+
+      const merged = new Map<string, any>();
+      searchResults.forEach((room) => merged.set(String(room._id), room));
+      fallbackMatches.forEach((room) => merged.set(String(room._id), room));
+
+      return Array.from(merged.values()).slice(0, limit);
+    }
+
+    let q = ctx.db
       .query("matchrooms")
       .withIndex("by_createdAt")
-      .order("desc")
-      .take(limit);
+      .order("desc");
+
+    if (gameFilter) {
+      q = q.filter((q) => q.eq(q.field("game"), gameFilter));
+    }
+
+    return await q.take(limit);
   },
 });
 
@@ -286,7 +365,8 @@ export const listUserMatchrooms = query({
         .collect(),
       ctx.db
         .query("matchrooms")
-        .filter((q) => q.contains(q.field("playerUids"), user.uid))
+        // Convex supports multikey indexes on array fields, but types expect the full array.
+        .withIndex("by_playerUid", (q) => q.eq("playerUids", user.uid as any))
         .collect(),
     ]);
 

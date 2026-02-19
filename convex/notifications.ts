@@ -8,12 +8,16 @@ export const listNotifications = query({
     cursorCreatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { user } = await requireUser(ctx);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { items: [], nextCursor: null };
+    }
+    const uid = identity.subject;
     const limit = Math.min(Math.max(args.limit ?? 30, 1), 100);
 
     let q = ctx.db
       .query("notifications")
-      .withIndex("by_toUid_createdAt", (q) => q.eq("toUid", user.uid))
+      .withIndex("by_toUid_createdAt", (q) => q.eq("toUid", uid))
       .order("desc");
 
     if (args.cursorCreatedAt) {
@@ -25,6 +29,32 @@ export const listNotifications = query({
       items.length > 0 ? (items[items.length - 1].createdAt as number) : null;
 
     return { items, nextCursor };
+  },
+});
+
+export const listOutgoingByType = query({
+  args: {
+    type: v.string(),
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [];
+    }
+    const uid = identity.subject;
+
+    let q = ctx.db
+      .query("notifications")
+      .withIndex("by_fromUid_createdAt", (q) => q.eq("fromUid", uid))
+      .order("desc")
+      .filter((q) => q.eq(q.field("type"), args.type));
+
+    if (args.status) {
+      q = q.filter((q) => q.eq(q.field("status"), args.status));
+    }
+
+    return await q.collect();
   },
 });
 

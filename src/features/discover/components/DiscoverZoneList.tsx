@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -11,7 +11,9 @@ import {
     View
 } from "react-native";
 
-import { getActiveZones, Zone } from "../../../../src/services/zoneService";
+import { useConvex, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import type { Doc } from "../../../../convex/_generated/dataModel";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
@@ -25,9 +27,16 @@ interface DiscoverZoneListProps {
     bottomPadding?: number;
 }
 
+type ZoneRow = Doc<"zones"> & { id: string; effectiveRateLabel?: string | null };
+
 export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQuery, selectedVenueType, edgePadding, bottomPadding }: DiscoverZoneListProps) {
     const router = useRouter();
-    const [zones, setZones] = useState<Zone[]>([]);
+    const convex = useConvex();
+    const searchTerm = searchQuery.trim();
+    const zonesQuery = useQuery(api.zones.listActiveZones, {
+        limit: 200,
+        search: searchTerm || undefined,
+    });
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -62,36 +71,133 @@ export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQu
         return [];
     };
 
-    const fetchZones = async () => {
-        try {
-            // Use internal game filter if venue type is selected, otherwise fetch all
-            const gameParam = internalSelectedGame === 'all' ? undefined : internalSelectedGame;
+    const zones = useMemo<ZoneRow[]>(() => {
+        const source = zonesQuery ?? [];
+        return source.map((zone: any) => ({
+            ...zone,
+            id: String(zone._id),
+        }));
+    }, [zonesQuery]);
 
-            const res = await getActiveZones(gameParam);
-            if (res.ok && res.data) {
-                setZones(res.data);
-            }
-        } catch (e) {
-            Logger.error("DiscoverZones", "Failed to fetch zones", e);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+    useEffect(() => {
+        if (zonesQuery === undefined) return;
+        setLoading(false);
+    }, [zonesQuery]);
 
     useEffect(() => {
         setInternalSelectedGame('all');
     }, [selectedVenueType]);
 
     useEffect(() => {
-        setLoading(true);
         setSelectedProximity('Any');
-        fetchZones();
     }, [internalSelectedGame]);
 
-    const onRefresh = () => {
+    const onRefresh = async () => {
         setRefreshing(true);
-        fetchZones();
+        try {
+            await convex.query(api.zones.listActiveZones, {
+                limit: 200,
+                search: searchTerm || undefined,
+            });
+        } catch (e) {
+            Logger.error("DiscoverZones", "Failed to refresh zones", e);
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
+    const normalizeSupportKey = (gameKey: string) => {
+        if (gameKey === 'fc26') return 'fc25';
+        if (gameKey === 'indoor_cricket') return 'indoorCricket';
+        return gameKey;
+    };
+
+    const supportsGame = (zone: ZoneRow, gameKey: string) => {
+        if (gameKey === 'all') return true;
+        const normalized = normalizeSupportKey(gameKey);
+        const field = `supports${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+        const supports = (zone.games as any)?.[field] === true;
+        if (!supports) return false;
+
+        if (gameKey === 'cs2') {
+            const pcSeats = zone.capacity?.pcSeats ?? 0;
+            return pcSeats > 0;
+        }
+
+        if (['fc25', 'fc26', 'tekken8'].includes(gameKey)) {
+            const consoleSeats = zone.capacity?.consoleSeats ?? 0;
+            return consoleSeats > 0;
+        }
+
+        return true;
+    };
+
+    const getEffectiveRateLabel = (zone: ZoneRow) => {
+        if (internalSelectedGame === 'all') return zone.effectiveRateLabel ?? null;
+        const pricing = (zone.branches?.[0]?.pricing ?? zone.pricing) as any;
+        if (!pricing) return null;
+
+        const labelFor = (rate: number | null, suffix: string) =>
+            rate ? `${rate} PKR/hr (${suffix})` : null;
+
+        switch (internalSelectedGame) {
+            case 'cs2': {
+                const rate =
+                    pricing.pc?.regular?.price ||
+                    pricing.pc?.premium?.price ||
+                    pricing.pc?.elite?.price ||
+                    null;
+                return labelFor(rate, 'Regular');
+            }
+            case 'fc26':
+            case 'fc25':
+            case 'tekken8': {
+                const ps5 = pricing.console?.ps5 || {};
+                const xbox = pricing.console?.xbox || {};
+                const ps5Rate = ps5.price1v1 || ps5.price || ps5.price2v2 || null;
+                const xboxRate = xbox.price1v1 || xbox.price || xbox.price2v2 || null;
+                const rate = ps5Rate || xboxRate || null;
+                return rate ? `${rate} PKR/hr (${ps5Rate ? 'PS5' : 'Xbox'})` : null;
+            }
+            case 'futsal': {
+                const futsal = pricing.futsal;
+                if (!futsal) return null;
+                const keys = Object.keys(futsal);
+                if (keys.length === 0) return null;
+                const key = futsal["5v5"] ? "5v5" : keys[0];
+                const rate = futsal[key]?.price || null;
+                return labelFor(rate, key);
+            }
+            case 'indoor_cricket': {
+                const indoor = pricing.indoorCricket || pricing.indoor_cricket;
+                if (!indoor) return null;
+                const keys = Object.keys(indoor);
+                if (keys.length === 0) return null;
+                const key = keys[0];
+                const rate = indoor[key]?.price || null;
+                return labelFor(rate, key);
+            }
+            case 'padel': {
+                const padel = pricing.padel;
+                if (!padel) return null;
+                const keys = Object.keys(padel);
+                if (keys.length === 0) return null;
+                const key = keys[0];
+                const rate = padel[key]?.price || null;
+                return labelFor(rate, key);
+            }
+            case 'pickleball': {
+                const pickleball = pricing.pickleball;
+                if (!pickleball) return null;
+                const keys = Object.keys(pickleball);
+                if (keys.length === 0) return null;
+                const key = keys[0];
+                const rate = pickleball[key]?.price || null;
+                return labelFor(rate, key);
+            }
+            default:
+                return null;
+        }
     };
 
     // Filter zones based on venue type and other filters
@@ -104,7 +210,11 @@ export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQu
             // Hybrid zones show in both
         }
 
-        if (searchQuery) {
+        if (internalSelectedGame !== 'all' && !supportsGame(zone, internalSelectedGame)) {
+            return false;
+        }
+
+        if (searchTerm.length === 0 && searchQuery) {
             const query = searchQuery.toLowerCase();
             const matchesName = zone.venueBrandName?.toLowerCase().includes(query);
             const matchesCity = zone.primaryBranch?.city?.toLowerCase().includes(query);
@@ -130,11 +240,11 @@ export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQu
         return true;
     });
 
-    const renderZoneItem = ({ item }: { item: Zone }) => {
+    const renderZoneItem = ({ item }: { item: ZoneRow }) => {
         const address = [item.primaryBranch?.areaLabel, item.primaryBranch?.city].filter(Boolean).join(", ");
-        const isGamingZone = item.type === 'gaming' || !item.type; // Default to gaming
         const isSportsCourt = item.type === 'sports';
         const isHybrid = item.type === 'hybrid';
+        const effectiveRateLabel = getEffectiveRateLabel(item as ZoneRow);
 
         return (
             <TouchableOpacity
@@ -159,9 +269,9 @@ export default function DiscoverZoneList({ selectedGame: _selectedGame, searchQu
                             </Text>
                         </View>
                     </View>
-                    {item.effectiveRateLabel && (
+                    {effectiveRateLabel && (
                         <View style={styles.priceTag}>
-                            <Text style={styles.priceText}>{item.effectiveRateLabel}</Text>
+                            <Text style={styles.priceText}>{effectiveRateLabel}</Text>
                         </View>
                     )}
                 </View>

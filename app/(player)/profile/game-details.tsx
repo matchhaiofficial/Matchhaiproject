@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,14 +19,14 @@ import {
     TEKKEN_CHARACTERS
 } from "../../../constants/profileOptions";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
-import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import styles from "./game-details.styles";
 
 // FACEIT Level Icons
@@ -73,6 +72,8 @@ export default function GameDetails() {
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
     const params = useLocalSearchParams();
     const gameId = params.gameId as GameKey;
+    const profileQuery = useQuery(api.users.getCurrentUser);
+    const updateGamePreferences = useMutation(api.users.updateGamePreferences);
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -110,94 +111,79 @@ export default function GameDetails() {
     const gameName = gameRule?.label || 'Game Details';
 
     useEffect(() => {
-        const fetchProfile = async () => {
-            if (!user?.uid || !gameId) return;
-            try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+        if (!gameId) return;
+        if (profileQuery === undefined) return;
+        if (!profileQuery) {
+            setLoading(false);
+            return;
+        }
 
-                    // Common Stats
-                    setFaceitLevel(data.faceitSkillLevel || null);
-                    setFaceitElo(data.faceitElo || null);
-                    setSteamStats(data.steamStats || null);
-                    setSteamCs2Hours(data.steamCs2Hours || null);
-                    setSteamTekken8Hours(data.steamTekken8Hours || null);
-                    setSteamFc26Hours(data.steamFc26Hours || null);
-                    setPsnStats(data.psnStats || null);
-                    setTekkenSkillScore(data.tekkenSkillScore || null);
-                    setTekkenBracket(data.tekkenSkillBracket || null);
-                    setSkillScores(normalizeSkillScores(data.skillScores || {}));
+        const data: any = profileQuery;
 
-                    // Initialize Game State
-                    switch (gameId) {
-                        case 'cs2':
-                            setActive(!!data.playsCs2);
-                            setRole(data.cs2Role || null);
-                            break;
-                        case 'fc26':
-                            setActive(!!data.playsFc);
-                            setFcTeam(data.fcTeam || "");
-                            setFcFormation(data.fcFormation || null);
-                            if (data.selectedFcLeagueId) {
-                                setSelectedFcLeagueId(data.selectedFcLeagueId);
-                            } else if (data.fcTeam) {
-                                const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes(data.fcTeam));
-                                if (league) setSelectedFcLeagueId(league.id);
-                            }
-                            break;
-                        case 'tekken8':
-                            setActive(!!data.playsTekken);
-                            setMultiRoles(data.tekkenFavorites || []);
-                            break;
-                        case 'futsal':
-                            setActive(!!data.playsFutsal);
-                            setMultiRoles(data.futsalPositions || []);
-                            break;
-                        case 'indoor_cricket':
-                            setActive(!!data.playsIndoorCricket);
-                            setRole(data.indoorCricketRole || null);
-                            break;
-                        case 'padel':
-                            setActive(!!data.playsPadel);
-                            setRole(data.padelRole || null);
-                            break;
-                        case 'pickleball':
-                            setActive(!!data.playsPickleball);
-                            setRole(data.pickleballRole || null);
-                            break;
-                    }
+        // Common Stats
+        setFaceitLevel(data.faceitSkillLevel || null);
+        setFaceitElo(data.faceitElo || null);
+        setSteamStats(data.steamStats || null);
+        setSteamCs2Hours(data.steamCs2Hours || null);
+        setSteamTekken8Hours(data.steamTekken8Hours || null);
+        setSteamFc26Hours(data.steamFc26Hours || null);
+        setPsnStats(data.psnStats || null);
+        setTekkenSkillScore(data.tekkenSkillScore || null);
+        setTekkenBracket(data.tekkenSkillBracket || null);
+        setSkillScores(normalizeSkillScores(data.skillScores || {}));
+
+        // Initialize Game State
+        switch (gameId) {
+            case 'cs2':
+                setActive(!!data.playsCs2);
+                setRole(data.cs2Role || null);
+                break;
+            case 'fc26':
+                setActive(!!data.playsFc);
+                setFcTeam(data.fcTeam || "");
+                setFcFormation(data.fcFormation || null);
+                if (data.selectedFcLeagueId) {
+                    setSelectedFcLeagueId(data.selectedFcLeagueId);
+                } else if (data.fcTeam) {
+                    const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes(data.fcTeam));
+                    if (league) setSelectedFcLeagueId(league.id);
                 }
+                break;
+            case 'tekken8':
+                setActive(!!data.playsTekken);
+                setMultiRoles(data.tekkenFavorites || []);
+                break;
+            case 'futsal':
+                setActive(!!data.playsFutsal);
+                setMultiRoles(data.futsalPositions || []);
+                break;
+            case 'indoor_cricket':
+                setActive(!!data.playsIndoorCricket);
+                setRole(data.indoorCricketRole || null);
+                break;
+            case 'padel':
+                setActive(!!data.playsPadel);
+                setRole(data.padelRole || null);
+                break;
+            case 'pickleball':
+                setActive(!!data.playsPickleball);
+                setRole(data.pickleballRole || null);
+                break;
+        }
 
-                // Background Refresh
-                refreshUserStats(user.uid).then((res) => {
-                    if (res.ok && res.data) {
-                        // Shallow update for UI reactivity if needed
-                        // Real implementation usually relies on listeners or full reload
-                    }
-                });
-
-            } catch (e) {
-                console.error("Failed to load game details", e);
-                showToast({ type: "error", title: "Error", message: "Failed to load game details" });
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchProfile();
-    }, [user?.uid, gameId]);
+        setLoading(false);
+    }, [profileQuery, gameId]);
 
     const [showAssessment, setShowAssessment] = useState(false);
 
-    const persistChanges = async () => {
-        if (!user?.uid || !gameId) return;
+    const persistChanges = async (overrideScores?: Record<string, GameSkillScore>) => {
+        if (!gameId) return;
 
         setSaving(true);
         try {
-            const updates: any = { updatedAt: new Date() };
+            const updates: any = {};
 
-            // Mapping generic state to Firestore fields
+            // Mapping generic state to Convex fields
             switch (gameId) {
                 case 'cs2':
                     updates.playsCs2 = active;
@@ -207,7 +193,6 @@ export default function GameDetails() {
                     updates.playsFc = active;
                     updates.fcTeam = active ? fcTeam : null;
                     updates.fcFormation = active ? fcFormation : null;
-                    updates.selectedFcLeagueId = active ? selectedFcLeagueId : null;
                     break;
                 case 'tekken8':
                     updates.playsTekken = active;
@@ -231,9 +216,12 @@ export default function GameDetails() {
                     break;
             }
 
+            let nextScores: Record<string, GameSkillScore> = overrideScores ?? skillScores;
+            let shouldUpdateScores = !!overrideScores;
+
             // Skill Score Calibration
             if (active) {
-                const currentScore = skillScores[gameId];
+                const currentScore = nextScores[gameId];
                 // Only calibrate if no score exists OR no match history
                 if (!currentScore || (!currentScore.matchesPlayed && !currentScore.lastMatchDate)) {
 
@@ -242,17 +230,15 @@ export default function GameDetails() {
                     if (!isPhysical) {
                         // Digital Game Auto-Calibration
                         const tempProfile: any = {
-                            ...user,
+                            ...(user || {}),
                             faceitSkillLevel: faceitLevel,
                             psnStats: psnStats,
                             steamCs2Hours: steamCs2Hours,
                             steamFc26Hours: steamFc26Hours,
-                            // Add other necessary fields for calculation
                         };
 
                         const initial = calculateInitialRating(gameId as GameKey, tempProfile);
                         if (initial && initial.source !== 'questionnaire') {
-                            // Valid external source found. Construct FULL Object.
                             const rating = clampRating(initial.rating);
                             const tier = getTierFromRating(rating);
 
@@ -265,23 +251,33 @@ export default function GameDetails() {
                                 initialSource: initial.source,
                                 initialRating: rating,
                                 lastMatchDate: null,
-                                lastUpdated: serverTimestamp()
+                                lastUpdated: Date.now()
                             };
 
-                            updates[`skillScores.${gameId}`] = newScore;
+                            nextScores = { ...nextScores, [gameId]: newScore };
+                            shouldUpdateScores = true;
                         }
                     }
                 }
             }
 
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            if (shouldUpdateScores) {
+                updates.skillScores = nextScores;
+                setSkillScores(nextScores);
+            }
+
+            const res = await updateGamePreferences(updates);
+            if (!res?.ok) {
+                showToast({ type: "error", title: "Error", message: res?.message || "Failed to save changes" });
+                return;
+            }
 
             showToast({ type: "success", title: "Saved", message: `${gameName} preferences updated` });
             router.back();
         } catch (e) {
             console.error("Save failed", e);
-            showToast({ type: "error", title: "Error", message: "Failed to save changes" });
+            const message = typeof (e as any)?.message === "string" ? (e as any).message : "Failed to save changes";
+            showToast({ type: "error", title: "Error", message });
         } finally {
             setSaving(false);
         }
@@ -316,7 +312,7 @@ export default function GameDetails() {
             initialSource: 'questionnaire',
             initialRating: normalizedRating,
             lastMatchDate: null,
-            lastUpdated: new Date()
+            lastUpdated: Date.now()
         };
 
         setSkillScores(prev => ({ ...prev, [gameId]: newScore })); // Optimistic UI
@@ -324,17 +320,12 @@ export default function GameDetails() {
         // We override persistChanges here slightly to ensure this score is included
         // Actually persistChanges logic for physical games relies on this being done?
         // No, persistChanges doesn't read from state for physical games usually. 
-        // We should just direct update Firestore or pass it to persistChanges.
+        // We should just direct update or pass it to persistChanges.
         // Let's call persistChanges but inject the score update manually since state might lag.
 
-        const asyncUpdate = async () => {
-            const userRef = doc(db, "users", user!.uid);
-            await updateDoc(userRef, {
-                [`skillScores.${gameId}`]: newScore
-            });
-            persistChanges(); // Save other pref changes
-        };
-        asyncUpdate();
+        const nextScores = { ...skillScores, [gameId]: newScore };
+        setSkillScores(nextScores);
+        persistChanges(nextScores);
     };
 
 

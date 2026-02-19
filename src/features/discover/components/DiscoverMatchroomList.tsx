@@ -25,10 +25,9 @@ import {
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../../src/constants/timelineFilters";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/matchService";
+import { useConvex, useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { matchesTimeline } from "../../../../src/utils/timeFilters";
@@ -51,6 +50,13 @@ const OVERS_OPTIONS = ['Any', '5', '6'];
 // Location options
 const LOCATION_OPTIONS = ['Any', ...KARACHI_AREAS.filter(a => a !== 'Other (Karachi)')];
 
+type Slot = {
+    status?: string;
+    role?: string;
+};
+
+type MatchroomRow = Record<string, any>;
+
 interface DiscoverMatchroomListProps {
     selectedGame: GameKey;
     searchQuery: string;
@@ -60,8 +66,24 @@ interface DiscoverMatchroomListProps {
 
 export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgePadding, bottomPadding }: DiscoverMatchroomListProps) {
     const { user } = useAuth();
-    const [rooms, setRooms] = useState<Matchroom[]>([]);
-    const [loading, setLoading] = useState(true);
+    const convex = useConvex();
+    const searchTerm = searchQuery.trim();
+    const roomsQuery = useQuery(api.matchrooms.listRecentMatchrooms, {
+        limit: 80,
+        search: searchTerm || undefined,
+        game: selectedGame !== 'all' ? selectedGame : undefined,
+    });
+    const outgoingRequestsQuery = useQuery(
+        api.notifications.listOutgoingByType,
+        user ? { type: "match_join_request", status: "pending" } : "skip",
+    );
+    const requestJoinMatchroom = useMutation(api.matchrooms.requestJoinMatchroom);
+
+    const rooms = useMemo(
+        () => (roomsQuery ?? []).map((room: any) => ({ ...room, id: String(room._id) })),
+        [roomsQuery],
+    );
+    const loading = roomsQuery === undefined;
     const [refreshing, setRefreshing] = useState(false);
 
     // Social State
@@ -85,65 +107,24 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [locationSearch, setLocationSearch] = useState('');
 
-    const fetchRooms = async () => {
-        if (!user) {
-            setRooms([]);
-            setLoading(false);
-            setRefreshing(false);
-            return;
-        }
-        try {
-            const res = await getMatchrooms();
-            if (res.ok && res.data) {
-                setRooms(res.data);
-            }
-        } catch (e) {
-            Logger.error("DiscoverMatchrooms", "Failed to fetch rooms", e);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+    useEffect(() => {
+        if (!outgoingRequestsQuery) return;
+        const requested = new Set<string>();
+        outgoingRequestsQuery.forEach((notif: any) => {
+            const matchroomId = notif?.meta?.matchroomId;
+            if (matchroomId) requested.add(String(matchroomId));
+        });
+        setRequestedRoomIds(requested);
+    }, [outgoingRequestsQuery]);
 
-    const fetchSocialState = async () => {
-        if (!user) return;
-        try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "match_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
-            const requested = new Set<string>();
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
-            });
-            setRequestedRoomIds(requested);
-        } catch (e) {
-            Logger.error("DiscoverMatchrooms", "Error fetching social state", e);
-        }
-    };
-
-    const handleRequestToJoin = async (room: Matchroom) => {
+    const handleRequestToJoin = async (room: any) => {
         if (!user) {
             Alert.alert("Login Required", "Please login to join matchrooms.");
             return;
         }
         try {
-            // BUSY CHECK
-            const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
-            if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
-                Alert.alert("Already Busy", busyCheck.message);
-                return;
-            }
-
-            const res = await requestJoinMatchroom(room, {
-                uid: user.uid,
-                username: user.displayName || 'Player',
-            });
-            if (res.ok) {
+            const res = await requestJoinMatchroom({ matchroomId: room._id });
+            if (res?.ok !== false) {
                 Alert.alert("Success", "Join request sent to host.");
                 setRequestedRoomIds(prev => new Set(prev).add(room.id!));
             } else {
@@ -155,38 +136,15 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
         }
     };
 
-    const handleCancelRequestToJoin = async (room: Matchroom) => {
-        if (!user) return;
-        try {
-            const res = await cancelMatchJoinRequest(room.id!, user.uid);
-            if (res.ok) {
-                setRequestedRoomIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(room.id!);
-                    return next;
-                });
-            } else {
-                Alert.alert("Error", res.message || "Failed to cancel request.");
-            }
-        } catch (e) {
-            Logger.error("DiscoverMatchrooms", "Cancel request error", e);
-        }
-    };
-
-    useEffect(() => {
-        // Initial fetch
-        setLoading(true);
-        fetchRooms();
-        fetchSocialState();
-    }, [user]);
-
     // Refetch social state on focus to catch host rejections or external cancellations
     useFocusEffect(
         useCallback(() => {
-            if (user) {
-                fetchSocialState();
-            }
-        }, [user])
+            if (!user) return;
+            void convex.query(api.notifications.listOutgoingByType, {
+                type: "match_join_request",
+                status: "pending",
+            });
+        }, [convex, user])
     );
 
     // Reset contextual filters when game changes
@@ -208,28 +166,47 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
         }
     }, [selectedGame]);
 
-    const onRefresh = () => {
+    const onRefresh = async () => {
         setRefreshing(true);
-        fetchRooms();
+        try {
+            await Promise.all([
+                convex.query(api.matchrooms.listRecentMatchrooms, {
+                    limit: 80,
+                    search: searchTerm || undefined,
+                    game: selectedGame !== 'all' ? selectedGame : undefined,
+                }),
+                user
+                    ? convex.query(api.notifications.listOutgoingByType, {
+                        type: "match_join_request",
+                        status: "pending",
+                    })
+                    : Promise.resolve(),
+            ]);
+        } catch (e) {
+            Logger.error("DiscoverMatchrooms", "Failed to refresh", e);
+        } finally {
+            setRefreshing(false);
+        }
     };
 
-    const getRoomOvers = (room: Matchroom) => {
+    const getRoomOvers = (room: MatchroomRow) => {
         if (room.overs != null) return String(room.overs);
         const match = room.format?.match(/(\d+)\s*overs?/i);
         return match ? match[1] : null;
     };
 
     const filteredRooms = useMemo(() => {
-        return rooms.filter((room: Matchroom) => {
+        const applySearchFilter = searchTerm.length === 0;
+        return rooms.filter((room: MatchroomRow) => {
             // Filter out expired rooms
             if (isRoomExpired(room)) return false;
 
-            if (searchQuery) {
+            if (applySearchFilter && searchQuery) {
                 const query = searchQuery.toLowerCase();
                 const matchesSearch =
-                    room.title.toLowerCase().includes(query) ||
-                    room.game.toLowerCase().includes(query) ||
-                    room.location?.toLowerCase().includes(query);
+                    (room.title || "").toLowerCase().includes(query) ||
+                    (room.game || "").toLowerCase().includes(query) ||
+                    (room.location || "").toLowerCase().includes(query);
                 if (!matchesSearch) return false;
             }
 
@@ -287,7 +264,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
 
             return true;
         });
-    }, [rooms, searchQuery, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedOvers, selectedLocation, selectedSkillLevel, selectedTimeline]);
+    }, [rooms, searchQuery, searchTerm, selectedGame, selectedSkill, selectedFormat, selectedRole, selectedSeries, selectedOvers, selectedLocation, selectedSkillLevel, selectedTimeline]);
 
     // Get contextual options based on selected game
     const getFormatOptions = () => {
@@ -327,7 +304,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const hasOversFilter = () => selectedGame === 'indoor_cricket';
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
-    const renderItem = ({ item }: { item: Matchroom }) => {
+    const renderItem = ({ item }: { item: MatchroomRow }) => {
         const isJoined = item.playerUids?.includes(user?.uid || "") || (item.players || []).some(p => p.uid === user?.uid);
         return (
             <MatchroomCard
@@ -335,7 +312,6 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
                 isRequested={requestedRoomIds.has(item.id!)}
                 isJoined={isJoined}
                 onJoinPress={() => handleRequestToJoin(item)}
-                onCancelJoinPress={() => handleCancelRequestToJoin(item)}
             />
         );
     };

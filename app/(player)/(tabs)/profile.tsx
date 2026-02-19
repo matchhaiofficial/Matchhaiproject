@@ -1,8 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -18,14 +16,15 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 
 import SkillBadge from "../../../src/components/SkillBadge";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { PsnVerificationResult } from "../../../src/services/psnApi";
-import { GameSkillScore } from "../../../src/services/skillRatingService";
-import { getUserTeams, Team } from "../../../src/services/teamService";
+import { useConvexSignOut } from "../../../src/utils/convexAuth";
+import type { PsnVerificationResult } from "../../../src/services/psnApi";
+import type { GameSkillScore } from "../../../src/services/skillRatingService";
+import { useConvex, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { Doc } from "../../../convex/_generated/dataModel";
 import { COLORS } from "../../../src/theme";
 import styles from "./profile.styles";
 
@@ -55,100 +54,60 @@ const ALL_GAMES = Object.entries(GAME_RULES).map(([key, rule]) => ({
                     ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer') as keyof typeof MaterialIcons.glyphMap
 }));
 
-interface FullUserProfile {
-    uid: string;
-    email?: string;
-    fullName?: string;
-    username?: string;
-    city?: string;
-    ageRange?: string;
+const formatDateLabel = (value: any) => {
+    if (!value) return "Just now";
+    if (typeof value?.toDate === "function") return value.toDate().toLocaleDateString();
+    if (value instanceof Date) return value.toLocaleDateString();
+    if (typeof value === "number") return new Date(value).toLocaleDateString();
+    return "Just now";
+};
 
-    // Generic Play Flags & Roles
-    playsCs2?: boolean; cs2Role?: string;
-    playsFc?: boolean; fcTeam?: string; fcFormation?: string;
-    playsTekken?: boolean; tekkenFavorites?: string[];
-    playsFutsal?: boolean; futsalPositions?: string[];
-    playsIndoorCricket?: boolean; indoorCricketRole?: string; indoorCricketBowlingStyle?: string; indoorCricketBattingStyle?: string;
-    playsPadel?: boolean; padelRole?: string;
-    playsPickleball?: boolean; pickleballRole?: string;
-
-    // Platform Data
-    steamProfileUrl?: string; steamPersonaName?: string; steamId?: string;
-    faceitProfileUrl?: string; faceitNickname?: string; faceitSkillLevel?: number; faceitElo?: number;
+type FullUserProfile = Doc<"users"> & {
     psnStats?: PsnVerificationResult;
-
-    // Skill Scores
     skillScores?: Record<string, GameSkillScore>;
+    platformLastSynced?: Record<string, any>;
+};
 
-    // Generic Stats
-    steamCs2Hours?: number;
-    steamTekken8Hours?: number;
-    steamFc26Hours?: number;
-
-    areasPreferred?: string[];
-
-    // Platform Metadata
-    platformLastSynced?: Record<string, any>; // Reserved for future detailed timestamps per platform if structure changes
-    updatedAt?: any;
-}
+type TeamRow = Doc<"teams"> & { id: string };
 
 export default function Profile() {
     const { user } = useAuth();
-    const { signOut } = useAuthActions();
+    const signOut = useConvexSignOut();
     const { showToast } = useToast();
+    const convex = useConvex();
     const tabBarHeight = useBottomTabBarHeight();
-    const [profile, setProfile] = useState<FullUserProfile | null>(null);
-    const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [myTeams, setMyTeams] = useState<Team[]>([]);
-    const [loadingTeams, setLoadingTeams] = useState(false);
+    const profileQuery = useQuery(api.users.getCurrentUser);
+    const teamsQuery = useQuery(api.teams.listTeamsForUser, user ? {} : "skip");
 
-    // Prevent double fetch
-    const isFetching = useRef(false);
+    const profile = (profileQuery ?? user ?? null) as FullUserProfile | null;
+    const loading = profileQuery === undefined;
+    const loadingTeams = teamsQuery === undefined;
 
-    const fetchProfile = useCallback(async (isRefresh = false) => {
-        if (!user?.uid || (isFetching.current && !isRefresh)) return;
-
-        try {
-            isFetching.current = true;
-            if (!isRefresh && !profile) setLoading(true); // Initial load only
-
-            const userRef = doc(db, "users", user.uid);
-            const snap = await getDoc(userRef);
-
-            if (snap.exists()) {
-                setProfile({ uid: snap.id, ...snap.data() } as FullUserProfile);
-            }
-
-            setLoadingTeams(true);
-            const teamsRes = await getUserTeams(user.uid);
-            if (teamsRes.ok && teamsRes.data) {
-                setMyTeams(teamsRes.data);
-            } else {
-                setMyTeams([]);
-            }
-        } catch (e) {
-            console.error("[Profile] Failed to fetch profile", e);
-            if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-            setLoadingTeams(false);
-            isFetching.current = false;
-        }
-    }, [user?.uid]);
-
-    // Focus Effect: Re-fetch only if data might be stale (simplified to always fetch on focus for now to ensure sync after edit)
-    useFocusEffect(
-        useCallback(() => {
-            fetchProfile();
-        }, [fetchProfile])
+    const myTeams = useMemo<TeamRow[]>(
+        () =>
+            (teamsQuery ?? []).map((team: any) => ({
+                ...team,
+                id: String(team._id),
+            })),
+        [teamsQuery],
     );
 
-    const onRefresh = () => {
+    const onRefresh = useCallback(async () => {
+        if (refreshing) return;
         setRefreshing(true);
-        fetchProfile(true);
-    };
+        try {
+            await Promise.all([
+                convex.query(api.users.getCurrentUser, {}),
+                convex.query(api.teams.listTeamsForUser, {}),
+            ]);
+        } catch (e) {
+            console.error("[Profile] Failed to refresh profile", e);
+            showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
+        } finally {
+            setRefreshing(false);
+        }
+    }, [convex, refreshing, showToast]);
 
     const handleLogout = async () => {
         Alert.alert(
@@ -299,9 +258,11 @@ export default function Profile() {
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>{getInitials()}</Text>
                     </View>
-                    <Text style={styles.profileName}>{profile?.fullName || 'Player'}</Text>
+                    <Text style={styles.profileName}>
+                        {profile?.displayName || profile?.fullName || user?.displayName || user?.email || 'Player'}
+                    </Text>
                     {profile?.username && <Text style={styles.profileUsername}>@{profile.username}</Text>}
-                    <Text style={styles.profileEmail}>{user?.email}</Text>
+                    <Text style={styles.profileEmail}>{profile?.email || user?.email || ""}</Text>
 
                     <View style={styles.profileMeta}>
                         {profile?.city && (
@@ -407,7 +368,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatDateLabel(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
@@ -426,7 +387,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatDateLabel(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
@@ -445,7 +406,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatDateLabel(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}

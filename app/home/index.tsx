@@ -2,7 +2,7 @@
 import { Redirect, router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useConvexSignOut } from "../../src/utils/convexAuth";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserRole } from "../../src/utils/role";
@@ -11,7 +11,7 @@ import styles from "./home.styles";
 
 export default function Home() {
   const { user, loading: authLoading } = useAuth();
-  const { signOut } = useAuthActions();
+  const signOut = useConvexSignOut();
   const [signingOut, setSigningOut] = useState(false);
 
   const role = getUserRole(user);

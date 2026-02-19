@@ -21,7 +21,7 @@ import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useConvexSignOut } from "../../../src/utils/convexAuth";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -98,7 +98,7 @@ export default function ZoneDashboardHome() {
     const insets = useSafeAreaInsets();
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
-    const { signOut } = useAuthActions();
+    const signOut = useConvexSignOut();
 
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);

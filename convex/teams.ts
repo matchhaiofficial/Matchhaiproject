@@ -358,7 +358,8 @@ export const listTeamsForUser = query({
         .collect(),
       ctx.db
         .query("teams")
-        .filter((q: any) => q.contains(q.field("memberUids"), user.uid))
+        // Convex supports multikey indexes on array fields, but types expect the full array.
+        .withIndex("by_memberUid", (q: any) => q.eq("memberUids", user.uid as any))
         .collect(),
     ]);
 
@@ -380,19 +381,30 @@ export const listPublicTeams = query({
   },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(args.limit ?? 20, 1), 50);
+    const search = String(args.search ?? "").trim();
+    const gameFilter = args.game && args.game !== "all" ? args.game : null;
+
+    if (search) {
+      return await ctx.db
+        .query("teams")
+        .withSearchIndex("search_name", (q: any) => {
+          let builder = q.search("name", search).eq("visibility", "public");
+          if (gameFilter) builder = builder.eq("game", gameFilter);
+          return builder;
+        })
+        .take(limit);
+    }
+
     let q = ctx.db
       .query("teams")
       .withIndex("by_visibility", (q: any) => q.eq("visibility", "public"))
       .order("desc");
 
-    let items = await q.take(200);
-    if (args.game && args.game !== "all") {
-      items = items.filter((t) => t.game === args.game);
+    if (gameFilter) {
+      q = q.filter((q: any) => q.eq(q.field("game"), gameFilter));
     }
-    if (args.search) {
-      const search = args.search.toLowerCase();
-      items = items.filter((t) => (t.nameLower || t.name || "").toLowerCase().includes(search));
-    }
+
+    const items = await q.take(200);
     return items.slice(0, limit);
   },
 });

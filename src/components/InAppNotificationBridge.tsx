@@ -26,9 +26,10 @@ export default function InAppNotificationBridge() {
     const { user, isAuthenticated } = useAuth();
     const seenIdsRef = useRef<Set<string>>(new Set());
     const primedRef = useRef(false);
+    const shouldFetch = isAuthenticated && !!user?.uid;
     const notificationData = useQuery(
         api.notifications.listNotifications,
-        isAuthenticated ? { limit: 50 } : "skip",
+        shouldFetch ? { limit: 50 } : "skip",
     );
 
     useEffect(() => {

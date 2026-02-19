@@ -1,7 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -13,9 +12,10 @@ import {
     View,
     ScrollView
 } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
+import { useConvex, useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import type { Doc } from "../../../../convex/_generated/dataModel";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import SegmentedTabs from "../../../../src/components/SegmentedTabs";
@@ -34,22 +34,43 @@ interface DiscoverTeamListProps {
     bottomPadding?: number;
 }
 
+type TeamRow = Doc<"teams"> & { id: string };
+
 export default function DiscoverTeamList({ selectedGame, searchQuery, initialMode = 'discover', intentTime, edgePadding, bottomPadding }: DiscoverTeamListProps) {
     const router = useRouter();
     const { user } = useAuth();
+    const convex = useConvex();
 
     // NEW: Mode State
     const [mode, setMode] = useState<'my' | 'discover'>(initialMode);
 
-    // Data State
-    const [publicTeams, setPublicTeams] = useState<Team[]>([]);
-    const [myTeams, setMyTeams] = useState<Team[]>([]); // NEW: My Teams state
-    const [lastVisible, setLastVisible] = useState<any>(null);
-    const [hasMore, setHasMore] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
+    const gameFilter = selectedGame === 'all' ? 'all' : selectedGame;
+    const searchTerm = searchQuery.trim();
+    const publicTeamsQuery = useQuery(api.teams.listPublicTeams, {
+        game: gameFilter,
+        search: searchTerm || undefined,
+        limit: 200,
+    });
+    const myTeamsQuery = useQuery(api.teams.listTeamsForUser, user && mode === 'my' ? {} : "skip");
+    const outgoingRequestsQuery = useQuery(
+        api.notifications.listOutgoingByType,
+        user && mode === 'discover' ? { type: "team_join_request", status: "pending" } : "skip",
+    );
+    const requestToJoinTeam = useMutation(api.teams.requestToJoinTeam);
 
-    // UI State
-    const [loading, setLoading] = useState(true);
+    const publicTeams = useMemo<TeamRow[]>(
+        () =>
+            (publicTeamsQuery ?? [])
+                .map((team: any) => ({ ...team, id: String(team._id) }))
+                .filter((team: any) => !user?.uid || !team.memberUids?.includes(user.uid)),
+        [publicTeamsQuery, user?.uid],
+    );
+    const myTeams = useMemo<TeamRow[]>(
+        () => (myTeamsQuery ?? []).map((team: any) => ({ ...team, id: String(team._id) })),
+        [myTeamsQuery],
+    );
+
+    const loading = mode === 'my' ? myTeamsQuery === undefined : publicTeamsQuery === undefined;
     const [refreshing, setRefreshing] = useState(false);
 
     // Filter State
@@ -61,84 +82,6 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
     // Social State
     const [requestedTeamIds, setRequestedTeamIds] = useState<Set<string>>(new Set());
 
-    const fetchSocialState = async () => {
-        if (!user) return;
-        try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "team_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
-            const requested = new Set<string>();
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.teamId) requested.add(data.meta.teamId);
-            });
-            setRequestedTeamIds(requested);
-        } catch (e) {
-            Logger.error("DiscoverTeams", "Error fetching social state", e);
-        }
-    };
-
-    const fetchMyTeams = async () => {
-        if (!user) return;
-        try {
-            setLoading(true);
-            const result = await getUserTeams(user.uid);
-            if (result.ok && result.data) {
-                setMyTeams(result.data);
-            }
-        } catch (error) {
-            Logger.error("DiscoverTeams", "Error fetching my teams", error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
-
-    const fetchPublicTeams = async (isLoadMore = false) => {
-        if (!user) return;
-        try {
-            if (isLoadMore) setLoadingMore(true);
-            else setLoading(true);
-
-            // Pass 'all' if selectedGame is 'all', otherwise the specific game key
-            const gameFilter = selectedGame === 'all' ? 'all' : selectedGame;
-
-            const result = await getPublicTeams({
-                game: gameFilter,
-                searchQuery: searchQuery,
-                lastDoc: isLoadMore ? lastVisible : null,
-                limitCount: 10
-            });
-
-            if (result.ok && result.data) {
-                // Filter out where user is already member/captain
-                const filteredData = result.data.filter(t => !t.memberUids?.includes(user.uid));
-
-                if (isLoadMore) {
-                    setPublicTeams(prev => {
-                        const existingIds = new Set(prev.map(t => t.id));
-                        const newUniqueTeams = filteredData.filter(t => !existingIds.has(t.id));
-                        return [...prev, ...newUniqueTeams];
-                    });
-                } else {
-                    setPublicTeams(filteredData);
-                }
-                setLastVisible(result.lastVisible);
-                setHasMore(result.data.length === 10);
-            }
-        } catch (error) {
-            Logger.error("DiscoverTeams", "Error fetching public teams", error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-            setLoadingMore(false);
-        }
-    };
-
     // Sync mode with prop (needed because segments are persisted with display:none)
     useEffect(() => {
         if (initialMode) {
@@ -147,37 +90,46 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         }
     }, [initialMode, intentTime]);
 
-    // Refetch when mode, filters change
     useEffect(() => {
-        if (mode === 'my') {
-            fetchMyTeams();
-        } else {
-            fetchPublicTeams(false);
-        }
-    }, [user, mode, selectedGame, searchQuery]);
+        if (!outgoingRequestsQuery) return;
+        const requested = new Set<string>();
+        outgoingRequestsQuery.forEach((notif: any) => {
+            const teamId = notif?.meta?.teamId;
+            if (teamId) requested.add(String(teamId));
+        });
+        setRequestedTeamIds(requested);
+    }, [outgoingRequestsQuery]);
 
-    useEffect(() => {
-        if (mode === 'discover') {
-            fetchSocialState();
-        }
-    }, [user, mode]);
-
-    const onRefresh = () => {
+    const onRefresh = async () => {
         setRefreshing(true);
-        if (mode === 'my') {
-            fetchMyTeams();
-        } else {
-            fetchPublicTeams(); // Reset
-            fetchSocialState();
+        try {
+            await Promise.all([
+                convex.query(api.teams.listPublicTeams, {
+                    game: gameFilter,
+                    search: searchTerm || undefined,
+                    limit: 200,
+                }),
+                user && mode === 'my' ? convex.query(api.teams.listTeamsForUser, {}) : Promise.resolve(),
+                user && mode === 'discover'
+                    ? convex.query(api.notifications.listOutgoingByType, {
+                        type: "team_join_request",
+                        status: "pending",
+                    })
+                    : Promise.resolve(),
+            ]);
+        } catch (error) {
+            Logger.error("DiscoverTeams", "Refresh failed", error);
+        } finally {
+            setRefreshing(false);
         }
     };
 
-    const handleRequestToJoin = async (teamId: string) => {
+    const handleRequestToJoin = async (teamId: any) => {
         try {
-            const res = await requestToJoinTeam(teamId);
-            if (res.ok) {
+            const res = await requestToJoinTeam({ teamId });
+            if (res?.ok !== false) {
                 Alert.alert("Success", "Join request sent to captain.");
-                setRequestedTeamIds(prev => new Set(prev).add(teamId));
+                setRequestedTeamIds(prev => new Set(prev).add(String(teamId)));
             } else {
                 Alert.alert("Error", res.message || "Failed to send request.");
             }
@@ -187,7 +139,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         }
     };
 
-    const renderTeamItem = ({ item }: { item: Team }) => {
+    const renderTeamItem = ({ item }: { item: TeamRow }) => {
         const isMyTeam = mode === 'my';
         const isRequested = requestedTeamIds.has(item.id || "");
         const rawMemberCount = item.memberUids?.length ?? item.memberCount ?? 0;
@@ -234,7 +186,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                         ) : (
                             <TouchableOpacity
                                 style={styles.requestBtn}
-                                onPress={() => handleRequestToJoin(item.id || "")}
+                                onPress={() => handleRequestToJoin(item._id)}
                             >
                                 <Text style={styles.requestBtnText}>Request to Join</Text>
                             </TouchableOpacity>
@@ -264,9 +216,10 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
 
     // Client-side filtering check
     const displayedTeams = (mode === 'my' ? myTeams : publicTeams).filter(t => {
+        const applySearchFilter = mode === 'my' || searchTerm.length === 0;
         // Search query filter (for My Teams especially since it's fetched all at once)
-        if (searchQuery) {
-            const queryContent = searchQuery.toLowerCase();
+        if (applySearchFilter && searchTerm) {
+            const queryContent = searchTerm.toLowerCase();
             const matchesSearch =
                 t.name.toLowerCase().includes(queryContent) ||
                 (t.game || '').toLowerCase().includes(queryContent);
@@ -413,9 +366,6 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
                 }
-                onEndReached={() => hasMore && !loadingMore && fetchPublicTeams(true)}
-                onEndReachedThreshold={0.5}
-                ListFooterComponent={loadingMore ? <ActivityIndicator size="small" color={COLORS.accent} style={{ padding: 20 }} /> : null}
                 ListEmptyComponent={
                     <View style={styles.emptyState}>
                         <MaterialIcons name="search-off" size={64} color={COLORS.muted} style={styles.emptyIcon} />

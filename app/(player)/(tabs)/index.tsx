@@ -19,7 +19,7 @@ import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useAuth } from "../../../src/context/AuthContext";
 import { api } from "../../../convex/_generated/api";
 import { normalizeGameKey } from "../../../src/features/discover/utils/gameKeys";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useConvexSignOut } from "../../../src/utils/convexAuth";
 import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
 import { Matchroom } from "../../../src/services/matchService";
 import { Team } from "../../../src/services/teamService";
@@ -318,7 +318,7 @@ const dedupeRooms = (rooms: Matchroom[]) => {
 export default function PlayerDashboard() {
   const { user, isAuthenticated } = useAuth();
   const convex = useConvex();
-  const { signOut } = useAuthActions();
+  const signOut = useConvexSignOut();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const [tags, setTags] = useState<string[]>([]);
@@ -343,9 +343,10 @@ export default function PlayerDashboard() {
   });
   const lastReminderSignatureRef = useRef("");
 
+  const shouldFetchNotifications = isAuthenticated && !!user?.uid;
   const notificationData = useQuery(
     api.notifications.listNotifications,
-    isAuthenticated ? { limit: 50 } : "skip",
+    shouldFetchNotifications ? { limit: 50 } : "skip",
   );
 
   const loadDashboardData = useCallback(async () => {

@@ -80,7 +80,11 @@ export default defineSchema({
     .index("by_psnAccountId", ["psnAccountId"])
     .index("by_role", ["role"])
     .index("by_accountType", ["accountType"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_displayName", {
+      searchField: "displayName",
+      filterFields: ["accountType"],
+    }),
 
   userFriends: defineTable({
     legacyId: v.optional(v.string()),
@@ -131,10 +135,15 @@ export default defineSchema({
     legacy: v.optional(v.any()),
   })
     .index("by_captainUid", ["captainUid"])
+    .index("by_memberUid", ["memberUids"])
     .index("by_visibility", ["visibility"])
     .index("by_game", ["game"])
     .index("by_nameLower", ["nameLower"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_name", {
+      searchField: "name",
+      filterFields: ["visibility", "game"],
+    }),
 
   teamMembers: defineTable({
     legacyId: v.optional(v.string()),
@@ -171,6 +180,7 @@ export default defineSchema({
     pricing: v.optional(v.any()),
     branches: v.optional(v.any()),
     notes: v.optional(v.string()),
+    searchText: v.optional(v.string()),
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
     legacy: v.optional(v.any()),
@@ -178,7 +188,11 @@ export default defineSchema({
     .index("by_ownerUid", ["ownerUid"])
     .index("by_status", ["status"])
     .index("by_primaryArea", ["primaryArea"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["status", "type"],
+    }),
 
   zoneBranches: defineTable({
     legacyId: v.optional(v.string()),
@@ -327,14 +341,20 @@ export default defineSchema({
     paymentCurrency: v.optional(v.string()),
     resultVerification: v.optional(v.any()),
     walkIn: v.optional(v.any()),
+    searchText: v.optional(v.string()),
     legacy: v.optional(v.any()),
   })
     .index("by_status", ["status"])
     .index("by_scheduledAt", ["scheduledAt"])
     .index("by_hostUid", ["hostUid"])
+    .index("by_playerUid", ["playerUids"])
     .index("by_zoneId", ["zoneId"])
     .index("by_teamId", ["teamId"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["game"],
+    }),
 
   chatrooms: defineTable({
     legacyId: v.optional(v.string()),
@@ -545,6 +565,7 @@ export default defineSchema({
     legacy: v.optional(v.any()),
   })
     .index("by_toUid_createdAt", ["toUid", "createdAt"])
+    .index("by_fromUid_createdAt", ["fromUid", "createdAt"])
     .index("by_status", ["status"])
     .index("by_type", ["type"]),
 

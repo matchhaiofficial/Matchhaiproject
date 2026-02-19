@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
@@ -27,12 +27,24 @@ export const useAuth = () => useContext(AuthContext);
 function normalizeUser(user: Doc<"users"> | null): AuthUser | null {
   if (!user) return null;
 
+  const email = user.email || "";
+  const emailHandle = email.includes("@") ? email.split("@")[0] : email;
+  const emailFallback =
+    emailHandle
+      ? emailHandle
+          .replace(/[._-]+/g, " ")
+          .split(" ")
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ")
+      : "";
+
   const displayName =
     user.displayName ||
     user.fullName ||
     user.username ||
     user.name ||
-    user.email ||
+    emailFallback ||
     "Player";
 
   return {
@@ -44,25 +56,50 @@ function normalizeUser(user: Doc<"users"> | null): AuthUser | null {
 }
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { isAuthenticated: authReady, isLoading } = useConvexAuth();
   const currentUser = useQuery(api.users.getCurrentUser);
   const upsertCurrentUser = useMutation(api.users.upsertCurrentUser);
-  const bootstrapAttempted = useRef(false);
+  const bootstrapInFlight = useRef(false);
+  const bootstrapRetryCount = useRef(0);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
 
-  const loading = isLoading || (isAuthenticated && currentUser == null);
+  const loading = isLoading || (authReady && currentUser == null);
   const user = useMemo(() => normalizeUser(currentUser ?? null), [currentUser]);
+  const isAuthenticated = authReady && currentUser != null;
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-    if (currentUser !== null) return;
-    if (bootstrapAttempted.current) return;
+    if (!authReady) {
+      bootstrapRetryCount.current = 0;
+      return;
+    }
+    if (currentUser !== null) {
+      bootstrapRetryCount.current = 0;
+      return;
+    }
+    if (bootstrapInFlight.current) return;
 
-    bootstrapAttempted.current = true;
-    void upsertCurrentUser({}).catch(() => {
-      // If this fails, the UI will keep showing the loading state.
-      // Log in the screen if needed.
-    });
-  }, [isAuthenticated, currentUser, upsertCurrentUser]);
+    bootstrapInFlight.current = true;
+    void upsertCurrentUser({})
+      .then(() => {
+        bootstrapRetryCount.current = 0;
+      })
+      .catch((error) => {
+        const message =
+          typeof error?.message === "string" ? error.message : String(error ?? "");
+        if (message.includes("Not authenticated") && bootstrapRetryCount.current < 3) {
+          bootstrapRetryCount.current += 1;
+          setTimeout(() => {
+            bootstrapInFlight.current = false;
+            setBootstrapNonce((value) => value + 1);
+          }, 400);
+          return;
+        }
+      })
+      .finally(() => {
+        if (!bootstrapInFlight.current) return;
+        bootstrapInFlight.current = false;
+      });
+  }, [authReady, currentUser, upsertCurrentUser, bootstrapNonce]);
 
   return (
     <AuthContext.Provider value={{ user, loading, isAuthenticated }}>
