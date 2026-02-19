@@ -14,44 +14,11 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
-import { signInWithEmail, signOutUser } from "../../src/services/authService";
-import { getUserProfile } from "../../src/services/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
-
-// 📱 Pakistani phone formatter
-const formatPakistaniPhone = (value: string) => {
-  const numeric = value.replace(/\D/g, "");
-  if (!numeric) return value;
-
-  let prefix = "";
-  let rest = numeric;
-
-  if (numeric.startsWith("92")) {
-    prefix = "+92 ";
-    rest = numeric.slice(2);
-  } else if (numeric.startsWith("0")) {
-    prefix = "0";
-    rest = numeric.slice(1);
-  } else {
-    // not clearly Pakistani → don't format
-    return value;
-  }
-
-  let formatted = prefix;
-
-  if (rest.length <= 3) {
-    formatted += rest;
-  } else if (rest.length <= 7) {
-    formatted += rest.slice(0, 3) + " " + rest.slice(3);
-  } else {
-    formatted +=
-      rest.slice(0, 3) + " " + rest.slice(3, 7) + " " + rest.slice(7);
-  }
-
-  return formatted.trim();
-};
 
 // Common weak passwords (2)
 const COMMON_WEAK_PASSWORDS = [
@@ -112,7 +79,9 @@ export default function Login() {
   const emailRef = useRef<TextInput | null>(null);
   const passwordRef = useRef<TextInput | null>(null);
 
+  const { signIn } = useAuthActions();
   const { showToast } = useToast();
+  const { user, isAuthenticated } = useAuth();
 
   // NEW: user type (player vs zone admin)
   const [userType, setUserType] = useState<"player" | "zone">("player");
@@ -123,7 +92,7 @@ export default function Login() {
   }, []);
 
   useEffect(() => {
-    console.log("[Login] userType changed →", userType);
+    console.log("[Login] userType changed ->", userType);
   }, [userType]);
 
   // Lockout countdown (7)
@@ -162,29 +131,24 @@ export default function Login() {
   } = useMemo(() => {
     const trimmed = emailOrPhone.trim();
 
-    // 📨 Email / phone validation (4 + 6)
+    // Email validation
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,}$/;
-    const normalizedPhone = trimmed.replace(/\s|-/g, "");
-    const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/; // Pakistani mobile
 
     let emailErr = "";
     let domainWarning = "";
 
     const isEmailLike = trimmed.includes("@");
-
     const emailValidFormat = emailRegex.test(trimmed);
-    const phoneValid = phoneRegex.test(normalizedPhone);
 
     if (!trimmed) {
-      emailErr = "Email or phone is required.";
-    } else if (!emailValidFormat && !phoneValid) {
-      emailErr = "Enter a valid email or Pakistani mobile number.";
+      emailErr = "Email is required.";
+    } else if (!emailValidFormat) {
+      emailErr = "Enter a valid email address.";
     }
 
     const emailValid = emailErr === "";
 
-    // Email domain typo / unusual warning (4)
-    // Only show for PLAYERS; Zone Admins can use custom business domains
+    // Email domain typo / unusual warning (players only)
     if (trimmed && emailValidFormat && userType === "player") {
       const parts = trimmed.split("@");
       if (parts.length === 2) {
@@ -200,7 +164,7 @@ export default function Login() {
       }
     }
 
-    // 🔐 Password rules
+    // Password rules
     const hasUppercase = /[A-Z]/.test(password);
     const hasLowercase = /[a-z]/.test(password);
     const hasNumeric = /\d/.test(password);
@@ -321,7 +285,7 @@ export default function Login() {
       showToast({
         type: "info",
         title: "Check details",
-        message: "Please enter a valid email/phone and your password.",
+        message: "Please enter a valid email and your password.",
       });
       return;
     }
@@ -329,154 +293,52 @@ export default function Login() {
     try {
       setLoading(true);
       setEmailServerError("");
-      console.log("[Login] calling signInWithEmail", { emailOrPhone });
+      console.log("[Login] calling signIn", { emailOrPhone });
 
-      const res = await signInWithEmail(emailOrPhone, password /*, userType */);
-
-      if (!res.ok) {
-        setLoading(false);
-        console.log("[Login] signInWithEmail FAILED", res);
-        const nextAttempts = failedAttempts + 1;
-        if (nextAttempts >= MAX_ATTEMPTS) {
-          setLockoutSecondsLeft(LOCKOUT_SECONDS);
-          setFailedAttempts(0);
-
-          showToast({
-            type: "warning",
-            title: "Too many attempts",
-            message: `You have failed 5 times. Please wait ${LOCKOUT_SECONDS} seconds before trying again.`,
-          });
-        } else {
-          setFailedAttempts(nextAttempts);
-        }
-
-        const trimmed = emailOrPhone.trim();
-        const normalizedPhone = trimmed.replace(/\s|-/g, "");
-        const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
-
-        if (res.code === "auth/user-not-found") {
-          if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
-            setEmailServerError("No account found for this phone number.");
-          } else {
-            setEmailServerError("This email is not registered.");
-          }
-        } else if (res.code === "auth/invalid-email") {
-          if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
-            setEmailServerError("Enter a valid Pakistani mobile number.");
-          } else {
-            setEmailServerError("Enter a valid email address.");
-          }
-        } else if (res.code === "auth/wrong-password") {
-          setEmailServerError("Incorrect password. Please try again.");
-        } else {
-          setEmailServerError(res.message || "Sign in failed.");
-        }
-
-        showToast({
-          type: "error",
-          title: "Sign In Failed",
-          message: res.message || "Sign in failed.",
-        });
-        return;
-      }
-
-      // ✅ Role Validation
-      console.log("[Login] Validating role for user:", res.user.uid);
-      const profileRes = await getUserProfile(res.user.uid);
-
-      if (!profileRes.ok) {
-        console.error("[Login] Failed to fetch user profile for role check:", profileRes.message);
-        await signOutUser();
-        setLoading(false);
-
-        const isMissing = profileRes.message === "User profile not found.";
-        showToast({
-          type: "error",
-          title: isMissing ? "Profile Missing" : "Login Error",
-          message: isMissing
-            ? "Your account profile was not found. Please contact support."
-            : "Could not verify your account type. Please try again.",
-        });
-        return;
-      }
-
-      const accountType = profileRes.data.role;
-      const inputEmail = emailOrPhone.trim().toLowerCase();
-      const userEmail = (res.user.email || inputEmail).toLowerCase();
-      const SUPER_ADMIN_UID = "jM2JZrPNNNahPb844rHmr0MQKYo1";
-      const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
-
-      // ✅ Robust Super Admin Check
-      const isSuperAdmin = accountType === "super-admin" ||
-        userEmail === SUPER_ADMIN_EMAIL ||
-        res.user.uid === SUPER_ADMIN_UID;
-
-      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "uid:", res.user.uid);
-
-      if (!isSuperAdmin) {
-        if (userType === "zone" && accountType !== "zone-admin") {
-          console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
-          await signOutUser();
-          setLoading(false);
-          setEmailServerError("Please sign in as user.");
-          showToast({
-            type: "error",
-            title: "Access Denied",
-            message: "Please sign in as user.",
-          });
-          return;
-        }
-
-        if (userType === "player" && accountType === "zone-admin") {
-          console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
-          await signOutUser();
-          setLoading(false);
-          setEmailServerError("Please sign in as zone admin.");
-          showToast({
-            type: "error",
-            title: "Access Denied",
-            message: "Please sign in as zone admin.",
-          });
-          return;
-        }
-      }
+      await signIn("password", {
+        email: emailOrPhone.trim().toLowerCase(),
+        password,
+        flow: "signIn",
+      });
 
       setLoading(false);
-      console.log("[Login] signInWithEmail OK, navigations target logic start");
-
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
 
       showToast({
         type: "success",
         title: "Welcome back",
-        message: isSuperAdmin ? "Signed in as Super Admin" : "You’re now signed in.",
+        message: "You're now signed in.",
       });
 
-      // ✅ Redirect based on user type or role
-      if (isSuperAdmin) {
-        console.log("[Login] Redirecting to Super Admin Dashboard");
-        router.replace("/super-admin" as any);
-      } else if (userType === "zone") {
-        router.replace("/zone");
-      } else {
-        router.replace("/home");
-      }
+      router.replace("/");
     } catch (e) {
-      console.error("[Login] signInWithEmail threw error", e);
+      console.error("[Login] signIn threw error", e);
       setLoading(false);
+
+      const nextAttempts = failedAttempts + 1;
+      if (nextAttempts >= MAX_ATTEMPTS) {
+        setLockoutSecondsLeft(LOCKOUT_SECONDS);
+        setFailedAttempts(0);
+
+        showToast({
+          type: "warning",
+          title: "Too many attempts",
+          message: `You have failed 5 times. Please wait ${LOCKOUT_SECONDS} seconds before trying again.`,
+        });
+      } else {
+        setFailedAttempts(nextAttempts);
+      }
+
+      setEmailServerError("Invalid email or password.");
       showToast({
         type: "error",
         title: "Sign In Failed",
-        message: "Something went wrong. Please try again.",
+        message: "Invalid email or password.",
       });
     }
   };
 
-  const handleForgotPassword = () => {
-    console.log("[Login] Forgot Password pressed");
-    router.push("/auth/forgot-password");
-  };
 
 
 
@@ -493,7 +355,7 @@ export default function Login() {
             : styles.passwordHintIconPending,
         ]}
       >
-        {satisfied ? "✓" : "×"}
+        {satisfied ? "?" : "×"}
       </Text>
       <Text
         style={[
@@ -518,8 +380,14 @@ export default function Login() {
     userType === "zone" ? "/auth/zone-register" : "/auth/register";
 
   useEffect(() => {
-    console.log("[Login] bottomHref changed →", bottomHref);
+    console.log("[Login] bottomHref changed ?", bottomHref);
   }, [bottomHref]);
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      router.replace("/");
+    }
+  }, [isAuthenticated, user]);
 
   return (
     <Container {...containerProps}>
@@ -574,7 +442,7 @@ export default function Login() {
 
         {/* Email / Phone */}
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Email or Phone</Text>
+          <Text style={styles.label}>Email</Text>
 
           <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
@@ -591,7 +459,7 @@ export default function Login() {
 
               <TextInput
                 ref={emailRef}
-                placeholder="Email or phone"
+                placeholder="you@example.com"
                 placeholderTextColor={COLORS.muted}
                 style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
                 selectionColor={COLORS.accent}
@@ -600,11 +468,7 @@ export default function Login() {
                 autoCorrect={false}
                 value={emailOrPhone}
                 onChangeText={(text) => {
-                  let next = text;
-                  if (/^[\d+\s-]*$/.test(text)) {
-                    next = formatPakistaniPhone(text);
-                  }
-                  setEmailOrPhone(next);
+                  setEmailOrPhone(text);
                   if (emailServerError) setEmailServerError("");
                 }}
                 onFocus={() => setEmailFocused(true)}
@@ -722,13 +586,6 @@ export default function Login() {
           )}
         </View>
 
-        {/* Forgot password */}
-        <View className="forgot-row" style={styles.forgotRow}>
-          <Pressable onPress={handleForgotPassword}>
-            <Text style={styles.forgotText}>Forgot Password?</Text>
-          </Pressable>
-        </View>
-
         {/* Primary Login button + brute-force UI */}
         <View style={styles.buttonShadowWrapper}>
           <Pressable
@@ -772,7 +629,7 @@ export default function Login() {
             asChild
             onPress={() =>
               console.log(
-                "[Login] Link pressed → userType=",
+                "[Login] Link pressed ? userType=",
                 userType,
                 "href=",
                 bottomHref

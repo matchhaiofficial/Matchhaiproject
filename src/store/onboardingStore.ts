@@ -56,8 +56,6 @@ type Step2Data = {
 type Step3Data = {
   steamProfileUrl: string;
   faceitProfileUrl: string;
-  eaProfileUrl: string;
-  xboxGamertag: string;
   psnOnlineId: string;
 
   // hydrated from API lookups (optional)
@@ -160,8 +158,6 @@ const initialState: Omit<
   step3: {
     steamProfileUrl: "",
     faceitProfileUrl: "",
-    eaProfileUrl: "",
-    xboxGamertag: "",
     psnOnlineId: "",
     steamProfile: null,
     faceitProfile: null,

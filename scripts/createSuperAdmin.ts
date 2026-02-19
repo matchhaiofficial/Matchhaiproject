@@ -17,7 +17,7 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 
 async function createSuperAdmin() {
-    const email = "superadmin@matchhai.com";
+    const email = "admin@matchhai.com";
     const password = "SuperAdmin@123";
     const fullName = "Super Admin";
 

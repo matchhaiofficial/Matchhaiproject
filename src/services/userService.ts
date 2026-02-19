@@ -143,50 +143,6 @@ export async function isPsnIdAvailable(psnAccountId: string, excludeUserId?: str
   return false;
 }
 
-/**
- * Check if an EA Profile URL is already linked to an account.
- */
-export async function isEaIdAvailable(eaProfileUrl: string, excludeUserId?: string): Promise<boolean> {
-  if (!eaProfileUrl) return false;
-
-  let q = query(
-    collection(db, "users"),
-    where("eaProfileUrl", "==", eaProfileUrl),
-    limit(1)
-  );
-
-  const snap = await getDocs(q);
-  if (snap.empty) return true;
-
-  if (excludeUserId && snap.docs[0].id === excludeUserId) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Check if an Xbox Gamertag is already linked to an account.
- */
-export async function isXboxIdAvailable(xboxGamertag: string, excludeUserId?: string): Promise<boolean> {
-  if (!xboxGamertag) return false;
-
-  let q = query(
-    collection(db, "users"),
-    where("xboxGamertag", "==", xboxGamertag),
-    limit(1)
-  );
-
-  const snap = await getDocs(q);
-  if (snap.empty) return true;
-
-  if (excludeUserId && snap.docs[0].id === excludeUserId) {
-    return true;
-  }
-
-  return false;
-}
-
 /** Helper you can reuse inside signUp to normalize phone before saving */
 export function normalizePhoneForSave(phone: string) {
   return normalizePhone(phone);
@@ -334,8 +290,6 @@ export async function fetchOnboardingSummary(): Promise<
 export interface OnboardingStep3Platforms {
   steamProfileUrl: string | null;
   faceitProfileUrl: string | null;
-  eaProfileUrl: string | null;
-  xboxGamertag: string | null;
   psnOnlineId: string | null;
 
   // optional, from API lookups
@@ -363,8 +317,6 @@ export async function saveOnboardingStep3Platforms(
     await updateDoc(userRef, {
       steamProfileUrl: platforms.steamProfileUrl ?? null,
       faceitProfileUrl: platforms.faceitProfileUrl ?? null,
-      eaProfileUrl: platforms.eaProfileUrl ?? null,
-      xboxGamertag: platforms.xboxGamertag ?? null,
       psnOnlineId: platforms.psnOnlineId ?? null,
 
       // flatten summaries so they’re easy to query later
@@ -540,7 +492,7 @@ export async function getUserProfile(
       displayName: data.displayName ?? undefined,
       fullName: data.fullName ?? undefined,
       username: data.username ?? undefined,
-      role: (data.accountType === "super-admin" || data.role === "super-admin" || (data.email && data.email.toLowerCase() === "superadmin@matchhai.com"))
+      role: (data.accountType === "super-admin" || data.role === "super-admin" || (data.email && data.email.toLowerCase() === "admin@matchhai.com"))
         ? "super-admin"
         : (data.accountType === 'zone' ? 'zone-admin' : (data.accountType || data.role || 'player')),
       trustScore: typeof data.trustScore === 'number' ? data.trustScore : 0.5, // Default trust

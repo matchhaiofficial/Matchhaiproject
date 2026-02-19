@@ -22,7 +22,7 @@ import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { signOutUser } from "../../../src/services/authService";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/teamService";
@@ -94,6 +94,7 @@ interface FullUserProfile {
 
 export default function Profile() {
     const { user } = useAuth();
+    const { signOut } = useAuthActions();
     const { showToast } = useToast();
     const tabBarHeight = useBottomTabBarHeight();
     const [profile, setProfile] = useState<FullUserProfile | null>(null);
@@ -159,9 +160,12 @@ export default function Profile() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        const res = await signOutUser();
-                        if (res.ok) router.replace("/auth/login");
-                        else Alert.alert("Logout Failed", res.message);
+                        try {
+                            await signOut();
+                            router.replace("/auth/login");
+                        } catch (error: any) {
+                            Alert.alert("Logout Failed", error?.message || "Please try again.");
+                        }
                     }
                 }
             ]

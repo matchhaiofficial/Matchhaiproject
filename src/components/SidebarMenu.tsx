@@ -28,11 +28,20 @@ type SidebarMenuProps = {
   onClose: () => void;
   items: SidebarItem[];
   title?: string;
+  onLogout?: () => void;
+  logoutLabel?: string;
 };
 
 const DRAWER_WIDTH = Math.min(320, Math.round(Dimensions.get("window").width * 0.82));
 
-export default function SidebarMenu({ visible, onClose, items, title = "Menu" }: SidebarMenuProps) {
+export default function SidebarMenu({
+  visible,
+  onClose,
+  items,
+  title = "Menu",
+  onLogout,
+  logoutLabel = "Logout",
+}: SidebarMenuProps) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -93,6 +102,20 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          {onLogout ? (
+            <TouchableOpacity
+              style={styles.logoutButton}
+              activeOpacity={0.88}
+              onPress={() => {
+                onLogout();
+                onClose();
+              }}
+            >
+              <MaterialIcons name="logout" size={18} color={COLORS.error} />
+              <Text style={styles.logoutButtonText}>{logoutLabel}</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.lg) }]}>
             <Text style={styles.footerHint}>Swipe or tap outside to close</Text>
@@ -200,6 +223,24 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.montserratMedium,
     fontSize: 14,
+  },
+  logoutButton: {
+    marginTop: SPACING.sm,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(239, 83, 80, 0.3)",
+    backgroundColor: "rgba(239, 83, 80, 0.1)",
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  logoutButtonText: {
+    color: COLORS.error,
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    fontWeight: "600",
   },
   footer: {
     marginTop: SPACING.lg,

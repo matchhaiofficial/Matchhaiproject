@@ -3,6 +3,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
+import { useConvex } from "convex/react";
 import {
   ActivityIndicator,
   Image,
@@ -26,11 +27,7 @@ import {
   fetchSteamProfileFromUrl,
   SteamProfileSummary,
 } from "../../src/services/steamApi";
-import {
-  isFaceitIdAvailable,
-  isPsnIdAvailable,
-  isSteamIdAvailable
-} from "../../src/services/userService";
+import { api } from "../../convex/_generated/api";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -57,6 +54,7 @@ const FACEIT_URL_REGEX = /^(?:https?:\/\/)?(?:www\.)?faceit\.com\/[a-z]{2}\/play
 export default function RegisterStep3() {
   const { step2, step3, setStep3 } = useOnboardingStore();
   const { showToast } = useToast();
+  const convex = useConvex();
 
   // Initial values from step2
   const [playsCs2] = useState<boolean>(step2.playsCs2);
@@ -146,7 +144,7 @@ export default function RegisterStep3() {
       return;
     }
 
-    const available = await isSteamIdAvailable(res.data.steamId);
+    const available = await convex.query(api.users.isSteamIdAvailable, { steamId: res.data.steamId });
     if (!available) {
       setSteamStatus("failed");
       setSteamCooldown(10);
@@ -173,7 +171,7 @@ export default function RegisterStep3() {
       return;
     }
 
-    const available = await isFaceitIdAvailable(res.data.faceitId);
+    const available = await convex.query(api.users.isFaceitIdAvailable, { faceitId: res.data.faceitId });
     if (!available) {
       setFaceitStatus("failed");
       setFaceitCooldown(10);
@@ -200,7 +198,7 @@ export default function RegisterStep3() {
       return;
     }
 
-    const available = await isPsnIdAvailable(res.data.psnAccountId);
+    const available = await convex.query(api.users.isPsnIdAvailable, { psnAccountId: res.data.psnAccountId });
     if (!available) {
       setPsnStatus("failed");
       setPsnCooldown(10);

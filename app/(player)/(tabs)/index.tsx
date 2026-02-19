@@ -1,15 +1,10 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { router, useFocusEffect } from "expo-router";
-import {
-    collection,
-    getDocs,
-    onSnapshot,
-    query,
-    where,
-} from "firebase/firestore";
+import { useConvex, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+    Alert,
     Image,
     Pressable,
     ScrollView,
@@ -21,22 +16,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
+import { api } from "../../../convex/_generated/api";
 import { normalizeGameKey } from "../../../src/features/discover/utils/gameKeys";
-import {
-    getOffersForUser,
-    getUserRequests,
-} from "../../../src/services/bookingRequestService";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
-import {
-    Matchroom,
-    getMatchrooms,
-    getUserMatchrooms,
-} from "../../../src/services/matchService";
-import { Team, getUserTeams } from "../../../src/services/teamService";
-import { UserProfile, getUserProfile } from "../../../src/services/userService";
-import { Zone, getActiveZones } from "../../../src/services/zoneService";
+import { Matchroom } from "../../../src/services/matchService";
+import { Team } from "../../../src/services/teamService";
+import { UserProfile } from "../../../src/services/userService";
+import { Zone } from "../../../src/services/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import {
@@ -328,7 +316,9 @@ const dedupeRooms = (rooms: Matchroom[]) => {
 };
 
 export default function PlayerDashboard() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const convex = useConvex();
+  const { signOut } = useAuthActions();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const [tags, setTags] = useState<string[]>([]);
@@ -353,111 +343,116 @@ export default function PlayerDashboard() {
   });
   const lastReminderSignatureRef = useRef("");
 
+  const notificationData = useQuery(
+    api.notifications.listNotifications,
+    isAuthenticated ? { limit: 50 } : "skip",
+  );
+
   const loadDashboardData = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!isAuthenticated || !user?.uid) {
+      setUpcomingRooms([]);
+      setRecommendedRooms([]);
+      setMyTeams([]);
+      setNearbyZones([]);
+      setTags([]);
+      setRequestStats({ myRequests: 0, myOffers: 0 });
+      setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
+      setFriendCount(0);
+      return;
+    }
+
+    const toMatchroom = (room: any): Matchroom => ({
+      id: String(room._id),
+      ...room,
+    });
+    const toTeam = (team: any): Team => ({ id: String(team._id), ...team });
+    const toZone = (zone: any): Zone => ({ id: String(zone._id), ...zone });
 
     try {
       const [
-        profileResult,
         userRoomsResult,
         allRoomsResult,
         teamsResult,
         zonesResult,
         requestsResult,
         offersResult,
-        intentsSnapshot,
-        friendsSnapshot,
+        intentsResult,
+        friendsResult,
       ] = await Promise.all([
-        getUserProfile(user.uid),
-        getUserMatchrooms(user.uid),
-        getMatchrooms(40),
-        getUserTeams(user.uid),
-        getActiveZones(),
-        getUserRequests(user.uid),
-        getOffersForUser(user.uid),
-        getDocs(
-          query(
-            collection(db, "booking_intents"),
-            where("createdByUid", "==", user.uid),
-          ),
-        ),
-        getDocs(collection(db, "users", user.uid, "friends")),
+        convex.query(api.matchrooms.listUserMatchrooms, {}),
+        convex.query(api.matchrooms.listRecentMatchrooms, { limit: 40 }),
+        convex.query(api.teams.listTeamsForUser, {}),
+        convex.query(api.zones.listActiveZones, { limit: 50 }),
+        convex.query(api.bookings.listBookingRequestsForUser, {}),
+        convex.query(api.bookings.listOffersForUser, {}),
+        convex.query(api.bookings.listBookingIntentsForUser, {}),
+        convex.query(api.users.listFriends, {}),
       ]);
 
-      const profileData = profileResult.ok ? profileResult.data : null;
+      const profileData = user ?? null;
       setTags(gameTagsFromProfile(profileData));
       const preferredGames = preferredGameKeysFromProfile(profileData);
       let myRoomIds = new Set<string>();
 
-      if (userRoomsResult.ok) {
-        const allMyRooms = dedupeRooms([
-          ...userRoomsResult.data.hosted,
-          ...userRoomsResult.data.joined,
-        ]);
-        myRoomIds = new Set(
-          allMyRooms.map((room) => room.id).filter(Boolean) as string[],
-        );
-        const now = Date.now();
-        const upcoming = allMyRooms
-          .filter((room) => {
-            const start = getRoomStartDate(room);
-            if (!start) return false;
-            return (
-              start.getTime() >= now - 15 * 60 * 1000 &&
-              room.status !== "completed"
-            );
-          })
-          .sort((a, b) => {
-            const aStart = getRoomStartDate(a)?.getTime() || 0;
-            const bStart = getRoomStartDate(b)?.getTime() || 0;
-            return aStart - bStart;
-          })
-          .slice(0, 3);
-        setUpcomingRooms(upcoming);
-      } else {
-        setUpcomingRooms([]);
-      }
+      const hostedRooms = (userRoomsResult?.hosted ?? [])
+        .map(toMatchroom)
+        .filter((room) => !isRoomExpired(room));
+      const joinedRooms = (userRoomsResult?.joined ?? [])
+        .map(toMatchroom)
+        .filter((room) => !isRoomExpired(room));
 
-      if (allRoomsResult.ok) {
-        const recommended = allRoomsResult.data
-          .filter((room) => !isRoomExpired(room) && !isRoomLocked(room))
-          .filter((room) => {
-            if (!room.id || myRoomIds.has(room.id)) return false;
-            if (
-              room.hostUid === user.uid ||
-              room.playerUids?.includes(user.uid)
-            )
-              return false;
-            if (!preferredGames.length) return true;
-            const normalized = normalizeGameKey(room.game);
-            return normalized ? preferredGames.includes(normalized) : true;
-          })
-          .slice(0, 4);
-        setRecommendedRooms(recommended);
-      } else {
-        setRecommendedRooms([]);
-      }
+      const allMyRooms = dedupeRooms([...hostedRooms, ...joinedRooms]);
+      myRoomIds = new Set(
+        allMyRooms.map((room) => room.id).filter(Boolean) as string[],
+      );
 
-      setMyTeams(
-        teamsResult.ok && teamsResult.data ? teamsResult.data.slice(0, 3) : [],
-      );
-      setNearbyZones(
-        zonesResult.ok && zonesResult.data ? zonesResult.data.slice(0, 3) : [],
-      );
+      const now = Date.now();
+      const upcoming = allMyRooms
+        .filter((room) => {
+          const start = getRoomStartDate(room);
+          if (!start) return false;
+          return (
+            start.getTime() >= now - 15 * 60 * 1000 &&
+            room.status !== "completed"
+          );
+        })
+        .sort((a, b) => {
+          const aStart = getRoomStartDate(a)?.getTime() || 0;
+          const bStart = getRoomStartDate(b)?.getTime() || 0;
+          return aStart - bStart;
+        })
+        .slice(0, 3);
+      setUpcomingRooms(upcoming);
+
+      const allRooms = (allRoomsResult ?? [])
+        .map(toMatchroom)
+        .filter((room) => !isRoomExpired(room));
+      const recommended = allRooms
+        .filter((room) => !isRoomLocked(room))
+        .filter((room) => {
+          if (!room.id || myRoomIds.has(room.id)) return false;
+          if (room.hostUid === user.uid || room.playerUids?.includes(user.uid))
+            return false;
+          if (!preferredGames.length) return true;
+          const normalized = normalizeGameKey(room.game);
+          return normalized ? preferredGames.includes(normalized) : true;
+        })
+        .slice(0, 4);
+      setRecommendedRooms(recommended);
+
+      setMyTeams((teamsResult ?? []).map(toTeam).slice(0, 3));
+      setNearbyZones((zonesResult ?? []).map(toZone).slice(0, 3));
+
       setRequestStats({
-        myRequests:
-          requestsResult.ok && requestsResult.data
-            ? requestsResult.data.length
-            : 0,
-        myOffers:
-          offersResult.ok && offersResult.data ? offersResult.data.length : 0,
+        myRequests: requestsResult?.length ?? 0,
+        myOffers: offersResult?.length ?? 0,
       });
-      const totals = intentsSnapshot.docs.reduce(
-        (acc: { totalSpent: number; pendingAmount: number }, docSnap: any) => {
-          const data = docSnap.data() || {};
-          const total = Number(data?.pricing?.total || 0);
+
+      const totals = (intentsResult ?? []).reduce(
+        (acc: { totalSpent: number; pendingAmount: number }, intent: any) => {
+          const total = Number(intent?.pricing?.total || 0);
           if (total <= 0) return acc;
-          if (data.paymentStatus === "paid") {
+          if (intent.paymentStatus === "paid") {
             acc.totalSpent += total;
           } else {
             acc.pendingAmount += total;
@@ -469,28 +464,16 @@ export default function PlayerDashboard() {
       setWalletStats({
         totalSpent: Math.round(totals.totalSpent),
         pendingAmount: Math.round(totals.pendingAmount),
-        transactions: intentsSnapshot.docs.length,
+        transactions: intentsResult?.length ?? 0,
       });
-      const friendUids = friendsSnapshot.docs.map((docSnap: any) => docSnap.id);
-      if (friendUids.length > 0) {
-        const profileResults = await Promise.all(
-          friendUids.map((friendUid: string) => getUserProfile(friendUid)),
-        );
-        const onlineFriends = profileResults.reduce(
-          (count, result) =>
-            count + (result.ok && result.data?.isOnline ? 1 : 0),
-          0,
-        );
-        setFriendCount(onlineFriends);
-      } else {
-        setFriendCount(0);
-      }
+
+      setFriendCount(friendsResult?.length ?? 0);
     } catch (error) {
       Logger.error("Dashboard", "Failed loading dashboard feed", error);
       setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
       setFriendCount(0);
     }
-  }, [user?.uid]);
+  }, [convex, isAuthenticated, user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -499,44 +482,37 @@ export default function PlayerDashboard() {
   );
 
   useEffect(() => {
-    if (!user) return;
+    if (!notificationData?.items) {
+      setNotificationCount(0);
+      setLatestNotifications([]);
+      return;
+    }
 
-    const q = query(
-      collection(db, "notifications"),
-      where("toUid", "==", user.uid),
-    );
+    const items: DashboardNotification[] = [];
+    let count = 0;
+    notificationData.items.forEach((notif: any) => {
+      // Count unread notifications
+      if (notif.isRead === false) {
+        count += 1;
+      }
 
-    const unsubscribe = onSnapshot(q, (snapshot: any) => {
-      const items: DashboardNotification[] = [];
-      let count = 0;
-      snapshot.forEach((docSnap: any) => {
-        const data = docSnap.data();
+      // Logic for showing latest notifications in the dashboard
+      if (notif.status !== "pending") return;
+      if (notif.expiresAt && getMillis(notif.expiresAt) < Date.now()) {
+        return;
+      }
 
-        // Count unread notifications
-        if (data.isRead === false) {
-          count += 1;
-        }
-
-        // Logic for showing latest notifications in the dashboard
-        if (data.status !== "pending") return;
-        if (data.expiresAt && getMillis(data.expiresAt) < Date.now()) {
-          return;
-        }
-
-        items.push({
-          id: docSnap.id,
-          message: data.message || data.title || "New update",
-          icon: notificationIcon(data.type),
-          createdAtMs: getMillis(data.createdAt),
-        });
+      items.push({
+        id: String(notif._id),
+        message: notif.message || notif.title || "New update",
+        icon: notificationIcon(notif.type),
+        createdAtMs: getMillis(notif.createdAt),
       });
-      items.sort((a, b) => b.createdAtMs - a.createdAtMs);
-      setNotificationCount(count);
-      setLatestNotifications(items.slice(0, 2));
     });
-
-    return () => unsubscribe();
-  }, [user]);
+    items.sort((a, b) => b.createdAtMs - a.createdAtMs);
+    setNotificationCount(count);
+    setLatestNotifications(items.slice(0, 2));
+  }, [notificationData]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -564,6 +540,24 @@ export default function PlayerDashboard() {
       href: `/matchrooms/${next.id}`,
     }).catch(() => null);
   }, [upcomingRooms, user?.uid]);
+
+  const handleLogout = useCallback(() => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOut();
+            router.replace("/auth/login");
+          } catch (error: any) {
+            Alert.alert("Logout Failed", error?.message || "Please try again.");
+          }
+        },
+      },
+    ]);
+  }, [router, signOut]);
 
   const QuickAction = ({ icon, label, onPress, color, shadowColor }: any) => (
     <Pressable
@@ -742,6 +736,7 @@ export default function PlayerDashboard() {
         visible={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         title="Quick Links"
+        onLogout={handleLogout}
         items={[
           {
             label: "Discover",

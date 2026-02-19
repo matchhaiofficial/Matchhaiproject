@@ -16,7 +16,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "super-admin") ||
-        request.auth.token.email == "superadmin@matchhai.com" ||
+        request.auth.token.email == "admin@matchhai.com" ||
         request.auth.uid == "jM2JZrPNNNahPb844rHmr0MQKYo1"
       );
     }

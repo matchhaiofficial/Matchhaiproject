@@ -1,86 +1,83 @@
 // app/home/index.tsx
-import { Redirect, router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
-import { useAuth } from '../../src/context/AuthContext';
-import { useZoneData } from '../../src/hooks/useZoneData';
-import { signOutUser } from '../../src/services/authService';
-import { COLORS, FONTS } from '../../src/theme';
-import styles from './home.styles';
+import { Redirect, router } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import { useAuthActions } from "@convex-dev/auth/react";
+
+import { useAuth } from "../../src/context/AuthContext";
+import { getUserRole } from "../../src/utils/role";
+import { COLORS, FONTS } from "../../src/theme";
+import styles from "./home.styles";
 
 export default function Home() {
   const { user, loading: authLoading } = useAuth();
-  const { zone, loading: zoneLoading } = useZoneData();
+  const { signOut } = useAuthActions();
   const [signingOut, setSigningOut] = useState(false);
 
-  const loading = authLoading || (!!user && zoneLoading);
+  const role = getUserRole(user);
 
-  // ✅ Redirect away when user becomes null (after logout)
   useEffect(() => {
     if (!authLoading && !user) {
-      console.log("[Home] no user → redirecting to /auth/login");
+      console.log("[Home] no user -> redirecting to /auth/login");
       router.replace("/auth/login");
     }
   }, [authLoading, user]);
 
-  // ✅ Role-aware redirect: If user has a zone, they belong in /zone. If super-admin, /super-admin
   useEffect(() => {
-    if (!loading && user) {
-      const isSuperAdmin = (user.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
-
-      if (isSuperAdmin) {
-        console.log("[Home] super-admin detected via email/uid → redirecting");
+    if (!authLoading && user) {
+      if (role === "superAdmin") {
         router.replace("/super-admin/(tabs)");
         return;
       }
-      if (zone) {
-        console.log("[Home] admin detected → redirecting to /zone");
-        router.replace("/zone");
+      if (role === "zoneAdmin") {
+        router.replace("/zone/(tabs)");
       }
     }
-  }, [loading, user, zone]);
+  }, [authLoading, role, user]);
 
-  if (loading) {
+  if (authLoading) {
     return (
-      <View style={[styles.screen, { alignItems: 'center', justifyContent: 'center' }]}>
+      <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
         <ActivityIndicator color={COLORS.accent} />
       </View>
     );
   }
 
-  // While redirecting, render nothing (or a tiny placeholder)
   if (!user) {
     return null;
   }
 
-  const name = user.displayName || '';
-  const email = user.email || '';
+  const name = user.displayName || "";
+  const email = user.email || "";
 
   const handleLogout = async () => {
     setSigningOut(true);
-    const res = await signOutUser();
-    setSigningOut(false);
-
-    if (!res.ok) {
-      Alert.alert('Logout Failed', res.message);
-      return;
+    try {
+      await signOut();
+    } catch (error: any) {
+      Alert.alert("Logout Failed", error?.message || "Please try again.");
+    } finally {
+      setSigningOut(false);
     }
-
-    // ❌ No need to call router here; AuthContext + useEffect will handle redirect
-    // router.replace('/auth/login');  <-- remove this line
   };
+
+  const fallbackHref =
+    role === "superAdmin"
+      ? "/super-admin/(tabs)"
+      : role === "zoneAdmin"
+        ? "/zone/(tabs)"
+        : "/(player)/(tabs)";
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Hi{name ? `, ${name}` : ''} 👋</Text>
+      <Text style={styles.title}>Hi{name ? `, ${name}` : ""}</Text>
       <Text style={styles.sub}>Signed in as {email}</Text>
 
       <View style={styles.card}>
         <Text style={styles.sub}>Redirecting to Dashboard...</Text>
       </View>
-      {/* Fallback redirect if they land here */}
-      <Redirect href={((user.email && user.email.toLowerCase() === "superadmin@matchhai.com") || user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1") ? "/super-admin/(tabs)" : "/(player)/(tabs)"} />
+
+      <Redirect href={fallbackHref as any} />
 
       <Pressable
         onPress={handleLogout}
@@ -90,12 +87,12 @@ export default function Home() {
             backgroundColor: COLORS.accent,
             borderRadius: 14,
             paddingVertical: 14,
-            alignItems: 'center',
+            alignItems: "center",
             marginTop: 20,
           },
           pressed && !signingOut && { opacity: 0.92 },
         ]}
-        android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
+        android_ripple={{ color: "rgba(255,255,255,0.08)" }}
       >
         {signingOut ? (
           <ActivityIndicator color="#fff" />

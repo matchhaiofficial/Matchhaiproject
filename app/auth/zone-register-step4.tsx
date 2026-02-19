@@ -13,9 +13,10 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { useMutation } from "convex/react";
 import { useToast } from "../../src/hooks/useToast";
-import { signUpWithEmail } from "../../src/services/authService";
-import { saveZoneRegistration } from "../../src/services/zoneService";
+import { api } from "../../convex/_generated/api";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -24,6 +25,9 @@ export default function AdminRegisterStep4() {
   const { step1, branches, step4, setStep4, setCurrentStep, resetAll } =
     useZoneOnboardingStore();
   const { showToast } = useToast();
+  const { signIn } = useAuthActions();
+  const upsertCurrentUser = useMutation(api.users.upsertCurrentUser);
+  const registerZone = useMutation(api.zones.registerZone);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -88,29 +92,25 @@ export default function AdminRegisterStep4() {
       if (currentSubStep <= 0) {
         setCurrentSubStep(1);
         console.log("[ZoneStep4] Phase 1: Creating administrator account...");
-        const resSignUp = await signUpWithEmail(
-          step1.contactEmail.trim(),
-          step1.password,
-          step1.ownerFullName.trim(),
-          undefined,
-          step1.contactPhone.trim(),
-          'zone'
-        );
+        await signIn("password", {
+          email: step1.contactEmail.trim().toLowerCase(),
+          password: step1.password,
+          flow: "signUp",
+        });
 
-        if (!resSignUp || !resSignUp.ok) {
-          throw { step: 1, message: resSignUp?.message || "Admin account creation failed." };
-        }
+        await upsertCurrentUser({
+          accountType: "zone",
+          fullName: step1.ownerFullName.trim(),
+          displayName: step1.ownerFullName.trim(),
+          phone: step1.contactPhone.trim(),
+        });
       }
 
-      // PHASE 2: Zone + Branches Firestore Save
+      // PHASE 2: Zone + Branches Save
       if (currentSubStep <= 1) {
         setCurrentSubStep(2);
         console.log("[ZoneStep4] Phase 2: Saving zone information...");
-        const resZone = await saveZoneRegistration({ step1, branches });
-
-        if (!resZone.ok) {
-          throw { step: 2, message: resZone.message || "Failed to save zone data." };
-        }
+        await registerZone({ step1, branches });
       }
 
       // SUCCESS

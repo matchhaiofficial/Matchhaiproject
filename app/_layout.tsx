@@ -5,12 +5,13 @@ import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
-import { LogBox, View } from "react-native";
+import { LogBox, Text, View } from "react-native";
 import { router } from "expo-router";
 import {
   addNotificationResponseReceivedListener,
   getLastNotificationResponseAsync,
 } from "expo-notifications/build/NotificationsEmitter";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
 
 // Suppress the keep-awake error in development (Expo internal issue)
 LogBox.ignoreLogs([
@@ -58,6 +59,8 @@ import {
 } from "../src/services/localNotifications";
 import { COLORS } from "../src/theme";
 import { toastConfig } from "../src/ui/toastConfig";
+import { convex } from "../src/config/convexClient";
+import { convexAuthStorage } from "../src/config/convexAuthStorage";
 
 export default function RootLayout() {
   const [montLoaded] = useMontserrat({
@@ -198,21 +201,32 @@ export default function RootLayout() {
   }, []);
 
   if (!ready) return null;
+  if (!convex) {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.background, alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <Text style={{ color: COLORS.text, textAlign: "center" }}>
+          Missing EXPO_PUBLIC_CONVEX_URL. Add it to your environment before starting the app.
+        </Text>
+      </View>
+    );
+  }
 
   return (
-    <AuthProvider>
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" translucent backgroundColor="transparent" />
-        <InAppNotificationBridge />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
-          }}
-        />
-        {/* Global toast host */}
-        <Toast config={toastConfig} />
-      </View>
-    </AuthProvider>
+    <ConvexAuthProvider client={convex} storage={convexAuthStorage}>
+      <AuthProvider>
+        <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+          <StatusBar style="light" translucent backgroundColor="transparent" />
+          <InAppNotificationBridge />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: COLORS.background },
+            }}
+          />
+          {/* Global toast host */}
+          <Toast config={toastConfig} />
+        </View>
+      </AuthProvider>
+    </ConvexAuthProvider>
   );
 }

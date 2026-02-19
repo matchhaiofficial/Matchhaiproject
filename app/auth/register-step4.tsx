@@ -13,12 +13,10 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { useMutation } from "convex/react";
 import { useToast } from "../../src/hooks/useToast";
-import { signUpWithEmail } from "../../src/services/authService";
-import {
-  saveOnboardingStep2,
-  saveOnboardingStep3Platforms,
-} from "../../src/services/userService";
+import { api } from "../../convex/_generated/api";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -27,6 +25,11 @@ export default function RegisterStep4() {
   const { step1, step2, step3, step4, setStep4, resetAll } =
     useOnboardingStore();
   const { showToast } = useToast();
+  const { signIn } = useAuthActions();
+  const upsertCurrentUser = useMutation(api.users.upsertCurrentUser);
+  const updateProfile = useMutation(api.users.updateProfile);
+  const updateGamePreferences = useMutation(api.users.updateGamePreferences);
+  const updatePlatformLinks = useMutation(api.users.updatePlatformLinks);
 
   console.log("[Step4] mounted", { step1, step2, step3, step4 });
 
@@ -95,8 +98,6 @@ export default function RegisterStep4() {
     const platforms: string[] = [];
     if (step3.steamProfileUrl?.trim()) platforms.push("Steam");
     if (step3.faceitProfileUrl?.trim()) platforms.push("FACEIT");
-    if (step3.eaProfileUrl?.trim()) platforms.push("EA / FC");
-    if (step3.xboxGamertag?.trim()) platforms.push("Xbox");
     if (step3.psnOnlineId?.trim()) platforms.push("PSN");
     return platforms;
   }, [step3]);
@@ -157,17 +158,24 @@ export default function RegisterStep4() {
       if (currentSubStep <= 0) {
         setCurrentSubStep(1);
         console.log("[Step4] Phase 1: Creating account...");
-        const resSignUp = await signUpWithEmail(
-          email.trim(),
+        await signIn("password", {
+          email: email.trim().toLowerCase(),
           password,
-          fullName.trim(),
-          username.trim(),
-          phone.trim()
-        );
+          flow: "signUp",
+        });
 
-        if (!resSignUp || !resSignUp.ok) {
-          throw { step: 1, message: resSignUp?.message || "Auth creation failed." };
-        }
+        await upsertCurrentUser({
+          accountType: "player",
+          fullName: fullName.trim(),
+          displayName: fullName.trim(),
+          username: username.trim(),
+          phone: phone.trim(),
+        });
+
+        await updateProfile({
+          city: step1.city?.trim() || null,
+          ageRange: step1.ageRange?.trim() || null,
+        });
       }
 
       // PHASE 2: Preferences (Step 2)
@@ -187,7 +195,7 @@ export default function RegisterStep4() {
         const padelRole = ((step2 as any).padelRole as string) ?? null;
         const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
-        const resStep2 = await saveOnboardingStep2({
+        await updateGamePreferences({
           areasPreferred: step2.selectedAreas,
           playsCs2: step2.playsCs2,
           cs2Role: step2.cs2Role,
@@ -196,45 +204,39 @@ export default function RegisterStep4() {
           fcFormation: step2.fcFormation,
           playsTekken: step2.playsTekken,
           tekkenFavorites: step2.tekkenFavorites,
-          // new sports fields logic
-          ...({
-            playsFutsal,
-            playsIndoorCricket,
-            playsPadel,
-            playsPickleball,
-            futsalPositions,
-            indoorCricketRole,
-            indoorCricketBowlingStyle,
-            indoorCricketBattingStyle,
-            padelRole,
-            pickleballRole,
-          } as any)
+          playsFutsal,
+          playsIndoorCricket,
+          playsPadel,
+          playsPickleball,
+          futsalPositions,
+          indoorCricketRole,
+          indoorCricketBowlingStyle,
+          indoorCricketBattingStyle,
+          padelRole,
+          pickleballRole,
         });
-
-        if (!resStep2.ok) {
-          throw { step: 2, message: resStep2.message };
-        }
       }
 
       // PHASE 3: Platforms (Step 3)
       if (currentSubStep <= 2) {
         setCurrentSubStep(3);
         console.log("[Step4] Phase 3: Connecting platforms...");
-        const resStep3 = await saveOnboardingStep3Platforms({
+        await updatePlatformLinks({
           steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
+          steamId: step3.steamProfile?.steamId ?? null,
+          steamPersonaName: step3.steamProfile?.personaName ?? null,
+          steamCs2Hours: step3.steamProfile?.cs2Hours ?? null,
+          steamStats: step3.steamProfile?.stats ?? null,
           faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
-          eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
-          xboxGamertag: (step3.xboxGamertag || "").trim() || null,
+          faceitId: step3.faceitProfile?.faceitId ?? null,
+          faceitNickname: step3.faceitProfile?.nickname ?? null,
+          faceitGame: step3.faceitProfile?.game ?? null,
+          faceitElo: step3.faceitProfile?.elo ?? null,
+          faceitSkillLevel: step3.faceitProfile?.skillLevel ?? null,
           psnOnlineId: (step3.psnOnlineId || "").trim() || null,
-          // summaries from Step 3
-          steamProfile: step3.steamProfile,
-          faceitProfile: step3.faceitProfile,
-          psnProfile: step3.psnProfile,
+          psnAccountId: step3.psnProfile?.psnAccountId ?? null,
+          psnStats: step3.psnProfile ?? null,
         });
-
-        if (!resStep3.ok) {
-          throw { step: 3, message: resStep3.message };
-        }
       }
 
       // SUCCESS
@@ -249,7 +251,7 @@ export default function RegisterStep4() {
           title: "Welcome to MatchHai",
           message: "Account ready! Let’s find your squad.",
         });
-        router.replace("/home");
+        router.replace("/");
       }, 1500);
 
     } catch (err: any) {

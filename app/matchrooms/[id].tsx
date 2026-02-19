@@ -27,7 +27,7 @@ import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
-import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
+import { cancelMatchJoinRequest, deleteMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, resolveMatchResultByAdmin, respondToMatchJoinRequest, startMatch } from "../../src/services/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
 import { submitMatchroomComplain } from "../../src/services/reportService";
 import {
@@ -105,6 +105,7 @@ export default function MatchroomDetails() {
     const [counterExpiryMinutes, setCounterExpiryMinutes] = useState("10");
     const [counterDateValue, setCounterDateValue] = useState<Date>(new Date(Date.now() + 2 * 60 * 60 * 1000));
     const [adminProcessing, setAdminProcessing] = useState<"accept" | "reject" | "counter" | null>(null);
+    const [resolvingResult, setResolvingResult] = useState(false);
 
     const fetchRoom = async () => {
         if (!id || typeof id !== 'string') return;
@@ -551,6 +552,38 @@ export default function MatchroomDetails() {
 
     const handleVote = () => {
         router.push(`/matchrooms/vote?id=${id}`);
+    };
+
+    const handleResolveResult = () => {
+        if (!id || !user?.uid) return;
+
+        const finalizeWithWinner = async (winner: "team1" | "team2") => {
+            setResolvingResult(true);
+            try {
+                const result = await resolveMatchResultByAdmin(id as string, user.uid, winner);
+                if (!result.ok) {
+                    Alert.alert("Unable to Finalize", result.message || "Could not resolve result.");
+                    return;
+                }
+                Alert.alert("Result Finalized", "Match has been marked as completed.");
+                fetchRoom();
+            } catch (error) {
+                Logger.error("MatchroomDetails", "Resolve result error", error);
+                Alert.alert("Error", "Something went wrong while finalizing result.");
+            } finally {
+                setResolvingResult(false);
+            }
+        };
+
+        Alert.alert(
+            "Finalize Match Result",
+            "Choose the final winner. This will mark the match as completed.",
+            [
+                { text: "Cancel", style: "cancel" },
+                { text: "Team 1 Won", onPress: () => finalizeWithWinner("team1") },
+                { text: "Team 2 Won", onPress: () => finalizeWithWinner("team2") },
+            ],
+        );
     };
 
     const handleComplain = async () => {
@@ -1003,6 +1036,35 @@ export default function MatchroomDetails() {
 
     const isFull = useMemo(() => occupiedSeatCount >= (room?.maxPlayers || 0), [occupiedSeatCount, room?.maxPlayers]);
     const canJoin = useMemo(() => !isExpired && !isLocked && !isJoined && !isFull, [isExpired, isLocked, isJoined, isFull]);
+    const resultStatus = room?.resultVerification?.status;
+    const hasCaptainReport = useMemo(
+        () => Boolean(room?.resultVerification?.captainReports?.team1Captain || room?.resultVerification?.captainReports?.team2Captain),
+        [room?.resultVerification?.captainReports?.team1Captain, room?.resultVerification?.captainReports?.team2Captain],
+    );
+    const canResolveResult = useMemo(() => {
+        if (!room || !user?.uid || room.status === "completed") return false;
+
+        const team1Captain = room.resultVerification?.team1Captain || room.hostUid;
+        const fallbackTeam2Captain =
+            room.resultVerification?.team2Captain ||
+            (room.players || []).map((player) => player.uid).find((uid) => uid && uid !== team1Captain);
+        const allowedResolvers = new Set(
+            [room.hostUid, room.zoneOwnerUid, team1Captain, fallbackTeam2Captain].filter(Boolean) as string[],
+        );
+        if (!allowedResolvers.has(user.uid)) return false;
+
+        return (
+            resultStatus === "participant_vote" ||
+            resultStatus === "admin_review" ||
+            (resultStatus === "pending" && hasCaptainReport)
+        );
+    }, [hasCaptainReport, resultStatus, room, user?.uid]);
+    const lifecycleStatusLabel = useMemo(() => {
+        if (!room) return "In Progress";
+        if (room.status === "completed" || resultStatus === "resolved") return "Completed";
+        if (resultStatus === "participant_vote" || resultStatus === "admin_review") return "Verifying Results";
+        return "In Progress";
+    }, [resultStatus, room]);
     const matchCode = room?.matchCode || (room?.id ? room.id.slice(-6).toUpperCase() : '');
     const qrValue = room?.id ? `matchhai://matchrooms/${room.id}` : '';
 
@@ -1878,7 +1940,7 @@ export default function MatchroomDetails() {
                     <View style={{ gap: SPACING.sm }}>
                         <View style={styles.statusBanner}>
                             <Text style={styles.statusText}>
-                                Status: {room.status === 'in-progress' ? 'In Progress' : 'Verifying Results'}
+                                Status: {lifecycleStatusLabel}
                             </Text>
                         </View>
 
@@ -1913,6 +1975,27 @@ export default function MatchroomDetails() {
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
                                 <Text style={styles.joinButtonText}>Vote on Dispute</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {canResolveResult && (
+                            <TouchableOpacity
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "lobby_finalize_result" });
+                                    }
+                                }}
+                                onPress={handleResolveResult}
+                                style={[styles.joinButton, { backgroundColor: COLORS.accent }]}
+                                activeOpacity={0.85}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                disabled={resolvingResult}
+                            >
+                                {resolvingResult ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <Text style={styles.joinButtonText}>Finalize Result</Text>
+                                )}
                             </TouchableOpacity>
                         )}
                     </View>

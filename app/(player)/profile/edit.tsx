@@ -28,13 +28,11 @@ import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/p
 import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
 import Logger from "../../../src/utils/logger";
 import {
-    isEaIdAvailable,
     isFaceitIdAvailable,
     isPhoneAvailable,
     isPsnIdAvailable,
     isSteamIdAvailable,
     isUsernameAvailable,
-    isXboxIdAvailable,
 } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import styles from "./edit.styles";
@@ -119,8 +117,6 @@ export default function EditProfile() {
     const [steamProfileUrl, setSteamProfileUrl] = useState("");
     const [faceitProfileUrl, setFaceitProfileUrl] = useState("");
     const [psnOnlineId, setPsnOnlineId] = useState("");
-    const [eaProfileUrl, setEaProfileUrl] = useState("");
-    const [xboxGamertag, setXboxGamertag] = useState("");
 
     // Privacy Settings
     const [hideAreasPublicly, setHideAreasPublicly] = useState(false);
@@ -134,15 +130,11 @@ export default function EditProfile() {
     const [steamLoading, setSteamLoading] = useState(false);
     const [faceitLoading, setFaceitLoading] = useState(false);
     const [psnLoading, setPsnLoading] = useState(false);
-    const [eaLoading, setEaLoading] = useState(false);
-    const [xboxLoading, setXboxLoading] = useState(false);
 
     // availability status
     const [steamStatus, setSteamStatus] = useState<"idle" | "available" | "taken">("idle");
     const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
     const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
-    const [eaStatus, setEaStatus] = useState<"idle" | "available" | "taken">("idle");
-    const [xboxStatus, setXboxStatus] = useState<"idle" | "available" | "taken">("idle");
 
     // Validation
     const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -241,8 +233,6 @@ export default function EditProfile() {
                     setSteamProfileUrl(data.steamProfileUrl || "");
                     setFaceitProfileUrl(data.faceitProfileUrl || "");
                     setPsnOnlineId(data.psnOnlineId || "");
-                    setEaProfileUrl(data.eaProfileUrl || "");
-                    setXboxGamertag(data.xboxGamertag || "");
 
                     setHideAreasPublicly(data.hideAreasPublicly || false);
                     setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
@@ -274,12 +264,6 @@ export default function EditProfile() {
                         setPsnStatus("available");
                     }
 
-                    if (data.eaId) {
-                        setEaStatus("available");
-                    }
-                    if (data.xboxId) {
-                        setXboxStatus("available");
-                    }
                 }
             } catch (e) {
                 console.error("Failed to load profile", e);
@@ -524,52 +508,6 @@ export default function EditProfile() {
         showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
     };
 
-    const handleEaLookup = async () => {
-        const value = eaProfileUrl.trim();
-        if (!value) {
-            showToast({ type: "info", title: "EA ID", message: "Enter your EA ID first." });
-            return;
-        }
-        setEaLoading(true);
-        const available = await isEaIdAvailable(value, user?.uid);
-        setEaLoading(false);
-
-        if (!available) {
-            setEaStatus("taken");
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-        } else {
-            setEaStatus("available");
-            showToast({ type: "success", title: "Verified", message: "EA ID is available and linked." });
-        }
-    };
-
-    const handleXboxLookup = async () => {
-        const value = xboxGamertag.trim();
-        if (!value) {
-            showToast({ type: "info", title: "Xbox Gamertag", message: "Enter your Xbox Gamertag first." });
-            return;
-        }
-        setXboxLoading(true);
-        const available = await isXboxIdAvailable(value, user?.uid);
-        setXboxLoading(false);
-
-        if (!available) {
-            setXboxStatus("taken");
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-        } else {
-            setXboxStatus("available");
-            showToast({ type: "success", title: "Verified", message: "Xbox Gamertag is available and linked." });
-        }
-    };
-
     const handleUpdatePassword = async () => {
         if (!currentPassword) {
             showToast({ type: "error", title: "Current Password Required", message: "Enter your current password." });
@@ -672,9 +610,7 @@ export default function EditProfile() {
         if (
             steamStatus === "taken" ||
             faceitStatus === "taken" ||
-            psnStatus === "taken" ||
-            eaStatus === "taken" ||
-            xboxStatus === "taken"
+            psnStatus === "taken"
         ) {
             showToast({
                 type: "error",
@@ -712,8 +648,6 @@ export default function EditProfile() {
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
                 psnOnlineId: psnOnlineId.trim() || null,
-                eaProfileUrl: eaProfileUrl.trim() || null,
-                xboxGamertag: xboxGamertag.trim() || null,
                 hideAreasPublicly,
                 hidePlatformsPublicly,
                 restrictInvitesToFriends,
@@ -764,19 +698,6 @@ export default function EditProfile() {
             } else if (!psnOnlineId.trim()) {
                 // Clear ALL PSN data if ID is cleared
                 updates.psnStats = null;
-            }
-
-            // EA / Xbox IDs
-            if (eaStatus === "available" && eaProfileUrl.trim()) {
-                updates.eaId = eaProfileUrl.trim();
-            } else if (!eaProfileUrl.trim()) {
-                updates.eaId = null;
-            }
-
-            if (xboxStatus === "available" && xboxGamertag.trim()) {
-                updates.xboxId = xboxGamertag.trim();
-            } else if (!xboxGamertag.trim()) {
-                updates.xboxId = null;
             }
 
             // Auth Updates - Email is read-only, no updates needed
@@ -1436,92 +1357,6 @@ export default function EditProfile() {
                             </View>
                         )}
                         {psnStatus === "taken" && (
-                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
-                        )}
-                    </View>
-
-                    {/* EA */}
-                    <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>EA Account / Club</Text>
-                        <View style={styles.platformInputRow}>
-                            <View style={[styles.platformIcon, { borderColor: COLORS.accent, backgroundColor: COLORS.accent + '10' }]}>
-                                <MaterialIcons name="sports-soccer" size={24} color={COLORS.accent} />
-                            </View>
-                            <View style={styles.platformField}>
-                                <View style={styles.inputBox}>
-                                    <TextInput
-                                        value={eaProfileUrl}
-                                        onChangeText={(t) => {
-                                            setEaProfileUrl(t);
-                                            setEaStatus("idle");
-                                        }}
-                                        style={[styles.input, { fontSize: 13 }]}
-                                        placeholder="Club link or EA ID"
-                                        placeholderTextColor={COLORS.muted}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-
-                        <Pressable
-                            onPress={handleEaLookup}
-                            disabled={eaLoading || !eaProfileUrl.trim()}
-                            style={({ pressed }) => [
-                                styles.platformButton,
-                                eaStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
-                                pressed && !eaLoading && { opacity: 0.9 },
-                            ]}
-                        >
-                            <Text style={styles.platformButtonText}>
-                                {eaLoading ? "Checking..." : eaStatus === "available" ? "EA Linked" : "Verify EA Account"}
-                            </Text>
-                        </Pressable>
-                        {eaStatus === "taken" && (
-                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
-                        )}
-                    </View>
-
-                    {/* Xbox */}
-                    <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>Xbox Gamertag</Text>
-                        <View style={styles.platformInputRow}>
-                            <View style={[styles.platformIcon, { borderColor: '#107C10', backgroundColor: '#e6f2e6' }]}>
-                                <MaterialIcons name="sports-esports" size={24} color="#107C10" />
-                            </View>
-                            <View style={styles.platformField}>
-                                <View style={styles.inputBox}>
-                                    <TextInput
-                                        value={xboxGamertag}
-                                        onChangeText={(t) => {
-                                            setXboxGamertag(t);
-                                            setXboxStatus("idle");
-                                        }}
-                                        style={[styles.input, { fontSize: 13 }]}
-                                        placeholder="Your Xbox gamertag"
-                                        placeholderTextColor={COLORS.muted}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-
-                        <Pressable
-                            onPress={handleXboxLookup}
-                            disabled={xboxLoading || !xboxGamertag.trim()}
-                            style={({ pressed }) => [
-                                styles.platformButton,
-                                xboxStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
-                                pressed && !xboxLoading && { opacity: 0.9 },
-                            ]}
-                        >
-                            <Text style={styles.platformButtonText}>
-                                {xboxLoading ? "Checking..." : xboxStatus === "available" ? "Xbox Linked" : "Verify Xbox Gamertag"}
-                            </Text>
-                        </Pressable>
-                        {xboxStatus === "taken" && (
                             <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
                         )}
                     </View>

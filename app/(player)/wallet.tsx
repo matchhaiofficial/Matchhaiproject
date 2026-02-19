@@ -28,6 +28,7 @@ import { getOffersForUser, getUserRequests } from "../../src/services/bookingReq
 import { BookingIntent } from "../../src/services/bookingService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
+import { calculateWalletTotals } from "../../src/utils/wallet";
 import styles from "./wallet.styles";
 
 type WalletTab = "overview" | "transactions";
@@ -107,20 +108,7 @@ export default function WalletScreen() {
         fetchWalletData();
     }, [fetchWalletData]));
 
-    const totals = useMemo(() => {
-        const totalSpent = bookingIntents
-            .filter((item) => item.paymentStatus === "paid")
-            .reduce((acc, item) => acc + (item.pricing?.total || 0), 0);
-        const pendingAmount = bookingIntents
-            .filter((item) => item.paymentStatus !== "paid")
-            .reduce((acc, item) => acc + (item.pricing?.total || 0), 0);
-        return {
-            totalSpent,
-            pendingAmount,
-            paidCount: bookingIntents.filter((item) => item.paymentStatus === "paid").length,
-            pendingCount: bookingIntents.filter((item) => item.paymentStatus !== "paid").length,
-        };
-    }, [bookingIntents]);
+    const totals = useMemo(() => calculateWalletTotals(bookingIntents), [bookingIntents]);
 
     const quickAmounts = [500, 1000, 2000, 5000];
 

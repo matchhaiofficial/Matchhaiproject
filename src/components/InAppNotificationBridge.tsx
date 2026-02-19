@@ -1,9 +1,9 @@
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { useQuery } from "convex/react";
 import React, { useEffect, useRef } from "react";
 import scheduleNotificationAsync from "expo-notifications/build/scheduleNotificationAsync";
 
-import { db } from "../config/firebaseConfig";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../../convex/_generated/api";
 import Logger from "../utils/logger";
 
 const toMillis = (value: any) => {
@@ -23,9 +23,13 @@ const inferHref = (data: any): string => {
 };
 
 export default function InAppNotificationBridge() {
-    const { user } = useAuth();
+    const { user, isAuthenticated } = useAuth();
     const seenIdsRef = useRef<Set<string>>(new Set());
     const primedRef = useRef(false);
+    const notificationData = useQuery(
+        api.notifications.listNotifications,
+        isAuthenticated ? { limit: 50 } : "skip",
+    );
 
     useEffect(() => {
         primedRef.current = false;
@@ -33,58 +37,51 @@ export default function InAppNotificationBridge() {
     }, [user?.uid]);
 
     useEffect(() => {
-        if (!user?.uid) return;
+        if (!notificationData?.items) return;
 
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid),
-        );
+        const incoming = notificationData.items.map((item: any) => ({
+            id: String(item._id),
+            data: item,
+        }));
 
-        const unsub = onSnapshot(
-            q,
-            async (snapshot: any) => {
-                const incoming: Array<{ id: string; data: any }> = [];
-                snapshot.forEach((docSnap: any) => incoming.push({ id: docSnap.id, data: docSnap.data() }));
+        if (!primedRef.current) {
+            incoming.forEach((item) => seenIdsRef.current.add(item.id));
+            primedRef.current = true;
+            return;
+        }
 
-                if (!primedRef.current) {
-                    incoming.forEach((item) => seenIdsRef.current.add(item.id));
-                    primedRef.current = true;
-                    return;
+        const run = async () => {
+            for (const item of incoming) {
+                if (seenIdsRef.current.has(item.id)) continue;
+                seenIdsRef.current.add(item.id);
+
+                const data = item.data || {};
+                if (data.status && String(data.status) !== "pending") continue;
+                if (data.expiresAt && toMillis(data.expiresAt) < Date.now()) continue;
+
+                const title = String(data.title || "New update");
+                const body = String(data.message || data.body || "Open inbox to view details.");
+                const href = inferHref(data);
+
+                try {
+                    await scheduleNotificationAsync({
+                        content: {
+                            title,
+                            body,
+                            data: { href, notificationId: item.id },
+                        },
+                        trigger: null,
+                    });
+                } catch (error) {
+                    Logger.debug("InAppNotificationBridge", "Failed to present local notification", { error });
                 }
+            }
+        };
 
-                for (const item of incoming) {
-                    if (seenIdsRef.current.has(item.id)) continue;
-                    seenIdsRef.current.add(item.id);
-
-                    const data = item.data || {};
-                    if (data.status && String(data.status) !== "pending") continue;
-                    if (data.expiresAt && toMillis(data.expiresAt) < Date.now()) continue;
-
-                    const title = String(data.title || "New update");
-                    const body = String(data.message || data.body || "Open inbox to view details.");
-                    const href = inferHref(data);
-
-                    try {
-                        await scheduleNotificationAsync({
-                            content: {
-                                title,
-                                body,
-                                data: { href, notificationId: item.id },
-                            },
-                            trigger: null,
-                        });
-                    } catch (error) {
-                        Logger.debug("InAppNotificationBridge", "Failed to present local notification", { error });
-                    }
-                }
-            },
-            (error: any) => {
-                Logger.error("InAppNotificationBridge", "Notifications listener failed", error);
-            },
-        );
-
-        return () => unsub();
-    }, [user?.uid]);
+        run().catch((error) => {
+            Logger.error("InAppNotificationBridge", "Notifications listener failed", error);
+        });
+    }, [notificationData]);
 
     return null;
 }

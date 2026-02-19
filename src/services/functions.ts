@@ -222,8 +222,7 @@ const getRequesterSnapshot = async (uid: string, gameKey: string) => {
         linked: {
             steam: !!data.steamId,
             faceit: !!data.faceitId,
-            psn: !!data.psnId,
-            xbox: !!data.xboxId
+            psn: !!data.psnId
         },
         stats: {
             faceitLevel: data.faceitSkillLevel || null

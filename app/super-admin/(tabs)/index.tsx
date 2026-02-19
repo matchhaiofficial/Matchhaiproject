@@ -2,6 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
+import { useAuthActions } from "@convex-dev/auth/react";
 import {
     ActivityIndicator,
     FlatList,
@@ -22,6 +23,7 @@ export default function PendingApprovals() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const { showToast } = useToast();
+    const { signOut } = useAuthActions();
 
     const fetchPending = async () => {
         setLoading(true);
@@ -95,9 +97,16 @@ export default function PendingApprovals() {
     );
 
     const handleLogout = async () => {
-        const { signOutUser } = await import("../../../src/services/authService");
-        await signOutUser();
-        router.replace("/auth/login");
+        try {
+            await signOut();
+            router.replace("/auth/login");
+        } catch (error: any) {
+            showToast({
+                type: "error",
+                title: "Logout Failed",
+                message: error?.message || "Please try again.",
+            });
+        }
     };
 
     if (loading && !refreshing) {

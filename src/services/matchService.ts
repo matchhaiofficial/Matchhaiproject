@@ -162,6 +162,17 @@ export interface Matchroom {
         // Participant voting (optional)
         participantVotes?: Record<string, 'team1' | 'team2' | 'unknown'>;
         deadline?: any;
+        voteSummary?: {
+            team1Votes: number;
+            team2Votes: number;
+            unknownVotes: number;
+            totalVotes: number;
+            totalParticipants: number;
+        };
+        resolvedWinner?: 'team1' | 'team2';
+        resolvedByUid?: string;
+        resolvedAt?: any;
+        resolutionSource?: 'captain_consensus' | 'participant_vote' | 'manual_admin';
 
         // Legacy
         votes?: Record<string, string>;
@@ -183,6 +194,34 @@ const stripUndefinedDeep = (value: any): any => {
         return result;
     }
     return value;
+};
+
+type MatchWinner = 'team1' | 'team2';
+type ParticipantVote = MatchWinner | 'unknown';
+
+const isMatchWinner = (value: unknown): value is MatchWinner =>
+    value === 'team1' || value === 'team2';
+
+const resolveResultCaptains = (
+    room: Matchroom,
+    rv: Matchroom['resultVerification'],
+) => {
+    const team1Captain = rv?.team1Captain || room.hostUid;
+    const fallbackTeam2Captain =
+        (room.players || []).map((player) => player.uid).find((uid) => uid && uid !== team1Captain) || '';
+    const team2Captain = rv?.team2Captain || fallbackTeam2Captain;
+    return { team1Captain, team2Captain };
+};
+
+const getParticipantUids = (room: Matchroom): string[] => {
+    const unique = new Set<string>();
+    (room.playerUids || []).forEach((uid) => {
+        if (uid) unique.add(uid);
+    });
+    (room.players || []).forEach((player) => {
+        if (player?.uid) unique.add(player.uid);
+    });
+    return Array.from(unique);
 };
 
 function parseFormatExtras(format?: string) {
@@ -580,14 +619,10 @@ export async function submitCaptainReport(
             const snap = await tx.get(roomRef);
             if (!snap.exists()) throw new Error("Matchroom not found");
             const room = snap.data() as Matchroom;
+            if (room.status === 'completed') throw new Error("Match already completed");
 
             const rv = room.resultVerification || { status: 'pending' as const };
-            const team1Captain = rv.team1Captain || room.hostUid;
-
-            // best-effort fallback: pick the first uid not equal to team1Captain
-            const fallbackTeam2Captain =
-                (room.players || []).map(p => p.uid).find(uid => uid && uid !== team1Captain) || '';
-            const team2Captain = rv.team2Captain || fallbackTeam2Captain;
+            const { team1Captain, team2Captain } = resolveResultCaptains(room, rv);
 
             const captainKey =
                 captainUid === team1Captain ? 'team1Captain'
@@ -596,15 +631,41 @@ export async function submitCaptainReport(
 
             if (!captainKey) throw new Error("Only captains can submit a report");
 
-            const reportPath = `resultVerification.captainReports.${captainKey}`;
+            const nextReports = {
+                ...(rv.captainReports || {}),
+                [captainKey]: { result: winner, timestamp: new Date() },
+            } as NonNullable<Matchroom['resultVerification']>['captainReports'];
 
-            tx.update(roomRef, {
-                "resultVerification.status": rv.status || 'pending',
+            const team1Report = nextReports?.team1Captain?.result;
+            const team2Report = nextReports?.team2Captain?.result;
+            const reportPath = `resultVerification.captainReports.${captainKey}`;
+            const updates: any = {
                 "resultVerification.team1Captain": team1Captain,
                 "resultVerification.team2Captain": team2Captain,
                 [reportPath]: { result: winner, timestamp: serverTimestamp() },
                 updatedAt: serverTimestamp(),
-            } as any);
+            };
+
+            if (isMatchWinner(team1Report) && isMatchWinner(team2Report)) {
+                if (team1Report === team2Report) {
+                    updates.status = 'completed';
+                    updates.completedAt = serverTimestamp();
+                    updates["resultVerification.status"] = 'resolved';
+                    updates["resultVerification.resolvedWinner"] = team1Report;
+                    updates["resultVerification.resolutionSource"] = 'captain_consensus';
+                    updates["resultVerification.resolvedByUid"] = captainUid;
+                    updates["resultVerification.resolvedAt"] = serverTimestamp();
+                } else {
+                    updates["resultVerification.status"] = 'participant_vote';
+                    if (!rv.deadline) {
+                        updates["resultVerification.deadline"] = new Date(Date.now() + ONE_DAY_MS);
+                    }
+                }
+            } else {
+                updates["resultVerification.status"] = 'pending';
+            }
+
+            tx.update(roomRef, updates);
         });
 
         return { ok: true };
@@ -623,16 +684,124 @@ export async function submitParticipantVote(
         if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
 
         const roomRef = doc(db, COLLECTION_NAME, matchroomId);
-        await updateDoc(roomRef, {
-            [`resultVerification.participantVotes.${participantUid}`]: vote,
-            "resultVerification.status": "participant_vote",
-            updatedAt: serverTimestamp(),
-        } as any);
+        await runTransaction(db, async (tx: any) => {
+            const snap = await tx.get(roomRef);
+            if (!snap.exists()) throw new Error("Matchroom not found");
+            const room = snap.data() as Matchroom;
+            if (room.status === 'completed') throw new Error("Match already completed");
+
+            const participantUids = getParticipantUids(room);
+            if (!participantUids.includes(participantUid)) {
+                throw new Error("Only match participants can vote");
+            }
+
+            const rv = room.resultVerification || { status: 'participant_vote' as const };
+            const nextVotes: Record<string, ParticipantVote> = {
+                ...(rv.participantVotes || {}),
+                [participantUid]: vote,
+            };
+
+            let team1Votes = 0;
+            let team2Votes = 0;
+            let unknownVotes = 0;
+            Object.values(nextVotes).forEach((choice) => {
+                if (choice === 'team1') team1Votes += 1;
+                else if (choice === 'team2') team2Votes += 1;
+                else unknownVotes += 1;
+            });
+
+            const totalParticipants = Math.max(1, participantUids.length || Number(room.currentPlayers || 0));
+            const totalVotes = Object.keys(nextVotes).length;
+            const majority = Math.floor(totalParticipants / 2) + 1;
+            const updates: any = {
+                [`resultVerification.participantVotes.${participantUid}`]: vote,
+                "resultVerification.voteSummary": {
+                    team1Votes,
+                    team2Votes,
+                    unknownVotes,
+                    totalVotes,
+                    totalParticipants,
+                },
+                updatedAt: serverTimestamp(),
+            };
+
+            if (team1Votes >= majority || team2Votes >= majority) {
+                const resolvedWinner: MatchWinner = team1Votes >= majority ? 'team1' : 'team2';
+                updates.status = 'completed';
+                updates.completedAt = serverTimestamp();
+                updates["resultVerification.status"] = 'resolved';
+                updates["resultVerification.resolvedWinner"] = resolvedWinner;
+                updates["resultVerification.resolutionSource"] = 'participant_vote';
+                updates["resultVerification.resolvedByUid"] = participantUid;
+                updates["resultVerification.resolvedAt"] = serverTimestamp();
+            } else if (totalVotes >= totalParticipants) {
+                updates["resultVerification.status"] = 'admin_review';
+            } else {
+                updates["resultVerification.status"] = 'participant_vote';
+                if (!rv.deadline) {
+                    updates["resultVerification.deadline"] = new Date(Date.now() + ONE_DAY_MS);
+                }
+            }
+
+            tx.update(roomRef, updates);
+        });
 
         return { ok: true };
     } catch (e: any) {
         Logger.error("matchService", "submitParticipantVote error", e);
         return { ok: false, message: e?.message || "Failed to submit vote" };
+    }
+}
+
+export async function resolveMatchResultByAdmin(
+    matchroomId: string,
+    resolverUid: string,
+    winner: MatchWinner
+): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        if (!auth.currentUser) return { ok: false, message: "Not authenticated" };
+        if (auth.currentUser.uid !== resolverUid) {
+            return { ok: false, message: "Resolver mismatch" };
+        }
+        if (!isMatchWinner(winner)) {
+            return { ok: false, message: "Invalid winner selection" };
+        }
+
+        const roomRef = doc(db, COLLECTION_NAME, matchroomId);
+        await runTransaction(db, async (tx: any) => {
+            const snap = await tx.get(roomRef);
+            if (!snap.exists()) throw new Error("Matchroom not found");
+            const room = snap.data() as Matchroom;
+            if (room.status === 'completed') throw new Error("Match already completed");
+
+            const rv = room.resultVerification || { status: 'admin_review' as const };
+            const { team1Captain, team2Captain } = resolveResultCaptains(room, rv);
+
+            const allowedResolvers = new Set(
+                [room.hostUid, room.zoneOwnerUid, team1Captain, team2Captain].filter(Boolean) as string[]
+            );
+            if (!allowedResolvers.has(resolverUid)) {
+                throw new Error("Only host/captain/admin can finalize this result");
+            }
+
+            tx.update(roomRef, {
+                status: 'completed',
+                completedAt: serverTimestamp(),
+                "resultVerification.status": 'resolved',
+                "resultVerification.team1Captain": team1Captain,
+                "resultVerification.team2Captain": team2Captain,
+                "resultVerification.resolvedWinner": winner,
+                "resultVerification.resolvedByUid": resolverUid,
+                "resultVerification.resolvedAt": serverTimestamp(),
+                "resultVerification.resolutionSource": 'manual_admin',
+                updatedAt: serverTimestamp(),
+            } as any);
+        });
+
+        return { ok: true };
+    } catch (e: any) {
+        Logger.error("matchService", "resolveMatchResultByAdmin error", e);
+        return { ok: false, message: e?.message || "Failed to resolve result" };
     }
 }
 

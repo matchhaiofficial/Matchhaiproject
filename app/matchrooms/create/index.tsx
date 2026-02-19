@@ -1656,7 +1656,7 @@ export default function CreateMatchroom() {
     try {
       const userRef = doc(db, "users", user.uid);
       const walletTxRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
-      await runTransaction(db, async (transaction) => {
+      await runTransaction(db, async (transaction: any) => {
         const userSnap = await transaction.get(userRef);
         const currentBalance = userSnap.exists()
           ? Number(userSnap.data()?.walletBalance || 0)
@@ -2052,7 +2052,10 @@ export default function CreateMatchroom() {
           ? {
             seatCount: Number.parseInt(walkInSeatCount, 10),
             bookedSeatCount: Math.floor(Number(walkInSeatCount)), // normalized
-            captainSeatNumber: walkInCaptainSeatNumber,
+            captainSeatNumber:
+              walkInTeamACaptainSeatNumber ??
+              walkInTeamBCaptainSeatNumber ??
+              undefined,
             roster: walkInSeatPlayers.slice(
               0,
               Math.floor(Number(walkInSeatCount)),

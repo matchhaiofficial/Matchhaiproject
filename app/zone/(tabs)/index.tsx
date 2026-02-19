@@ -21,7 +21,7 @@ import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { signOutUser } from "../../../src/services/authService";
+import { useAuthActions } from "@convex-dev/auth/react";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -98,6 +98,7 @@ export default function ZoneDashboardHome() {
     const insets = useSafeAreaInsets();
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
+    const { signOut } = useAuthActions();
 
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [notificationCount, setNotificationCount] = useState(0);
@@ -314,9 +315,11 @@ export default function ZoneDashboardHome() {
     );
 
     const handleLogout = async () => {
-        const result = await signOutUser();
-        if (!result.ok) {
-            Alert.alert("Logout failed", result.message);
+        try {
+            await signOut();
+            router.replace("/auth/login");
+        } catch (error: any) {
+            Alert.alert("Logout failed", error?.message || "Please try again.");
         }
     };
 
@@ -328,7 +331,6 @@ export default function ZoneDashboardHome() {
                 icon: module.icon as any,
                 onPress: () => router.push(module.route as any),
             })),
-            { label: "Logout", icon: "logout" as const, onPress: handleLogout },
         ],
         [dashboardModules, router],
     );
@@ -573,6 +575,7 @@ export default function ZoneDashboardHome() {
                 onClose={() => setSidebarOpen(false)}
                 items={sidebarItems}
                 title="Zone Modules"
+                onLogout={handleLogout}
             />
         </Screen>
     );

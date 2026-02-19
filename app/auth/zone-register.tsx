@@ -2,6 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
+import { useConvex } from "convex/react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,10 +16,7 @@ import {
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
-import {
-  isEmailAvailable,
-  isPhoneAvailable,
-} from "../../src/services/userService";
+import { api } from "../../convex/_generated/api";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -69,6 +67,7 @@ const formatPakistaniPhone = (value: string) => {
 export default function AdminRegisterStep1() {
   const { step1, setStep1, setCurrentStep } = useZoneOnboardingStore();
   const { showToast } = useToast();
+  const convex = useConvex();
 
   const [ownerFullName, setOwnerFullName] = useState(step1.ownerFullName);
   const [venueBrandName, setVenueBrandName] = useState(step1.venueBrandName);
@@ -245,7 +244,7 @@ export default function AdminRegisterStep1() {
 
     try {
       setEmailStatus("checking");
-      const available = await isEmailAvailable(trimmed);
+      const available = await convex.query(api.users.isEmailAvailable, { email: trimmed });
       setEmailStatus(available ? "available" : "taken");
     } catch {
       setEmailStatus("error");
@@ -262,7 +261,7 @@ export default function AdminRegisterStep1() {
 
     try {
       setPhoneStatus("checking");
-      const available = await isPhoneAvailable(normalizedPhone);
+      const available = await convex.query(api.users.isPhoneAvailable, { phone: normalizedPhone });
       setPhoneStatus(available ? "available" : "taken");
     } catch {
       setPhoneStatus("error");

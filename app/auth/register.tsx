@@ -2,6 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
+import { useConvex } from "convex/react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -16,11 +17,7 @@ import { AGE_RANGES, CITY_OPTIONS } from "../../constants/profileOptions";
 import { CustomSingleSelect } from "../../src/components/CustomSingleSelect";
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
-import {
-  isEmailAvailable,
-  isPhoneAvailable,
-  isUsernameAvailable,
-} from "../../src/services/userService";
+import { api } from "../../convex/_generated/api";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
@@ -42,6 +39,7 @@ type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 export default function Register() {
   const { step1, setStep1 } = useOnboardingStore();
   const { showToast } = useToast();
+  const convex = useConvex();
 
   const [fullName, setFullName] = useState(step1.fullName);
   const [username, setUsername] = useState(step1.username);
@@ -224,7 +222,7 @@ export default function Register() {
     setUsernameStatus("checking");
 
     try {
-      const available = await isUsernameAvailable(trimmed);
+      const available = await convex.query(api.users.isUsernameAvailable, { username: trimmed });
       setLatestRequestIds(current => {
         if (current.username === requestId) {
           setUsernameStatus(available ? "available" : "taken");
@@ -254,7 +252,7 @@ export default function Register() {
     setEmailStatus("checking");
 
     try {
-      const available = await isEmailAvailable(trimmed);
+      const available = await convex.query(api.users.isEmailAvailable, { email: trimmed });
       setLatestRequestIds(current => {
         if (current.email === requestId) {
           setEmailStatus(available ? "available" : "taken");
@@ -283,7 +281,7 @@ export default function Register() {
     setPhoneStatus("checking");
 
     try {
-      const available = await isPhoneAvailable(phoneDigits);
+      const available = await convex.query(api.users.isPhoneAvailable, { phone: phoneDigits });
       setLatestRequestIds(current => {
         if (current.phone === requestId) {
           setPhoneStatus(available ? "available" : "taken");
