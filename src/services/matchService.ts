@@ -275,12 +275,7 @@ export async function createMatchroom(roomData: Matchroom): Promise<{ ok: true; 
 
             const now = Date.now();
             const isAdminFlow = roomData.zoneAdminApproved === true;
-            const playerFlowLeadMs =
-                roomData.teamMode === "team"
-                    ? 2 * ONE_DAY_MS
-                    : roomData.teamMode === "solo"
-                        ? 3 * ONE_DAY_MS
-                        : ONE_DAY_MS;
+            const playerFlowLeadMs = 2 * ONE_DAY_MS;
             const minLeadMs = isAdminFlow ? ONE_DAY_MS : playerFlowLeadMs;
 
             if (scheduledStartAt.getTime() - now < minLeadMs) {
