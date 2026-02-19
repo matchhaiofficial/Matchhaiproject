@@ -823,7 +823,7 @@ export default function CreateMatchroom() {
     }, [selectedTeamId, refreshSelectedTeam]),
   );
 
-  const minLeadDays = isZoneWalkInAdmin ? 0 : teamMode === "team" ? 2 : 3;
+  const minLeadDays = isZoneWalkInAdmin ? 0 : 2;
   const minAllowedDate = (() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -2841,11 +2841,7 @@ export default function CreateMatchroom() {
             onChange={handleFieldChange}
             selectedGame={selectedGame || undefined}
             minimumDate={minAllowedDate}
-            dateHelperText={
-              teamMode === "team"
-                ? `Captain booking: earliest allowed date is ${minAllowedDate.toLocaleDateString()}`
-                : `Solo booking: earliest allowed date is ${minAllowedDate.toLocaleDateString()}`
-            }
+            dateHelperText={`Earliest allowed date is ${minAllowedDate.toLocaleDateString()} (minimum 2 days from now)`}
           />
 
           {/* Captain-only Booking Options */}
