@@ -1,11 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import {
-  collection,
-  doc,
-  runTransaction,
-  serverTimestamp,
-} from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +13,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import type { BookingRequest } from "../../../src/services/bookingRequestService";
@@ -38,6 +31,7 @@ import {
 } from "../../../src/services/teamService";
 import type { UserProfile } from "../../../src/services/userService";
 import {
+  deductWalletFunds,
   getUserProfile,
   getUserSportRoleLabel,
 } from "../../../src/services/userService";
@@ -1654,41 +1648,18 @@ export default function CreateMatchroom() {
     if (amount <= 0) return { ok: true as const };
 
     try {
-      const userRef = doc(db, "users", user.uid);
-      const walletTxRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
-      await runTransaction(db, async (transaction) => {
-        const userSnap = await transaction.get(userRef);
-        const currentBalance = userSnap.exists()
-          ? Number(userSnap.data()?.walletBalance || 0)
-          : 0;
-        if (!Number.isFinite(currentBalance) || currentBalance < amount) {
-          throw new Error("insufficient_wallet");
+      const res = await deductWalletFunds(user.uid, amount, "matchroom_create");
+      if (!res.ok) {
+        if (res.code === "insufficient_wallet") {
+          return {
+            ok: false as const,
+            message: "Insufficient wallet balance. Please add funds from Wallet.",
+          };
         }
-        transaction.set(
-          userRef,
-          {
-            walletBalance: currentBalance - amount,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-        transaction.set(walletTxRef, {
-          uid: user.uid,
-          type: "debit",
-          amount,
-          status: "completed",
-          source: "matchroom_create",
-          createdAt: serverTimestamp(),
-        });
-      });
+        return { ok: false as const, message: res.message || "Unable to complete wallet payment." };
+      }
       return { ok: true as const };
     } catch (error: any) {
-      if (error?.message === "insufficient_wallet") {
-        return {
-          ok: false as const,
-          message: "Insufficient wallet balance. Please add funds from Wallet.",
-        };
-      }
       return { ok: false as const, message: "Unable to complete wallet payment." };
     }
   };
@@ -3592,3 +3563,4 @@ export default function CreateMatchroom() {
     </Screen>
   );
 }
+

@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -13,8 +12,8 @@ import {
     View,
     ScrollView
 } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
+import { fetchDocs } from "../../../../src/services/firestoreService";
 import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
@@ -64,16 +63,17 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
     const fetchSocialState = async () => {
         if (!user) return;
         try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "team_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
+            const snap = await fetchDocs({
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "fromUid", op: "==", value: user.uid },
+                    { field: "type", op: "==", value: "team_join_request" },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+            });
             const requested = new Set<string>();
             snap.forEach(doc => {
-                const data = doc.data();
+                const data = doc.data;
                 if (data.meta?.teamId) requested.add(data.meta.teamId);
             });
             setRequestedTeamIds(requested);
@@ -430,3 +430,4 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         </View>
     );
 }
+

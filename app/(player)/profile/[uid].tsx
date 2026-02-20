@@ -1,15 +1,14 @@
 import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { formatDistanceToNow } from "date-fns";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Linking, ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
-import { getUserProfile, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { fetchDocs } from "../../../src/services/firestoreService";
+import { getUserFriends, getUserProfile, refreshUserStats, UserProfile } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
@@ -35,6 +34,16 @@ const getFaceitLevel = (elo: number): number => {
     if (elo < 1851) return 8;
     if (elo < 2001) return 9;
     return 10;
+};
+
+const toDateValue = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === "function") return value.toDate();
+    if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
+    if (typeof value === "number") return new Date(value);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const getPlayerGames = (profile: UserProfile): string[] => {
@@ -91,8 +100,10 @@ export default function PlayerProfile() {
         let status = 'Inactive';
         const lastMatch = skillData?.lastMatchDate;
         if (lastMatch) {
-            const date = lastMatch instanceof Timestamp ? lastMatch.toDate() : new Date(lastMatch);
-            status = `Played ${formatDistanceToNow(date)} ago`;
+            const date = toDateValue(lastMatch);
+            if (date) {
+                status = `Played ${formatDistanceToNow(date)} ago`;
+            }
         } else if (profile.isOnline) {
             status = 'Online Now';
         }
@@ -101,10 +112,12 @@ export default function PlayerProfile() {
         let tr = 'Stable';
         const lastUpdated = skillData?.lastUpdated;
         if (lastUpdated) {
-            const updateDate = lastUpdated instanceof Timestamp ? lastUpdated.toDate() : new Date(lastUpdated);
-            const daysSinceUpdate = (new Date().getTime() - updateDate.getTime()) / (1000 * 3600 * 24);
-            if (daysSinceUpdate < 7 && totalMatches > 0) tr = 'Increasing';
-            else if (daysSinceUpdate > 14) tr = 'Decreasing';
+            const updateDate = toDateValue(lastUpdated);
+            if (updateDate) {
+                const daysSinceUpdate = (new Date().getTime() - updateDate.getTime()) / (1000 * 3600 * 24);
+                if (daysSinceUpdate < 7 && totalMatches > 0) tr = 'Increasing';
+                else if (daysSinceUpdate > 14) tr = 'Decreasing';
+            }
         }
 
         return { winRate: wr, confidence: conf, activityStatus: status, trend: tr };
@@ -159,35 +172,39 @@ export default function PlayerProfile() {
     const checkFriendStatus = async () => {
         if (!user || !uid) return;
         try {
-            const friendsSnap = await getDocs(collection(db, "users", user.uid, "friends"));
+            const friendsRes = await getUserFriends(user.uid);
             const friends = new Set<string>();
-            friendsSnap.forEach(doc => friends.add(doc.id));
+            if (friendsRes.ok && friendsRes.data) {
+                friendsRes.data.forEach((friend) => friends.add(friend.uid));
+            }
             setIsFriend(friends.has(uid));
 
             if (!friends.has(uid)) {
                 // Check for outgoing request (I sent to them)
-                const outgoingQ = query(
-                    collection(db, "notifications"),
-                    where("fromUid", "==", user.uid),
-                    where("toUid", "==", uid),
-                    where("type", "==", "friend_request"),
-                    where("status", "==", "pending")
-                );
-                const outgoingSnap = await getDocs(outgoingQ);
-                setIsPending(!outgoingSnap.empty);
+                const outgoingSnap = await fetchDocs({
+                    collectionPath: ["notifications"],
+                    where: [
+                        { field: "fromUid", op: "==", value: user.uid },
+                        { field: "toUid", op: "==", value: uid },
+                        { field: "type", op: "==", value: "friend_request" },
+                        { field: "status", op: "==", value: "pending" },
+                    ],
+                });
+                setIsPending(outgoingSnap.length > 0);
 
                 // Check for incoming request (they sent to me)
-                const incomingQ = query(
-                    collection(db, "notifications"),
-                    where("fromUid", "==", uid),
-                    where("toUid", "==", user.uid),
-                    where("type", "==", "friend_request"),
-                    where("status", "==", "pending")
-                );
-                const incomingSnap = await getDocs(incomingQ);
-                if (!incomingSnap.empty) {
+                const incomingSnap = await fetchDocs({
+                    collectionPath: ["notifications"],
+                    where: [
+                        { field: "fromUid", op: "==", value: uid },
+                        { field: "toUid", op: "==", value: user.uid },
+                        { field: "type", op: "==", value: "friend_request" },
+                        { field: "status", op: "==", value: "pending" },
+                    ],
+                });
+                if (incomingSnap.length > 0) {
                     setHasIncomingRequest(true);
-                    setIncomingRequestId(incomingSnap.docs[0].id);
+                    setIncomingRequestId(incomingSnap[0].id);
                 } else {
                     setHasIncomingRequest(false);
                     setIncomingRequestId(null);

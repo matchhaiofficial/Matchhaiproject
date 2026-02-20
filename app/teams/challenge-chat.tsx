@@ -1,15 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-    addDoc,
-    collection,
-    doc,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    updateDoc,
-} from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -24,8 +14,8 @@ import {
 
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { addDocToCollection, serverTimestampValue, subscribeDoc, subscribeDocs, updateDocByPath } from "../../src/services/firestoreService";
 import { COLORS } from "../../src/theme";
 import styles from "./challenge-chat.styles";
 
@@ -59,20 +49,24 @@ export default function TeamChallengeChatScreen() {
 
     useEffect(() => {
         if (!chatId || !user?.uid) return;
-        const chatRef = doc(db, "team_match_chats", chatId);
-        const unsubChat = onSnapshot(chatRef, (snap: any) => {
-            setLoading(!snap.exists());
-        });
-
-        const q = query(
-            collection(db, "team_match_chats", chatId, "messages"),
-            orderBy("createdAt", "asc"),
+        const unsubChat = subscribeDoc(
+            ["team_match_chats", chatId],
+            (snap) => {
+                setLoading(!snap.exists);
+            },
         );
-        const unsubMessages = onSnapshot(q, (snapshot: any) => {
-            const rows = snapshot.docs.map((item: any) => ({ id: item.id, ...item.data() } as ChallengeMessage));
+
+        const unsubMessages = subscribeDocs(
+            {
+                collectionPath: ["team_match_chats", chatId, "messages"],
+                orderBy: [{ field: "createdAt", direction: "asc" }],
+            },
+            (docs) => {
+            const rows = docs.map((item) => ({ id: item.id, ...item.data } as ChallengeMessage));
             rows.sort((a: ChallengeMessage, b: ChallengeMessage) => toMillis(a.createdAt) - toMillis(b.createdAt));
             setMessages(rows);
-        });
+            },
+        );
 
         return () => {
             unsubChat();
@@ -85,19 +79,19 @@ export default function TeamChallengeChatScreen() {
         setSending(true);
         const text = draft.trim();
         setDraft("");
-        await addDoc(collection(db, "team_match_chats", chatId, "messages"), {
+        await addDocToCollection(["team_match_chats", chatId, "messages"], {
             senderUid: user.uid,
             senderName: user.displayName || "Captain",
             text,
-            createdAt: serverTimestamp(),
+            createdAt: serverTimestampValue(),
         });
-        await updateDoc(doc(db, "team_match_chats", chatId), {
-            updatedAt: serverTimestamp(),
+        await updateDocByPath(["team_match_chats", chatId], {
+            updatedAt: serverTimestampValue(),
             lastMessage: {
                 text,
                 senderUid: user.uid,
             },
-            [`lastReadBy.${user.uid}`]: serverTimestamp(),
+            [`lastReadBy.${user.uid}`]: serverTimestampValue(),
         });
         setSending(false);
     };
@@ -151,3 +145,4 @@ export default function TeamChallengeChatScreen() {
         </Screen>
     );
 }
+

@@ -1,5 +1,4 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { collection, getDocs } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -11,8 +10,8 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
+import { fetchDocs } from "../../../src/services/firestoreService";
 import { inviteToTeam } from "../../../src/services/functions";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -46,13 +45,10 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName 
         if (!user) return;
         setLoading(true);
         try {
-            const friendsRef = collection(db, "users", user.uid, "friends");
-            const snap = await getDocs(friendsRef);
-            const list: Friend[] = [];
-            snap.forEach(doc => {
-                const data = doc.data();
-                list.push({ uid: data.uid, username: data.username });
+            const snap = await fetchDocs({
+                collectionPath: ["users", user.uid, "friends"],
             });
+            const list: Friend[] = snap.map((doc) => ({ uid: doc.data.uid, username: doc.data.username }));
             setFriends(list);
         } catch (error) {
             Logger.error("InviteFriendsSheet", "Error fetching friends", error);
@@ -161,4 +157,5 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName 
         </Modal>
     );
 }
+
 

@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,8 +16,8 @@ import {
 
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { fetchDocs, updateDocByPath } from "../../src/services/firestoreService";
 import { getUserTeams, Team } from "../../src/services/teamService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -39,17 +38,16 @@ export default function MyTeams() {
         if (!user) return;
         try {
             setRefreshing(true);
-            const q = query(
-                collection(db, 'teams'),
-                where('captainUid', '==', user.uid)
-            );
-            const snap = await getDocs(q);
+            const snap = await fetchDocs({
+                collectionPath: ["teams"],
+                where: [{ field: "captainUid", op: "==", value: user.uid }],
+            });
             const batchPromises = [];
 
-            for (const teamDoc of snap.docs) {
-                const data = teamDoc.data();
+            for (const teamDoc of snap) {
+                const data = teamDoc.data;
                 if (!data.memberUids) {
-                    batchPromises.push(updateDoc(doc(db, 'teams', teamDoc.id), {
+                    batchPromises.push(updateDocByPath(["teams", teamDoc.id], {
                         memberUids: [user.uid]
                     }));
                 }
@@ -251,3 +249,4 @@ export default function MyTeams() {
         </Screen>
     );
 }
+

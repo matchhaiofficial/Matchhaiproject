@@ -11,8 +11,7 @@ import {
     Text,
     View,
 } from "react-native";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../../src/config/firebaseConfig";
+import { fetchDoc } from "../../../src/services/firestoreService";
 import { approveZone, rejectZone } from "../../../src/services/superAdminService";
 import { Zone } from "../../../src/services/zoneService";
 import { COLORS, FONTS, SPACING, RADII } from "../../../src/theme";
@@ -29,10 +28,9 @@ export default function RequestDetail() {
         async function fetchRequest() {
             if (!id) return;
             try {
-                const docRef = doc(db, "zones", id);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    setRequest({ id: snap.id, ...snap.data() } as Zone);
+                const snap = await fetchDoc<Zone>(["zones", id]);
+                if (snap.exists) {
+                    setRequest({ id: snap.id, ...snap.data } as Zone);
                 }
             } catch (error) {
                 console.error("Error fetching request detail:", error);

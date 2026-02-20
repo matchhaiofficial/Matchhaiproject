@@ -1,10 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
+import { fetchDocs } from "../../../../src/services/firestoreService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
@@ -119,21 +118,24 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
         if (!user) return;
         try {
             // 1. Fetch Friends
-            const friendsSnap = await getDocs(collection(db, "users", user.uid, "friends"));
+            const friendsSnap = await fetchDocs({
+                collectionPath: ["users", user.uid, "friends"],
+            });
             const friends = new Set<string>();
             friendsSnap.forEach(doc => friends.add(doc.id));
             setFriendUids(friends);
 
             // 2. Fetch Pending Outgoing Requests
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "friend_request"),
-                where("status", "==", "pending")
-            );
-            const pendingSnap = await getDocs(q);
+            const pendingSnap = await fetchDocs({
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "fromUid", op: "==", value: user.uid },
+                    { field: "type", op: "==", value: "friend_request" },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+            });
             const pending = new Set<string>();
-            pendingSnap.forEach(doc => pending.add(doc.data().toUid));
+            pendingSnap.forEach(doc => pending.add(doc.data.toUid));
             setPendingUids(pending);
 
         } catch (e) {
@@ -144,13 +146,14 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
     const fetchPlayers = async () => {
         if (!user) return;
         try {
-            let q = query(collection(db, "users"), where("accountType", "==", "player"));
-
-            const snapshot = await getDocs(q);
+            const snapshot = await fetchDocs({
+                collectionPath: ["users"],
+                where: [{ field: "accountType", op: "==", value: "player" }],
+            });
             const loadedPlayers: Player[] = [];
 
             snapshot.forEach(doc => {
-                const data = doc.data();
+                const data = doc.data;
                 // Exclude self
                 if (doc.id === user?.uid) return;
 
@@ -560,3 +563,4 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
         </View>
     );
 }
+

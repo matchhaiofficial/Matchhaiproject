@@ -1,14 +1,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, updateDoc, where, doc, getDocs, writeBatch, deleteDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
+import { runBatch, subscribeDocs, updateDocByPath } from "../../../src/services/firestoreService";
 import { respondToMatchJoinRequest } from "../../../src/services/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -78,16 +77,14 @@ export default function ZoneNotificationsModule() {
             return;
         }
 
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid),
-        );
-
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => {
-                const rows = snapshot.docs
-                    .map((item: any) => ({ id: item.id, ...item.data() } as AdminNotification))
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [{ field: "toUid", op: "==", value: user.uid }],
+            },
+            (docs) => {
+                const rows = docs
+                    .map((item) => ({ id: item.id, ...item.data } as AdminNotification))
                     .filter((item: AdminNotification) => {
                         const type = String(item.type || "").toLowerCase();
                         return type.includes("booking") || type.includes("resource") || type.includes("admin") || type.includes("match");
@@ -125,7 +122,7 @@ export default function ZoneNotificationsModule() {
     const markSeenIfPending = async (item: AdminNotification) => {
         try {
             if (item.status === "pending") {
-                await updateDoc(doc(db, "notifications", item.id), {
+                await updateDocByPath(["notifications", item.id], {
                     status: "seen",
                 });
             }
@@ -168,19 +165,21 @@ export default function ZoneNotificationsModule() {
                     onPress: async () => {
                         setClearing(true);
                         try {
-                            const batch = writeBatch(db);
+                            const ops = [];
                             if (hasPending) {
                                 items.forEach((item) => {
                                     if (item.status !== "seen") {
-                                        batch.update(doc(db, "notifications", item.id), { status: "seen", isRead: true });
+                                        ops.push({ type: "update", path: ["notifications", item.id], data: { status: "seen", isRead: true } });
                                     }
                                 });
                             } else {
                                 items.forEach((item) => {
-                                    batch.delete(doc(db, "notifications", item.id));
+                                    ops.push({ type: "delete", path: ["notifications", item.id] });
                                 });
                             }
-                            await batch.commit();
+                            if (ops.length) {
+                                await runBatch(ops);
+                            }
                         } catch (e) {
                             Logger.error("ZoneNotifications", "Clear all failed", e);
                         } finally {
@@ -223,7 +222,7 @@ export default function ZoneNotificationsModule() {
             }
 
             if (res.ok) {
-                await updateDoc(doc(db, "notifications", item.id), { status: "seen", isRead: true });
+                await updateDocByPath(["notifications", item.id], { status: "seen", isRead: true });
                 Alert.alert("Success", `Request has been ${decision}ed.`);
             } else {
                 Alert.alert("Error", res.message);
@@ -533,3 +532,4 @@ export default function ZoneNotificationsModule() {
         </Screen>
     );
 }
+

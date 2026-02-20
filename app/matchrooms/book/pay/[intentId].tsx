@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -13,12 +12,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../../../src/context/AuthContext";
-import { db } from "../../../../src/config/firebaseConfig";
 import {
     BookingIntent,
     confirmBookingTransaction,
     getBookingIntent
 } from "../../../../src/services/bookingService";
+import { getUserProfile } from "../../../../src/services/userService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import styles from "./pay.styles";
@@ -59,8 +58,8 @@ export default function MockPaymentScreen() {
         const loadWallet = async () => {
             if (!user?.uid) return;
             try {
-                const snap = await getDoc(doc(db, "users", user.uid));
-                setWalletBalance(snap.exists() ? Number(snap.data()?.walletBalance || 0) : 0);
+                const res = await getUserProfile(user.uid);
+                setWalletBalance(res.ok && res.data ? Number(res.data.walletBalance || 0) : 0);
             } catch {
                 setWalletBalance(0);
             }

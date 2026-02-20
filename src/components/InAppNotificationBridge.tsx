@@ -1,9 +1,8 @@
-import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useRef } from "react";
 import scheduleNotificationAsync from "expo-notifications/build/scheduleNotificationAsync";
 
-import { db } from "../config/firebaseConfig";
 import { useAuth } from "../context/AuthContext";
+import { subscribeDocs } from "../services/firestoreService";
 import Logger from "../utils/logger";
 
 const toMillis = (value: any) => {
@@ -35,16 +34,13 @@ export default function InAppNotificationBridge() {
     useEffect(() => {
         if (!user?.uid) return;
 
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid),
-        );
-
-        const unsub = onSnapshot(
-            q,
-            async (snapshot: any) => {
-                const incoming: Array<{ id: string; data: any }> = [];
-                snapshot.forEach((docSnap: any) => incoming.push({ id: docSnap.id, data: docSnap.data() }));
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [{ field: "toUid", op: "==", value: user.uid }],
+            },
+            async (docs) => {
+                const incoming = docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data }));
 
                 if (!primedRef.current) {
                     incoming.forEach((item) => seenIdsRef.current.add(item.id));
@@ -78,7 +74,7 @@ export default function InAppNotificationBridge() {
                     }
                 }
             },
-            (error: any) => {
+            (error) => {
                 Logger.error("InAppNotificationBridge", "Notifications listener failed", error);
             },
         );
@@ -88,3 +84,4 @@ export default function InAppNotificationBridge() {
 
     return null;
 }
+

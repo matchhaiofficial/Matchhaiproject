@@ -1,14 +1,4 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    runTransaction,
-    serverTimestamp,
-    where,
-} from "firebase/firestore";
 import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -22,10 +12,10 @@ import {
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getOffersForUser, getUserRequests } from "../../src/services/bookingRequestService";
-import { BookingIntent } from "../../src/services/bookingService";
+import { BookingIntent, getBookingIntentsByCreator } from "../../src/services/bookingService";
+import { addWalletFunds, getUserProfile } from "../../src/services/userService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./wallet.styles";
@@ -77,21 +67,20 @@ export default function WalletScreen() {
         }
         setLoading(true);
         try {
-            const [intentsSnap, requestsResult, offersResult, userDoc] = await Promise.all([
-                getDocs(query(collection(db, "booking_intents"), where("createdByUid", "==", user.uid))),
+            const [intentsRes, requestsResult, offersResult, userRes] = await Promise.all([
+                getBookingIntentsByCreator(user.uid),
                 getUserRequests(user.uid),
                 getOffersForUser(user.uid),
-                getDoc(doc(db, "users", user.uid)),
+                getUserProfile(user.uid),
             ]);
 
-            const intents = intentsSnap.docs
-                .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as BookingIntent))
+            const intents = (intentsRes.ok && intentsRes.data ? intentsRes.data : [])
                 .sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
 
             setBookingIntents(intents);
             setRequestsCount(requestsResult.ok && requestsResult.data ? requestsResult.data.length : 0);
             setOffersCount(offersResult.ok && offersResult.data ? offersResult.data.length : 0);
-            setWalletBalance(userDoc.exists() ? Number(userDoc.data()?.walletBalance || 0) : 0);
+            setWalletBalance(userRes.ok && userRes.data ? Number(userRes.data?.walletBalance || 0) : 0);
         } catch (error) {
             Logger.error("Wallet", "Failed to fetch wallet data", error);
             setBookingIntents([]);
@@ -134,33 +123,13 @@ export default function WalletScreen() {
 
         setAddingFunds(true);
         try {
-            const userRef = doc(db, "users", user.uid);
-            const txRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
-            await runTransaction(db, async (transaction: any) => {
-                const userSnap = await transaction.get(userRef);
-                const currentBalance = userSnap.exists()
-                    ? Number(userSnap.data()?.walletBalance || 0)
-                    : 0;
-
-                transaction.set(
-                    userRef,
-                    {
-                        walletBalance: currentBalance + amount,
-                        updatedAt: serverTimestamp(),
-                    },
-                    { merge: true },
-                );
-                transaction.set(txRef, {
-                    uid: user.uid,
-                    type: "credit",
-                    amount,
-                    status: "completed",
-                    source: "manual_topup",
-                    createdAt: serverTimestamp(),
-                });
-            });
-
+            const res = await addWalletFunds(user.uid, amount, "manual_topup");
+            if (!res.ok) {
+                Alert.alert("Failed", res.message || "Could not add funds.");
+                return;
+            }
             setAddAmount("");
+            setWalletBalance(res.balance);
             await fetchWalletData();
             Alert.alert("Funds added", `Rs ${Math.round(amount)} added to your wallet.`);
         } catch (error) {
@@ -318,3 +287,4 @@ export default function WalletScreen() {
         </Screen>
     );
 }
+

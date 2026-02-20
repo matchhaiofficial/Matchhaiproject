@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,11 +16,11 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
+import { subscribeDocs } from "../../../src/services/firestoreService";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -196,14 +195,15 @@ export default function ZoneDashboardHome() {
 
     useEffect(() => {
         if (!user?.uid) return;
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid),
-            where("status", "==", "pending"),
-        );
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => setNotificationCount(snapshot.size || 0),
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "toUid", op: "==", value: user.uid },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+            },
+            (docs) => setNotificationCount(docs.length || 0),
             () => setNotificationCount(0),
         );
         return () => unsub();
@@ -577,3 +577,4 @@ export default function ZoneDashboardHome() {
         </Screen>
     );
 }
+

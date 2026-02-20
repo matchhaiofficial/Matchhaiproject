@@ -1,13 +1,12 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { fetchDoc } from "../../src/services/firestoreService";
 import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
 import type { Team } from "../../src/services/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/zoneService";
@@ -111,17 +110,17 @@ export default function TeamChallengeCreateScreen() {
             }
 
             const [opponentSnap, captained] = await Promise.all([
-                getDoc(doc(db, "teams", opponentTeamId)),
+                fetchDoc<Team>(["teams", opponentTeamId]),
                 getCaptainedTeams(user.uid),
             ]);
 
-            if (!opponentSnap.exists()) {
+            if (!opponentSnap.exists) {
                 Alert.alert("Not found", "Opponent team not found.");
                 router.back();
                 return;
             }
 
-            const opponent = { id: opponentSnap.id, ...opponentSnap.data() } as Team;
+            const opponent = { id: opponentSnap.id, ...opponentSnap.data } as Team;
             setOpponentTeam(opponent);
             setFormData((prev) => ({
                 ...prev,
@@ -427,3 +426,4 @@ export default function TeamChallengeCreateScreen() {
         </Screen>
     );
 }
+

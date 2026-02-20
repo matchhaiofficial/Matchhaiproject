@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, onSnapshot } from "firebase/firestore";
+import { subscribeDoc } from "../../../../src/services/firestoreService";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { db } from "../../../../src/config/firebaseConfig";
 import { BookingIntent, updateBookingIntentStatus } from "../../../../src/services/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
@@ -29,9 +28,9 @@ export default function BookingStatusScreen() {
     useEffect(() => {
         if (!intentId) return;
 
-        const unsubscribe = onSnapshot(doc(db, "booking_intents", intentId), (snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.data() as BookingIntent;
+        const unsubscribe = subscribeDoc(["booking_intents", intentId], (snapshot) => {
+            if (snapshot.exists && snapshot.data) {
+                const data = snapshot.data as BookingIntent;
                 setIntent(data);
 
                 // Calculate time left for timer

@@ -21,10 +21,9 @@ import QRCode from "react-native-qrcode-svg";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
-import { collection, doc, getDoc, getDocs, limit, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import SkillBadge from "../../src/components/SkillBadge";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { fetchDoc, fetchDocs, subscribeDocs } from "../../src/services/firestoreService";
 import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
 import { cancelMatchJoinRequest, deleteMatchroom, adminCancelMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
@@ -140,18 +139,19 @@ export default function MatchroomDetails() {
     const checkRequestStatus = async () => {
         if (!user || !id) return;
         try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "match_join_request"),
-                where("status", "in", ["pending", "rejected"])
-            );
-            const snap = await getDocs(q);
+            const snap = await fetchDocs({
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "fromUid", op: "==", value: user.uid },
+                    { field: "type", op: "==", value: "match_join_request" },
+                    { field: "status", op: "in", value: ["pending", "rejected"] },
+                ],
+            });
             const slots = new Map<string, string>();
             let genericStatus: string | null = null;
 
             snap.forEach(doc => {
-                const data = doc.data();
+                const data = doc.data;
                 if (data.meta?.matchroomId === id) {
                     if (data.meta.slotId) {
                         slots.set(data.meta.slotId, data.status);
@@ -180,20 +180,24 @@ export default function MatchroomDetails() {
 
         if (!isHost && !isAdmin) return;
 
-        const q = query(
-            collection(db, 'notifications'),
-            where('meta.matchroomId', '==', id),
-            where('type', '==', 'match_join_request'),
-            where('status', '==', 'pending'),
-            orderBy('createdAt', 'desc')
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "meta.matchroomId", op: "==", value: id },
+                    { field: "type", op: "==", value: "match_join_request" },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+                orderBy: [{ field: "createdAt", direction: "desc" }],
+            },
+            (docs) => {
+                const reqs = docs.map(d => ({ id: d.id, ...d.data }));
+                setIncomingRequests(reqs);
+            },
+            (err) => {
+                Logger.warn("MatchroomDetails", "Failed to listen for requests", err);
+            },
         );
-
-        const unsub = onSnapshot(q, (snapshot) => {
-            const reqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            setIncomingRequests(reqs);
-        }, (err) => {
-            Logger.warn("MatchroomDetails", "Failed to listen for requests", err);
-        });
 
         return () => unsub();
     }, [id, user, room?.hostUid, profile?.role]);
@@ -242,13 +246,12 @@ export default function MatchroomDetails() {
         let cancelled = false;
         const resolveRequestId = async () => {
             try {
-                const q = query(
-                    collection(db, "booking_requests"),
-                    where("matchroomId", "==", room.id),
-                    limit(1),
-                );
-                const snapshot = await getDocs(q);
-                const docSnap = snapshot.docs[0];
+                const snapshot = await fetchDocs({
+                    collectionPath: ["booking_requests"],
+                    where: [{ field: "matchroomId", op: "==", value: room.id }],
+                    limit: 1,
+                });
+                const docSnap = snapshot[0];
                 if (!cancelled && docSnap) {
                     setBookingRequestId(docSnap.id);
                 }
@@ -407,9 +410,9 @@ export default function MatchroomDetails() {
             await Promise.all(players.map(async (p) => {
                 // Optimization: Don't refetch if already have it (though simple MVP re-fetch is safer for updates)
                 try {
-                    const uDoc = await getDoc(doc(db, "users", p.uid));
-                    if (uDoc.exists()) {
-                        const rawScore = uDoc.data().skillScores?.[room.game] as GameSkillScore | undefined;
+                    const uDoc = await fetchDoc(["users", p.uid]);
+                    if (uDoc.exists) {
+                        const rawScore = (uDoc.data as any)?.skillScores?.[room.game] as GameSkillScore | undefined;
                         if (rawScore && typeof rawScore.rating === 'number') {
                             ratings[p.uid] = { ...rawScore, rating: clampRating(rawScore.rating) };
                         } else {
@@ -521,9 +524,9 @@ export default function MatchroomDetails() {
             // Parallel fetch of profiles to get skill scores
             await Promise.all(playersArr.map(async (p) => {
                 try {
-                    const uDoc = await getDoc(doc(db, "users", p.uid));
-                    if (uDoc.exists()) {
-                        const uData = uDoc.data();
+                    const uDoc = await fetchDoc(["users", p.uid]);
+                    if (uDoc.exists) {
+                        const uData = uDoc.data as any;
                         const gameScore = uData.skillScores?.[room.game];
                         // Default to mid rating if no score found
                         if (typeof gameScore?.rating === 'number') {
@@ -768,9 +771,10 @@ export default function MatchroomDetails() {
         if (!user) return;
         setLoadingFriends(true);
         try {
-            const friendsRef = collection(db, 'users', user.uid, 'friends');
-            const snap = await getDocs(friendsRef);
-            const friendsList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const snap = await fetchDocs({
+                collectionPath: ["users", user.uid, "friends"],
+            });
+            const friendsList = snap.map((doc) => ({ id: doc.id, ...doc.data }));
             setFriends(friendsList);
         } catch (e) {
             Logger.error("MatchroomDetails", "Error fetching friends", e);

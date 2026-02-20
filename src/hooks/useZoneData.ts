@@ -1,8 +1,7 @@
-import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { useEffect, useState } from "react";
 
-import { db } from "../config/firebaseConfig";
 import { useAuth } from "../context/AuthContext";
+import { subscribeDocs } from "../services/firestoreService";
 import Logger from "../utils/logger";
 
 export function useZoneData() {
@@ -19,19 +18,21 @@ export function useZoneData() {
 
         setLoading(true);
 
-        const q = query(collection(db, "zones"), where("ownerUid", "==", user.uid));
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => {
-                if (!snapshot.empty) {
-                    const doc = snapshot.docs[0];
-                    setZone({ id: doc.id, ...doc.data() });
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["zones"],
+                where: [{ field: "ownerUid", op: "==", value: user.uid }],
+            },
+            (docs) => {
+                if (docs.length > 0) {
+                    const doc = docs[0];
+                    setZone({ id: doc.id, ...doc.data });
                 } else {
                     setZone(null);
                 }
                 setLoading(false);
             },
-            (error: any) => {
+            (error) => {
                 Logger.error('useZoneData', 'Zone listener failed', error);
                 setZone(null);
                 setLoading(false);
@@ -43,3 +44,4 @@ export function useZoneData() {
 
     return { zone, loading };
 }
+

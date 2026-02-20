@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { fetchDoc, serverTimestampValue, updateDocByPath } from "../../../src/services/firestoreService";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,7 +20,6 @@ import {
     TEKKEN_CHARACTERS
 } from "../../../constants/profileOptions";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
@@ -113,10 +112,9 @@ export default function GameDetails() {
         const fetchProfile = async () => {
             if (!user?.uid || !gameId) return;
             try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+                const snap = await fetchDoc(["users", user.uid]);
+                if (snap.exists && snap.data) {
+                    const data = snap.data;
 
                     // Common Stats
                     setFaceitLevel(data.faceitSkillLevel || null);
@@ -265,7 +263,7 @@ export default function GameDetails() {
                                 initialSource: initial.source,
                                 initialRating: rating,
                                 lastMatchDate: null,
-                                lastUpdated: serverTimestamp()
+                                lastUpdated: serverTimestampValue()
                             };
 
                             updates[`skillScores.${gameId}`] = newScore;
@@ -274,8 +272,7 @@ export default function GameDetails() {
                 }
             }
 
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            await updateDocByPath(["users", user.uid], updates);
 
             showToast({ type: "success", title: "Saved", message: `${gameName} preferences updated` });
             router.back();
@@ -328,8 +325,7 @@ export default function GameDetails() {
         // Let's call persistChanges but inject the score update manually since state might lag.
 
         const asyncUpdate = async () => {
-            const userRef = doc(db, "users", user!.uid);
-            await updateDoc(userRef, {
+            await updateDocByPath(["users", user!.uid], {
                 [`skillScores.${gameId}`]: newScore
             });
             persistChanges(); // Save other pref changes
@@ -669,3 +665,4 @@ const RenderExternalStats = (props: any) => {
 
     return null;
 }
+

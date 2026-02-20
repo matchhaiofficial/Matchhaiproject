@@ -1,5 +1,5 @@
 import { collection, doc, getDocs, updateDoc } from 'firebase/firestore';
-import { db } from '../src/config/firebaseConfig';
+import { db } from '../src/repositories/firebase/firebase';
 
 /**
  * Script to fix existing teams that are missing the 'memberUids' array.

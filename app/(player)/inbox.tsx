@@ -1,12 +1,18 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import {
+    deleteDocByPath,
+    fetchDoc,
+    runBatch,
+    serverTimestampValue,
+    subscribeDocs,
+    updateDocByPath,
+} from "../../src/services/firestoreService";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, PanResponder, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { claimSeatTransaction } from "../../src/services/bookingService";
 import { respondFriendRequest, respondToJoinRequest, respondToMatchroomInvite, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
@@ -143,23 +149,25 @@ export default function Inbox() {
 
     useEffect(() => {
         if (!user) return;
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid)
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const list: Notification[] = [];
-            snapshot.forEach(doc => {
-                list.push({ id: doc.id, ...doc.data() } as Notification);
-            });
+        const unsubscribe = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [{ field: "toUid", op: "==", value: user.uid }],
+            },
+            (docs) => {
+                const list: Notification[] = [];
+                docs.forEach(doc => {
+                    list.push({ id: doc.id, ...doc.data } as Notification);
+                });
             list.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
             setNotifications(list);
             setLoading(false);
-        }, (error) => {
-            Logger.error("Inbox", "Error listening to notifications", error);
-            setLoading(false);
-        });
+            },
+            (error) => {
+                Logger.error("Inbox", "Error listening to notifications", error);
+                setLoading(false);
+            },
+        );
 
         return () => unsubscribe();
     }, [user]);
@@ -173,11 +181,13 @@ export default function Inbox() {
         if (unreadIds.length > 0) {
             const markAsRead = async () => {
                 try {
-                    const batch = writeBatch(db);
-                    unreadIds.forEach(id => {
-                        batch.update(doc(db, "notifications", id), { isRead: true });
-                    });
-                    await batch.commit();
+                    await runBatch(
+                        unreadIds.map((id) => ({
+                            type: "update",
+                            path: ["notifications", id],
+                            data: { isRead: true },
+                        })),
+                    );
                     Logger.info("Inbox", `Marked ${unreadIds.length} notifications as read`);
                 } catch (e) {
                     Logger.error("Inbox", "Error auto-marking notifications as read", e);
@@ -244,17 +254,16 @@ export default function Inbox() {
         setProcessing(notifId);
         try {
             // Update the intent
-            const intentRef = doc(db, "booking_intents", intentId);
-            await updateDoc(intentRef, {
+            await updateDocByPath(["booking_intents", intentId], {
                 'approvals.captain.status': decision,
                 'approvals.captain.decidedBy': user?.uid,
-                'approvals.captain.decidedAt': serverTimestamp(),
+                'approvals.captain.decidedAt': serverTimestampValue(),
                 // If rejected, update overall status
                 ...(decision === 'rejected' ? { status: 'rejected' } : {})
             });
 
             // Update notification
-            await updateDoc(doc(db, "notifications", notifId), {
+            await updateDocByPath(["notifications", notifId], {
                 status: decision === 'approved' ? 'accepted' : 'rejected'
             });
 
@@ -273,9 +282,9 @@ export default function Inbox() {
             if (decision === 'accept') {
                 if (intentId) {
                     // Booking Intent Flow (Legacy)
-                    const intentSnap = await getDoc(doc(db, "booking_intents", intentId));
-                    if (intentSnap.exists()) {
-                        const data = intentSnap.data();
+                    const intentSnap = await fetchDoc(["booking_intents", intentId]);
+                    if (intentSnap.exists && intentSnap.data) {
+                        const data = intentSnap.data;
                         const slotIds = data.selectedSlots as string[];
                         const invitees = data.invitees as any[];
                         const myIdx = invitees.findIndex(i => i.uid === user?.uid);
@@ -306,7 +315,7 @@ export default function Inbox() {
             }
 
             // Update notification
-            await updateDoc(doc(db, "notifications", notifId), {
+            await updateDocByPath(["notifications", notifId], {
                 status: decision === 'accept' ? 'accepted' : 'rejected'
             });
 
@@ -321,7 +330,7 @@ export default function Inbox() {
     // Delete a single notification
     const handleDeleteNotification = async (notifId: string) => {
         try {
-            await deleteDoc(doc(db, "notifications", notifId));
+            await deleteDocByPath(["notifications", notifId]);
         } catch (e) {
             Logger.error("Inbox", "Error deleting notification", e);
             Alert.alert("Error", "Failed to delete notification.");
@@ -344,11 +353,12 @@ export default function Inbox() {
                     onPress: async () => {
                         setDeleting(true);
                         try {
-                            const batch = writeBatch(db);
-                            resolvedNotifs.forEach(n => {
-                                batch.delete(doc(db, "notifications", n.id));
-                            });
-                            await batch.commit();
+                            await runBatch(
+                                resolvedNotifs.map((n) => ({
+                                    type: "delete",
+                                    path: ["notifications", n.id],
+                                })),
+                            );
                         } catch (e) {
                             Logger.error("Inbox", "Error clearing history", e);
                             Alert.alert("Error", "Failed to clear history.");
@@ -366,11 +376,13 @@ export default function Inbox() {
         if (unreadNotifs.length === 0) return;
 
         try {
-            const batch = writeBatch(db);
-            unreadNotifs.forEach(n => {
-                batch.update(doc(db, "notifications", n.id), { isRead: true });
-            });
-            await batch.commit();
+            await runBatch(
+                unreadNotifs.map((n) => ({
+                    type: "update",
+                    path: ["notifications", n.id],
+                    data: { isRead: true },
+                })),
+            );
         } catch (e) {
             Logger.error("Inbox", "Error marking all as read", e);
             Alert.alert("Error", "Failed to mark all as read.");
@@ -1055,3 +1067,4 @@ export default function Inbox() {
         </Screen>
     );
 }
+

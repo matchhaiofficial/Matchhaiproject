@@ -1,7 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,9 +18,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
-import { auth, db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
+import { fetchDoc, updateDocByPath } from "../../../src/services/firestoreService";
+import {
+    currentUser,
+    reauthenticateCurrentUser,
+    reloadCurrentUser,
+    updateCurrentUserPassword,
+    verifyCurrentUserEmail,
+} from "../../../src/services/authService";
 import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
 import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
 import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
@@ -217,10 +222,9 @@ export default function EditProfile() {
         const fetchProfile = async () => {
             if (!user?.uid) return;
             try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+                const snap = await fetchDoc(["users", user.uid]);
+                if (snap.exists && snap.data) {
+                    const data = snap.data;
                     console.log("EditProfile loaded data:", JSON.stringify(data, null, 2));
                     setFullName(data.fullName || "");
                     setUsername(data.username || "");
@@ -228,7 +232,7 @@ export default function EditProfile() {
                     setCity(data.city || "Karachi");
                     setAgeRange(data.ageRange || "");
                     // Store full email as-is
-                    const userEmail = auth.currentUser?.email || "";
+                    const userEmail = currentUser()?.email || "";
                     setEmail(userEmail);
                     setOriginalEmail(userEmail);
                     setPhone(data.phone || "");
@@ -297,20 +301,21 @@ export default function EditProfile() {
 
         const checkEmailUpdate = async () => {
             try {
-                if (!auth.currentUser) return;
+                if (!currentUser()) return;
 
                 // Reload auth state
-                await reload(auth.currentUser);
+                const reloadResult = await reloadCurrentUser();
+                if (!reloadResult.ok) return;
 
                 // Check if email has been updated
-                const currentEmail = auth.currentUser.email || "";
+                const refreshedUser = currentUser();
+                const currentEmail = refreshedUser?.email || "";
                 if (currentEmail === pendingEmail) {
                     // Email verified and updated!
                     console.log("Email verified! Updating Firestore...");
 
                     // Clear pending email from Firestore
-                    const userRef = doc(db, "users", user.uid);
-                    await updateDoc(userRef, {
+                    await updateDocByPath(["users", user.uid], {
                         pendingEmail: null,
                         updatedAt: new Date()
                     });
@@ -586,14 +591,22 @@ export default function EditProfile() {
 
         setPasswordUpdating(true);
         try {
-            if (!auth.currentUser || !auth.currentUser.email) return;
+            const reauth = await reauthenticateCurrentUser(currentPassword);
+            if (!reauth.ok) {
+                let msg = "Failed to re-authenticate.";
+                if (reauth.code === 'auth/wrong-password') msg = "Current password is incorrect.";
+                if (reauth.code === 'auth/requires-recent-login') msg = "Session too old. Please re-login.";
+                showToast({ type: "error", title: "Error", message: msg });
+                return;
+            }
 
-            // Re-authenticate
-            const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-            await reauthenticateWithCredential(auth.currentUser, cred);
-
-            // Update
-            await updatePassword(auth.currentUser, password);
+            const updateResult = await updateCurrentUserPassword(password);
+            if (!updateResult.ok) {
+                let msg = "Failed to update password.";
+                if (updateResult.code === 'auth/requires-recent-login') msg = "Session too old. Please re-login.";
+                showToast({ type: "error", title: "Error", message: msg });
+                return;
+            }
 
             showToast({ type: "success", title: "Success", message: "Password updated successfully." });
 
@@ -614,15 +627,22 @@ export default function EditProfile() {
 
     // Email update handler
     const handleUpdateEmail = async () => {
-        if (!auth.currentUser || !isNewEmailValid || !user?.uid) return;
+        if (!currentUser() || !isNewEmailValid || !user?.uid) return;
 
         try {
             setEmailUpdating(true);
-            await verifyBeforeUpdateEmail(auth.currentUser, newEmail.trim());
+            const verifyResult = await verifyCurrentUserEmail(newEmail.trim());
+            if (!verifyResult.ok) {
+                let msg = "Failed to send verification email";
+                if (verifyResult.code === 'auth/invalid-email') msg = "Invalid email format.";
+                if (verifyResult.code === 'auth/email-already-in-use') msg = "This email is already in use.";
+                if (verifyResult.code === 'auth/requires-recent-login') msg = "Please re-login to change your email.";
+                showToast({ type: "error", title: "Error", message: msg });
+                return;
+            }
 
             // Store pending email in Firestore
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, {
+            await updateDocByPath(["users", user.uid], {
                 pendingEmail: newEmail.trim(),
                 updatedAt: new Date()
             });
@@ -640,11 +660,7 @@ export default function EditProfile() {
             setNewEmail("");
         } catch (e: any) {
             console.error("Email update failed", e);
-            let msg = "Failed to send verification email";
-            if (e.code === 'auth/invalid-email') msg = "Invalid email format.";
-            if (e.code === 'auth/email-already-in-use') msg = "This email is already in use.";
-            if (e.code === 'auth/requires-recent-login') msg = "Please re-login to change your email.";
-            showToast({ type: "error", title: "Error", message: msg });
+            showToast({ type: "error", title: "Error", message: "Failed to send verification email" });
         } finally {
             setEmailUpdating(false);
         }
@@ -781,8 +797,7 @@ export default function EditProfile() {
 
             // Auth Updates - Email is read-only, no updates needed
 
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            await updateDocByPath(["users", user.uid], updates);
 
             showToast({ type: "success", title: "Saved", message: "Profile updated successfully" });
             router.back();
@@ -1539,3 +1554,4 @@ export default function EditProfile() {
         </SafeAreaView>
     );
 }
+

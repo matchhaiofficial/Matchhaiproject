@@ -1,14 +1,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { fetchDoc, fetchDocs, subscribeDocs } from "../../src/services/firestoreService";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
 import { getCaptainedTeams } from "../../src/services/teamMatchService";
@@ -60,23 +59,20 @@ export default function TeamDetails() {
         if (!id || !user) return;
         try {
             // Read 1: Team doc
-            const teamDoc = await getDoc(doc(db, 'teams', id as string));
-            if (!teamDoc.exists()) {
+            const teamDoc = await fetchDoc<Team>(["teams", id as string]);
+            if (!teamDoc.exists) {
                 Alert.alert("Error", "Team not found");
                 router.back();
                 return;
             }
 
-            const teamData = { id: teamDoc.id, ...teamDoc.data() } as Team;
+            const teamData = { id: teamDoc.id, ...teamDoc.data } as Team;
 
             // Read 2: Members subcollection
-            const membersSnapshot = await getDocs(
-                query(
-                    collection(db, 'teams', id as string, 'members')
-                )
-            );
-            const members: any[] = [];
-            membersSnapshot.forEach(doc => members.push({ ...doc.data() }));
+            const membersSnapshot = await fetchDocs({
+                collectionPath: ["teams", id as string, "members"],
+            });
+            const members: any[] = membersSnapshot.map((doc) => ({ ...doc.data }));
             // Prefer subcollection members, but merge in memberUids if subcollection is incomplete/stale.
             const memberUids = Array.isArray(teamData.memberUids) ? teamData.memberUids : [];
             if (memberUids.length > 0) {
@@ -98,8 +94,8 @@ export default function TeamDetails() {
             // Read 3: Check if viewer has pending request (deterministic ID)
             if (!members.some(m => m.uid === user.uid)) {
                 const requestId = `team_join_request_${id}_${user.uid}`;
-                const requestDoc = await getDoc(doc(db, 'notifications', requestId));
-                if (requestDoc.exists() && requestDoc.data()?.status === 'pending') {
+                const requestDoc = await fetchDoc(["notifications", requestId]);
+                if (requestDoc.exists && requestDoc.data?.status === 'pending') {
                     setMyPendingRequest(true);
                 } else {
                     setMyPendingRequest(false);
@@ -144,23 +140,26 @@ export default function TeamDetails() {
         if (!id || !user || !isCaptain) return;
 
         // Captain-only: listen to join requests
-        const q = query(
-            collection(db, "notifications"),
-            where("type", "==", "team_join_request"),
-            where("toUid", "==", user.uid),
-            where("meta.teamId", "==", id),
-            where("status", "==", "pending")
+        const unsubscribe = subscribeDocs(
+            {
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "type", op: "==", value: "team_join_request" },
+                    { field: "toUid", op: "==", value: user.uid },
+                    { field: "meta.teamId", op: "==", value: id },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+            },
+            (docs) => {
+                const list: any[] = docs.map((doc) => ({ id: doc.id, ...doc.data }));
+                list.sort((a, b) => {
+                    const timeA = a.createdAt?.toMillis?.() || 0;
+                    const timeB = b.createdAt?.toMillis?.() || 0;
+                    return timeB - timeA;
+                });
+                setPendingRequests(list);
+            },
         );
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const list: any[] = [];
-            snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-            list.sort((a, b) => {
-                const timeA = a.createdAt?.toMillis?.() || 0;
-                const timeB = b.createdAt?.toMillis?.() || 0;
-                return timeB - timeA;
-            });
-            setPendingRequests(list);
-        });
 
         return () => unsubscribe();
     }, [id, user, isCaptain]);

@@ -12,7 +12,6 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
-import { collection, doc, getDocs, limit, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 
 import AppHeader from "../../../src/components/AppHeader";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
@@ -20,7 +19,7 @@ import Screen from "../../../src/components/Screen";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { db } from "../../../src/config/firebaseConfig";
+import { fetchDocs, serverTimestampValue, setDocByPath } from "../../../src/services/firestoreService";
 import { type Matchroom } from "../../../src/services/matchService";
 import {
     acceptZoneBookingRequest,
@@ -329,13 +328,12 @@ export default function ZoneBookingsModule() {
                 const linkedMatchroomIds = new Set<string>();
 
                 for (const batch of batches) {
-                    const q = query(
-                        collection(db, "booking_requests"),
-                        where("matchroomId", "in", batch),
-                    );
-                    const snapshot = await getDocs(q);
-                    snapshot.docs.forEach((docSnap: any) => {
-                        const data = docSnap.data() as Record<string, any>;
+                    const snapshot = await fetchDocs({
+                        collectionPath: ["booking_requests"],
+                        where: [{ field: "matchroomId", op: "in", value: batch }],
+                    });
+                    snapshot.forEach((docSnap) => {
+                        const data = docSnap.data as Record<string, any>;
                         const status = String(data.status || "open");
                         if (data.matchroomId) {
                             linkedMatchroomIds.add(String(data.matchroomId));
@@ -373,10 +371,10 @@ export default function ZoneBookingsModule() {
                         paymentStatus: room.paymentStatus || "unpaid",
                         lifecycleStatus: "matchroom_admin_pending",
                         matchroomId,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp(),
+                        createdAt: serverTimestampValue(),
+                        updatedAt: serverTimestampValue(),
                     };
-                    await setDoc(doc(db, "booking_requests", docId), requestData, { merge: true });
+                    await setDocByPath(["booking_requests", docId], requestData, { merge: true });
                     collected.push(normalizeLinkedRequest(docId, requestData));
                 }
 
@@ -419,13 +417,12 @@ export default function ZoneBookingsModule() {
         let cancelled = false;
         const resolveRequestId = async () => {
             try {
-                const q = query(
-                    collection(db, "booking_requests"),
-                    where("matchroomId", "==", deepMatchroomId),
-                    limit(1),
-                );
-                const snapshot = await getDocs(q);
-                const docSnap = snapshot.docs[0];
+                const snapshot = await fetchDocs({
+                    collectionPath: ["booking_requests"],
+                    where: [{ field: "matchroomId", op: "==", value: deepMatchroomId }],
+                    limit: 1,
+                });
+                const docSnap = snapshot[0];
                 if (!cancelled && docSnap) {
                     setSelectedRequestId(docSnap.id);
                 }
@@ -912,4 +909,5 @@ export default function ZoneBookingsModule() {
         </Screen>
     );
 }
+
 

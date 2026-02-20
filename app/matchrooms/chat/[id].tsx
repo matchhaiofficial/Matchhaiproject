@@ -19,8 +19,7 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import { useScreenPadding } from "../../../src/hooks/useScreenPadding";
 import { useAuth } from "../../../src/context/AuthContext";
-import { db } from "../../../src/config/firebaseConfig";
-import { arrayUnion, collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, addDoc, setDoc, updateDoc, where } from "firebase/firestore";
+import { addDocToCollection, arrayUnionValue, fetchDoc, fetchDocs, serverTimestampValue, setDocByPath, subscribeDoc, subscribeDocs, updateDocByPath } from "../../../src/services/firestoreService";
 import { COLORS, SPACING } from "../../../src/theme";
 import styles from "./chat.styles";
 import Logger from "../../../src/utils/logger";
@@ -86,36 +85,35 @@ export default function MatchroomChat() {
     try {
       Logger.info("MatchroomChat", "Access check start", { chatroomId, uid: user.uid });
       let resolvedId = chatroomId;
-      let roomSnap = await getDoc(doc(db, "matchrooms", resolvedId));
-      if (!roomSnap.exists()) {
-        const q = query(
-          collection(db, "matchrooms"),
-          where("matchCode", "==", chatroomId),
-          limit(1)
-        );
-        const qs = await getDocs(q);
-        if (!qs.empty) {
-          resolvedId = qs.docs[0].id;
-          roomSnap = qs.docs[0];
+      let roomSnap = await fetchDoc<any>(["matchrooms", resolvedId]);
+      if (!roomSnap.exists) {
+        const qs = await fetchDocs({
+          collectionPath: ["matchrooms"],
+          where: [{ field: "matchCode", op: "==", value: chatroomId }],
+          limit: 1,
+        });
+        if (qs.length > 0) {
+          resolvedId = qs[0].id;
+          roomSnap = { exists: true, id: qs[0].id, data: qs[0].data };
           setRoomDocId(resolvedId);
           Logger.info("MatchroomChat", "Resolved matchCode to docId", { chatroomId, resolvedId });
         } else {
           Logger.warn("MatchroomChat", "No matchroom found for code", { chatroomId });
         }
       }
-      if (!roomSnap.exists()) {
+      if (!roomSnap.exists) {
         setAuthorized(false);
         setLoading(false);
         Logger.warn("MatchroomChat", "Room not found", { chatroomId, resolvedId });
         return;
       }
-      const roomData: any = roomSnap.data();
+      const roomData: any = roomSnap.data;
       setRoomTitle(roomData.title || "Matchroom Chat");
       setRoomMeta(roomData);
 
       const tryGetChatroom = async () => {
         try {
-          return await getDoc(doc(db, "chatrooms", resolvedId));
+          return await fetchDoc<any>(["chatrooms", resolvedId]);
         } catch (err) {
           Logger.warn("MatchroomChat", "Chatroom read failed", { resolvedId, err });
           return null;
@@ -123,21 +121,21 @@ export default function MatchroomChat() {
       };
 
       let chatSnap = await tryGetChatroom();
-      if ((!chatSnap || !chatSnap.exists()) && (roomData.hostUid === user.uid || roomData.zoneOwnerUid === user.uid)) {
+      if ((!chatSnap || !chatSnap.exists) && (roomData.hostUid === user.uid || roomData.zoneOwnerUid === user.uid)) {
         try {
           const participantUids = Array.from(new Set([
             roomData.hostUid,
             ...(roomData.playerUids || []),
             ...(roomData.zoneOwnerUid ? [roomData.zoneOwnerUid] : []),
           ].filter(Boolean)));
-          await setDoc(doc(db, "chatrooms", resolvedId), {
+          await setDocByPath(["chatrooms", resolvedId], {
             matchroomId: resolvedId,
             zoneId: roomData.zoneId || null,
             participantUids,
             lastMessage: null,
             lastReadBy: {},
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+            createdAt: serverTimestampValue(),
+            updatedAt: serverTimestampValue(),
           }, { merge: true });
           Logger.info("MatchroomChat", "Chatroom created by host/venue owner", { resolvedId });
         } catch (err) {
@@ -146,13 +144,13 @@ export default function MatchroomChat() {
         chatSnap = await tryGetChatroom();
       }
 
-      if (!chatSnap || !chatSnap.exists()) {
+      if (!chatSnap || !chatSnap.exists) {
         setAuthorized(false);
         Logger.warn("MatchroomChat", "Chatroom missing after sync", { resolvedId });
         return;
       }
 
-      let participantUids: string[] = chatSnap.data()?.participantUids || [];
+      let participantUids: string[] = chatSnap.data?.participantUids || [];
       let isParticipant = participantUids.includes(user.uid);
       setAuthorized(isParticipant);
       Logger.info("MatchroomChat", "Access check result", {
@@ -176,33 +174,38 @@ export default function MatchroomChat() {
 
   useEffect(() => {
     if (!activeRoomId || !authorized) return;
-    const messagesRef = collection(db, "chatrooms", activeRoomId, "messages");
-    const q = query(messagesRef, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        const data: any = docSnap.data();
-        list.push({
-          id: docSnap.id,
-          text: data.text || "",
-          senderUid: data.senderUid,
-          senderName: data.senderName || "Player",
-          createdAt: data.createdAt,
-          replyTo: data.replyTo,
-          deletedFor: data.deletedFor,
+    const unsubscribe = subscribeDocs(
+      {
+        collectionPath: ["chatrooms", activeRoomId, "messages"],
+        orderBy: [{ field: "createdAt", direction: "desc" }],
+      },
+      (docs) => {
+        const list: ChatMessage[] = docs.map((docSnap) => {
+          const data: any = docSnap.data;
+          return {
+            id: docSnap.id,
+            text: data.text || "",
+            senderUid: data.senderUid,
+            senderName: data.senderName || "Player",
+            createdAt: data.createdAt,
+            replyTo: data.replyTo,
+            deletedFor: data.deletedFor,
+          };
         });
-      });
-      setMessages(list);
-    });
+        setMessages(list);
+      },
+    );
     return () => unsubscribe();
   }, [activeRoomId, authorized]);
 
   useEffect(() => {
     if (!activeRoomId || !authorized) return;
-    const chatRef = doc(db, "chatrooms", activeRoomId);
-    const unsubscribe = onSnapshot(chatRef, (snap) => {
-      setChatMeta(snap.exists() ? snap.data() : null);
-    });
+    const unsubscribe = subscribeDoc(
+      ["chatrooms", activeRoomId],
+      (snap) => {
+        setChatMeta(snap.exists ? snap.data : null);
+      },
+    );
     return () => unsubscribe();
   }, [activeRoomId, authorized]);
 
@@ -222,11 +225,12 @@ export default function MatchroomChat() {
 
         for (let index = 0; index < uniqueUids.length; index += 10) {
           const batch = uniqueUids.slice(index, index + 10);
-          const usersSnap = await getDocs(
-            query(collection(db, "users"), where(documentId(), "in", batch))
-          );
+          const usersSnap = await fetchDocs({
+            collectionPath: ["users"],
+            where: [{ field: "__name__", op: "in", value: batch }],
+          });
           usersSnap.forEach((userDoc) => {
-            const data: any = userDoc.data();
+            const data: any = userDoc.data;
             names[userDoc.id] =
               data?.username ||
               data?.displayName ||
@@ -256,13 +260,13 @@ export default function MatchroomChat() {
   const markRead = useCallback(async () => {
     if (!activeRoomId || !user?.uid) return;
     try {
-      await setDoc(
-        doc(db, "chatrooms", activeRoomId),
+      await setDocByPath(
+        ["chatrooms", activeRoomId],
         {
           lastReadBy: {
-            [user.uid]: serverTimestamp(),
+            [user.uid]: serverTimestampValue(),
           },
-          updatedAt: serverTimestamp(),
+          updatedAt: serverTimestampValue(),
         },
         { merge: true }
       );
@@ -309,7 +313,7 @@ export default function MatchroomChat() {
         text: trimmed,
         senderUid: user.uid,
         senderName: user.displayName || "Player",
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestampValue(),
         clientMessageId: `${user.uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       };
       if (replyTo) {
@@ -319,16 +323,16 @@ export default function MatchroomChat() {
           snippet: (replyTo.text || "").slice(0, 80),
         };
       }
-      await addDoc(collection(db, "chatrooms", activeRoomId, "messages"), payload);
+      await addDocToCollection(["chatrooms", activeRoomId, "messages"], payload);
       try {
-        await updateDoc(doc(db, "chatrooms", activeRoomId), {
+        await updateDocByPath(["chatrooms", activeRoomId], {
           lastMessage: {
             type: "text",
             text: trimmed,
             senderUid: user.uid,
-            createdAt: serverTimestamp(),
+            createdAt: serverTimestampValue(),
           },
-          updatedAt: serverTimestamp(),
+          updatedAt: serverTimestampValue(),
         });
       } catch (e) {
         Logger.warn("MatchroomChat", "Failed to update lastMessage", e);
@@ -348,9 +352,9 @@ export default function MatchroomChat() {
   const deleteForMe = async (messageId: string) => {
     if (!activeRoomId || !user?.uid) return;
     try {
-      await updateDoc(doc(db, "chatrooms", activeRoomId, "messages", messageId), {
-        deletedFor: arrayUnion(user.uid),
-        updatedAt: serverTimestamp(),
+      await updateDocByPath(["chatrooms", activeRoomId, "messages", messageId], {
+        deletedFor: arrayUnionValue(user.uid),
+        updatedAt: serverTimestampValue(),
       });
     } catch (error) {
       Logger.warn("MatchroomChat", "deleteForMe failed", error);

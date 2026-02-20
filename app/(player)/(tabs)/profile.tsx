@@ -1,7 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -18,13 +17,13 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 
 import SkillBadge from "../../../src/components/SkillBadge";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
+import { getUserProfile } from "../../../src/services/userService";
 import { getUserTeams, Team } from "../../../src/services/teamService";
 import { COLORS } from "../../../src/theme";
 import styles from "./profile.styles";
@@ -112,11 +111,9 @@ export default function Profile() {
             isFetching.current = true;
             if (!isRefresh && !profile) setLoading(true); // Initial load only
 
-            const userRef = doc(db, "users", user.uid);
-            const snap = await getDoc(userRef);
-
-            if (snap.exists()) {
-                setProfile({ uid: snap.id, ...snap.data() } as FullUserProfile);
+            const profileRes = await getUserProfile(user.uid);
+            if (profileRes.ok && profileRes.data) {
+                setProfile({ uid: profileRes.data.uid, ...profileRes.data } as FullUserProfile);
             }
 
             setLoadingTeams(true);
@@ -544,3 +541,4 @@ export default function Profile() {
         </Screen>
     );
 }
+

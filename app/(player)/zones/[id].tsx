@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
+import { fetchDoc } from "../../../src/services/firestoreService";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -15,7 +15,6 @@ import {
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 
-import { db } from "../../../src/config/firebaseConfig";
 import { Zone } from "../../../src/services/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -35,11 +34,10 @@ export default function PlayerZoneDetails() {
 
     const fetchZoneDetails = async () => {
         try {
-            const docRef = doc(db, "zones", id as string);
-            const docSnap = await getDoc(docRef);
+            const docSnap = await fetchDoc(["zones", id as string]);
 
-            if (docSnap.exists()) {
-                setZone({ id: docSnap.id, ...docSnap.data() } as Zone);
+            if (docSnap.exists && docSnap.data) {
+                setZone({ id: docSnap.id!, ...docSnap.data } as Zone);
             } else {
                 Logger.error("ZoneDetails", "Zone not found", { id });
             }

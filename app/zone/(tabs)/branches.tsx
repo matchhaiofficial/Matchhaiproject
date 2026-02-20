@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -12,8 +11,8 @@ import {
 
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
 import { useZoneData } from "../../../src/hooks/useZoneData";
+import { subscribeDocs } from "../../../src/services/firestoreService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./branches.styles";
@@ -49,13 +48,14 @@ export default function ZoneBranches() {
             return;
         }
 
-        const q = query(collection(db, "zones", zone.id, "branches"));
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => {
-                const list = snapshot.docs.map((doc: any) => ({
+        const unsub = subscribeDocs(
+            {
+                collectionPath: ["zones", zone.id, "branches"],
+            },
+            (docs) => {
+                const list = docs.map((doc) => ({
                     id: doc.id,
-                    ...doc.data(),
+                    ...doc.data,
                 }));
                 if (list.length > 0) {
                     setBranches(list);
@@ -175,3 +175,4 @@ export default function ZoneBranches() {
         </Screen>
     );
 }
+

@@ -25,9 +25,8 @@ import {
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../../src/constants/timelineFilters";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
+import { fetchDocs } from "../../../../src/services/firestoreService";
 import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/matchService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
@@ -108,16 +107,17 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const fetchSocialState = async () => {
         if (!user) return;
         try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "match_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
+            const snap = await fetchDocs({
+                collectionPath: ["notifications"],
+                where: [
+                    { field: "fromUid", op: "==", value: user.uid },
+                    { field: "type", op: "==", value: "match_join_request" },
+                    { field: "status", op: "==", value: "pending" },
+                ],
+            });
             const requested = new Set<string>();
             snap.forEach(doc => {
-                const data = doc.data();
+                const data = doc.data;
                 if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
             });
             setRequestedRoomIds(requested);
@@ -553,3 +553,4 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
         </View>
     );
 }
+
