@@ -6,7 +6,7 @@ export default StyleSheet.create({
     wrapper: {
         alignItems: "center",
         justifyContent: "center",
-        marginBottom: 20,
+        marginBottom: 8,
     },
     logo: {
         width: LOGO_SIZE,
