@@ -15,7 +15,7 @@ import {
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
 import { signUpWithEmail } from "../../src/services/authService";
-import { saveZoneRegistration } from "../../src/services/zoneService";
+import { saveZoneRegistration } from "../../src/services/convex/zoneService";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";

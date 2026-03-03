@@ -56,7 +56,7 @@ export default function FriendsScreen() {
 
   const loadFriends = useCallback(
     async (showRefresh = false) => {
-      if (!user?.uid) {
+      if (!user?._id) {
         setFriends([]);
         setLoading(false);
         setRefreshing(false);
@@ -68,7 +68,7 @@ export default function FriendsScreen() {
         setLoading(true);
       }
       try {
-        const friendsResult = await getUserFriends(user.uid);
+        const friendsResult = await getUserFriends(user._id);
         if (!friendsResult.ok || !friendsResult.data) {
           setFriends([]);
           return;
@@ -76,11 +76,11 @@ export default function FriendsScreen() {
 
         const detailedFriends = await Promise.all(
           friendsResult.data.map(async (friend) => {
-            const profileResult = await getUserProfile(friend.uid);
+            const profileResult = await getUserProfile(friend._id);
             const profile = profileResult.ok ? profileResult.data : undefined;
             const username =
               profile?.username ||
-              profile?.displayName ||
+              profile?.fullName ||
               friend.username ||
               "Unknown";
             const avatarUri =
@@ -109,7 +109,7 @@ export default function FriendsScreen() {
         setRefreshing(false);
       }
     },
-    [user?.uid],
+    [user?._id],
   );
 
   useFocusEffect(

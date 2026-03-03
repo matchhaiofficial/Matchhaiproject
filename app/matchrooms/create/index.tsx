@@ -24,25 +24,26 @@ import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import type { BookingRequest } from "../../../src/services/bookingRequestService";
 import { createBookingRequest } from "../../../src/services/bookingRequestService";
-import { createMatchroom } from "../../../src/services/matchService";
+import { createMatchroom } from "../../../src/services/convex/matchService";
 import {
   applyPricingRulesToRate,
   getEnabledPricingRulesForZone,
   type PricingRule,
 } from "../../../src/services/pricingRuleService";
 import { SkillTier } from "../../../src/services/skillRatingService";
-import type { Team } from "../../../src/services/teamService";
+import type { Team } from "../../../src/services/convex/teamService";
 import {
   getTeamById,
   getUserTeamsForGame,
-} from "../../../src/services/teamService";
+} from "../../../src/services/convex/teamService";
 import type { UserProfile } from "../../../src/services/userService";
 import {
   getUserProfile,
   getUserSportRoleLabel,
 } from "../../../src/services/userService";
 import { createZoneWalkInMatchroom } from "../../../src/services/zoneAdminBookingService";
-import type { Zone } from "../../../src/services/zoneService";
+import type { Zone } from "../../../src/services/convex/zoneService";
+import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS, FONTS } from "../../../src/theme";
 
 import Logger from "../../../src/utils/logger";
@@ -453,9 +454,9 @@ export default function CreateMatchroom() {
   }, [selectedGame, formData.format]);
 
   const captainedTeams = useMemo(() => {
-    if (!user?.uid) return [];
-    return (teams || []).filter((t) => t.captainUid === user.uid);
-  }, [teams, user?.uid]);
+    if (!user?._id) return [];
+    return (teams || []).filter((t) => t.captainUid === user._id);
+  }, [teams, user?._id]);
 
   const isCaptainForGame = captainedTeams.length > 0;
 
@@ -606,14 +607,14 @@ export default function CreateMatchroom() {
     const fetchRoles = async () => {
       const entries = await Promise.all(
         missingUids.map(async (uid) => {
-          if (uid === user?.uid && userProfile) {
+          if (uid === user?._id && userProfile) {
             return [
               uid,
               getUserSportRoleLabel(userProfile, selectedGame),
             ] as const;
           }
 
-          const res = await getUserProfile(uid);
+          const res = await getUserProfile(uid as Id<"users">);
           if (!res.ok) return [uid, null] as const;
           return [uid, getUserSportRoleLabel(res.data, selectedGame)] as const;
         }),
@@ -639,7 +640,7 @@ export default function CreateMatchroom() {
     resolvedTeam,
     selectedGame,
     memberSportRoleByUid,
-    user?.uid,
+    user?._id,
     userProfile,
   ]);
 
@@ -1122,13 +1123,13 @@ export default function CreateMatchroom() {
   }, [isZoneWalkInAdmin, userProfile, params.zoneSupportedGames]);
 
   const loadUserProfile = async () => {
-    if (!user?.uid) {
+    if (!user?._id) {
       setLoading(false);
       return;
     }
 
     try {
-      const result = await getUserProfile(user.uid);
+      const result = await getUserProfile(user._id);
       if (result.ok) {
         setUserProfile(result.data);
       } else {
@@ -1288,7 +1289,7 @@ export default function CreateMatchroom() {
 
     // Phase 2: Load teams for this game (player mode only)
     if (user && !isZoneWalkInAdmin) {
-      const result = await getUserTeamsForGame(user.uid, gameKey as any);
+      const result = await getUserTeamsForGame(user._id, gameKey as any);
       if (result.ok && result.data) {
         setTeams(result.data);
         // Reset team state
@@ -1649,13 +1650,13 @@ export default function CreateMatchroom() {
     });
   };
   const payWithWallet = async (amountDue: number) => {
-    if (!user?.uid) return { ok: false as const, message: "Not authenticated." };
+    if (!user?._id) return { ok: false as const, message: "Not authenticated." };
     const amount = Math.max(0, Math.ceil(Number(amountDue || 0)));
     if (amount <= 0) return { ok: true as const };
 
     try {
-      const userRef = doc(db, "users", user.uid);
-      const walletTxRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
+      const userRef = doc(db, "users", user._id);
+      const walletTxRef = doc(collection(db, "users", user._id, "wallet_transactions"));
       await runTransaction(db, async (transaction) => {
         const userSnap = await transaction.get(userRef);
         const currentBalance = userSnap.exists()
@@ -1673,7 +1674,7 @@ export default function CreateMatchroom() {
           { merge: true },
         );
         transaction.set(walletTxRef, {
-          uid: user.uid,
+          uid: user._id,
           type: "debit",
           amount,
           status: "completed",
@@ -1737,7 +1738,7 @@ export default function CreateMatchroom() {
         const actualBookedCount = validPlayers.length;
 
         const knownPlayers = validPlayers.map((player, idx) => ({
-          uid: `walkin_${user.uid}_${walkInSeed}_${player.seatNumber}`, // Use seatNumber to keep ID stable? Or just idx. 
+          uid: `walkin_${user._id}_${walkInSeed}_${player.seatNumber}`, // Use seatNumber to keep ID stable? Or just idx. 
           // Better to use a unique index or just let them be distinct.
           // Note: service uses these to fill slots.
           username: player.name.trim(),
@@ -1750,12 +1751,12 @@ export default function CreateMatchroom() {
 
         const result = await createZoneWalkInMatchroom({
           zoneId: adminZone.id,
-          zoneOwnerUid: adminZone.ownerUid || user.uid,
+          zoneOwnerUid: adminZone.ownerUid || user._id,
           branchId: branch?.id || null,
           branchName: branch?.label || null,
-          adminUid: user.uid,
+          adminUid: user._id,
           adminName:
-            user.displayName || adminZone.ownerFullName || "Zone Admin",
+            user.fullName || adminZone.ownerFullName || "Zone Admin",
           gameKey: selectedGame || "unknown",
           title: formData.title.trim() || "Walk-in Matchroom",
           scheduledDate: formData.date,
@@ -1846,9 +1847,9 @@ export default function CreateMatchroom() {
       if (locationMode === "broadcast") {
         const requestData: Omit<BookingRequest, "id" | "createdAt" | "status"> =
         {
-          userId: user.uid,
+          userId: user._id,
           userName:
-            userProfile.displayName || userProfile.username || "Player",
+            userProfile.fullName || userProfile.username || "Player",
           gameKey: selectedGame!,
           title: formData.title.trim(),
           description: formData.description?.trim() || "",
@@ -1912,8 +1913,8 @@ export default function CreateMatchroom() {
 
       // Phase 1 & 2: Normal matchroom creation (zone mode)
       const matchroomData = {
-        hostUid: user.uid,
-        hostName: userProfile.username || userProfile.displayName || "Player",
+        hostUid: user._id,
+        hostName: userProfile.username || userProfile.fullName || "Player",
         game: selectedGame!,
         title: formData.title.trim(),
         description: formData.description?.trim() || "",
@@ -2027,7 +2028,7 @@ export default function CreateMatchroom() {
                 username:
                   resolvedTeam.captainUsername ||
                   userProfile.username ||
-                  userProfile.displayName ||
+                  userProfile.fullName ||
                   "Captain",
                 role: memberSportRoleByUid[resolvedTeam.captainUid]
                   ? `Captain â€¢ ${memberSportRoleByUid[resolvedTeam.captainUid]}`
@@ -2052,7 +2053,7 @@ export default function CreateMatchroom() {
           ? {
             seatCount: Number.parseInt(walkInSeatCount, 10),
             bookedSeatCount: Math.floor(Number(walkInSeatCount)), // normalized
-            captainSeatNumber: walkInCaptainSeatNumber,
+            captainSeatNumber: walkInTeamACaptainSeatNumber,
             roster: walkInSeatPlayers.slice(
               0,
               Math.floor(Number(walkInSeatCount)),

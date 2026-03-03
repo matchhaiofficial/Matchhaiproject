@@ -16,7 +16,7 @@ export default function SuperAdminLayout() {
     React.useEffect(() => {
         async function loadProfile() {
             if (user) {
-                const res = await getUserProfile(user.uid);
+                const res = await getUserProfile(user._id);
                 if (res.ok) {
                     setProfile(res.data);
                 }
@@ -43,7 +43,7 @@ export default function SuperAdminLayout() {
     // Redirect if not super-admin
     const isSuperAdmin = profile?.role === "super-admin" ||
         (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user?.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+        user?._id === "jM2JZrPNNNahPb844rHmr0MQKYo1";
 
     if (!isSuperAdmin) {
         Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: profile?.role });

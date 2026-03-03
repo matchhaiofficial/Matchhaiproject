@@ -13,8 +13,8 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { useAuth } from "../../../src/context/AuthContext";
 import { createBookingIntentDetailed } from "../../../src/services/bookingService";
-import { getMatchroom, Matchroom } from "../../../src/services/matchService";
-import { getTeamById, getUserTeamsForGame, Team } from "../../../src/services/teamService";
+import { getMatchroom, Matchroom } from "../../../src/services/convex/matchService";
+import { getTeamById, getUserTeamsForGame, Team } from "../../../src/services/convex/teamService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import FriendPicker from "../components";
@@ -84,7 +84,7 @@ export default function BookSlotsScreen() {
         const fetchTeams = async () => {
             if (!user || !room?.game) return;
             try {
-                const res = await getUserTeamsForGame(user.uid, room.game);
+                const res = await getUserTeamsForGame(user._id, room.game);
                 if (res.ok && res.data) {
                     setUserTeams(res.data);
                 }
@@ -127,7 +127,7 @@ export default function BookSlotsScreen() {
         // Members to add (excluding ones already in the list)
         const existingUids = new Set(room.playerUids || []);
         // Also exclude the current user if they are already in the room
-        const toAdd = team.members.filter(m => !existingUids.has(m.uid) && m.uid !== user?.uid).slice(0, 5);
+        const toAdd = team.members.filter(m => !existingUids.has(m.uid) && m.uid !== user?._id).slice(0, 5);
 
         // Find open slot IDs
         const openSlotIds = currentSlots
@@ -192,7 +192,7 @@ export default function BookSlotsScreen() {
         setSubmitting(true);
         try {
             const res = await createBookingIntentDetailed({
-                matchroom: room,
+                matchroom: room as any,
                 side: selectedSide,
                 selectedSlots: Object.keys(selections),
                 invitees: selectionList,

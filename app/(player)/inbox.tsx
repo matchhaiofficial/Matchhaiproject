@@ -1,15 +1,17 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import { useMutation } from "convex/react";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, PanResponder, Pressable, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
-import { claimSeatTransaction } from "../../src/services/bookingService";
+import { claimSeatTransaction, getBookingIntent } from "../../src/services/convex/bookingService";
 import { respondFriendRequest, respondToJoinRequest, respondToMatchroomInvite, respondToMatchroomJoinRequest, respondToTeamInvite } from "../../src/services/functions";
+import { useNotifications, Notification } from "../../src/hooks/useNotifications";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./inbox.styles";
@@ -17,58 +19,11 @@ import styles from "./inbox.styles";
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SWIPE_THRESHOLD = -80;
 
-interface Notification {
-    id: string;
-    isRead: boolean;
-    type:
-    | 'friend_request'
-    | 'team_invite'
-    | 'team_join_request'
-    | 'team_join_decision'
-    | 'match_booking_captain_approval'
-    | 'match_seat_invitation'
-    | 'match_join_request'
-    | 'team_match_challenge'
-    | 'team_match_challenge_update'
-    | 'booking_request_accepted'
-    | 'booking_request_rejected'
-    | 'booking_counter_offer'
-    | 'match_cancelled_admin';
-    fromUid: string;
-    fromUsername: string;
-    status: 'pending' | 'accepted' | 'declined' | 'rejected';
-    createdAt: any;
-    expiresAt?: any;
-    title?: string;
-    message?: string;
-    reason?: string;
-    meta?: {
-        teamId?: string;
-        teamName?: string;
-        game?: string;
-        gameKey?: string;
-        requesterSnapshot?: {
-            city?: string;
-            skillTier?: Record<string, string>;
-            linked?: { steam?: boolean; faceit?: boolean; psn?: boolean; xbox?: boolean };
-        };
-        matchroomId?: string;
-        matchroomTitle?: string;
-        intentId?: string;
-        side?: string;
-        role?: string;
-        challengeId?: string;
-        challengerTeamName?: string;
-        opponentTeamName?: string;
-        reason?: string;
-        note?: string;
-    };
-}
-
 const getTimeAgo = (timestamp: any): string => {
-    if (!timestamp?.toDate) return 'Just now';
+    // Handle Convex timestamp (number) or Firebase timestamp
+    if (!timestamp) return 'Just now';
     const now = new Date();
-    const then = timestamp.toDate();
+    const then = typeof timestamp === 'number' ? new Date(timestamp) : (timestamp?.toDate ? timestamp.toDate() : new Date(timestamp));
     const diffMs = now.getTime() - then.getTime();
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
@@ -135,34 +90,22 @@ export default function Inbox() {
     const { user } = useAuth();
 
     const [activeTab, setActiveTab] = useState<'pending' | 'resolved'>('pending');
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState<string | null>(null);
     const [deleting, setDeleting] = useState(false);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
-    useEffect(() => {
-        if (!user) return;
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user.uid)
-        );
+    // Use Convex real-time notifications hook
+    const {
+        notifications,
+        loading,
+        markAsRead,
+        markAllAsRead: markAllReadHook,
+        updateStatus,
+        deleteNotification: deleteNotificationHook,
+    } = useNotifications();
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const list: Notification[] = [];
-            snapshot.forEach(doc => {
-                list.push({ id: doc.id, ...doc.data() } as Notification);
-            });
-            list.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-            setNotifications(list);
-            setLoading(false);
-        }, (error) => {
-            Logger.error("Inbox", "Error listening to notifications", error);
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [user]);
+    // Convex mutations for booking intent updates
+    const updateBookingIntentMutation = useMutation(api.bookings.updateIntentApproval);
 
     // Auto-mark notifications as read when viewing the inbox
     useEffect(() => {
@@ -171,21 +114,19 @@ export default function Inbox() {
             .map(n => n.id);
 
         if (unreadIds.length > 0) {
-            const markAsRead = async () => {
+            const markAllAsReadFn = async () => {
                 try {
-                    const batch = writeBatch(db);
-                    unreadIds.forEach(id => {
-                        batch.update(doc(db, "notifications", id), { isRead: true });
-                    });
-                    await batch.commit();
+                    for (const id of unreadIds) {
+                        await markAsRead(id);
+                    }
                     Logger.info("Inbox", `Marked ${unreadIds.length} notifications as read`);
                 } catch (e) {
                     Logger.error("Inbox", "Error auto-marking notifications as read", e);
                 }
             };
-            markAsRead();
+            markAllAsReadFn();
         }
-    }, [notifications]);
+    }, [notifications.length]); // Only run when notification count changes
 
     const handleFriendResponse = async (notifId: string, decision: 'accept' | 'decline') => {
         if (processing) return;
@@ -243,20 +184,15 @@ export default function Inbox() {
         if (processing) return;
         setProcessing(notifId);
         try {
-            // Update the intent
-            const intentRef = doc(db, "booking_intents", intentId);
-            await updateDoc(intentRef, {
-                'approvals.captain.status': decision,
-                'approvals.captain.decidedBy': user?.uid,
-                'approvals.captain.decidedAt': serverTimestamp(),
-                // If rejected, update overall status
-                ...(decision === 'rejected' ? { status: 'rejected' } : {})
+            // Update the intent using Convex mutation
+            await updateBookingIntentMutation({
+                intentId: intentId as Id<"bookingIntents">,
+                approvalType: "captain",
+                approved: decision === 'approved',
             });
 
-            // Update notification
-            await updateDoc(doc(db, "notifications", notifId), {
-                status: decision === 'approved' ? 'accepted' : 'rejected'
-            });
+            // Update notification status
+            await updateStatus(notifId, decision === 'approved' ? 'accepted' : 'rejected');
 
         } catch (e) {
             Logger.error("Inbox", "Error handling booking approval", e);
@@ -272,16 +208,16 @@ export default function Inbox() {
         try {
             if (decision === 'accept') {
                 if (intentId) {
-                    // Booking Intent Flow (Legacy)
-                    const intentSnap = await getDoc(doc(db, "booking_intents", intentId));
-                    if (intentSnap.exists()) {
-                        const data = intentSnap.data();
-                        const slotIds = data.selectedSlots as string[];
-                        const invitees = data.invitees as any[];
-                        const myIdx = invitees.findIndex(i => i.uid === user?.uid);
-                        if (myIdx !== -1) {
-                            const mySlotId = slotIds[myIdx];
-                            const res = await claimSeatTransaction(matchroomId, intentId, mySlotId);
+                    // Booking Intent Flow - get intent from Convex
+                    const intentResult = await getBookingIntent(intentId);
+                    if (intentResult.ok && intentResult.data) {
+                        const data = intentResult.data;
+                        const slotIds = data.selectedSlots || [];
+                        const invitees = data.invitees || [];
+                        const myIdx = invitees.findIndex((i: any) => i.uid === user?._id);
+                        if (myIdx !== -1 && slotIds[myIdx] !== undefined) {
+                            const mySlotIdx = slotIds[myIdx];
+                            const res = await claimSeatTransaction(matchroomId, intentId, mySlotIdx);
                             if (!res.ok) {
                                 alert(res.message);
                                 setProcessing(null);
@@ -305,10 +241,8 @@ export default function Inbox() {
                 }
             }
 
-            // Update notification
-            await updateDoc(doc(db, "notifications", notifId), {
-                status: decision === 'accept' ? 'accepted' : 'rejected'
-            });
+            // Update notification status using Convex
+            await updateStatus(notifId, decision === 'accept' ? 'accepted' : 'rejected');
 
         } catch (e) {
             Logger.error("Inbox", "Error handling seat invitation", e);
@@ -318,17 +252,17 @@ export default function Inbox() {
         }
     };
 
-    // Delete a single notification
+    // Delete a single notification using Convex
     const handleDeleteNotification = async (notifId: string) => {
         try {
-            await deleteDoc(doc(db, "notifications", notifId));
+            await deleteNotificationHook(notifId);
         } catch (e) {
             Logger.error("Inbox", "Error deleting notification", e);
             Alert.alert("Error", "Failed to delete notification.");
         }
     };
 
-    // Clear all resolved notifications
+    // Clear all resolved notifications using Convex
     const handleClearAllHistory = async () => {
         const resolvedNotifs = notifications.filter(n => n.status !== 'pending');
         if (resolvedNotifs.length === 0) return;
@@ -344,11 +278,10 @@ export default function Inbox() {
                     onPress: async () => {
                         setDeleting(true);
                         try {
-                            const batch = writeBatch(db);
-                            resolvedNotifs.forEach(n => {
-                                batch.delete(doc(db, "notifications", n.id));
-                            });
-                            await batch.commit();
+                            // Delete each notification using Convex
+                            for (const n of resolvedNotifs) {
+                                await deleteNotificationHook(n.id);
+                            }
                         } catch (e) {
                             Logger.error("Inbox", "Error clearing history", e);
                             Alert.alert("Error", "Failed to clear history.");
@@ -361,16 +294,10 @@ export default function Inbox() {
         );
     };
 
+    // Mark all as read using Convex hook
     const handleMarkAllRead = async () => {
-        const unreadNotifs = notifications.filter(n => n.isRead === false);
-        if (unreadNotifs.length === 0) return;
-
         try {
-            const batch = writeBatch(db);
-            unreadNotifs.forEach(n => {
-                batch.update(doc(db, "notifications", n.id), { isRead: true });
-            });
-            await batch.commit();
+            await markAllReadHook();
         } catch (e) {
             Logger.error("Inbox", "Error marking all as read", e);
             Alert.alert("Error", "Failed to mark all as read.");
@@ -384,7 +311,8 @@ export default function Inbox() {
         if (isRejectedChallengeNotification) return false;
         if (n.status !== 'pending') return false;
         if (n.expiresAt) {
-            const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
+            // expiresAt is now a number (timestamp) from Convex
+            const expiresMs = typeof n.expiresAt === 'number' ? n.expiresAt : Date.now();
             if (expiresMs < Date.now()) return false;
         }
         return true;
@@ -400,7 +328,8 @@ export default function Inbox() {
 
         // Expiration check for pending items
         if (isPending && n.expiresAt) {
-            const expiresMs = n.expiresAt?.toMillis ? n.expiresAt.toMillis() : (n.expiresAt instanceof Date ? n.expiresAt.getTime() : n.expiresAt);
+            // expiresAt is now a number (timestamp) from Convex
+            const expiresMs = typeof n.expiresAt === 'number' ? n.expiresAt : Date.now();
             if (expiresMs < Date.now()) {
                 return false; // Hide expired pending items
             }

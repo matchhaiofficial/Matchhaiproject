@@ -46,7 +46,7 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName 
         if (!user) return;
         setLoading(true);
         try {
-            const friendsRef = collection(db, "users", user.uid, "friends");
+            const friendsRef = collection(db, "users", user._id, "friends");
             const snap = await getDocs(friendsRef);
             const list: Friend[] = [];
             snap.forEach(doc => {

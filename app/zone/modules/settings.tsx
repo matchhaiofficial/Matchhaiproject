@@ -52,7 +52,7 @@ export default function ZoneSettingsModule() {
     );
 
     const legacyCount = Array.isArray(zone?.branches) ? zone.branches.length : 0;
-    const migrationEnabled = Boolean(zone?.id && user?.uid);
+    const migrationEnabled = Boolean(zone?.id && user?._id);
     const migrated = Boolean(zone?.migration?.perBranchSeatModel) || branchCount > 0;
 
     const statusLabel = useMemo(() => {
@@ -64,7 +64,7 @@ export default function ZoneSettingsModule() {
     const statusColor = migrated ? COLORS.success : COLORS.warning;
 
     const runMigration = async () => {
-        if (!zone?.id || !user?.uid) return;
+        if (!zone?.id || !user?._id) return;
 
         Alert.alert(
             "Run Branch Migration",
@@ -75,7 +75,7 @@ export default function ZoneSettingsModule() {
                     text: "Run Migration",
                     onPress: async () => {
                         setMigrating(true);
-                        const result = await migrateZoneBranchesToSubcollection(zone.id, user.uid);
+                        const result = await migrateZoneBranchesToSubcollection(zone.id, user._id);
                         setMigrating(false);
 
                         if (result.ok) {

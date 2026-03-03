@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../../src/config/firebaseConfig';
-import { getMatchroomById, submitParticipantVote } from '../../src/services/matchService';
+import { getMatchroomById, submitParticipantVote } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
 import styles from './vote.styles';

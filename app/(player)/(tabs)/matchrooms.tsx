@@ -32,7 +32,7 @@ import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../src/constants/time
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../src/services/matchService";
+import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { isRoomExpired } from "../../../src/utils/matchroomLifecycle";
@@ -120,7 +120,7 @@ export default function MatchroomsIndex() {
         try {
             const q = query(
                 collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
+                where("fromUid", "==", user._id),
                 where("type", "==", "match_join_request"),
                 where("status", "==", "pending")
             );
@@ -143,15 +143,15 @@ export default function MatchroomsIndex() {
         }
         try {
             // BUSY CHECK
-            const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
+            const busyCheck = await isUserInActiveMatchroom(user._id, room as any);
             if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
                 Alert.alert("Already Busy", busyCheck.message);
                 return;
             }
 
             const res = await requestJoinMatchroom(room, {
-                uid: user.uid,
-                username: user.displayName || 'Player',
+                uid: user._id,
+                username: user.fullName || 'Player',
             });
             if (res.ok) {
                 Alert.alert("Success", "Join request sent to host.");
@@ -168,7 +168,7 @@ export default function MatchroomsIndex() {
     const handleCancelRequestToJoin = async (room: Matchroom) => {
         if (!user) return;
         try {
-            const res = await cancelMatchJoinRequest(room.id!, user.uid);
+            const res = await cancelMatchJoinRequest(room.id!, user._id);
             if (res.ok) {
                 setRequestedRoomIds(prev => {
                     const next = new Set(prev);
@@ -326,7 +326,7 @@ export default function MatchroomsIndex() {
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
     const renderItem = useCallback(({ item }: { item: Matchroom }) => {
-        const isJoined = item.playerUids?.includes(user?.uid || "") || (item.players || []).some(p => p.uid === user?.uid);
+        const isJoined = item.playerUids?.includes(user?._id || "") || (item.players || []).some(p => p.uid === user?._id);
         return (
             <MatchroomCard
                 room={item}

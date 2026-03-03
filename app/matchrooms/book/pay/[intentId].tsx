@@ -57,16 +57,16 @@ export default function MockPaymentScreen() {
 
     useEffect(() => {
         const loadWallet = async () => {
-            if (!user?.uid) return;
+            if (!user?._id) return;
             try {
-                const snap = await getDoc(doc(db, "users", user.uid));
+                const snap = await getDoc(doc(db, "users", user._id));
                 setWalletBalance(snap.exists() ? Number(snap.data()?.walletBalance || 0) : 0);
             } catch {
                 setWalletBalance(0);
             }
         };
         loadWallet();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     const handleMockPayment = async () => {
         if (!intentId || !user) return;
@@ -78,7 +78,7 @@ export default function MockPaymentScreen() {
         setProcessing(true);
 
         try {
-            const res = await confirmBookingTransaction(intentId, user.uid, paymentMethod);
+            const res = await confirmBookingTransaction(intentId, user._id, paymentMethod);
             if (res.ok) {
                 // Navigate to status screen
                 router.replace({

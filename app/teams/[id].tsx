@@ -10,7 +10,7 @@ import Screen from "../../src/components/Screen";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
-import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/teamService";
+import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/convex/teamService";
 import { getCaptainedTeams } from "../../src/services/teamMatchService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
@@ -96,8 +96,8 @@ export default function TeamDetails() {
             setTeam(teamData);
 
             // Read 3: Check if viewer has pending request (deterministic ID)
-            if (!members.some(m => m.uid === user.uid)) {
-                const requestId = `team_join_request_${id}_${user.uid}`;
+            if (!members.some(m => m.uid === user._id)) {
+                const requestId = `team_join_request_${id}_${user._id}`;
                 const requestDoc = await getDoc(doc(db, 'notifications', requestId));
                 if (requestDoc.exists() && requestDoc.data()?.status === 'pending') {
                     setMyPendingRequest(true);
@@ -120,19 +120,19 @@ export default function TeamDetails() {
     }, [id, user]);
 
     useEffect(() => {
-        if (!user?.uid) return;
-        getCaptainedTeams(user.uid).then((result) => {
+        if (!user?._id) return;
+        getCaptainedTeams(user._id).then((result) => {
             if (result.ok && result.data) {
                 setCaptainedTeams(result.data);
             } else {
                 setCaptainedTeams([]);
             }
         });
-    }, [user?.uid]);
+    }, [user?._id]);
 
     // Role & Permission Checks
-    const isMember = team?.members?.some(m => m.uid === user?.uid) || false;
-    const isCaptain = team?.captainUid === user?.uid;
+    const isMember = team?.members?.some(m => m.uid === user?._id) || false;
+    const isCaptain = team?.captainUid === user?._id;
     const memberCount = team?.members?.length ?? team?.memberUids?.length ?? team?.memberCount ?? 0;
     const maxMembers = team ? (team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5) : 0;
     const memberCountDisplay = maxMembers > 0 ? Math.min(memberCount, maxMembers) : memberCount;
@@ -147,7 +147,7 @@ export default function TeamDetails() {
         const q = query(
             collection(db, "notifications"),
             where("type", "==", "team_join_request"),
-            where("toUid", "==", user.uid),
+            where("toUid", "==", user._id),
             where("meta.teamId", "==", id),
             where("status", "==", "pending")
         );
@@ -175,7 +175,7 @@ export default function TeamDetails() {
 
         // Check if user has set role for this game AND not already in a team for this game
         try {
-            const profileRes = await getUserProfile(user.uid);
+            const profileRes = await getUserProfile(user._id);
             if (!profileRes.ok) {
                 Alert.alert("Error", "Could not load your profile.");
                 return;
@@ -223,7 +223,7 @@ export default function TeamDetails() {
             }
 
             // Check if user is already in a team for this game
-            const userTeamsForGame = await getUserTeams(user.uid);
+            const userTeamsForGame = await getUserTeams(user._id);
             if (userTeamsForGame.ok && userTeamsForGame.data) {
                 const hasTeamInGame = userTeamsForGame.data.some(
                     t => t.game.toLowerCase() === team?.game.toLowerCase()
@@ -451,7 +451,7 @@ export default function TeamDetails() {
     };
 
     const handleChallenge = async () => {
-        if (!team?.id || !user?.uid) return;
+        if (!team?.id || !user?._id) return;
         const candidates = captainedTeams.filter(
             (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
         );
@@ -693,12 +693,12 @@ export default function TeamDetails() {
                         maxMembers={maxMembers}
                         members={team.members || []}
                         captainUid={team.captainUid}
-                        viewerUid={user?.uid}
+                        viewerUid={user?._id}
                         isCaptain={isCaptain}
                         game={team.game}
                         onEmptySlotPress={handleEmptySlotPress}
                         onMemberPress={(member) => {
-                            if (isCaptain && member.uid !== user?.uid) {
+                            if (isCaptain && member.uid !== user?._id) {
                                 Alert.alert(
                                     member.username,
                                     "Choose an action",

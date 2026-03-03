@@ -12,6 +12,10 @@ import {
   getLastNotificationResponseAsync,
 } from "expo-notifications/build/NotificationsEmitter";
 
+// Convex
+import { ConvexProvider } from "convex/react";
+import { convex } from "../src/lib/convex";
+
 // Suppress the keep-awake error in development (Expo internal issue)
 LogBox.ignoreLogs([
   "Unable to activate keep awake",
@@ -200,19 +204,21 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <AuthProvider>
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" translucent backgroundColor="transparent" />
-        <InAppNotificationBridge />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
-          }}
-        />
-        {/* Global toast host */}
-        <Toast config={toastConfig} />
-      </View>
-    </AuthProvider>
+    <ConvexProvider client={convex}>
+      <AuthProvider>
+        <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+          <StatusBar style="light" translucent backgroundColor="transparent" />
+          <InAppNotificationBridge />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: COLORS.background },
+            }}
+          />
+          {/* Global toast host */}
+          <Toast config={toastConfig} />
+        </View>
+      </AuthProvider>
+    </ConvexProvider>
   );
 }

@@ -110,7 +110,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
         try {
             const q = query(
                 collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
+                where("fromUid", "==", user._id),
                 where("type", "==", "match_join_request"),
                 where("status", "==", "pending")
             );
@@ -133,15 +133,15 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
         }
         try {
             // BUSY CHECK
-            const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
+            const busyCheck = await isUserInActiveMatchroom(user._id, room as any);
             if (busyCheck.inRoom && busyCheck.roomId !== room.id) {
                 Alert.alert("Already Busy", busyCheck.message);
                 return;
             }
 
             const res = await requestJoinMatchroom(room, {
-                uid: user.uid,
-                username: user.displayName || 'Player',
+                uid: user._id,
+                username: user.fullName || 'Player',
             });
             if (res.ok) {
                 Alert.alert("Success", "Join request sent to host.");
@@ -158,7 +158,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const handleCancelRequestToJoin = async (room: Matchroom) => {
         if (!user) return;
         try {
-            const res = await cancelMatchJoinRequest(room.id!, user.uid);
+            const res = await cancelMatchJoinRequest(room.id!, user._id);
             if (res.ok) {
                 setRequestedRoomIds(prev => {
                     const next = new Set(prev);
@@ -328,7 +328,7 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const hasCS2SkillFilter = () => selectedGame === 'cs2';
 
     const renderItem = ({ item }: { item: Matchroom }) => {
-        const isJoined = item.playerUids?.includes(user?.uid || "") || (item.players || []).some(p => p.uid === user?.uid);
+        const isJoined = item.playerUids?.includes(user?._id || "") || (item.players || []).some(p => p.uid === user?._id);
         return (
             <MatchroomCard
                 room={item}

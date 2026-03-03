@@ -1027,7 +1027,7 @@ export const repairTeamMatchChallenge = async (challengeId: string) => {
                     match.slotsB.length !== teamSize;
                 const teamBHasFilledSlots = Array.isArray(match?.slotsB)
                     ? match.slotsB.some((slot: any) =>
-                        Boolean(slot?.uid || slot?.user?.uid || String(slot?.status || "").toLowerCase() === "confirmed"))
+                        Boolean(slot?.uid || slot?.user?._id || String(slot?.status || "").toLowerCase() === "confirmed"))
                     : false;
 
                 if (hasWrongSize || teamBHasFilledSlots) {

@@ -869,8 +869,8 @@ export async function createZoneWalkInMatchroom(input: {
             // New behavior: respect isCaptain flags for both teams
             captainsByFlag.forEach(captain => {
                 if (!captain.uid) return;
-                const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === captain.uid);
-                const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === captain.uid);
+                const inTeamA = slotsA.some((slot) => (slot.user?._id || slot.uid) === captain.uid);
+                const inTeamB = slotsB.some((slot) => (slot.user?._id || slot.uid) === captain.uid);
 
                 if (inTeamA) captainUidA = captain.uid;
                 if (inTeamB) captainUidB = captain.uid;
@@ -881,8 +881,8 @@ export async function createZoneWalkInMatchroom(input: {
             const fallbackCaptain = captainBySeat || knownPlayers[0] || null;
 
             if (fallbackCaptain?.uid) {
-                const inTeamA = slotsA.some((slot) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
-                const inTeamB = slotsB.some((slot) => (slot.user?.uid || slot.uid) === fallbackCaptain.uid);
+                const inTeamA = slotsA.some((slot) => (slot.user?._id || slot.uid) === fallbackCaptain.uid);
+                const inTeamB = slotsB.some((slot) => (slot.user?._id || slot.uid) === fallbackCaptain.uid);
                 if (inTeamA || slotsB.length === 0) {
                     captainUidA = fallbackCaptain.uid;
                 } else if (inTeamB) {

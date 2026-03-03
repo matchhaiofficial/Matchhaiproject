@@ -11,7 +11,7 @@ import {
     View
 } from "react-native";
 
-import { getActiveZones, Zone } from "../../../../src/services/zoneService";
+import { getActiveZones, Zone } from "../../../services/convex/zoneService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";

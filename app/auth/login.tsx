@@ -14,9 +14,10 @@ import {
 } from "react-native";
 
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
-import { signInWithEmail, signOutUser } from "../../src/services/authService";
-import { getUserProfile } from "../../src/services/userService";
+import { signInWithEmail, signOutUser } from "../../src/services/convex/authService";
+import { getUserProfile } from "../../src/services/convex/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 
@@ -113,6 +114,7 @@ export default function Login() {
   const passwordRef = useRef<TextInput | null>(null);
 
   const { showToast } = useToast();
+  const { refreshSession } = useAuth();
 
   // NEW: user type (player vs zone admin)
   const [userType, setUserType] = useState<"player" | "zone">("player");
@@ -381,8 +383,8 @@ export default function Login() {
       }
 
       // ✅ Role Validation
-      console.log("[Login] Validating role for user:", res.user.uid);
-      const profileRes = await getUserProfile(res.user.uid);
+      console.log("[Login] Validating role for user:", res.userId);
+      const profileRes = await getUserProfile(res.userId);
 
       if (!profileRes.ok) {
         console.error("[Login] Failed to fetch user profile for role check:", profileRes.message);
@@ -400,18 +402,16 @@ export default function Login() {
         return;
       }
 
-      const accountType = profileRes.data.role;
+      const accountType = profileRes.data.role || profileRes.data.accountType;
       const inputEmail = emailOrPhone.trim().toLowerCase();
       const userEmail = (res.user.email || inputEmail).toLowerCase();
-      const SUPER_ADMIN_UID = "jM2JZrPNNNahPb844rHmr0MQKYo1";
       const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
 
       // ✅ Robust Super Admin Check
       const isSuperAdmin = accountType === "super-admin" ||
-        userEmail === SUPER_ADMIN_EMAIL ||
-        res.user.uid === SUPER_ADMIN_UID;
+        userEmail === SUPER_ADMIN_EMAIL;
 
-      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "uid:", res.user.uid);
+      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "userId:", res.userId);
 
       if (!isSuperAdmin) {
         if (userType === "zone" && accountType !== "zone-admin") {
@@ -441,16 +441,20 @@ export default function Login() {
         }
       }
 
-      setLoading(false);
-      console.log("[Login] signInWithEmail OK, navigations target logic start");
+      console.log("[Login] signInWithEmail OK, refreshing session before navigation");
 
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
 
+      // Refresh the auth session to ensure AuthContext is updated
+      await refreshSession();
+
+      setLoading(false);
+
       showToast({
         type: "success",
         title: "Welcome back",
-        message: isSuperAdmin ? "Signed in as Super Admin" : "You’re now signed in.",
+        message: isSuperAdmin ? "Signed in as Super Admin" : "You're now signed in.",
       });
 
       // ✅ Redirect based on user type or role

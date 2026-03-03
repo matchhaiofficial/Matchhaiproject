@@ -20,7 +20,7 @@ import {
   isEmailAvailable,
   isPhoneAvailable,
   isUsernameAvailable,
-} from "../../src/services/userService";
+} from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";

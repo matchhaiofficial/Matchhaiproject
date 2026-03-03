@@ -66,7 +66,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         try {
             const q = query(
                 collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
+                where("fromUid", "==", user._id),
                 where("type", "==", "team_join_request"),
                 where("status", "==", "pending")
             );
@@ -86,7 +86,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
         if (!user) return;
         try {
             setLoading(true);
-            const result = await getUserTeams(user.uid);
+            const result = await getUserTeams(user._id);
             if (result.ok && result.data) {
                 setMyTeams(result.data);
             }
@@ -116,7 +116,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
 
             if (result.ok && result.data) {
                 // Filter out where user is already member/captain
-                const filteredData = result.data.filter(t => !t.memberUids?.includes(user.uid));
+                const filteredData = result.data.filter(t => !t.memberUids?.includes(user._id));
 
                 if (isLoadMore) {
                     setPublicTeams(prev => {

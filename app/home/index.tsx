@@ -27,7 +27,7 @@ export default function Home() {
   useEffect(() => {
     if (!loading && user) {
       const isSuperAdmin = (user.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+        user._id === "jM2JZrPNNNahPb844rHmr0MQKYo1";
 
       if (isSuperAdmin) {
         console.log("[Home] super-admin detected via email/uid → redirecting");
@@ -54,7 +54,7 @@ export default function Home() {
     return null;
   }
 
-  const name = user.displayName || '';
+  const name = user.fullName || '';
   const email = user.email || '';
 
   const handleLogout = async () => {
@@ -80,7 +80,7 @@ export default function Home() {
         <Text style={styles.sub}>Redirecting to Dashboard...</Text>
       </View>
       {/* Fallback redirect if they land here */}
-      <Redirect href={((user.email && user.email.toLowerCase() === "superadmin@matchhai.com") || user.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1") ? "/super-admin/(tabs)" : "/(player)/(tabs)"} />
+      <Redirect href={((user.email && user.email.toLowerCase() === "superadmin@matchhai.com") || user._id === "jM2JZrPNNNahPb844rHmr0MQKYo1") ? "/super-admin/(tabs)" : "/(player)/(tabs)"} />
 
       <Pressable
         onPress={handleLogout}

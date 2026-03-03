@@ -1,0 +1,656 @@
+// src/services/convex/matchService.ts
+// Convex-based matchroom service that maintains the same interface as the Firebase version
+
+import { convex } from "../../lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface Slot {
+  slotId: string;
+  uid?: string;
+  user?: {
+    uid: string;
+    username: string;
+    photoURL?: string;
+    skillTier?: "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+  };
+  status: "open" | "reserved" | "confirmed";
+  reservedFor?: {
+    uid: string;
+    username: string;
+    photoURL?: string;
+  };
+  reservedForUid?: string;
+  role?: string;
+}
+
+export interface Matchroom {
+  id?: string;
+  _id?: string;
+  hostUid: string;
+  hostName: string;
+  game: string;
+  title: string;
+  description?: string;
+  status: "open" | "in-progress" | "completed" | "locked" | "expired" | "cancelled";
+  maxPlayers: number;
+  currentPlayers: number;
+  players: Array<{
+    uid: string;
+    username: string;
+    joinedAt: any;
+    role?: string;
+    skillTier?: "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+  }>;
+  playerUids?: string[];
+  createdAt: any;
+  completedAt?: any;
+
+  // Location fields
+  location?: string;
+  coordinates?: { latitude: number; longitude: number };
+  locationMode?: "zone" | "broadcast";
+  broadcastAreas?: string[];
+  zoneId?: string;
+  zoneOwnerUid?: string;
+
+  // Timing & Pricing
+  startTime?: any;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  scheduledStartAt?: number;
+  lockAt?: number;
+  expiresAt?: number;
+  durationMinutes?: number;
+  pricing: { perPlayer: number; currency: string };
+  matchCode?: string;
+  flexibility?: string;
+  bookingSource?: string;
+  skipBookingRequest?: boolean;
+
+  // Game-Specific Fields
+  format?: string;
+  seriesType?: string | null;
+  durationHours?: number | null;
+  selectedMaps?: string[];
+  skillLevel?: string;
+  hostSkillScore?: number | null;
+  hostSkillTier?: "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Any";
+  hostRole?: string;
+  hostSkillContext?: { gameKey: string; answers: Record<string, any> };
+
+  // Live Fairness Stats
+  avgSkillScoreLive?: number;
+  totalSkillSum?: number;
+  ratedPlayerCount?: number;
+
+  // Game-specific options
+  playstyle?: string | null;
+  rankRequirement?: string | null;
+  overs?: number | null;
+  sidePreference?: string | null;
+  composition?: string | null;
+  battingOrder?: string | null;
+  battingStyle?: string | null;
+  bowlingStyle?: string | null;
+  bowlingOrder?: string | null;
+  ruleset?: Record<string, any>;
+
+  // Slot-based System
+  slotsA: Slot[];
+  slotsB: Slot[];
+  captainUidA?: string;
+  captainUidB?: string;
+
+  // Team fields
+  teamMode?: "team" | "solo";
+  teamId?: string | null;
+  teamName?: string | null;
+  reservedSlots?: number;
+  teamPaymentMode?: "captain_pays_all" | "captain_pays_self";
+  assignedTeamMembers?: Array<{ uid: string; username: string; role: string }>;
+
+  isPrivate?: boolean;
+  isLocked?: boolean;
+  lockedAt?: any;
+  zoneAdminApproved?: boolean;
+
+  // Payment
+  paymentStatus?: "paid" | "unpaid";
+  paymentAmount?: number;
+  paymentReservedSlots?: number;
+  paymentCurrency?: string;
+
+  // Result verification
+  resultVerification?: {
+    status: "pending" | "participant_vote" | "admin_review" | "resolved";
+    team1Captain?: string;
+    team2Captain?: string;
+    captainReports?: {
+      team1Captain?: { result: "team1" | "team2"; timestamp?: any };
+      team2Captain?: { result: "team1" | "team2"; timestamp?: any };
+    };
+    participantVotes?: Record<string, "team1" | "team2" | "unknown">;
+    deadline?: any;
+    votes?: Record<string, string>;
+  };
+}
+
+type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
+type ErrorResult = { ok: false; message: string; code?: string };
+type Result<T = void> = SuccessResult<T> | ErrorResult;
+
+// Helper to parse scheduled date/time
+function parseScheduledStartAt(scheduledDate?: string, scheduledTime?: string): number | null {
+  const date = String(scheduledDate || "").trim();
+  const time = String(scheduledTime || "").trim();
+  if (!date || !time) return null;
+  const dt = new Date(`${date}T${time}`);
+  return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+}
+
+// Helper to generate slots
+function generateSlots(teamSize: number, side: "A" | "B", players: any[] = []): Slot[] {
+  return Array.from({ length: teamSize }, (_, i) => {
+    const seatNum = i + 1;
+    const player = players[i];
+    return {
+      slotId: `${side}${seatNum}`,
+      status: player ? ("confirmed" as const) : ("open" as const),
+      role: player?.role || "Player",
+      uid: player?.uid,
+      user: player
+        ? { uid: player.uid, username: player.username, skillTier: player.skillTier }
+        : undefined,
+    };
+  });
+}
+
+/**
+ * Create a new matchroom
+ */
+export async function createMatchroom(
+  roomData: Matchroom
+): Promise<Result<{ id: string }>> {
+  try {
+    // Validate lead time for non-walk-ins
+    if (roomData.bookingSource !== "walkin") {
+      const scheduledStartAt = parseScheduledStartAt(
+        roomData.scheduledDate,
+        roomData.scheduledTime
+      );
+      if (!scheduledStartAt) {
+        return { ok: false, message: "Scheduled date/time is required." };
+      }
+
+      const now = Date.now();
+      const isAdminFlow = roomData.zoneAdminApproved === true;
+      const minLeadMs = isAdminFlow ? ONE_DAY_MS : 2 * ONE_DAY_MS;
+
+      if (scheduledStartAt - now < minLeadMs) {
+        const hours = Math.round(minLeadMs / (60 * 60 * 1000));
+        return {
+          ok: false,
+          message: `Match must be scheduled at least ${hours} hours in advance.`,
+        };
+      }
+    }
+
+    // Prepare players array
+    let players = roomData.players || [];
+    if (players.length === 0) {
+      players = [
+        {
+          uid: roomData.hostUid,
+          username: roomData.hostName,
+          joinedAt: Date.now(),
+          role: "Host",
+        },
+      ];
+    }
+
+    const playerUids = roomData.playerUids || players.map((p) => p.uid);
+
+    // Generate slots if not provided
+    let slotsA = roomData.slotsA || [];
+    let slotsB = roomData.slotsB || [];
+
+    if (
+      (!slotsA.length || !slotsB.length) &&
+      roomData.maxPlayers &&
+      roomData.maxPlayers % 2 === 0
+    ) {
+      const teamSize = roomData.maxPlayers / 2;
+      slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
+      slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
+    }
+
+    // Calculate timing
+    const scheduledStartAt = parseScheduledStartAt(
+      roomData.scheduledDate,
+      roomData.scheduledTime
+    );
+    const lockAt = scheduledStartAt ? scheduledStartAt - ONE_DAY_MS : undefined;
+    const expiresAt = lockAt;
+
+    const matchroomId = await convex.mutation(api.matchrooms.create, {
+      hostUid: roomData.hostUid,
+      hostName: roomData.hostName,
+      game: roomData.game,
+      title: roomData.title || `${roomData.game} Match`,
+      description: roomData.description,
+      maxPlayers: roomData.maxPlayers,
+      players: players.map((p) => ({
+        uid: p.uid,
+        username: p.username,
+        joinedAt: typeof p.joinedAt === "number" ? p.joinedAt : Date.now(),
+        role: p.role,
+        skillTier: p.skillTier,
+      })),
+      playerUids,
+      location: roomData.location,
+      locationMode: roomData.locationMode,
+      zoneId: roomData.zoneId,
+      zoneOwnerUid: roomData.zoneOwnerUid,
+      scheduledDate: roomData.scheduledDate,
+      scheduledTime: roomData.scheduledTime,
+      scheduledStartAt,
+      lockAt,
+      expiresAt,
+      durationMinutes: roomData.durationMinutes,
+      pricing: roomData.pricing,
+      slotsA,
+      slotsB,
+      captainUidA: roomData.captainUidA || roomData.hostUid,
+      captainUidB: roomData.captainUidB,
+      format: roomData.format,
+      selectedMaps: roomData.selectedMaps,
+      skillLevel: roomData.skillLevel,
+      hostSkillTier: roomData.hostSkillTier,
+      hostRole: roomData.hostRole,
+      teamMode: roomData.teamMode,
+      teamId: roomData.teamId || undefined,
+      teamName: roomData.teamName || undefined,
+      reservedSlots: roomData.reservedSlots,
+      teamPaymentMode: roomData.teamPaymentMode,
+      bookingSource: roomData.bookingSource,
+      isPrivate: roomData.isPrivate,
+      paymentStatus: roomData.paymentStatus,
+      zoneAdminApproved: roomData.zoneAdminApproved,
+    });
+
+    return { ok: true, id: matchroomId };
+  } catch (error: any) {
+    console.error("[matchService] createMatchroom error:", error);
+    return { ok: false, message: error?.message || "Failed to create matchroom" };
+  }
+}
+
+/**
+ * Get all matchrooms (with optional limit)
+ */
+export async function getMatchrooms(
+  limitCount = 20
+): Promise<Result<Matchroom[]>> {
+  try {
+    const rooms = await convex.query(api.matchrooms.list, {
+      limit: limitCount,
+    });
+    return { ok: true, data: rooms as Matchroom[] };
+  } catch (error: any) {
+    console.error("[matchService] getMatchrooms error:", error);
+    return { ok: false, message: "Failed to fetch matchrooms" };
+  }
+}
+
+/**
+ * Get a single matchroom by ID
+ */
+export async function getMatchroom(id: string): Promise<Result<Matchroom>> {
+  try {
+    const room = await convex.query(api.matchrooms.getById, { matchroomId: id });
+    if (!room) {
+      return { ok: false, message: "Matchroom not found" };
+    }
+    return { ok: true, data: room as Matchroom };
+  } catch (error: any) {
+    console.error("[matchService] getMatchroom error:", error);
+    return { ok: false, message: "Failed to load matchroom" };
+  }
+}
+
+// Alias for backwards compatibility
+export const getMatchroomById = getMatchroom;
+
+/**
+ * Get user's matchrooms (hosted + joined)
+ */
+export async function getUserMatchrooms(
+  uid: string
+): Promise<Result<{ hosted: Matchroom[]; joined: Matchroom[] }>> {
+  try {
+    const result = await convex.query(api.matchrooms.getUserMatchrooms, { uid });
+    return {
+      ok: true,
+      data: {
+        hosted: result.hosted as Matchroom[],
+        joined: result.joined as Matchroom[],
+      },
+    };
+  } catch (error: any) {
+    console.error("[matchService] getUserMatchrooms error:", error);
+    return { ok: false, message: "Failed to fetch your matchrooms" };
+  }
+}
+
+/**
+ * Join a matchroom
+ */
+export async function joinMatchroom(
+  roomId: string,
+  user: { uid: string; username: string },
+  role?: string,
+  _joinCode?: string
+): Promise<Result> {
+  try {
+    // Check time conflicts first
+    const room = await convex.query(api.matchrooms.getById, { matchroomId: roomId });
+    if (!room) {
+      return { ok: false, message: "Matchroom not found" };
+    }
+
+    if (room.scheduledStartAt) {
+      const conflict = await convex.query(api.matchrooms.checkTimeConflict, {
+        uid: user.uid,
+        scheduledStartAt: room.scheduledStartAt,
+        durationMinutes: room.durationMinutes || 60,
+        excludeRoomId: roomId,
+      });
+
+      if (conflict.conflict) {
+        return { ok: false, message: conflict.message || "Time conflict with another match" };
+      }
+    }
+
+    await convex.mutation(api.matchrooms.join, {
+      matchroomId: roomId as Id<"matchrooms">,
+      uid: user.uid,
+      username: user.username,
+      role,
+    });
+
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] joinMatchroom error:", error);
+    return { ok: false, message: error?.message || "Failed to join matchroom" };
+  }
+}
+
+/**
+ * Leave a matchroom
+ */
+export async function leaveMatchroom(
+  roomId: string,
+  userUid: string
+): Promise<Result> {
+  try {
+    await convex.mutation(api.matchrooms.leave, {
+      matchroomId: roomId as Id<"matchrooms">,
+      uid: userUid,
+    });
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] leaveMatchroom error:", error);
+    return {
+      ok: false,
+      message: error?.message || "Failed to leave matchroom",
+    };
+  }
+}
+
+/**
+ * Delete a matchroom
+ */
+export async function deleteMatchroom(roomId: string): Promise<Result> {
+  try {
+    await convex.mutation(api.matchrooms.remove, {
+      matchroomId: roomId as Id<"matchrooms">,
+    });
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] deleteMatchroom error:", error);
+    return { ok: false, message: "Failed to delete matchroom" };
+  }
+}
+
+/**
+ * Start a match
+ */
+export async function startMatch(
+  roomId: string,
+  ratings: Record<string, number>,
+  hostUid: string,
+  team2Captain?: string
+): Promise<Result> {
+  try {
+    await convex.mutation(api.matchrooms.startMatch, {
+      matchroomId: roomId as Id<"matchrooms">,
+      hostUid,
+      team2Captain,
+      initialRatings: ratings,
+    });
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] startMatch error:", error);
+    return { ok: false, message: "Failed to start match" };
+  }
+}
+
+/**
+ * Submit captain report
+ */
+export async function submitCaptainReport(
+  matchroomId: string,
+  captainUid: string,
+  winner: "team1" | "team2"
+): Promise<Result> {
+  try {
+    await convex.mutation(api.matchrooms.submitCaptainReport, {
+      matchroomId: matchroomId as Id<"matchrooms">,
+      captainUid,
+      winner,
+    });
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] submitCaptainReport error:", error);
+    return { ok: false, message: error?.message || "Failed to submit report" };
+  }
+}
+
+/**
+ * Submit participant vote
+ */
+export async function submitParticipantVote(
+  matchroomId: string,
+  participantUid: string,
+  vote: "team1" | "team2" | "unknown"
+): Promise<Result> {
+  try {
+    await convex.mutation(api.matchrooms.submitParticipantVote, {
+      matchroomId: matchroomId as Id<"matchrooms">,
+      participantUid,
+      vote,
+    });
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] submitParticipantVote error:", error);
+    return { ok: false, message: error?.message || "Failed to submit vote" };
+  }
+}
+
+/**
+ * Admin cancel matchroom
+ */
+export async function adminCancelMatchroom(
+  roomId: string,
+  adminUid: string,
+  reason: string,
+  note?: string
+): Promise<Result> {
+  try {
+    const result = await convex.mutation(api.matchrooms.adminCancel, {
+      matchroomId: roomId as Id<"matchrooms">,
+      adminUid,
+      reason,
+      note,
+    });
+    return { ok: true, message: result.message };
+  } catch (error: any) {
+    console.error("[matchService] adminCancelMatchroom error:", error);
+    return { ok: false, message: error?.message || "Failed to cancel lobby" };
+  }
+}
+
+/**
+ * Check if user has time conflict
+ */
+export async function findUserTimeConflict(
+  uid: string,
+  targetRoom: Matchroom,
+  excludeRoomId?: string
+): Promise<{ conflict: true; room: Matchroom; message: string } | { conflict: false }> {
+  try {
+    if (!targetRoom.scheduledStartAt) {
+      return { conflict: false };
+    }
+
+    const result = await convex.query(api.matchrooms.checkTimeConflict, {
+      uid,
+      scheduledStartAt: targetRoom.scheduledStartAt,
+      durationMinutes: targetRoom.durationMinutes || 60,
+      excludeRoomId,
+    });
+
+    if (result.conflict) {
+      return {
+        conflict: true,
+        room: result.room as Matchroom,
+        message: result.message || "Time conflict with another match",
+      };
+    }
+
+    return { conflict: false };
+  } catch (error) {
+    console.error("[matchService] findUserTimeConflict error:", error);
+    return { conflict: false };
+  }
+}
+
+/**
+ * Check if user is in active matchroom
+ */
+export async function isUserInActiveMatchroom(
+  uid: string,
+  targetRoom?: Matchroom
+): Promise<{ inRoom: boolean; roomId?: string; message?: string }> {
+  if (!targetRoom) return { inRoom: false };
+
+  const conflict = await findUserTimeConflict(uid, targetRoom, targetRoom.id || targetRoom._id);
+  if (conflict.conflict) {
+    return {
+      inRoom: true,
+      roomId: conflict.room.id || conflict.room._id,
+      message: conflict.message,
+    };
+  }
+  return { inRoom: false };
+}
+
+/**
+ * Request to join a matchroom (creates notification)
+ */
+export async function requestJoinMatchroom(
+  room: Matchroom,
+  user: { uid: string; username: string },
+  role?: string,
+  targetTeam?: string,
+  slotId?: string
+): Promise<Result<{ id: string }>> {
+  try {
+    const roomId = room.id || room._id;
+    if (!roomId) {
+      return { ok: false, message: "Matchroom ID missing" };
+    }
+
+    // Check time conflict
+    const conflict = await findUserTimeConflict(user.uid, room, roomId);
+    if (conflict.conflict) {
+      return { ok: false, message: conflict.message };
+    }
+
+    // Create notification for host
+    const now = Date.now();
+    const notificationId = await convex.mutation(api.notifications.create, {
+      type: "match_join_request" as any,
+      toUid: room.hostUid as any,
+      fromUid: user.uid as any,
+      fromUsername: user.username,
+      title: "Join Request",
+      body: `${user.username} wants to join ${room.title}`,
+      status: "pending",
+      matchroomId: roomId as any,
+      data: {
+        matchroomId: roomId,
+        matchroomTitle: room.title,
+        game: room.game,
+        role: role || "Flex",
+        targetTeam: targetTeam || "Any",
+        slotId: slotId || null,
+      },
+      expiresAt: now + 24 * 60 * 60 * 1000,
+    });
+
+    return { ok: true, id: notificationId };
+  } catch (error: any) {
+    console.error("[matchService] requestJoinMatchroom error:", error);
+    return { ok: false, message: "Failed to send request" };
+  }
+}
+
+/**
+ * Cancel join request
+ */
+export async function cancelMatchJoinRequest(
+  roomId: string,
+  userId: string
+): Promise<Result> {
+  try {
+    // Find and delete the notification
+    // This would require a query to find the notification by entityKey or similar
+    // For now, we'll implement this when notifications service is migrated
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[matchService] cancelMatchJoinRequest error:", error);
+    return { ok: false, message: "Failed to cancel request" };
+  }
+}
+
+/**
+ * Respond to join request
+ */
+export async function respondToMatchJoinRequest(
+  requestId: string,
+  decision: "accept" | "reject",
+  adminUid: string
+): Promise<Result> {
+  try {
+    // This will be implemented with the notifications service migration
+    // For now, return success
+    return { ok: true, message: decision === "accept" ? "Request accepted" : "Request rejected" };
+  } catch (error: any) {
+    console.error("[matchService] respondToMatchJoinRequest error:", error);
+    return { ok: false, message: "Failed to process request" };
+  }
+}

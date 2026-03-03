@@ -15,7 +15,7 @@ import {
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
-import { sendPasswordReset } from "../../src/services/authService";
+import { sendPasswordReset } from "../../src/services/convex/authService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 

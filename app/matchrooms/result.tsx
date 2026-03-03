@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from '../../src/config/firebaseConfig';
-import { getMatchroomById, submitCaptainReport } from '../../src/services/matchService';
+import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
 import styles from './result.styles';
@@ -52,12 +52,16 @@ export default function MatchResultSubmission() {
             }
 
             const room = res.data;
-                // Transform Matchroom to MatchData interface expected by UI
-                // (Or update UI to use Matchroom directly - simpler to map here for now)
+            if (!room) {
+                setError("Match data not found");
+                return;
+            }
+            // Transform Matchroom to MatchData interface expected by UI
+            // (Or update UI to use Matchroom directly - simpler to map here for now)
 
-                // Mock team splitting for MVP visualization if not strictly defined
-                // Assume first half players are team 1, second half team 2
-                const mid = Math.ceil(room.players.length / 2);
+            // Mock team splitting for MVP visualization if not strictly defined
+            // Assume first half players are team 1, second half team 2
+            const mid = Math.ceil(room.players.length / 2);
                 const team1 = room.players.slice(0, mid);
                 const team2 = room.players.slice(mid);
 

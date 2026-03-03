@@ -81,7 +81,7 @@ export async function signUpWithEmail(
       trimmedEmail,
       password
     );
-    console.log("[authService] user created", cred.user.uid);
+    console.log("[authService] user created", cred.user._id);
 
     // 1) Update displayName in Firebase Auth (non-fatal if it fails)
     if (displayName) {
@@ -99,7 +99,7 @@ export async function signUpWithEmail(
 
     // 2) Firestore profile write
     try {
-      const uid = cred.user.uid;
+      const uid = cred.user._id;
       const usernameTrimmed = username?.trim() || null;
       const usernameLower = usernameTrimmed
         ? usernameTrimmed.toLowerCase()

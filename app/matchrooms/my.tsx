@@ -14,7 +14,7 @@ import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserMatchrooms, Matchroom } from "../../src/services/matchService";
+import { getUserMatchrooms, Matchroom } from "../../src/services/convex/matchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { getRoomDisplayStatus } from "../../src/utils/matchroomLifecycle";
@@ -35,7 +35,7 @@ export default function MyMatchrooms() {
     const fetchData = async () => {
         if (!user) return;
         try {
-            const res = await getUserMatchrooms(user.uid);
+            const res = await getUserMatchrooms(user._id);
             if (res.ok && res.data) {
                 setHostedRooms(res.data.hosted);
                 setJoinedRooms(res.data.joined);
@@ -58,8 +58,8 @@ export default function MyMatchrooms() {
     };
 
     const renderMatchCard = ({ item }: { item: Matchroom }) => {
-        const isHost = item.hostUid === user?.uid;
-        const myPlayer = item.players.find(p => p.uid === user?.uid);
+        const isHost = item.hostUid === user?._id;
+        const myPlayer = item.players.find(p => p.uid === user?._id);
 
         return (
             <TouchableOpacity

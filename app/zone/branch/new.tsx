@@ -17,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { addBranch } from "../../../src/services/zoneService";
+import { addBranch } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import styles from "./branch.styles";
 

@@ -14,12 +14,14 @@ import {
 
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
-import { signUpWithEmail } from "../../src/services/authService";
+import { signUpWithEmail } from "../../src/services/convex/authService";
 import {
   saveOnboardingStep2,
   saveOnboardingStep3Platforms,
-} from "../../src/services/userService";
+  completeOnboarding,
+} from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
+import { useAuth } from "../../src/context/AuthContext";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
@@ -27,6 +29,7 @@ export default function RegisterStep4() {
   const { step1, step2, step3, step4, setStep4, resetAll } =
     useOnboardingStore();
   const { showToast } = useToast();
+  const { refreshSession } = useAuth();
 
   console.log("[Step4] mounted", { step1, step2, step3, step4 });
 
@@ -121,6 +124,7 @@ export default function RegisterStep4() {
   const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
   const [currentSubStep, setCurrentSubStep] = useState<number>(0);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
 
   // ---- Final submit (with phase-based reliability) ----
   const handleFinalSignUp = async () => {
@@ -134,7 +138,7 @@ export default function RegisterStep4() {
       return;
     }
 
-    const { fullName, username, email, phone, password } = step1;
+    const { fullName, username, email, phone, password, city, ageRange } = step1;
 
     // Safety: if Step 1 is somehow incomplete, push them back
     if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
@@ -154,6 +158,7 @@ export default function RegisterStep4() {
 
     try {
       // PHASE 1: Auth + Basic Profile
+      let userId = registeredUserId;
       if (currentSubStep <= 0) {
         setCurrentSubStep(1);
         console.log("[Step4] Phase 1: Creating account...");
@@ -162,12 +167,21 @@ export default function RegisterStep4() {
           password,
           fullName.trim(),
           username.trim(),
-          phone.trim()
+          phone.trim(),
+          "player",
+          city?.trim() || "Karachi",
+          ageRange?.trim() || undefined
         );
 
         if (!resSignUp || !resSignUp.ok) {
           throw { step: 1, message: resSignUp?.message || "Auth creation failed." };
         }
+        userId = resSignUp.userId as string;
+        setRegisteredUserId(userId);
+      }
+
+      if (!userId) {
+        throw { step: 1, message: "User ID not available. Please try again." };
       }
 
       // PHASE 2: Preferences (Step 2)
@@ -187,7 +201,7 @@ export default function RegisterStep4() {
         const padelRole = ((step2 as any).padelRole as string) ?? null;
         const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
-        const resStep2 = await saveOnboardingStep2({
+        const resStep2 = await saveOnboardingStep2(userId as any, {
           areasPreferred: step2.selectedAreas,
           playsCs2: step2.playsCs2,
           cs2Role: step2.cs2Role,
@@ -220,7 +234,7 @@ export default function RegisterStep4() {
       if (currentSubStep <= 2) {
         setCurrentSubStep(3);
         console.log("[Step4] Phase 3: Connecting platforms...");
-        const resStep3 = await saveOnboardingStep3Platforms({
+        const resStep3 = await saveOnboardingStep3Platforms(userId as any, {
           steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
           faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
           eaProfileUrl: (step3.eaProfileUrl || "").trim() || null,
@@ -237,17 +251,31 @@ export default function RegisterStep4() {
         }
       }
 
+      // PHASE 4: Complete onboarding
+      if (currentSubStep <= 3) {
+        setCurrentSubStep(4);
+        console.log("[Step4] Phase 4: Completing onboarding...");
+        const resComplete = await completeOnboarding(userId as any);
+
+        if (!resComplete.ok) {
+          throw { step: 4, message: resComplete.message };
+        }
+      }
+
       // SUCCESS
-      setCurrentSubStep(4);
+      setCurrentSubStep(5);
       setPhase("success");
       console.log("[Step4] Registration fully complete!");
+
+      // Refresh the auth session before navigating
+      await refreshSession();
 
       setTimeout(() => {
         resetAll();
         showToast({
           type: "success",
           title: "Welcome to MatchHai",
-          message: "Account ready! Let’s find your squad.",
+          message: "Account ready! Let's find your squad.",
         });
         router.replace("/home");
       }, 1500);
@@ -277,6 +305,7 @@ export default function RegisterStep4() {
       { id: 1, label: "Creating account" },
       { id: 2, label: "Saving preferences" },
       { id: 3, label: "Connecting platforms" },
+      { id: 4, label: "Completing setup" },
     ];
 
     return (

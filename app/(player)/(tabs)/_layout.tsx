@@ -14,7 +14,7 @@ export default function PlayerTabsLayout() {
 
     // ✅ If super-admin, force redirect to their dashboard
     const isSuperAdmin = (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user?.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+        user?._id === "jM2JZrPNNNahPb844rHmr0MQKYo1";
 
     if (!loading && isSuperAdmin) {
         return <Redirect href="/super-admin/(tabs)" />;

@@ -58,7 +58,7 @@ export default function TeamChallengeChatScreen() {
     const [sending, setSending] = useState(false);
 
     useEffect(() => {
-        if (!chatId || !user?.uid) return;
+        if (!chatId || !user?._id) return;
         const chatRef = doc(db, "team_match_chats", chatId);
         const unsubChat = onSnapshot(chatRef, (snap: any) => {
             setLoading(!snap.exists());
@@ -78,16 +78,16 @@ export default function TeamChallengeChatScreen() {
             unsubChat();
             unsubMessages();
         };
-    }, [chatId, user?.uid]);
+    }, [chatId, user?._id]);
 
     const sendMessage = async () => {
-        if (!chatId || !user?.uid || !draft.trim() || sending) return;
+        if (!chatId || !user?._id || !draft.trim() || sending) return;
         setSending(true);
         const text = draft.trim();
         setDraft("");
         await addDoc(collection(db, "team_match_chats", chatId, "messages"), {
-            senderUid: user.uid,
-            senderName: user.displayName || "Captain",
+            senderUid: user._id,
+            senderName: user.fullName || "Captain",
             text,
             createdAt: serverTimestamp(),
         });
@@ -95,9 +95,9 @@ export default function TeamChallengeChatScreen() {
             updatedAt: serverTimestamp(),
             lastMessage: {
                 text,
-                senderUid: user.uid,
+                senderUid: user._id,
             },
-            [`lastReadBy.${user.uid}`]: serverTimestamp(),
+            [`lastReadBy.${user._id}`]: serverTimestamp(),
         });
         setSending(false);
     };
@@ -118,7 +118,7 @@ export default function TeamChallengeChatScreen() {
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         renderItem={({ item }) => {
-                            const mine = item.senderUid === user?.uid;
+                            const mine = item.senderUid === user?._id;
                             return (
                                 <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowOther]}>
                                     <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>

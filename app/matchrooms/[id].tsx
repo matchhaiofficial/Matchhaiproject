@@ -21,13 +21,18 @@ import QRCode from "react-native-qrcode-svg";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
-import { collection, doc, getDoc, getDocs, limit, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import SkillBadge from "../../src/components/SkillBadge";
-import { db } from "../../src/config/firebaseConfig";
+import {
+    useMyJoinRequests,
+    useIncomingJoinRequests,
+    usePlayerSkillScores,
+    useFriendsForInvite,
+    useBookingRequestForMatchroom,
+} from "../../src/hooks/useMatchroomData";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserProfile } from "../../src/services/userService";
 import { inviteToMatchroom, kickFromMatchroom, transferMatchroomCaptain } from "../../src/services/functions";
-import { cancelMatchJoinRequest, deleteMatchroom, adminCancelMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/matchService";
+import { cancelMatchJoinRequest, deleteMatchroom, adminCancelMatchroom, getMatchroom, isUserInActiveMatchroom, leaveMatchroom, Matchroom, requestJoinMatchroom, startMatch, respondToMatchJoinRequest } from "../../src/services/convex/matchService";
 import { getUserSportRoleLabel } from "../../src/services/userService";
 import { submitMatchroomComplain } from "../../src/services/reportService";
 import {
@@ -98,6 +103,42 @@ export default function MatchroomDetails() {
     const [invitingSlot, setInvitingSlot] = useState<{ team: 'A' | 'B', slotId: string } | null>(null);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
+    // Convex real-time hooks (replace Firebase onSnapshot)
+    const isHostEarly = user?._id === room?.hostUid;
+    const isAdminEarly = profile?.role === 'zone-admin' || profile?.role === 'super-admin';
+    const { requestedSlots: convexRequestedSlots, genericRequestStatus: convexGenericRequestStatus } = useMyJoinRequests(id as string);
+    const { requests: convexIncomingRequests } = useIncomingJoinRequests(id as string, isHostEarly || isAdminEarly);
+    const playerUids = room?.players?.map((p: any) => p.uid) || [];
+    const { ratings: convexPlayerRatings } = usePlayerSkillScores(playerUids, room?.game);
+    const { friends: convexFriends, loading: loadingConvexFriends } = useFriendsForInvite();
+
+    // Use Convex data instead of Firebase state
+    useEffect(() => {
+        setRequestedSlots(convexRequestedSlots);
+    }, [convexRequestedSlots]);
+
+    useEffect(() => {
+        setGenericRequestStatus(convexGenericRequestStatus);
+    }, [convexGenericRequestStatus]);
+
+    useEffect(() => {
+        setIncomingRequests(convexIncomingRequests as any[]);
+    }, [convexIncomingRequests]);
+
+    useEffect(() => {
+        if (Object.keys(convexPlayerRatings).length > 0) {
+            // Cast to compatible type - Convex returns partial GameSkillScore
+            setPlayerRatings(convexPlayerRatings as Record<string, GameSkillScore | null>);
+        }
+    }, [convexPlayerRatings]);
+
+    useEffect(() => {
+        if (convexFriends.length > 0) {
+            setFriends(convexFriends);
+        }
+        setLoadingFriends(loadingConvexFriends);
+    }, [convexFriends, loadingConvexFriends]);
+
     // Zone Admin Inline Actions State
     const [showSuggestModal, setShowSuggestModal] = useState(false);
     const [counterPrice, setCounterPrice] = useState("");
@@ -137,72 +178,17 @@ export default function MatchroomDetails() {
         }
     };
 
-    const checkRequestStatus = async () => {
-        if (!user || !id) return;
-        try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
-                where("type", "==", "match_join_request"),
-                where("status", "in", ["pending", "rejected"])
-            );
-            const snap = await getDocs(q);
-            const slots = new Map<string, string>();
-            let genericStatus: string | null = null;
-
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.matchroomId === id) {
-                    if (data.meta.slotId) {
-                        slots.set(data.meta.slotId, data.status);
-                    } else {
-                        genericStatus = data.status;
-                    }
-                }
-            });
-            setRequestedSlots(slots);
-            setGenericRequestStatus(genericStatus);
-        } catch (e) {
-            Logger.error("MatchroomDetails", "Error checking request status", e);
-        }
-    };
-
     useEffect(() => {
         fetchRoom();
-        checkRequestStatus();
     }, [id, user]);
 
-    // Listen for incoming join requests (Host/Admin only)
-    useEffect(() => {
-        if (!id || !user || !room) return;
-        const isHost = user.uid === room.hostUid;
-        const isAdmin = profile?.role === 'zone-admin' || profile?.role === 'super-admin'; // weak check, but okay for visibility
-
-        if (!isHost && !isAdmin) return;
-
-        const q = query(
-            collection(db, 'notifications'),
-            where('meta.matchroomId', '==', id),
-            where('type', '==', 'match_join_request'),
-            where('status', '==', 'pending'),
-            orderBy('createdAt', 'desc')
-        );
-
-        const unsub = onSnapshot(q, (snapshot) => {
-            const reqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            setIncomingRequests(reqs);
-        }, (err) => {
-            Logger.warn("MatchroomDetails", "Failed to listen for requests", err);
-        });
-
-        return () => unsub();
-    }, [id, user, room?.hostUid, profile?.role]);
+    // Incoming join requests now handled by useIncomingJoinRequests hook
 
     const handleRespondToRequest = async (req: any, decision: 'accept' | 'reject') => {
         if (!user) return;
         setProcessingRequestId(req.id);
         try {
-            const res = await respondToMatchJoinRequest(req.id, decision, user.uid);
+            const res = await respondToMatchJoinRequest(req.id, decision, user._id);
             if (res.ok) {
                 if (decision === 'accept') {
                     Alert.alert("Accepted", `${req.fromUsername} has joined.`);
@@ -220,7 +206,7 @@ export default function MatchroomDetails() {
 
     useEffect(() => {
         if (!user) return;
-        getUserProfile(user.uid).then(res => {
+        getUserProfile(user._id).then(res => {
             if (res.ok) setProfile(res.data);
         });
     }, [user]);
@@ -237,30 +223,9 @@ export default function MatchroomDetails() {
         setBookingRequestId(rawBookingRequestId || null);
     }, [rawBookingRequestId]);
 
-    useEffect(() => {
-        if (!isZoneAdmin || bookingRequestId || !room?.id) return;
-        let cancelled = false;
-        const resolveRequestId = async () => {
-            try {
-                const q = query(
-                    collection(db, "booking_requests"),
-                    where("matchroomId", "==", room.id),
-                    limit(1),
-                );
-                const snapshot = await getDocs(q);
-                const docSnap = snapshot.docs[0];
-                if (!cancelled && docSnap) {
-                    setBookingRequestId(docSnap.id);
-                }
-            } catch (e) {
-                Logger.warn("MatchroomDetails", "Failed to resolve booking request by matchroomId", e);
-            }
-        };
-        resolveRequestId();
-        return () => {
-            cancelled = true;
-        };
-    }, [bookingRequestId, isZoneAdmin, room?.id]);
+    // Note: Booking request lookup now uses rawBookingRequestId from room object
+    // The direct matchroomId lookup has been removed as the booking flow should
+    // store the bookingRequestId directly on the matchroom
 
     const openBookingQueue = () => {
         router.push({
@@ -275,7 +240,7 @@ export default function MatchroomDetails() {
 
     // ── Zone Admin Inline Handlers ──────────────────────────────────
     const handleZoneAccept = async () => {
-        if (!room?.zoneId || !user?.uid || !bookingRequestId) {
+        if (!room?.zoneId || !user?._id || !bookingRequestId) {
             Alert.alert("Missing data", "Cannot accept — booking request or zone info not found.");
             return;
         }
@@ -283,7 +248,7 @@ export default function MatchroomDetails() {
         try {
             const result = await acceptZoneBookingRequest({
                 requestId: bookingRequestId,
-                adminUid: user.uid,
+                adminUid: user._id,
                 zoneId: room.zoneId,
                 requestOwnerUid: room.hostUid,
                 location: room.location || undefined,
@@ -304,7 +269,7 @@ export default function MatchroomDetails() {
     };
 
     const handleZoneReject = () => {
-        if (!room?.zoneId || !user?.uid || !bookingRequestId) {
+        if (!room?.zoneId || !user?._id || !bookingRequestId) {
             Alert.alert("Missing data", "Cannot reject — booking request or zone info not found.");
             return;
         }
@@ -321,7 +286,7 @@ export default function MatchroomDetails() {
                         try {
                             const result = await rejectZoneBookingRequest({
                                 requestId: bookingRequestId,
-                                adminUid: user!.uid,
+                                adminUid: user!._id,
                                 zoneId: room!.zoneId!,
                                 requestOwnerUid: room!.hostUid,
                                 reason: "fully_booked",
@@ -346,7 +311,7 @@ export default function MatchroomDetails() {
     };
 
     const handleZoneSuggest = async () => {
-        if (!room?.zoneId || !user?.uid || !bookingRequestId) return;
+        if (!room?.zoneId || !user?._id || !bookingRequestId) return;
 
         const parsedPrice = Number.parseInt(counterPrice, 10);
         const parsedExpiry = Number.parseInt(counterExpiryMinutes, 10);
@@ -365,7 +330,7 @@ export default function MatchroomDetails() {
                 requestOwnerUid: room.hostUid,
                 zoneId: room.zoneId,
                 zoneName: room.location || "Zone",
-                zoneOwnerUid: user.uid,
+                zoneOwnerUid: user._id,
                 proposedDate: counterDate,
                 proposedTime: counterTime,
                 pricePerPlayer: parsedPrice,
@@ -397,33 +362,7 @@ export default function MatchroomDetails() {
     const toTimeDisplay = (d: Date) =>
         d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
 
-    // Fetch ratings when players list updates
-    useEffect(() => {
-        if (!room) return;
-
-        const fetchRatings = async () => {
-            const ratings: Record<string, GameSkillScore | null> = {};
-            const players = room?.players || [];
-            await Promise.all(players.map(async (p) => {
-                // Optimization: Don't refetch if already have it (though simple MVP re-fetch is safer for updates)
-                try {
-                    const uDoc = await getDoc(doc(db, "users", p.uid));
-                    if (uDoc.exists()) {
-                        const rawScore = uDoc.data().skillScores?.[room.game] as GameSkillScore | undefined;
-                        if (rawScore && typeof rawScore.rating === 'number') {
-                            ratings[p.uid] = { ...rawScore, rating: clampRating(rawScore.rating) };
-                        } else {
-                            ratings[p.uid] = rawScore || null;
-                        }
-                    }
-                } catch (e) {
-                    console.error("Failed to fetch rating for", p.username);
-                }
-            }));
-            setPlayerRatings(ratings);
-        };
-        fetchRatings();
-    }, [room?.players, room?.game]);
+    // Player ratings now fetched via usePlayerSkillScores hook
 
 
 
@@ -431,7 +370,7 @@ export default function MatchroomDetails() {
         if (!user || !id) return;
         setRequestLoading(true);
         try {
-            const res = await cancelMatchJoinRequest(id as string, user.uid);
+            const res = await cancelMatchJoinRequest(id as string, user._id);
             if (res.ok) {
                 setRequestedSlots(new Map());
                 setGenericRequestStatus(null);
@@ -451,7 +390,7 @@ export default function MatchroomDetails() {
         if (!room || !user || !id) return;
 
         // BUSY CHECK
-        const busyCheck = await isUserInActiveMatchroom(user.uid, room as any);
+        const busyCheck = await isUserInActiveMatchroom(user._id, room as any);
         if (busyCheck.inRoom && busyCheck.roomId !== id) {
             Alert.alert("Already Busy", busyCheck.message);
             return;
@@ -462,7 +401,7 @@ export default function MatchroomDetails() {
             // Determine Role from Profile - Ensure we have latest profile
             let currentProfile = profile;
             if (!currentProfile && user) {
-                const res = await getUserProfile(user.uid);
+                const res = await getUserProfile(user._id);
                 if (res.ok) {
                     currentProfile = res.data;
                     setProfile(res.data);
@@ -478,8 +417,8 @@ export default function MatchroomDetails() {
             }
 
             const res = await requestJoinMatchroom(room, {
-                uid: user.uid,
-                username: profile?.username || user.displayName || 'Player',
+                uid: user._id,
+                username: profile?.username || user.fullName || 'Player',
             }, gameplayRole, team || 'Any', slotId); // NEW: pass slotId
 
             if (res.ok) {
@@ -514,31 +453,18 @@ export default function MatchroomDetails() {
         if (!room) return;
         setStarting(true);
         try {
-            // Snapshot ratings
+            // Snapshot ratings from Convex hook data (playerRatings state)
             const ratingsSnapshot: Record<string, number> = {};
             const playersArr = room.players || [];
 
-            // Parallel fetch of profiles to get skill scores
-            await Promise.all(playersArr.map(async (p) => {
-                try {
-                    const uDoc = await getDoc(doc(db, "users", p.uid));
-                    if (uDoc.exists()) {
-                        const uData = uDoc.data();
-                        const gameScore = uData.skillScores?.[room.game];
-                        // Default to mid rating if no score found
-                        if (typeof gameScore?.rating === 'number') {
-                            ratingsSnapshot[p.uid] = clampRating(gameScore.rating);
-                        } else {
-                            ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
-                        }
-                    } else {
-                        ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
-                    }
-                } catch (err) {
-                    console.error("Error fetching user rating", err);
+            playersArr.forEach((p) => {
+                const score = playerRatings[p.uid];
+                if (score && typeof score.rating === 'number') {
+                    ratingsSnapshot[p.uid] = clampRating(score.rating);
+                } else {
                     ratingsSnapshot[p.uid] = DEFAULT_SKILL_RATING;
                 }
-            }));
+            });
 
             // Assign Captains (MVP: Host vs First Opponent)
             const team2Player = playersArr.find(p => p.uid !== room.hostUid);
@@ -581,8 +507,8 @@ export default function MatchroomDetails() {
             title: room.title,
             reason: complainReason,
             description: complainDescription,
-            reporterUid: user.uid,
-            reporterUsername: user.displayName || "Anonymous"
+            reporterUid: user._id,
+            reporterUsername: user.fullName || "Anonymous"
         });
 
         setSubmittingComplain(false);
@@ -619,7 +545,7 @@ export default function MatchroomDetails() {
                     onPress: async () => {
                         setJoining(true); // Reuse state for loading
                         try {
-                            const res = await leaveMatchroom(id as string, user.uid);
+                            const res = await leaveMatchroom(id as string, user._id);
                             if (res.ok) {
                                 Alert.alert("Left", "You have left the matchroom.");
                                 fetchRoom();
@@ -707,7 +633,7 @@ export default function MatchroomDetails() {
         try {
             const res = await adminCancelMatchroom(
                 id as string,
-                user.uid,
+                user._id,
                 adminCancelReason,
                 adminCancelNote.trim()
             );
@@ -764,25 +690,12 @@ export default function MatchroomDetails() {
         );
     };
 
-    const fetchFriends = async () => {
-        if (!user) return;
-        setLoadingFriends(true);
-        try {
-            const friendsRef = collection(db, 'users', user.uid, 'friends');
-            const snap = await getDocs(friendsRef);
-            const friendsList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setFriends(friendsList);
-        } catch (e) {
-            Logger.error("MatchroomDetails", "Error fetching friends", e);
-        } finally {
-            setLoadingFriends(false);
-        }
-    };
+    // Friends are now loaded via useFriendsForInvite hook
 
     const handleInvitePress = (team: 'A' | 'B', slotId: string) => {
         setInvitingSlot({ team, slotId });
         setShowInviteModal(true);
-        fetchFriends();
+        // Friends are already loaded from Convex hook
     };
 
     const handleSendInvite = async (friend: any) => {
@@ -796,7 +709,7 @@ export default function MatchroomDetails() {
                 team: invitingSlot.team,
                 slotId: invitingSlot.slotId,
                 role: 'Flex', // Default, will pull from their profile on join
-                fromUsername: profile?.username || user?.displayName || 'Captain'
+                fromUsername: profile?.username || user?.fullName || user?.username || 'Captain'
             });
 
             if (res.ok) {
@@ -876,7 +789,7 @@ export default function MatchroomDetails() {
     };
 
 
-    const isHost = useMemo(() => user?.uid === room?.hostUid, [user?.uid, room?.hostUid]);
+    const isHost = useMemo(() => user?._id === room?.hostUid, [user?._id, room?.hostUid]);
     const playersArr = useMemo(() => room?.players || [], [room?.players]);
     const isWalkInRoom = useMemo(
         () => String((room as any)?.bookingSource || '').toLowerCase() === 'walkin',
@@ -885,7 +798,7 @@ export default function MatchroomDetails() {
     const participantUids = useMemo(() => {
         const slots = [...(room?.slotsA || []), ...(room?.slotsB || [])];
         const slotUids = slots
-            .map((s: any) => s?.user?.uid || s?.uid)
+            .map((s: any) => s?.user?._id || s?.uid)
             .filter(Boolean);
         return new Set<string>([
             ...(room?.playerUids || []),
@@ -894,7 +807,7 @@ export default function MatchroomDetails() {
             room?.zoneOwnerUid,
         ].filter(Boolean));
     }, [room]);
-    const isJoined = useMemo(() => !!user?.uid && participantUids.has(user.uid), [participantUids, user?.uid]);
+    const isJoined = useMemo(() => !!user?._id && participantUids.has(user._id), [participantUids, user?._id]);
 
     // Lifecycle states
     const isExpired = useMemo(() => (room ? isRoomExpired(room) : false), [room]);
@@ -1013,8 +926,8 @@ export default function MatchroomDetails() {
         }
 
         const assigned = new Set<string>();
-        slotsA.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
-        slotsB.forEach((s: any) => s?.user?.uid && assigned.add(s.user.uid));
+        slotsA.forEach((s: any) => s?.user?._id && assigned.add(s.user._id));
+        slotsB.forEach((s: any) => s?.user?._id && assigned.add(s.user._id));
         const unassigned = (room?.players || []).filter((p: any) => !assigned.has(p.uid));
         let idx = 0;
         const fill = (slots: any[]) =>
@@ -1063,10 +976,10 @@ export default function MatchroomDetails() {
 
     const captainUidAResolved = room?.captainUidA || room?.hostUid;
     const captainUidBResolved = room?.captainUidB || null;
-    const canManageTeamA = isHost || (!!captainUidAResolved && user?.uid === captainUidAResolved);
-    const canManageTeamB = isHost || (!!captainUidBResolved && user?.uid === captainUidBResolved) || (!captainUidBResolved && isHost);
-    const canInviteTeamA = !!captainUidAResolved && user?.uid === captainUidAResolved;
-    const canInviteTeamB = !!user?.uid && (user.uid === captainUidBResolved || (!captainUidBResolved && isHost));
+    const canManageTeamA = isHost || (!!captainUidAResolved && user?._id === captainUidAResolved);
+    const canManageTeamB = isHost || (!!captainUidBResolved && user?._id === captainUidBResolved) || (!captainUidBResolved && isHost);
+    const canInviteTeamA = !!captainUidAResolved && user?._id === captainUidAResolved;
+    const canInviteTeamB = !!user?._id && (user._id === captainUidBResolved || (!captainUidBResolved && isHost));
 
     const getSkillBadgeProps = (uid?: string, fallbackTierRaw?: unknown) => {
         if (uid && playerRatings[uid]) {
@@ -1127,7 +1040,7 @@ export default function MatchroomDetails() {
                                 <MaterialIcons name="delete-outline" size={24} color={COLORS.error} />
                             </TouchableOpacity>
                         )}
-                        {user?.uid && participantUids.has(user.uid) && (
+                        {user?._id && participantUids.has(user._id) && (
                             <TouchableOpacity
                                 onPressIn={() => {
                                     if (touchDebugEnabled) {
@@ -1344,19 +1257,19 @@ export default function MatchroomDetails() {
                                     </View>
                                     <TouchableOpacity
                                         style={styles.slotInfo}
-                                        disabled={!slot.user || slot.user.uid === user?.uid || !canManageTeamA}
-                                        onPress={() => slot.user && handleManagePlayer('A', slot.user.uid, slot.user.username)}
+                                        disabled={!slot.user || slot.user._id === user?._id || !canManageTeamA}
+                                        onPress={() => slot.user && handleManagePlayer('A', slot.user._id, slot.user.username)}
                                     >
                                         {slot.user ? (
                                             <View>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
-                                                        {captainUidAResolved === slot.user.uid && (
+                                                        {captainUidAResolved === slot.user._id && (
                                                             <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
                                                         )}
                                                     </View>
-                                                    {canManageTeamA && slot.user.uid !== user?.uid && (
+                                                    {canManageTeamA && slot.user._id !== user?._id && (
                                                         <TouchableOpacity
                                                             onPress={() => handleManagePlayer('A', slot.user!.uid, slot.user!.username)}
                                                             style={{ padding: 4 }}
@@ -1371,7 +1284,7 @@ export default function MatchroomDetails() {
                                                     </Text>
                                                     {(() => {
                                                         const badge = getSkillBadgeProps(
-                                                            slot.user?.uid,
+                                                            slot.user?._id,
                                                             (slot.user as any)?.skillTier,
                                                         );
                                                         if (!badge) return null;
@@ -1475,19 +1388,19 @@ export default function MatchroomDetails() {
                                     </View>
                                     <TouchableOpacity
                                         style={styles.slotInfo}
-                                        disabled={!slot.user || slot.user.uid === user?.uid || !canManageTeamB}
-                                        onPress={() => slot.user && handleManagePlayer('B', slot.user.uid, slot.user.username)}
+                                        disabled={!slot.user || slot.user._id === user?._id || !canManageTeamB}
+                                        onPress={() => slot.user && handleManagePlayer('B', slot.user._id, slot.user.username)}
                                     >
                                         {slot.user ? (
                                             <View>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                                                         <Text style={styles.slotName} numberOfLines={1}>{slot.user.username}</Text>
-                                                        {captainUidBResolved === slot.user.uid && (
+                                                        {captainUidBResolved === slot.user._id && (
                                                             <FontAwesome5 name="crown" size={10} color={COLORS.warning} style={{ marginLeft: 4 }} />
                                                         )}
                                                     </View>
-                                                    {canManageTeamB && slot.user.uid !== user?.uid && (
+                                                    {canManageTeamB && slot.user._id !== user?._id && (
                                                         <TouchableOpacity
                                                             onPress={() => handleManagePlayer('B', slot.user!.uid, slot.user!.username)}
                                                             style={{ padding: 4 }}
@@ -1502,7 +1415,7 @@ export default function MatchroomDetails() {
                                                     </Text>
                                                     {(() => {
                                                         const badge = getSkillBadgeProps(
-                                                            slot.user?.uid,
+                                                            slot.user?._id,
                                                             (slot.user as any)?.skillTier,
                                                         );
                                                         if (!badge) return null;
@@ -1609,7 +1522,7 @@ export default function MatchroomDetails() {
                                                 </View>
                                             )}
                                         </View>
-                                        {player.uid === user?.uid && (
+                                        {player.uid === user?._id && (
                                             <MaterialIcons name="person" size={16} color={COLORS.accent} style={{ opacity: 0.6 }} />
                                         )}
                                     </View>
@@ -1656,7 +1569,7 @@ export default function MatchroomDetails() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm }}>
                             <MaterialIcons name="person-add" size={18} color={COLORS.accent} />
                             <Text style={{
-                                color: COLORS.textPrimary,
+                                color: COLORS.text,
                                 fontSize: 15,
                                 fontWeight: '700',
                                 marginLeft: 8,
@@ -1690,7 +1603,7 @@ export default function MatchroomDetails() {
 
                                 {/* Info */}
                                 <View style={{ flex: 1 }}>
-                                    <Text style={{ color: COLORS.textPrimary, fontWeight: '600', fontSize: 14 }}>
+                                    <Text style={{ color: COLORS.text, fontWeight: '600', fontSize: 14 }}>
                                         {req.fromUsername || 'Player'}
                                     </Text>
                                     <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 2 }}>

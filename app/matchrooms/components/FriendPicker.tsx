@@ -46,11 +46,11 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
     const loadFriends = async () => {
         setLoading(true);
         try {
-            const res = await getUserFriends(user!.uid);
+            const res = await getUserFriends(user!._id);
             if (res.ok) {
                 // Fetch skill scores for the selected game for each friend
                 const friendsWithScores = await Promise.all(res.data.map(async (f) => {
-                    const profileRes = await getUserProfile(f.uid);
+                    const profileRes = await getUserProfile(f._id);
                     let score = 50; // Default
                     if (profileRes.ok) {
                         const skillScores = profileRes.data.skillScores as any;

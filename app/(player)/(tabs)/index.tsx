@@ -2,20 +2,20 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { router, useFocusEffect } from "expo-router";
 import {
-    collection,
-    getDocs,
-    onSnapshot,
-    query,
-    where,
+  collection,
+  getDocs,
+  onSnapshot,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Image,
-    Pressable,
-    ScrollView,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
@@ -25,23 +25,24 @@ import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { normalizeGameKey } from "../../../src/features/discover/utils/gameKeys";
 import {
-    getOffersForUser,
-    getUserRequests,
+  getOffersForUser,
+  getUserRequests,
 } from "../../../src/services/bookingRequestService";
-import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
 import {
-    Matchroom,
-    getMatchrooms,
-    getUserMatchrooms,
-} from "../../../src/services/matchService";
-import { Team, getUserTeams } from "../../../src/services/teamService";
+  Matchroom,
+  getMatchrooms,
+  getUserMatchrooms,
+} from "../../../src/services/convex/matchService";
+import { Team, getUserTeams } from "../../../src/services/convex/teamService";
+import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
 import { UserProfile, getUserProfile } from "../../../src/services/userService";
-import { Zone, getActiveZones } from "../../../src/services/zoneService";
+import { Id } from "../../../convex/_generated/dataModel";
+import { Zone, getActiveZones } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import {
-    isRoomExpired,
-    isRoomLocked,
+  isRoomExpired,
+  isRoomLocked,
 } from "../../../src/utils/matchroomLifecycle";
 import { getRoomStartDate } from "../../../src/utils/timeFilters";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
@@ -180,7 +181,8 @@ const preferredGameKeysFromProfile = (profile?: UserProfile | null) => {
   return games;
 };
 
-const ZONE_GAME_TAGS: Array<{ key: keyof Zone["games"]; label: string }> = [
+type ZoneGamesKeys = "supportsCs2" | "supportsFc25" | "supportsTekken8" | "supportsFutsal" | "supportsIndoorCricket" | "supportsPadel" | "supportsPickleball";
+const ZONE_GAME_TAGS: Array<{ key: ZoneGamesKeys; label: string }> = [
   { key: "supportsCs2", label: "CS2" },
   { key: "supportsFc25", label: "FC26" },
   { key: "supportsTekken8", label: "Tekken 8" },
@@ -354,7 +356,7 @@ export default function PlayerDashboard() {
   const lastReminderSignatureRef = useRef("");
 
   const loadDashboardData = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?._id) return;
 
     try {
       const [
@@ -368,20 +370,20 @@ export default function PlayerDashboard() {
         intentsSnapshot,
         friendsSnapshot,
       ] = await Promise.all([
-        getUserProfile(user.uid),
-        getUserMatchrooms(user.uid),
+        getUserProfile(user._id),
+        getUserMatchrooms(user._id),
         getMatchrooms(40),
-        getUserTeams(user.uid),
+        getUserTeams(user._id),
         getActiveZones(),
-        getUserRequests(user.uid),
-        getOffersForUser(user.uid),
+        getUserRequests(user._id),
+        getOffersForUser(user._id),
         getDocs(
           query(
             collection(db, "booking_intents"),
-            where("createdByUid", "==", user.uid),
+            where("createdByUid", "==", user._id),
           ),
         ),
-        getDocs(collection(db, "users", user.uid, "friends")),
+        getDocs(collection(db, "users", user._id, "friends")),
       ]);
 
       const profileData = profileResult.ok ? profileResult.data : null;
@@ -389,10 +391,10 @@ export default function PlayerDashboard() {
       const preferredGames = preferredGameKeysFromProfile(profileData);
       let myRoomIds = new Set<string>();
 
-      if (userRoomsResult.ok) {
+      if (userRoomsResult.ok && userRoomsResult.data) {
         const allMyRooms = dedupeRooms([
-          ...userRoomsResult.data.hosted,
-          ...userRoomsResult.data.joined,
+          ...(userRoomsResult.data.hosted || []),
+          ...(userRoomsResult.data.joined || []),
         ]);
         myRoomIds = new Set(
           allMyRooms.map((room) => room.id).filter(Boolean) as string[],
@@ -418,14 +420,14 @@ export default function PlayerDashboard() {
         setUpcomingRooms([]);
       }
 
-      if (allRoomsResult.ok) {
+      if (allRoomsResult.ok && allRoomsResult.data) {
         const recommended = allRoomsResult.data
           .filter((room) => !isRoomExpired(room) && !isRoomLocked(room))
           .filter((room) => {
             if (!room.id || myRoomIds.has(room.id)) return false;
             if (
-              room.hostUid === user.uid ||
-              room.playerUids?.includes(user.uid)
+              room.hostUid === user._id ||
+              room.playerUids?.includes(user._id)
             )
               return false;
             if (!preferredGames.length) return true;
@@ -474,7 +476,7 @@ export default function PlayerDashboard() {
       const friendUids = friendsSnapshot.docs.map((docSnap: any) => docSnap.id);
       if (friendUids.length > 0) {
         const profileResults = await Promise.all(
-          friendUids.map((friendUid: string) => getUserProfile(friendUid)),
+          friendUids.map((friendUid: string) => getUserProfile(friendUid as Id<"users">)),
         );
         const onlineFriends = profileResults.reduce(
           (count, result) =>
@@ -490,7 +492,7 @@ export default function PlayerDashboard() {
       setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
       setFriendCount(0);
     }
-  }, [user?.uid]);
+  }, [user?._id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -503,7 +505,7 @@ export default function PlayerDashboard() {
 
     const q = query(
       collection(db, "notifications"),
-      where("toUid", "==", user.uid),
+      where("toUid", "==", user._id),
     );
 
     const unsubscribe = onSnapshot(q, (snapshot: any) => {
@@ -539,7 +541,7 @@ export default function PlayerDashboard() {
   }, [user]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?._id) {
       lastReminderSignatureRef.current = "";
       return;
     }
@@ -563,7 +565,7 @@ export default function PlayerDashboard() {
       minutesBefore: 15,
       href: `/matchrooms/${next.id}`,
     }).catch(() => null);
-  }, [upcomingRooms, user?.uid]);
+  }, [upcomingRooms, user?._id]);
 
   const QuickAction = ({ icon, label, onPress, color, shadowColor }: any) => (
     <Pressable
@@ -813,7 +815,7 @@ export default function PlayerDashboard() {
                   source={{
                     uri:
                       user?.photoURL ||
-                      `https://ui-avatars.com/api/?name=${user?.displayName || "Player"}&background=42a5f5&color=fff&size=112`,
+                      `https://ui-avatars.com/api/?name=${user?.fullName || "Player"}&background=42a5f5&color=fff&size=112`,
                   }}
                   style={styles.avatar}
                 />
@@ -822,7 +824,7 @@ export default function PlayerDashboard() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.welcomeText}>PLAYER DASHBOARD</Text>
                 <Text style={styles.username}>
-                  {user?.displayName || "Guest"}
+                  {user?.fullName || "Guest"}
                 </Text>
               </View>
             </View>

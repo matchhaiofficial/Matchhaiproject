@@ -38,13 +38,13 @@ export default function TeamChallengesScreen() {
     const [rows, setRows] = useState<TeamMatchChallenge[]>([]);
 
     const fetchRows = useCallback(async () => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setRows([]);
             setLoading(false);
             return;
         }
-        await repairTeamChallengesForCaptain(user.uid);
-        const result = await getChallengesForCaptain(user.uid);
+        await repairTeamChallengesForCaptain(user._id);
+        const result = await getChallengesForCaptain(user._id);
         if (result.ok && result.data) {
             setRows(result.data);
         } else {
@@ -52,7 +52,7 @@ export default function TeamChallengesScreen() {
         }
         setLoading(false);
         setRefreshing(false);
-    }, [user?.uid]);
+    }, [user?._id]);
 
     useFocusEffect(useCallback(() => {
         fetchRows();

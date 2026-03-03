@@ -25,7 +25,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
 import { PsnVerificationResult } from "../../../src/services/psnApi";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
-import { getUserTeams, Team } from "../../../src/services/teamService";
+import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { COLORS } from "../../../src/theme";
 import styles from "./profile.styles";
 
@@ -106,13 +106,13 @@ export default function Profile() {
     const isFetching = useRef(false);
 
     const fetchProfile = useCallback(async (isRefresh = false) => {
-        if (!user?.uid || (isFetching.current && !isRefresh)) return;
+        if (!user?._id || (isFetching.current && !isRefresh)) return;
 
         try {
             isFetching.current = true;
             if (!isRefresh && !profile) setLoading(true); // Initial load only
 
-            const userRef = doc(db, "users", user.uid);
+            const userRef = doc(db, "users", user._id);
             const snap = await getDoc(userRef);
 
             if (snap.exists()) {
@@ -120,7 +120,7 @@ export default function Profile() {
             }
 
             setLoadingTeams(true);
-            const teamsRes = await getUserTeams(user.uid);
+            const teamsRes = await getUserTeams(user._id);
             if (teamsRes.ok && teamsRes.data) {
                 setMyTeams(teamsRes.data);
             } else {
@@ -135,7 +135,7 @@ export default function Profile() {
             setLoadingTeams(false);
             isFetching.current = false;
         }
-    }, [user?.uid]);
+    }, [user?._id]);
 
     // Focus Effect: Re-fetch only if data might be stale (simplified to always fetch on focus for now to ensure sync after edit)
     useFocusEffect(

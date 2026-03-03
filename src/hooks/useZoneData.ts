@@ -11,7 +11,7 @@ export function useZoneData() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setZone(null);
             setLoading(false);
             return;
@@ -19,7 +19,7 @@ export function useZoneData() {
 
         setLoading(true);
 
-        const q = query(collection(db, "zones"), where("ownerUid", "==", user.uid));
+        const q = query(collection(db, "zones"), where("ownerUid", "==", user._id));
         const unsub = onSnapshot(
             q,
             (snapshot: any) => {
@@ -39,7 +39,7 @@ export function useZoneData() {
         );
 
         return () => unsub();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     return { zone, loading };
 }

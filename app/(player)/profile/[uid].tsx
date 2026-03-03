@@ -10,6 +10,7 @@ import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
 import { getUserProfile, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
@@ -89,9 +90,10 @@ export default function PlayerProfile() {
 
         // 3. Activity Status
         let status = 'Inactive';
-        const lastMatch = skillData?.lastMatchDate;
-        if (lastMatch) {
-            const date = lastMatch instanceof Timestamp ? lastMatch.toDate() : new Date(lastMatch);
+        // Convex uses numbers for timestamps (lastUpdated is a number)
+        const lastUpdated = (skillData as any)?.lastUpdated;
+        if (lastUpdated && typeof lastUpdated === 'number') {
+            const date = new Date(lastUpdated);
             status = `Played ${formatDistanceToNow(date)} ago`;
         } else if (profile.isOnline) {
             status = 'Online Now';
@@ -99,9 +101,8 @@ export default function PlayerProfile() {
 
         // 4. Trend
         let tr = 'Stable';
-        const lastUpdated = skillData?.lastUpdated;
-        if (lastUpdated) {
-            const updateDate = lastUpdated instanceof Timestamp ? lastUpdated.toDate() : new Date(lastUpdated);
+        if (lastUpdated && typeof lastUpdated === 'number') {
+            const updateDate = new Date(lastUpdated);
             const daysSinceUpdate = (new Date().getTime() - updateDate.getTime()) / (1000 * 3600 * 24);
             if (daysSinceUpdate < 7 && totalMatches > 0) tr = 'Increasing';
             else if (daysSinceUpdate > 14) tr = 'Decreasing';
@@ -141,7 +142,7 @@ export default function PlayerProfile() {
     const loadProfile = async () => {
         if (!uid) return;
         try {
-            const res = await getUserProfile(uid);
+            const res = await getUserProfile(uid as Id<"users">);
             if (res.ok) {
                 setProfile(res.data);
                 const userGames = getPlayerGames(res.data);
@@ -159,7 +160,7 @@ export default function PlayerProfile() {
     const checkFriendStatus = async () => {
         if (!user || !uid) return;
         try {
-            const friendsSnap = await getDocs(collection(db, "users", user.uid, "friends"));
+            const friendsSnap = await getDocs(collection(db, "users", user._id, "friends"));
             const friends = new Set<string>();
             friendsSnap.forEach(doc => friends.add(doc.id));
             setIsFriend(friends.has(uid));
@@ -168,7 +169,7 @@ export default function PlayerProfile() {
                 // Check for outgoing request (I sent to them)
                 const outgoingQ = query(
                     collection(db, "notifications"),
-                    where("fromUid", "==", user.uid),
+                    where("fromUid", "==", user._id),
                     where("toUid", "==", uid),
                     where("type", "==", "friend_request"),
                     where("status", "==", "pending")
@@ -180,7 +181,7 @@ export default function PlayerProfile() {
                 const incomingQ = query(
                     collection(db, "notifications"),
                     where("fromUid", "==", uid),
-                    where("toUid", "==", user.uid),
+                    where("toUid", "==", user._id),
                     where("type", "==", "friend_request"),
                     where("status", "==", "pending")
                 );
@@ -219,7 +220,7 @@ export default function PlayerProfile() {
         if (!uid || syncing) return;
         setSyncing(true);
         try {
-            const res = await refreshUserStats(uid);
+            const res = await refreshUserStats(uid as Id<"users">);
             if (res.ok) {
                 showToast({ type: "success", title: "Synced", message: "Gaming stats updated successfully" });
                 loadProfile();
@@ -232,7 +233,7 @@ export default function PlayerProfile() {
     };
 
     const renderFriendActions = () => {
-        if (!uid || user?.uid === uid) return null;
+        if (!uid || user?._id === uid) return null;
 
         if (isFriend) {
             return (
@@ -401,7 +402,7 @@ export default function PlayerProfile() {
                     <Text style={styles.activityText}>{activityStatus}</Text>
                 </View>
 
-                {user?.uid !== uid && (
+                {user?._id !== uid && (
                     <View style={styles.actionContainer}>
                         {renderFriendActions()}
                     </View>
@@ -415,9 +416,10 @@ export default function PlayerProfile() {
         const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
         if (!skillData) return null;
 
-        const sourceLabel = skillData.initialSource === 'faceit' ? 'FACEIT' :
-            skillData.initialSource === 'psn' ? 'PSN' :
-                skillData.initialSource === 'steam' ? 'Steam' : 'MatchHai';
+        const extendedSkillData = skillData as typeof skillData & { initialSource?: string };
+        const sourceLabel = extendedSkillData.initialSource === 'faceit' ? 'FACEIT' :
+            extendedSkillData.initialSource === 'psn' ? 'PSN' :
+                extendedSkillData.initialSource === 'steam' ? 'Steam' : 'MatchHai';
 
         return (
             <View style={styles.primarySkillCard}>
@@ -482,7 +484,7 @@ export default function PlayerProfile() {
                         <Text style={styles.platformName}>{name}</Text>
                         <Text style={styles.platformValue}>Not connected</Text>
                     </View>
-                    {uid === user?.uid && (
+                    {uid === user?._id && (
                         <TouchableOpacity onPress={() => router.push('/(player)/profile/edit' as any)}>
                             <MaterialIcons name="add-circle-outline" size={24} color={COLORS.muted} />
                         </TouchableOpacity>
@@ -506,10 +508,10 @@ export default function PlayerProfile() {
                         )}
                     </View>
                     <Text style={styles.platformValue}>
-                        {profile.hidePlatformsPublicly && uid !== user?.uid ? 'Verified Account' : value}
+                        {profile.hidePlatformsPublicly && uid !== user?._id ? 'Verified Account' : value}
                     </Text>
                 </View>
-                {uid === user?.uid && (
+                {uid === user?._id && (
                     <TouchableOpacity
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -622,8 +624,8 @@ export default function PlayerProfile() {
                     <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.divider }}>
                         <StatRow icon="shield" label="Team" value={profile.fcTeam || 'N/A'} />
                         <StatRow icon="grid-view" label="Formation" value={profile.fcFormation || 'N/A'} />
-                        {profile.steamFc26Hours && (
-                            <StatRow icon="schedule" label="Playtime" value={`${profile.steamFc26Hours.toLocaleString()}h`} />
+                        {(profile as any).steamFc26Hours && (
+                            <StatRow icon="schedule" label="Playtime" value={`${(profile as any).steamFc26Hours.toLocaleString()}h`} />
                         )}
                     </View>
                 )}

@@ -199,7 +199,7 @@ export default function ZoneInsightsModule() {
         if (!zone?.id) return;
         const unsub = subscribeZoneMatchrooms(
             zone.id,
-            user?.uid,
+            user?._id,
             (rows) => {
                 setMatchrooms(rows);
                 setLastUpdatedAt(Date.now());
@@ -217,7 +217,7 @@ export default function ZoneInsightsModule() {
             },
         );
         return () => unsub();
-    }, [branchAreas, user?.uid, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
+    }, [branchAreas, user?._id, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
 
     const allResources = useMemo(
         () => Object.values(resourcesByBranch).flat(),

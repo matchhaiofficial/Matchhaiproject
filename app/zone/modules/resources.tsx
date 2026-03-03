@@ -273,14 +273,14 @@ export default function ZoneResourcesModule() {
         resourceId: string,
         status: ResourceLifecycleStatus,
     ) => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         setProcessingResourceId(resourceId);
         const result = await updateBranchResourceStatus({
             zoneId: zone.id,
             branchId: selectedBranchId,
             resourceId,
             status,
-            adminUid: user.uid,
+            adminUid: user._id,
             holdRequestId: selectedRequestId || undefined,
         });
         setProcessingResourceId(null);
@@ -290,7 +290,7 @@ export default function ZoneResourcesModule() {
     };
 
     const applyBulkStatus = async (status: ResourceLifecycleStatus) => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         if (selectedResourceIds.length === 0) {
             Alert.alert("No selection", "Select resources first.");
             return;
@@ -303,7 +303,7 @@ export default function ZoneResourcesModule() {
                     branchId: selectedBranchId,
                     resourceId,
                     status,
-                    adminUid: user.uid,
+                    adminUid: user._id,
                     holdRequestId: selectedRequestId || undefined,
                 }),
             ),
@@ -319,7 +319,7 @@ export default function ZoneResourcesModule() {
     };
 
     const handleAllocate = async () => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         if (!selectedRequestId || selectedResourceIds.length === 0) {
             Alert.alert("Missing selection", "Pick a booking request and resources.");
             return;
@@ -341,7 +341,7 @@ export default function ZoneResourcesModule() {
             branchId: selectedBranchId,
             requestId: selectedRequestId,
             resourceIds: selectedResourceIds,
-            adminUid: user.uid,
+            adminUid: user._id,
         });
         setAllocating(false);
 

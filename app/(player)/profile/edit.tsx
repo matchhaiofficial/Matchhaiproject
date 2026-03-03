@@ -215,9 +215,9 @@ export default function EditProfile() {
 
     useEffect(() => {
         const fetchProfile = async () => {
-            if (!user?.uid) return;
+            if (!user?._id) return;
             try {
-                const docRef = doc(db, "users", user.uid);
+                const docRef = doc(db, "users", user._id);
                 const snap = await getDoc(docRef);
                 if (snap.exists()) {
                     const data = snap.data();
@@ -289,11 +289,11 @@ export default function EditProfile() {
             }
         };
         fetchProfile();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     // Auto-refresh auth state to check for email verification
     useEffect(() => {
-        if (!user?.uid || !pendingEmail) return;
+        if (!user?._id || !pendingEmail) return;
 
         const checkEmailUpdate = async () => {
             try {
@@ -309,7 +309,7 @@ export default function EditProfile() {
                     console.log("Email verified! Updating Firestore...");
 
                     // Clear pending email from Firestore
-                    const userRef = doc(db, "users", user.uid);
+                    const userRef = doc(db, "users", user._id);
                     await updateDoc(userRef, {
                         pendingEmail: null,
                         updatedAt: new Date()
@@ -354,7 +354,7 @@ export default function EditProfile() {
         const interval = setInterval(checkEmailUpdate, 5000);
 
         return () => clearInterval(interval);
-    }, [user?.uid, pendingEmail]);
+    }, [user?._id, pendingEmail]);
 
 
     // Username check (unchanged)
@@ -436,7 +436,7 @@ export default function EditProfile() {
         }
 
         // Check uniqueness
-        const available = await isSteamIdAvailable(res.data.steamId, user?.uid);
+        const available = await isSteamIdAvailable(res.data.steamId, user?._id);
         if (!available) {
             setSteamStatus("taken");
             setSteamProfile(null);
@@ -471,7 +471,7 @@ export default function EditProfile() {
         }
 
         // Check uniqueness
-        const available = await isFaceitIdAvailable(res.data.faceitId, user?.uid);
+        const available = await isFaceitIdAvailable(res.data.faceitId, user?._id);
         if (!available) {
             setFaceitStatus("taken");
             setFaceitProfile(null);
@@ -507,7 +507,7 @@ export default function EditProfile() {
         }
 
         // Check uniqueness
-        const available = await isPsnIdAvailable(res.data.psnAccountId, user?.uid);
+        const available = await isPsnIdAvailable(res.data.psnAccountId, user?._id);
         if (!available) {
             setPsnStatus("taken");
             setPsnStats(null);
@@ -531,7 +531,7 @@ export default function EditProfile() {
             return;
         }
         setEaLoading(true);
-        const available = await isEaIdAvailable(value, user?.uid);
+        const available = await isEaIdAvailable(value, user?._id);
         setEaLoading(false);
 
         if (!available) {
@@ -554,7 +554,7 @@ export default function EditProfile() {
             return;
         }
         setXboxLoading(true);
-        const available = await isXboxIdAvailable(value, user?.uid);
+        const available = await isXboxIdAvailable(value, user?._id);
         setXboxLoading(false);
 
         if (!available) {
@@ -614,14 +614,14 @@ export default function EditProfile() {
 
     // Email update handler
     const handleUpdateEmail = async () => {
-        if (!auth.currentUser || !isNewEmailValid || !user?.uid) return;
+        if (!auth.currentUser || !isNewEmailValid || !user?._id) return;
 
         try {
             setEmailUpdating(true);
             await verifyBeforeUpdateEmail(auth.currentUser, newEmail.trim());
 
             // Store pending email in Firestore
-            const userRef = doc(db, "users", user.uid);
+            const userRef = doc(db, "users", user._id);
             await updateDoc(userRef, {
                 pendingEmail: newEmail.trim(),
                 updatedAt: new Date()
@@ -651,7 +651,7 @@ export default function EditProfile() {
     };
 
     const handleSave = async () => {
-        if (!user?.uid) return;
+        if (!user?._id) return;
 
         if (!fullName.trim()) {
             showToast({ type: "info", title: "Required", message: "Full Name is required" });
@@ -781,7 +781,7 @@ export default function EditProfile() {
 
             // Auth Updates - Email is read-only, no updates needed
 
-            const userRef = doc(db, "users", user.uid);
+            const userRef = doc(db, "users", user._id);
             await updateDoc(userRef, updates);
 
             showToast({ type: "success", title: "Saved", message: "Profile updated successfully" });

@@ -15,7 +15,7 @@ import {
     subscribeTeamMatchChallenge,
     type TeamMatchChallenge,
 } from "../../src/services/teamMatchService";
-import type { Zone } from "../../src/services/zoneService";
+import type { Zone } from "../../src/services/convex/zoneService";
 import { COLORS } from "../../src/theme";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
 import styles from "./challenge.styles";
@@ -87,11 +87,11 @@ export default function TeamMatchChallengeDetails() {
     }, [challengeId, router]);
 
     const isCaptain = useMemo(() => {
-        if (!challenge || !user?.uid) return false;
-        return challenge.captainAUid === user.uid || challenge.captainBUid === user.uid;
-    }, [challenge, user?.uid]);
-    const isCaptainA = useMemo(() => !!challenge && challenge.captainAUid === user?.uid, [challenge, user?.uid]);
-    const isCaptainB = useMemo(() => !!challenge && challenge.captainBUid === user?.uid, [challenge, user?.uid]);
+        if (!challenge || !user?._id) return false;
+        return challenge.captainAUid === user._id || challenge.captainBUid === user._id;
+    }, [challenge, user?._id]);
+    const isCaptainA = useMemo(() => !!challenge && challenge.captainAUid === user?._id, [challenge, user?._id]);
+    const isCaptainB = useMemo(() => !!challenge && challenge.captainBUid === user?._id, [challenge, user?._id]);
 
     const normalizedStatus = String(challenge?.status || "").trim().toLowerCase();
     const normalizedAdminReviewStatus = String(challenge?.adminReviewStatus || "").trim().toLowerCase();
@@ -101,9 +101,9 @@ export default function TeamMatchChallengeDetails() {
     const isAcceptedFlow = !!challenge && ["accepted", "venue_proposed", "venue_confirmed", "admin_pending", "completed"].includes(normalizedStatus);
 
     const myChoice = useMemo(() => {
-        if (!challenge || !user?.uid) return null;
-        return challenge.captainVenueChoices?.[user.uid] || null;
-    }, [challenge, user?.uid]);
+        if (!challenge || !user?._id) return null;
+        return challenge.captainVenueChoices?.[user._id] || null;
+    }, [challenge, user?._id]);
 
     const bothConfirmed = useMemo(() => !!challenge?.matchroomId && !!challenge?.confirmedVenue, [challenge]);
     const proposalFromA = challenge?.proposedVenueByCaptainA || null;

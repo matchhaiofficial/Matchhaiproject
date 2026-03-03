@@ -19,7 +19,7 @@ import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserTeams, Team } from "../../src/services/teamService";
+import { getUserTeams, Team } from "../../src/services/convex/teamService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./(tabs)/teams.styles"; // Reuse styles from tabs/teams
@@ -41,7 +41,7 @@ export default function MyTeams() {
             setRefreshing(true);
             const q = query(
                 collection(db, 'teams'),
-                where('captainUid', '==', user.uid)
+                where('captainUid', '==', user._id)
             );
             const snap = await getDocs(q);
             const batchPromises = [];
@@ -50,7 +50,7 @@ export default function MyTeams() {
                 const data = teamDoc.data();
                 if (!data.memberUids) {
                     batchPromises.push(updateDoc(doc(db, 'teams', teamDoc.id), {
-                        memberUids: [user.uid]
+                        memberUids: [user._id]
                     }));
                 }
             }
@@ -73,7 +73,7 @@ export default function MyTeams() {
     const fetchTeams = async () => {
         if (!user) return;
         try {
-            const result = await getUserTeams(user.uid);
+            const result = await getUserTeams(user._id);
             if (result.ok && result.data) {
                 setTeams(result.data);
             }

@@ -3,8 +3,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { FaceitProfileSummary } from "../services/faceitApi";
-import type { SteamProfileSummary } from "../services/steamApi";
+// Import types from Convex service (migrated from Firebase)
+import type {
+  FaceitProfileSummary,
+  SteamProfileSummary,
+} from "../services/convex/externalApiService";
 
 type Step1Data = {
   fullName: string;

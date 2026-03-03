@@ -119,7 +119,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
         if (!user) return;
         try {
             // 1. Fetch Friends
-            const friendsSnap = await getDocs(collection(db, "users", user.uid, "friends"));
+            const friendsSnap = await getDocs(collection(db, "users", user._id, "friends"));
             const friends = new Set<string>();
             friendsSnap.forEach(doc => friends.add(doc.id));
             setFriendUids(friends);
@@ -127,7 +127,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
             // 2. Fetch Pending Outgoing Requests
             const q = query(
                 collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
+                where("fromUid", "==", user._id),
                 where("type", "==", "friend_request"),
                 where("status", "==", "pending")
             );
@@ -152,7 +152,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
             snapshot.forEach(doc => {
                 const data = doc.data();
                 // Exclude self
-                if (doc.id === user?.uid) return;
+                if (doc.id === user?._id) return;
 
                 // Construct roles object from flattened fields
                 const roles: Record<string, string> = {};

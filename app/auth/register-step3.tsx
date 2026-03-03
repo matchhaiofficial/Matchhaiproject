@@ -20,17 +20,16 @@ import { useToast } from "../../src/hooks/useToast";
 import {
   FaceitProfileSummary,
   fetchFaceitProfileFromUrl,
-} from "../../src/services/faceitApi";
-import { PsnVerificationResult, verifyPsnProfile } from "../../src/services/psnApi";
-import {
-  fetchSteamProfileFromUrl,
+  PsnVerificationResult,
+  verifyPsnProfile,
   SteamProfileSummary,
-} from "../../src/services/steamApi";
+  fetchSteamProfileFromUrl,
+} from "../../src/services/convex/externalApiService";
 import {
-  isFaceitIdAvailable,
+  isSteamIdAvailable,
   isPsnIdAvailable,
-  isSteamIdAvailable
-} from "../../src/services/userService";
+  isFaceitIdAvailable,
+} from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
@@ -197,6 +196,14 @@ export default function RegisterStep3() {
       setPsnStatus("failed");
       setPsnCooldown(10);
       showToast({ type: "error", title: "PSN verification failed", message: res.message });
+      return;
+    }
+
+    // Defensive check - ensure psnAccountId exists
+    if (!res.data.psnAccountId) {
+      setPsnStatus("failed");
+      setPsnCooldown(10);
+      showToast({ type: "error", title: "PSN verification failed", message: "Could not retrieve PSN account ID. Profile may be private." });
       return;
     }
 

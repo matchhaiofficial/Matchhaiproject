@@ -6,7 +6,7 @@ import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
-import { Matchroom, getUserMatchrooms } from "../../src/services/matchService";
+import { Matchroom, getUserMatchrooms } from "../../src/services/convex/matchService";
 import { COLORS } from "../../src/theme";
 import { getRoomStartDate } from "../../src/utils/timeFilters";
 import Logger from "../../src/utils/logger";
@@ -30,16 +30,16 @@ export default function ScheduleScreen() {
     const [rooms, setRooms] = useState<Matchroom[]>([]);
 
     const fetchSchedule = useCallback(async () => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setRooms([]);
             setLoading(false);
             return;
         }
         setLoading(true);
         try {
-            const result = await getUserMatchrooms(user.uid);
-            if (result.ok) {
-                setRooms(dedupeRooms([...result.data.hosted, ...result.data.joined]));
+            const result = await getUserMatchrooms(user._id);
+            if (result.ok && result.data) {
+                setRooms(dedupeRooms([...(result.data.hosted || []), ...(result.data.joined || [])]));
             } else {
                 setRooms([]);
             }
@@ -49,7 +49,7 @@ export default function ScheduleScreen() {
         } finally {
             setLoading(false);
         }
-    }, [user?.uid]);
+    }, [user?._id]);
 
     useFocusEffect(useCallback(() => {
         fetchSchedule();

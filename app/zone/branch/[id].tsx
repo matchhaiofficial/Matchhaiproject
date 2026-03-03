@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { updateZone } from "../../../src/services/zoneService";
+import { updateZone } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./branch.styles";

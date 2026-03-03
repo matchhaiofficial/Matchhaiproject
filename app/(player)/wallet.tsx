@@ -67,7 +67,7 @@ export default function WalletScreen() {
     const [addingFunds, setAddingFunds] = useState(false);
 
     const fetchWalletData = useCallback(async () => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setBookingIntents([]);
             setRequestsCount(0);
             setOffersCount(0);
@@ -78,10 +78,10 @@ export default function WalletScreen() {
         setLoading(true);
         try {
             const [intentsSnap, requestsResult, offersResult, userDoc] = await Promise.all([
-                getDocs(query(collection(db, "booking_intents"), where("createdByUid", "==", user.uid))),
-                getUserRequests(user.uid),
-                getOffersForUser(user.uid),
-                getDoc(doc(db, "users", user.uid)),
+                getDocs(query(collection(db, "booking_intents"), where("createdByUid", "==", user._id))),
+                getUserRequests(user._id),
+                getOffersForUser(user._id),
+                getDoc(doc(db, "users", user._id)),
             ]);
 
             const intents = intentsSnap.docs
@@ -101,7 +101,7 @@ export default function WalletScreen() {
         } finally {
             setLoading(false);
         }
-    }, [user?.uid]);
+    }, [user?._id]);
 
     useFocusEffect(useCallback(() => {
         fetchWalletData();
@@ -125,7 +125,7 @@ export default function WalletScreen() {
     const quickAmounts = [500, 1000, 2000, 5000];
 
     const handleAddFunds = async () => {
-        if (!user?.uid || addingFunds) return;
+        if (!user?._id || addingFunds) return;
         const amount = Number(addAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
             Alert.alert("Invalid amount", "Enter a valid amount to add funds.");
@@ -134,8 +134,8 @@ export default function WalletScreen() {
 
         setAddingFunds(true);
         try {
-            const userRef = doc(db, "users", user.uid);
-            const txRef = doc(collection(db, "users", user.uid, "wallet_transactions"));
+            const userRef = doc(db, "users", user._id);
+            const txRef = doc(collection(db, "users", user._id, "wallet_transactions"));
             await runTransaction(db, async (transaction: any) => {
                 const userSnap = await transaction.get(userRef);
                 const currentBalance = userSnap.exists()
@@ -151,7 +151,7 @@ export default function WalletScreen() {
                     { merge: true },
                 );
                 transaction.set(txRef, {
-                    uid: user.uid,
+                    uid: user._id,
                     type: "credit",
                     amount,
                     status: "completed",

@@ -13,7 +13,7 @@ import {
 } from "react-native";
 
 import { getPendingZones } from "../../../src/services/superAdminService";
-import { Zone } from "../../../src/services/zoneService";
+import { Zone } from "../../../src/services/convex/zoneService";
 import { COLORS, FONTS, SPACING, RADII, SHADOWS } from "../../../src/theme";
 import { useToast } from "../../../src/hooks/useToast";
 

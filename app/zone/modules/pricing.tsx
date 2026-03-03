@@ -183,7 +183,7 @@ export default function ZonePricingModule() {
     }, [pricingEngineReady, rulesBlocked, zone?.id]);
 
     const createRule = async () => {
-        if (!zone?.id || !user?.uid) return;
+        if (!zone?.id || !user?._id) return;
         if (!pricingEngineReady) {
             Alert.alert("Migration required", "Run branch migration before creating pricing rules.");
             return;
@@ -222,7 +222,7 @@ export default function ZonePricingModule() {
                 validTo: validToAt ? toDateValue(validToAt) : null,
                 priority: Number.isFinite(parsedPriority) ? parsedPriority : 0,
             },
-            user.uid,
+            user._id,
         );
         setSaving(false);
 

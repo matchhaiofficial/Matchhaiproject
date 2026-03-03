@@ -34,7 +34,7 @@ import {
     type ZoneBranch,
     type ZoneBranchResource,
 } from "../../../src/services/zoneAdminResourceService";
-import { type Matchroom } from "../../../src/services/matchService";
+import { type Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import styles from "./dashboard.styles";
 
@@ -175,7 +175,7 @@ export default function ZoneDashboardHome() {
         );
         const unsubMatchrooms = subscribeZoneMatchrooms(
             zone.id,
-            user?.uid,
+            user?._id,
             (rows) => setMatchrooms(rows),
             () => setMatchrooms([]),
             {
@@ -192,13 +192,13 @@ export default function ZoneDashboardHome() {
             unsubQueue();
             unsubMatchrooms();
         };
-    }, [branchAreas, user?.uid, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
+    }, [branchAreas, user?._id, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
 
     useEffect(() => {
-        if (!user?.uid) return;
+        if (!user?._id) return;
         const q = query(
             collection(db, "notifications"),
-            where("toUid", "==", user.uid),
+            where("toUid", "==", user._id),
             where("status", "==", "pending"),
         );
         const unsub = onSnapshot(
@@ -207,7 +207,7 @@ export default function ZoneDashboardHome() {
             () => setNotificationCount(0),
         );
         return () => unsub();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     const allResources = useMemo(
         () => Object.values(resourcesByBranch).flat(),
@@ -221,7 +221,7 @@ export default function ZoneDashboardHome() {
             : 0;
         const zoneType = zone?.type === "sports" ? "Sports" : zone?.type === "hybrid" ? "Hybrid" : "Gaming";
         const status = zone?.status === "active" ? "Active" : zone?.status === "rejected" ? "Rejected" : "Pending";
-        const ownerName = zone?.ownerFullName || user?.displayName || "Zone Owner";
+        const ownerName = zone?.ownerFullName || user?.fullName || "Zone Owner";
         const busy = allResources.filter((item) => item.lifecycleStatus === "booked" || item.lifecycleStatus === "held").length;
         const utilization = allResources.length ? Math.round((busy / allResources.length) * 100) : 0;
         const liveRooms = matchrooms.filter((item) => ["open", "in-progress"].includes(String(item.status || "").toLowerCase())).length;
@@ -248,7 +248,7 @@ export default function ZoneDashboardHome() {
             upcomingCount,
             maintenanceCount: allResources.filter((item) => item.lifecycleStatus === "maintenance").length,
         };
-    }, [allResources, branches.length, matchrooms, queue, user?.displayName, zone]);
+    }, [allResources, branches.length, matchrooms, queue, user?.fullName, zone]);
 
     const dashboardModules = useMemo(
         () =>

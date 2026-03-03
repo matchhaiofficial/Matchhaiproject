@@ -110,7 +110,7 @@ export const joinTeam = async (teamId: string, user: { uid: string; username: st
     try {
         const teamRef = doc(db, TEAMS_COLLECTION, teamId);
         const newMember: TeamMember = {
-            uid: user.uid,
+            uid: user._id,
             username: user.username,
             role: 'member',
             joinedAt: new Date()
@@ -118,7 +118,7 @@ export const joinTeam = async (teamId: string, user: { uid: string; username: st
 
         await updateDoc(teamRef, {
             members: arrayUnion(newMember),
-            memberUids: arrayUnion(user.uid)
+            memberUids: arrayUnion(user._id)
         });
 
         return { ok: true, message: 'Joined team' };

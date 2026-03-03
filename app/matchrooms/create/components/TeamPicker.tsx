@@ -2,7 +2,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { Team } from '../../../../src/services/teamService';
+import { Team } from '../../../../src/services/convex/teamService';
 import { COLORS, FONTS } from '../../../../src/theme';
 import styles from '../create.styles';
 

@@ -1290,7 +1290,7 @@ export const transferMatchroomCaptain = async (data: {
 
             // Verify new captain is in the same team
             const slots = team === 'A' ? matchroomData.slotsA : matchroomData.slotsB;
-            const isMember = slots.some((s: any) => s.user?.uid === newCaptainUid);
+            const isMember = slots.some((s: any) => s.user?._id === newCaptainUid);
 
             if (!isMember) {
                 throw new Error("Target player must be in your team to become captain.");

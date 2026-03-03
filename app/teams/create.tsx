@@ -58,7 +58,7 @@ export default function CreateTeam() {
 
     const handleSubmit = async () => {
         Keyboard.dismiss();
-        Logger.info("CreateTeam", "handleSubmit called", { name, selectedGame, selectedSize, uid: user?.uid });
+        Logger.info("CreateTeam", "handleSubmit called", { name, selectedGame, selectedSize, uid: user?._id });
 
         if (!user) {
             alert("You must be logged in");

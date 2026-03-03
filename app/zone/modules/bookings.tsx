@@ -21,7 +21,7 @@ import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { db } from "../../../src/config/firebaseConfig";
-import { type Matchroom } from "../../../src/services/matchService";
+import { type Matchroom } from "../../../src/services/convex/matchService";
 import {
     acceptZoneBookingRequest,
     rejectZoneBookingRequest,
@@ -285,7 +285,7 @@ export default function ZoneBookingsModule() {
 
         const unsubMatchrooms = subscribeZoneMatchrooms(
             zone.id,
-            user?.uid,
+            user?._id,
             (rows) => {
                 setMatchrooms(rows);
                 setLoadingMatchrooms(false);
@@ -312,7 +312,7 @@ export default function ZoneBookingsModule() {
             unsubQueue();
             unsubMatchrooms();
         };
-    }, [branchAreas, user?.uid, zone?.id]);
+    }, [branchAreas, user?._id, zone?.id]);
 
     useEffect(() => {
         let cancelled = false;
@@ -481,11 +481,11 @@ export default function ZoneBookingsModule() {
 
     const handleAccept = async (targetRequest?: ZoneBookingQueueItem) => {
         const req = targetRequest || selectedRequest;
-        if (!zone?.id || !user?.uid || !req) return;
+        if (!zone?.id || !user?._id || !req) return;
         setProcessingAction("accept");
         const result = await acceptZoneBookingRequest({
             requestId: req.id,
-            adminUid: user.uid,
+            adminUid: user._id,
             zoneId: zone.id,
             requestOwnerUid: req.userId,
             branchId: primaryBranch?.id || undefined,
@@ -503,11 +503,11 @@ export default function ZoneBookingsModule() {
     };
 
     const handleReject = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
+        if (!zone?.id || !user?._id || !selectedRequest) return;
         setProcessingAction("reject");
         const result = await rejectZoneBookingRequest({
             requestId: selectedRequest.id,
-            adminUid: user.uid,
+            adminUid: user._id,
             zoneId: zone.id,
             requestOwnerUid: selectedRequest.userId,
             reason: rejectReason,
@@ -523,7 +523,7 @@ export default function ZoneBookingsModule() {
     };
 
     const handleCounterOffer = async () => {
-        if (!zone?.id || !user?.uid || !selectedRequest) return;
+        if (!zone?.id || !user?._id || !selectedRequest) return;
 
         const parsedPrice = Number.parseInt(counterPrice, 10);
         const parsedExpiry = Number.parseInt(counterExpiryMinutes, 10);
@@ -540,7 +540,7 @@ export default function ZoneBookingsModule() {
                 requestOwnerUid: selectedRequest.userId,
                 zoneId: zone.id,
                 zoneName: zone.venueBrandName || "Zone",
-                zoneOwnerUid: user.uid,
+                zoneOwnerUid: user._id,
                 branchId: primaryBranch?.id || undefined,
                 branchName: primaryBranch?.branchDisplayName || null,
                 proposedDate: counterDateTime.date,

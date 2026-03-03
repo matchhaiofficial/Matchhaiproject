@@ -30,14 +30,14 @@ export default function InAppNotificationBridge() {
     useEffect(() => {
         primedRef.current = false;
         seenIdsRef.current = new Set();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     useEffect(() => {
-        if (!user?.uid) return;
+        if (!user?._id) return;
 
         const q = query(
             collection(db, "notifications"),
-            where("toUid", "==", user.uid),
+            where("toUid", "==", user._id),
         );
 
         const unsub = onSnapshot(
@@ -84,7 +84,7 @@ export default function InAppNotificationBridge() {
         );
 
         return () => unsub();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     return null;
 }

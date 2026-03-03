@@ -774,14 +774,14 @@ export async function requestJoinMatchroom(
         const roomId = room.id;
         if (!roomId) throw "Matchroom ID missing";
 
-        const conflict = await findUserTimeConflict(user.uid, room, roomId);
+        const conflict = await findUserTimeConflict(user._id, room, roomId);
         if (conflict.conflict) {
             return { ok: false, message: conflict.message };
         }
 
         // Idempotency: Use deterministic ID to prevent duplicate pending requests
         // If slot-specific, maybe uniqueness changes? For now, keep one request per user per room to avoid spam.
-        const requestId = `match_join_request_${roomId}_${user.uid}`;
+        const requestId = `match_join_request_${roomId}_${user._id}`;
         const notifRef = doc(db, 'notifications', requestId);
 
         const existingSnap = await getDoc(notifRef);
@@ -793,7 +793,7 @@ export async function requestJoinMatchroom(
         await setDoc(notifRef, {
             type: 'match_join_request',
             toUid: room.hostUid,
-            fromUid: user.uid,
+            fromUid: user._id,
             fromUsername: user.username,
             status: 'pending',
             isRead: false,
@@ -810,7 +810,7 @@ export async function requestJoinMatchroom(
             }
         });
 
-        Logger.info("matchService", "Join request sent", { roomId, uid: user.uid, slotId });
+        Logger.info("matchService", "Join request sent", { roomId, uid: user._id, slotId });
         return { ok: true, id: requestId };
     } catch (error) {
         Logger.error("matchService", "Error requesting to join", error);
@@ -951,7 +951,7 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
         const room = roomSnap.data() as Matchroom;
 
         // BUSY CHECK
-        const busyCheck = await isUserInActiveMatchroom(user.uid, { id: roomId, ...room } as Matchroom);
+        const busyCheck = await isUserInActiveMatchroom(user._id, { id: roomId, ...room } as Matchroom);
         if (busyCheck.inRoom && busyCheck.roomId !== roomId) {
             return { ok: false, message: busyCheck.message || "You are already in another active matchroom." };
         }
@@ -973,12 +973,12 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
         const updateData: any = {
             currentPlayers: newPlayerCount,
             players: arrayUnion({
-                uid: user.uid,
+                uid: user._id,
                 username: user.username,
                 joinedAt: new Date(),
                 role: role || 'Flex'
             }),
-            playerUids: arrayUnion(user.uid)
+            playerUids: arrayUnion(user._id)
         };
 
         // As soon as room is full, lock it immediately.
@@ -1027,7 +1027,7 @@ export async function joinMatchroom(roomId: string, user: { uid: string; usernam
         // Add to chatroom participants (best-effort)
         try {
             await updateDoc(doc(db, 'chatrooms', roomId), {
-                participantUids: arrayUnion(user.uid),
+                participantUids: arrayUnion(user._id),
                 updatedAt: serverTimestamp(),
             });
         } catch (e) {

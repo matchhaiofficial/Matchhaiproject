@@ -45,7 +45,7 @@ export default function SidebarMenu({ visible, onClose, items, title = "Menu" }:
     }).start();
   }, [visible, translateX]);
 
-  const displayName = user?.displayName || "Player";
+  const displayName = user?.fullName || "Player";
   const avatarUri = user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=2c2c2c&color=fff&size=128`;
 
   const headerPadding = useMemo(

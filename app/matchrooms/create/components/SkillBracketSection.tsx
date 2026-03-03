@@ -122,12 +122,12 @@ export default function SkillBracketSection({
     const [localSkill, setLocalSkill] = useState<GameSkillScore | null>(null);
 
     useEffect(() => {
-        if (!userProfile?.uid) return;
+        if (!userProfile?._id) return;
 
         const loadSkill = async () => {
             setLoading(true);
             try {
-                const skill = await initializeSkillIfMissing(userProfile.uid, gameKey as any, userProfile);
+                const skill = await initializeSkillIfMissing(userProfile._id, gameKey as any, userProfile);
                 if (skill) {
                     setLocalSkill({ ...skill, rating: clampRating(skill.rating) });
                     if (valueTier === null) {
@@ -144,13 +144,13 @@ export default function SkillBracketSection({
         };
 
         loadSkill();
-    }, [gameKey, userProfile?.uid]);
+    }, [gameKey, userProfile?._id]);
 
     const handleCalibrationComplete = async (answers: Record<string, number>) => {
-        if (!userProfile?.uid) return;
+        if (!userProfile?._id) return;
         setLoading(true);
         try {
-            const res = await saveSelfAssessment(userProfile.uid, gameKey as any, answers);
+            const res = await saveSelfAssessment(userProfile._id, gameKey as any, answers);
             if (res.ok && res.rating !== undefined && res.tier) {
                 const normalizedRating = clampRating(res.rating);
                 const newSkill: GameSkillScore = {

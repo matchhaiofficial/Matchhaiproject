@@ -9,7 +9,7 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { respondToMatchJoinRequest } from "../../../src/services/matchService";
+import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import {
@@ -73,14 +73,14 @@ export default function ZoneNotificationsModule() {
     const [clearing, setClearing] = useState(false);
 
     useEffect(() => {
-        if (!user?.uid) {
+        if (!user?._id) {
             setLoading(false);
             return;
         }
 
         const q = query(
             collection(db, "notifications"),
-            where("toUid", "==", user.uid),
+            where("toUid", "==", user._id),
         );
 
         const unsub = onSnapshot(
@@ -107,7 +107,7 @@ export default function ZoneNotificationsModule() {
         );
 
         return () => unsub();
-    }, [user?.uid]);
+    }, [user?._id]);
 
     const pendingCount = useMemo(
         () => items.filter((item) => item.status !== "seen").length,
@@ -149,7 +149,7 @@ export default function ZoneNotificationsModule() {
     };
 
     const handleClearAll = async () => {
-        if (!user?.uid || items.length === 0) return;
+        if (!user?._id || items.length === 0) return;
 
         const hasPending = pendingCount > 0;
         const alertTitle = hasPending ? "Mark All as Seen" : "Clear Notification History";
@@ -193,7 +193,7 @@ export default function ZoneNotificationsModule() {
     };
 
     const handleAcceptRejectBooking = async (item: AdminNotification, decision: 'accept' | 'reject') => {
-        if (!user?.uid || !item.meta?.requestId) return;
+        if (!user?._id || !item.meta?.requestId) return;
         setProcessingId(item.id);
         try {
             const requestId = item.meta.requestId;
@@ -208,14 +208,14 @@ export default function ZoneNotificationsModule() {
             if (decision === 'accept') {
                 res = await acceptZoneBookingRequest({
                     requestId,
-                    adminUid: user.uid,
+                    adminUid: user._id,
                     zoneId,
                     requestOwnerUid: item.fromUid
                 });
             } else {
                 res = await rejectZoneBookingRequest({
                     requestId,
-                    adminUid: user.uid,
+                    adminUid: user._id,
                     zoneId,
                     requestOwnerUid: item.fromUid,
                     reason: "Declined by admin"
@@ -236,10 +236,10 @@ export default function ZoneNotificationsModule() {
     };
 
     const handleAcceptReject = async (item: AdminNotification, decision: 'accept' | 'reject') => {
-        if (!user?.uid) return;
+        if (!user?._id) return;
         setProcessingId(item.id);
         try {
-            const res = await respondToMatchJoinRequest(item.id, decision, user.uid);
+            const res = await respondToMatchJoinRequest(item.id, decision, user._id);
             if (res.ok) {
                 if (decision === 'accept') {
                     Alert.alert("Accepted", `${item.fromUsername || 'Player'} has been added to the room.`);

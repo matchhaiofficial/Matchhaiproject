@@ -160,7 +160,7 @@ export async function createBookingIntentDetailed({
         Logger.info("bookingService", "Creating intent", {
             matchroomId: room?.id,
             side,
-            uid: user.uid,
+            uid: user._id,
             slotCount: slotIds.length,
             inviteeCount: invs.length
         });
@@ -176,7 +176,7 @@ export async function createBookingIntentDetailed({
         }
 
 
-        const intentId = generateIntentId(room?.id || 'unknown', side, user.uid, slotIds);
+        const intentId = generateIntentId(room?.id || 'unknown', side, user._id, slotIds);
 
         // Check for existing unexpired intent
         const existingRef = doc(db, "booking_intents", intentId);
@@ -217,19 +217,19 @@ export async function createBookingIntentDetailed({
         const targetCaptainUid = side === 'A' ? room.captainUidA : room.captainUidB;
         const approverUid = targetCaptainUid || getHostCaptainUid(room);
 
-        const captainApproved = !captainApprovalRequired || (approverUid === user.uid);
+        const captainApproved = !captainApprovalRequired || (approverUid === user._id);
         const zoneApproved = room.locationMode === 'broadcast' || room.isPrivate === true; // Simplified rule
 
         // User spec: "if they lies in skilltier avg then directly ask them to pay"
         // This implies if !captainApprovalRequired, they go straight to payment.
-        const canSkipApproval = !captainApprovalRequired || (approverUid === user.uid);
+        const canSkipApproval = !captainApprovalRequired || (approverUid === user._id);
 
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour for approval and payment
 
         const intentData: Omit<BookingIntent, 'id'> = {
             matchroomId: room?.id || 'unknown',
             game: room?.game || 'unknown',
-            createdByUid: user.uid,
+            createdByUid: user._id,
             side,
             selectedSlots: slotIds,
             invitees: invs,
@@ -242,7 +242,7 @@ export async function createBookingIntentDetailed({
                 captain: {
                     required: captainApprovalRequired,
                     status: captainApproved ? 'approved' : 'pending',
-                    ...(captainApproved && approverUid === user.uid ? { decidedBy: user.uid, decidedAt: new Date() } : {})
+                    ...(captainApproved && approverUid === user._id ? { decidedBy: user._id, decidedAt: new Date() } : {})
                 },
                 zone: {
                     required: !zoneApproved,
@@ -267,7 +267,7 @@ export async function createBookingIntentDetailed({
             notificationBatch.push({
                 type: 'match_booking_captain_approval',
                 toUid: approverUid,
-                fromUid: user.uid,
+                fromUid: user._id,
                 fromUsername: user.displayName || 'Player',
                 status: 'pending',
                 isRead: false,
@@ -471,7 +471,7 @@ export async function claimSeatTransaction(
             const slot = slots.find(s => s.slotId === slotId);
 
             if (!slot) throw "Slot not found";
-            if (slot.status !== 'reserved' || slot.reservedForUid !== user.uid) {
+            if (slot.status !== 'reserved' || slot.reservedForUid !== user._id) {
                 throw "This seat is not reserved for you";
             }
 
@@ -481,7 +481,7 @@ export async function claimSeatTransaction(
                     return {
                         ...s,
                         status: 'confirmed' as const,
-                        uid: user.uid,
+                        uid: user._id,
                         reservedForUid: undefined // remove reservation
                     };
                 }
@@ -489,20 +489,20 @@ export async function claimSeatTransaction(
             });
 
             // Update player list in room for backward compat / easy lookup
-            const userInPlayers = room.players.some(p => p.uid === user.uid);
+            const userInPlayers = room.players.some(p => p.uid === user._id);
             let updatedPlayers = room.players;
             let updatedUids = room.playerUids || [];
 
             if (!userInPlayers) {
                 // Find role from intent
-                const inviteeData = intent.invitees.find(i => i.uid === user.uid);
+                const inviteeData = intent.invitees.find(i => i.uid === user._id);
                 updatedPlayers = [...room.players, {
-                    uid: user.uid,
+                    uid: user._id,
                     username: user.displayName || "Unknown",
                     joinedAt: new Date(),
                     role: inviteeData?.roleForGame
                 }];
-                updatedUids = [...updatedUids, user.uid];
+                updatedUids = [...updatedUids, user._id];
             }
 
             transaction.update(roomRef, {
@@ -515,7 +515,7 @@ export async function claimSeatTransaction(
 
             // Live Fairness Calc: Update avg if user has skill
             // We need to fetch the invitee's skill from the intent to invoke this
-            const inviteeData = intent.invitees.find(i => i.uid === user.uid);
+            const inviteeData = intent.invitees.find(i => i.uid === user._id);
             const userSkill = inviteeData?.skillScore;
 
             if (userSkill !== undefined && userSkill !== null) {

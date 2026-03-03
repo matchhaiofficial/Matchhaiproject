@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import React, { memo, useEffect, useState } from "react";
 import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from "react-native";
 
-import { Matchroom } from "../../../src/services/matchService";
+import { Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
 import styles from "../matchrooms.styles";

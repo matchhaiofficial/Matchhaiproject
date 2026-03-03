@@ -145,7 +145,7 @@ export async function saveZoneRegistration(
     }));
 
     const docBody = {
-      ownerUid: user.uid,
+      ownerUid: user._id,
       ownerFullName: step1.ownerFullName.trim(),
       venueBrandName: step1.venueBrandName.trim(),
       contactEmail: step1.contactEmail.trim().toLowerCase(),

@@ -20,7 +20,7 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 
 import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
-import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../src/services/teamService";
+import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../src/services/convex/teamService";
 import { getCaptainedTeams } from "../../../src/services/teamMatchService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -65,7 +65,7 @@ export default function Teams() {
             setRefreshing(true);
             const q = query(
                 collection(db, 'teams'),
-                where('captainUid', '==', user.uid)
+                where('captainUid', '==', user._id)
             );
             const snap = await getDocs(q);
             const batchPromises = [];
@@ -74,7 +74,7 @@ export default function Teams() {
                 const data = teamDoc.data();
                 if (!data.memberUids) {
                     batchPromises.push(updateDoc(doc(db, 'teams', teamDoc.id), {
-                        memberUids: [user.uid]
+                        memberUids: [user._id]
                     }));
                 }
             }
@@ -97,7 +97,7 @@ export default function Teams() {
     const fetchTeams = async () => {
         if (!user) return;
         try {
-            const result = await getUserTeams(user.uid);
+            const result = await getUserTeams(user._id);
             if (result.ok && result.data) {
                 setTeams(result.data);
             }
@@ -110,8 +110,8 @@ export default function Teams() {
     };
 
     const fetchCaptainedTeams = async () => {
-        if (!user?.uid) return;
-        const result = await getCaptainedTeams(user.uid);
+        if (!user?._id) return;
+        const result = await getCaptainedTeams(user._id);
         if (result.ok && result.data) {
             setCaptainedTeams(result.data);
         } else {
@@ -128,13 +128,12 @@ export default function Teams() {
             const result = await getPublicTeams({
                 game: selectedGame,
                 searchQuery: searchQuery,
-                lastDoc: isLoadMore ? lastVisible : null,
-                limitCount: 10
+                limitCount: isLoadMore ? publicTeams.length + 10 : 10
             });
 
             if (result.ok && result.data) {
                 // Filter out teams where current user is already a member/captain
-                const filteredData = result.data.filter(t => !t.memberUids?.includes(user.uid));
+                const filteredData = result.data.filter(t => !t.memberUids?.includes(user._id));
 
                 if (isLoadMore) {
                     setPublicTeams(prev => {
@@ -145,8 +144,7 @@ export default function Teams() {
                 } else {
                     setPublicTeams(filteredData);
                 }
-                setLastVisible(result.lastVisible);
-                setHasMore(result.data.length === 10);
+                setHasMore(result.data.length >= 10);
             }
         } catch (error) {
             Logger.error("Teams", "Error fetching public teams", error);
@@ -162,7 +160,7 @@ export default function Teams() {
         try {
             const q = query(
                 collection(db, "notifications"),
-                where("fromUid", "==", user.uid),
+                where("fromUid", "==", user._id),
                 where("type", "==", "team_join_request"),
                 where("status", "==", "pending")
             );
@@ -219,7 +217,7 @@ export default function Teams() {
     };
 
     const handleChallengeTeam = async (opponent: Team) => {
-        if (!opponent.id || !user?.uid) return;
+        if (!opponent.id || !user?._id) return;
         const captainedForGame = captainedTeams.filter(
             (team) => String(team.game || "").toLowerCase() === String(opponent.game || "").toLowerCase(),
         );

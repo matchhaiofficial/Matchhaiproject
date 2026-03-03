@@ -111,9 +111,9 @@ export default function GameDetails() {
 
     useEffect(() => {
         const fetchProfile = async () => {
-            if (!user?.uid || !gameId) return;
+            if (!user?._id || !gameId) return;
             try {
-                const docRef = doc(db, "users", user.uid);
+                const docRef = doc(db, "users", user._id);
                 const snap = await getDoc(docRef);
                 if (snap.exists()) {
                     const data = snap.data();
@@ -171,7 +171,7 @@ export default function GameDetails() {
                 }
 
                 // Background Refresh
-                refreshUserStats(user.uid).then((res) => {
+                refreshUserStats(user._id).then((res) => {
                     if (res.ok && res.data) {
                         // Shallow update for UI reactivity if needed
                         // Real implementation usually relies on listeners or full reload
@@ -186,12 +186,12 @@ export default function GameDetails() {
             }
         };
         fetchProfile();
-    }, [user?.uid, gameId]);
+    }, [user?._id, gameId]);
 
     const [showAssessment, setShowAssessment] = useState(false);
 
     const persistChanges = async () => {
-        if (!user?.uid || !gameId) return;
+        if (!user?._id || !gameId) return;
 
         setSaving(true);
         try {
@@ -274,7 +274,7 @@ export default function GameDetails() {
                 }
             }
 
-            const userRef = doc(db, "users", user.uid);
+            const userRef = doc(db, "users", user._id);
             await updateDoc(userRef, updates);
 
             showToast({ type: "success", title: "Saved", message: `${gameName} preferences updated` });
@@ -328,7 +328,7 @@ export default function GameDetails() {
         // Let's call persistChanges but inject the score update manually since state might lag.
 
         const asyncUpdate = async () => {
-            const userRef = doc(db, "users", user!.uid);
+            const userRef = doc(db, "users", user!._id as string);
             await updateDoc(userRef, {
                 [`skillScores.${gameId}`]: newScore
             });
@@ -576,7 +576,7 @@ export default function GameDetails() {
                 visible={showAssessment}
                 onClose={() => setShowAssessment(false)}
                 gameKey={gameId}
-                userId={user?.uid || ''}
+                userId={user?._id || ''}
                 onSuccess={handleAssessmentSuccess}
             />
 

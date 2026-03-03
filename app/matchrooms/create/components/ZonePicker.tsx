@@ -2,7 +2,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { getActiveZones, Zone } from '../../../../src/services/zoneService';
+import { getActiveZones, Zone } from '../../../../src/services/convex/zoneService';
 import { COLORS } from '../../../../src/theme';
 import styles from '../create.styles';
 
