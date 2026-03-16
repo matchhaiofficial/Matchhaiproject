@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -13,12 +12,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAuth } from "../../../../src/context/AuthContext";
-import { db } from "../../../../src/config/firebaseConfig";
+import { convex } from "../../../../src/lib/convex";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
 import {
     BookingIntent,
     confirmBookingTransaction,
     getBookingIntent
-} from "../../../../src/services/bookingService";
+} from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import styles from "./pay.styles";
@@ -59,8 +60,10 @@ export default function MockPaymentScreen() {
         const loadWallet = async () => {
             if (!user?._id) return;
             try {
-                const snap = await getDoc(doc(db, "users", user._id));
-                setWalletBalance(snap.exists() ? Number(snap.data()?.walletBalance || 0) : 0);
+                const balance = await convex.query(api.wallet.getBalance, {
+                    userId: user._id as Id<"users">,
+                });
+                setWalletBalance(Number(balance || 0));
             } catch {
                 setWalletBalance(0);
             }
@@ -105,7 +108,7 @@ export default function MockPaymentScreen() {
     }
 
     if (!intent) return null;
-    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.total || 0);
+    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.totalCost || 0);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -120,7 +123,7 @@ export default function MockPaymentScreen() {
                 <View style={styles.amountCard}>
                     <Text style={styles.amountLabel}>TOTAL AMOUNT</Text>
                     <Text style={styles.amountValue}>
-                        {intent.pricing.currency} {intent.pricing.total}
+                        {(intent.pricing as any)?.currency || "PKR"} {intent.pricing?.totalCost}
                     </Text>
                     <Text style={styles.seatCount}>
                         For {intent.selectedSlots.length} Reserved Seats
@@ -142,7 +145,7 @@ export default function MockPaymentScreen() {
                     </View>
                     <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Price per seat</Text>
-                        <Text style={styles.detailValue}>{intent.pricing.currency}{intent.pricing.perPlayer}</Text>
+                        <Text style={styles.detailValue}>{(intent.pricing as any)?.currency || "PKR"}{intent.pricing?.perPlayerCost}</Text>
                     </View>
                 </View>
 
@@ -162,7 +165,7 @@ export default function MockPaymentScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.methodName}>MatchHai Wallet</Text>
-                            <Text style={styles.methodDetail}>Balance: {intent.pricing.currency} {Math.round(walletBalance)}</Text>
+                            <Text style={styles.methodDetail}>Balance: {(intent.pricing as any)?.currency || "PKR"} {Math.round(walletBalance)}</Text>
                         </View>
                         <MaterialIcons
                             name={paymentMethod === "wallet" ? "radio-button-checked" : "radio-button-unchecked"}

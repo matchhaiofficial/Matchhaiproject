@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { collection, getDocs } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import React, { useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -11,7 +13,6 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { inviteToTeam } from "../../../src/services/functions";
 import { COLORS } from "../../../src/theme";
@@ -32,34 +33,19 @@ interface InviteFriendsSheetProps {
 
 export default function InviteFriendsSheet({ visible, onClose, teamId, teamName }: InviteFriendsSheetProps) {
     const { user } = useAuth();
-    const [friends, setFriends] = useState<Friend[]>([]);
-    const [loading, setLoading] = useState(true);
     const [invitingIds, setInvitingIds] = useState<Set<string>>(new Set());
 
-    useEffect(() => {
-        if (visible && user) {
-            fetchFriends();
-        }
-    }, [visible, user]);
+    // Real-time query for friends (replaces Firebase getDocs)
+    const friendsData = useQuery(
+        api.social.listFriends,
+        user?._id ? { userId: user._id as Id<"users"> } : "skip"
+    );
 
-    const fetchFriends = async () => {
-        if (!user) return;
-        setLoading(true);
-        try {
-            const friendsRef = collection(db, "users", user._id, "friends");
-            const snap = await getDocs(friendsRef);
-            const list: Friend[] = [];
-            snap.forEach(doc => {
-                const data = doc.data();
-                list.push({ uid: data.uid, username: data.username });
-            });
-            setFriends(list);
-        } catch (error) {
-            Logger.error("InviteFriendsSheet", "Error fetching friends", error);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const friends: Friend[] = (friendsData ?? []).map((f: any) => ({
+        uid: f.friendId,
+        username: f.username,
+    }));
+    const loading = visible && friendsData === undefined;
 
     const handleInvite = async (friendUid: string, friendUsername: string) => {
         if (invitingIds.has(friendUid)) return;

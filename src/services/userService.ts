@@ -1,6 +1,6 @@
 // src/services/userService.ts
 // Re-exports from Convex user service for backwards compatibility
-// Original Firebase implementation backed up to userService.firebase.ts.bak
+// Convex-based user service (re-export wrapper)
 
 export {
   // Types

@@ -76,6 +76,21 @@ export const getById = query({
   },
 });
 
+// Get matchroom by matchCode (fallback lookup)
+export const getByMatchCode = query({
+  args: { matchCode: v.string() },
+  handler: async (ctx, args) => {
+    const rooms = await ctx.db
+      .query("matchrooms")
+      .filter((q) => q.eq(q.field("matchCode"), args.matchCode))
+      .take(1);
+    if (rooms.length > 0) {
+      return { ...rooms[0], id: rooms[0]._id };
+    }
+    return null;
+  },
+});
+
 // List matchrooms (with optional filters)
 export const list = query({
   args: {
@@ -686,6 +701,453 @@ export const updateSlots = mutation({
 
     await ctx.db.patch(args.matchroomId, updateData);
     return { ok: true };
+  },
+});
+
+// Invite to matchroom (creates notification)
+export const inviteToMatchroom = mutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    fromUid: v.string(),
+    fromUsername: v.string(),
+    toUid: v.id("users"),
+    team: v.union(v.literal("A"), v.literal("B")),
+    slotId: v.string(),
+    role: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
+
+    // Verify captain
+    const captainUid = args.team === "A"
+      ? (room.captainUidA || room.hostUid)
+      : room.captainUidB;
+    if (captainUid !== args.fromUid) {
+      throw new Error(`Only the captain of Team ${args.team} can send invitations for this team.`);
+    }
+
+    // Not already in room
+    if (room.playerUids.includes(args.toUid)) {
+      throw new Error("User is already in this matchroom.");
+    }
+
+    const entityKey = `match_invite_${args.matchroomId}_${args.toUid}_${args.slotId}`;
+    const now = Date.now();
+    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+    // Get fromUser Convex ID
+    const fromUsers = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q) => q.eq("authId", args.fromUid))
+      .take(1);
+    const fromUserId = fromUsers[0]?._id;
+
+    const notifId = await ctx.db.insert("notifications", {
+      type: "match_seat_invitation",
+      toUid: args.toUid,
+      fromUid: fromUserId,
+      fromUsername: args.fromUsername,
+      status: "pending",
+      entityKey,
+      matchroomId: args.matchroomId,
+      title: "Matchroom Invite",
+      body: `You've been invited to join ${room.title}`,
+      data: {
+        matchroomId: args.matchroomId,
+        matchroomTitle: room.title,
+        team: args.team,
+        slotId: args.slotId,
+        role: args.role || "Flex",
+        game: room.game,
+      },
+      expiresAt: now + twoDaysMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return notifId;
+  },
+});
+
+// Respond to matchroom invite
+export const respondToMatchroomInvite = mutation({
+  args: {
+    notificationId: v.id("notifications"),
+    userId: v.id("users"),
+    accept: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const notif = await ctx.db.get(args.notificationId);
+    if (!notif) throw new Error("Notification not found");
+    if (notif.status !== "pending") throw new Error("Invitation already handled.");
+
+    const now = Date.now();
+
+    if (!args.accept) {
+      await ctx.db.patch(args.notificationId, { status: "declined", updatedAt: now });
+      return { ok: true };
+    }
+
+    // Get user
+    const user = await ctx.db.get(args.userId);
+    const username = user?.username || "Player";
+
+    const data = notif.data as any;
+    const matchroomId = notif.matchroomId || data?.matchroomId;
+    if (!matchroomId) throw new Error("Matchroom reference missing");
+
+    const room = await ctx.db.get(matchroomId as Id<"matchrooms">);
+    if (!room) throw new Error("Matchroom not found.");
+
+    // Already in room
+    if (room.playerUids.includes(args.userId as string)) {
+      throw new Error("You are already in this matchroom.");
+    }
+
+    const team = data?.team;
+    const slotId = data?.slotId;
+    const role = data?.role || "Flex";
+
+    // Find and fill slot
+    const slots: any[] = team === "A" ? [...(room.slotsA || [])] : [...(room.slotsB || [])];
+    const slotIdx = slots.findIndex((s: any) => s.slotId === slotId);
+    if (slotIdx === -1) throw new Error("Target slot not found.");
+    if (slots[slotIdx].user || slots[slotIdx].uid) throw new Error("This slot is already taken.");
+
+    slots[slotIdx] = {
+      ...slots[slotIdx],
+      uid: args.userId as string,
+      user: { uid: args.userId as string, username },
+      status: "confirmed" as const,
+      role,
+    };
+
+    const newPlayers = [...room.players, {
+      uid: args.userId as string,
+      username,
+      joinedAt: now,
+      role,
+    }];
+    const newPlayerUids = [...room.playerUids, args.userId as string];
+    const newPlayerCount = newPlayers.length;
+    const willBeFull = newPlayerCount >= room.maxPlayers;
+
+    const updateData: any = {
+      [team === "A" ? "slotsA" : "slotsB"]: slots,
+      players: newPlayers,
+      playerUids: newPlayerUids,
+      currentPlayers: newPlayerCount,
+      updatedAt: now,
+    };
+
+    if (willBeFull) {
+      updateData.status = "locked";
+      updateData.isLocked = true;
+      updateData.lockedAt = now;
+    }
+
+    await ctx.db.patch(matchroomId as Id<"matchrooms">, updateData);
+    await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+
+    // Add to chatroom participants
+    const chatrooms = await ctx.db
+      .query("chatrooms")
+      .withIndex("by_matchroomId", (q) => q.eq("matchroomId", matchroomId as Id<"matchrooms">))
+      .take(1);
+    if (chatrooms.length > 0) {
+      const chat = chatrooms[0];
+      const participantUids = [...(chat.participantUids || [])];
+      if (!participantUids.includes(args.userId as string)) {
+        participantUids.push(args.userId as string);
+        await ctx.db.patch(chat._id, { participantUids, updatedAt: now });
+      }
+    }
+
+    return { ok: true, willBeFull };
+  },
+});
+
+// Respond to matchroom join request (host accepts/rejects)
+export const respondToMatchroomJoinRequest = mutation({
+  args: {
+    notificationId: v.id("notifications"),
+    hostUid: v.string(),
+    accept: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const notif = await ctx.db.get(args.notificationId);
+    if (!notif) throw new Error("Request not found");
+    if (notif.type !== "match_join_request") throw new Error("Invalid notification type");
+    if (notif.status !== "pending") throw new Error("Request already handled");
+
+    const now = Date.now();
+    const data = notif.data as any;
+    const matchroomId = notif.matchroomId || data?.matchroomId;
+    if (!matchroomId) throw new Error("Matchroom ID missing from request");
+
+    const room = await ctx.db.get(matchroomId as Id<"matchrooms">);
+    if (!room) throw new Error("Matchroom not found");
+
+    if (room.hostUid !== args.hostUid) {
+      throw new Error("Only the host can respond to join requests");
+    }
+
+    if (isRoomExpired(room)) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      return { ok: false, message: "Matchroom expired." };
+    }
+
+    if (!args.accept) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      return { ok: true, message: "Request rejected." };
+    }
+
+    const requesterUid = notif.fromUid ? (await ctx.db.get(notif.fromUid))?.authId || (notif.fromUid as string) : "";
+    const requesterUsername = notif.fromUsername || "Player";
+    const role = data?.role || "Flex";
+    const targetTeam = data?.targetTeam || role;
+
+    if ((room.currentPlayers || 0) >= room.maxPlayers) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      throw new Error("Matchroom is full");
+    }
+
+    // Check if already in room
+    const fromUidStr = notif.data?.fromAuthId || requesterUid;
+    if (room.playerUids.includes(fromUidStr)) {
+      await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+      return { ok: true, message: "User is already in the matchroom." };
+    }
+
+    // Add player
+    const newPlayers = [...room.players, {
+      uid: fromUidStr,
+      username: requesterUsername,
+      joinedAt: now,
+      role,
+    }];
+    const newPlayerUids = [...room.playerUids, fromUidStr];
+    const newPlayerCount = newPlayers.length;
+    const willBeFull = newPlayerCount >= room.maxPlayers;
+
+    const updateData: any = {
+      players: newPlayers,
+      playerUids: newPlayerUids,
+      currentPlayers: newPlayerCount,
+      updatedAt: now,
+    };
+
+    // Slot assignment
+    const slotsA = [...(room.slotsA || [])];
+    const slotsB = [...(room.slotsB || [])];
+    const requestedSlotId = data?.slotId;
+
+    const assignToSlots = (slots: any[], slotId?: string) => {
+      let idx = -1;
+      if (slotId) {
+        idx = slots.findIndex((s: any) => s.slotId === slotId && !s.user && !s.uid);
+      } else {
+        idx = slots.findIndex((s: any) => !s.user && !s.uid);
+      }
+      if (idx === -1) return { slots, assigned: false };
+      const updated = [...slots];
+      updated[idx] = {
+        ...updated[idx],
+        uid: fromUidStr,
+        user: { uid: fromUidStr, username: requesterUsername },
+        status: "confirmed" as const,
+        role,
+      };
+      return { slots: updated, assigned: true };
+    };
+
+    let assigned = false;
+    if (slotsA.length > 0 || slotsB.length > 0) {
+      if (requestedSlotId) {
+        const resA = assignToSlots(slotsA, requestedSlotId);
+        if (resA.assigned) {
+          updateData.slotsA = resA.slots;
+          assigned = true;
+        } else {
+          const resB = assignToSlots(slotsB, requestedSlotId);
+          if (resB.assigned) {
+            updateData.slotsB = resB.slots;
+            assigned = true;
+            if (!room.captainUidB) updateData.captainUidB = fromUidStr;
+          }
+        }
+      }
+
+      if (!assigned) {
+        if (targetTeam === "Team A" || targetTeam === "A") {
+          const resA = assignToSlots(slotsA);
+          if (resA.assigned) { updateData.slotsA = resA.slots; assigned = true; }
+        } else if (targetTeam === "Team B" || targetTeam === "B") {
+          const resB = assignToSlots(slotsB);
+          if (resB.assigned) {
+            updateData.slotsB = resB.slots;
+            assigned = true;
+            if (!room.captainUidB) updateData.captainUidB = fromUidStr;
+          }
+        } else {
+          const resA = assignToSlots(slotsA);
+          if (resA.assigned) { updateData.slotsA = resA.slots; assigned = true; }
+          else {
+            const resB = assignToSlots(slotsB);
+            if (resB.assigned) {
+              updateData.slotsB = resB.slots;
+              assigned = true;
+              if (!room.captainUidB) updateData.captainUidB = fromUidStr;
+            }
+          }
+        }
+      }
+
+      if (!assigned) {
+        await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+        return { ok: false, message: "No available slot for this matchroom." };
+      }
+    }
+
+    if (willBeFull) {
+      updateData.status = "locked";
+      updateData.isLocked = true;
+      updateData.lockedAt = now;
+    }
+
+    await ctx.db.patch(matchroomId as Id<"matchrooms">, updateData);
+    await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+
+    return { ok: true, message: "Player added to matchroom." };
+  },
+});
+
+// Kick player from matchroom
+export const kickFromMatchroom = mutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    callerUid: v.string(),
+    playerUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (args.playerUid === args.callerUid) throw new Error("You cannot kick yourself.");
+
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found.");
+
+    const isHost = room.hostUid === args.callerUid;
+    const slotsA = room.slotsA || [];
+    const slotsB = room.slotsB || [];
+    const inTeamA = slotsA.some((s: any) => s.uid === args.playerUid);
+    const inTeamB = slotsB.some((s: any) => s.uid === args.playerUid);
+    const isCaptainA = room.captainUidA === args.callerUid;
+    const isCaptainB = room.captainUidB === args.callerUid;
+    const canKick = isHost || (inTeamA && isCaptainA) || (inTeamB && isCaptainB);
+
+    if (!canKick) throw new Error("You do not have permission to kick this player.");
+
+    const updatedPlayers = room.players.filter((p) => p.uid !== args.playerUid);
+    const updatedUids = room.playerUids.filter((uid) => uid !== args.playerUid);
+
+    const releaseSlot = (slots: any[]) =>
+      slots.map((s: any) => {
+        if (s.uid === args.playerUid || s.reservedForUid === args.playerUid) {
+          return { slotId: s.slotId, status: "open" as const, role: s.role };
+        }
+        return s;
+      });
+
+    const now = Date.now();
+    const updates: any = {
+      players: updatedPlayers,
+      playerUids: updatedUids,
+      currentPlayers: updatedPlayers.length,
+      slotsA: releaseSlot(slotsA),
+      slotsB: releaseSlot(slotsB),
+      updatedAt: now,
+    };
+
+    if (room.captainUidA === args.playerUid) updates.captainUidA = undefined;
+    if (room.captainUidB === args.playerUid) updates.captainUidB = undefined;
+
+    await ctx.db.patch(args.matchroomId, updates);
+
+    // Remove from chatroom
+    const chatrooms = await ctx.db
+      .query("chatrooms")
+      .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
+      .take(1);
+    if (chatrooms.length > 0) {
+      const chat = chatrooms[0];
+      const participantUids = (chat.participantUids || []).filter((uid) => uid !== args.playerUid);
+      await ctx.db.patch(chat._id, { participantUids, updatedAt: now });
+    }
+
+    return { ok: true, message: "Player kicked successfully." };
+  },
+});
+
+// Transfer matchroom captain
+export const transferMatchroomCaptain = mutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    callerUid: v.string(),
+    team: v.union(v.literal("A"), v.literal("B")),
+    newCaptainUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
+
+    const currentCaptainUid = args.team === "A" ? room.captainUidA : room.captainUidB;
+    const isHost = room.hostUid === args.callerUid;
+
+    if (currentCaptainUid !== args.callerUid && !isHost) {
+      throw new Error("Only the current captain or the host can transfer leadership.");
+    }
+
+    // Verify new captain is in the team
+    const slots = args.team === "A" ? room.slotsA : room.slotsB;
+    const isMember = (slots || []).some((s: any) => s.uid === args.newCaptainUid);
+    if (!isMember) {
+      throw new Error("Target player must be in your team to become captain.");
+    }
+
+    const updateData: any = { updatedAt: Date.now() };
+    if (args.team === "A") {
+      updateData.captainUidA = args.newCaptainUid;
+      if (room.hostUid === args.callerUid) {
+        updateData.hostUid = args.newCaptainUid;
+      }
+    } else {
+      updateData.captainUidB = args.newCaptainUid;
+    }
+
+    await ctx.db.patch(args.matchroomId, updateData);
+    return { ok: true, message: `Captaincy successfully transferred to ${args.team} teammate.` };
+  },
+});
+
+// Cancel all pending matchroom join requests for a user
+export const cancelUserPendingMatchroomRequests = mutation({
+  args: { userUid: v.id("users") },
+  handler: async (ctx, args) => {
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_fromUid", (q) => q.eq("fromUid", args.userUid))
+      .collect();
+
+    const pending = notifications.filter(
+      (n) => n.type === "match_join_request" && n.status === "pending"
+    );
+
+    const now = Date.now();
+    for (const notif of pending) {
+      await ctx.db.patch(notif._id, { status: "expired", updatedAt: now });
+    }
+
+    return { ok: true, count: pending.length };
   },
 });
 

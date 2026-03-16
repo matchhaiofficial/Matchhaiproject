@@ -11,7 +11,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../../src/config/firebaseConfig';
+import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitParticipantVote } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
@@ -47,8 +47,9 @@ export default function ParticipantVoting() {
     const [selectedVote, setSelectedVote] = useState<'team1' | 'team2' | 'unknown' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const { user } = useAuth();
 
-    const currentUserId = auth.currentUser?.uid;
+    const currentUserId = user?._id;
 
     const loadVoteData = useCallback(async () => {
         if (!matchroomId) return;
@@ -60,7 +61,7 @@ export default function ParticipantVoting() {
                 return;
             }
 
-            const room = res.data;
+            const room = res.data!;
                 const rv = room.resultVerification;
                 if (!rv) {
                     setError("Voting not started");
@@ -77,7 +78,7 @@ export default function ParticipantVoting() {
                         status: 'participant_vote',
                         captainReports: rv.captainReports || {},
                         participantVotes: rv.participantVotes || {},
-                        deadline: rv.deadline ? new Date(rv.deadline.seconds * 1000) : new Date() // Fallback
+                        deadline: rv.deadline ? new Date(typeof rv.deadline === 'number' ? rv.deadline : rv.deadline.seconds ? rv.deadline.seconds * 1000 : Date.now()) : new Date() // Fallback
                     },
                     totalParticipants: room.players.length
                 });

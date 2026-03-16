@@ -231,7 +231,7 @@ export async function createMatchroom(
     const scheduledStartAt = parseScheduledStartAt(
       roomData.scheduledDate,
       roomData.scheduledTime
-    );
+    ) ?? undefined;
     const lockAt = scheduledStartAt ? scheduledStartAt - ONE_DAY_MS : undefined;
     const expiresAt = lockAt;
 
@@ -599,7 +599,6 @@ export async function requestJoinMatchroom(
       fromUsername: user.username,
       title: "Join Request",
       body: `${user.username} wants to join ${room.title}`,
-      status: "pending",
       matchroomId: roomId as any,
       data: {
         matchroomId: roomId,

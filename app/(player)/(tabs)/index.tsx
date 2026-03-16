@@ -1,13 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { router, useFocusEffect } from "expo-router";
-import {
-  collection,
-  getDocs,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Image,
@@ -21,13 +17,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { normalizeGameKey } from "../../../src/features/discover/utils/gameKeys";
 import {
   getOffersForUser,
   getUserRequests,
-} from "../../../src/services/bookingRequestService";
+} from "../../../src/services/convex/bookingRequestService";
 import {
   Matchroom,
   getMatchrooms,
@@ -36,7 +31,6 @@ import {
 import { Team, getUserTeams } from "../../../src/services/convex/teamService";
 import { scheduleMatchroomReminder } from "../../../src/services/localNotifications";
 import { UserProfile, getUserProfile } from "../../../src/services/userService";
-import { Id } from "../../../convex/_generated/dataModel";
 import { Zone, getActiveZones } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -334,7 +328,6 @@ export default function PlayerDashboard() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const [tags, setTags] = useState<string[]>([]);
-  const [notificationCount, setNotificationCount] = useState(0);
   const [latestNotifications, setLatestNotifications] = useState<
     DashboardNotification[]
   >([]);
@@ -355,6 +348,83 @@ export default function PlayerDashboard() {
   });
   const lastReminderSignatureRef = useRef("");
 
+  // Convex reactive queries for notifications (replaces onSnapshot)
+  const notificationCount = useQuery(
+    api.notifications.countUnread,
+    user?._id ? { userId: user._id as Id<"users"> } : "skip"
+  ) ?? 0;
+
+  const pendingNotifications = useQuery(
+    api.notifications.listForUser,
+    user?._id ? { userId: user._id as Id<"users">, status: "pending" as const, limit: 10 } : "skip"
+  );
+
+  // Derive latest notifications from reactive query
+  useEffect(() => {
+    if (!pendingNotifications) {
+      setLatestNotifications([]);
+      return;
+    }
+
+    const items: DashboardNotification[] = pendingNotifications
+      .map((n: any) => ({
+        id: n._id,
+        message: n.body || n.title || "New update",
+        icon: notificationIcon(n.type),
+        createdAtMs: n.createdAt || 0,
+      }))
+      .sort((a: DashboardNotification, b: DashboardNotification) => b.createdAtMs - a.createdAtMs)
+      .slice(0, 2);
+
+    setLatestNotifications(items);
+  }, [pendingNotifications]);
+
+  // Convex reactive query for friends
+  const friendsList = useQuery(
+    api.social.listFriends,
+    user?._id ? { userId: user._id as Id<"users"> } : "skip"
+  );
+
+  useEffect(() => {
+    if (!friendsList) {
+      setFriendCount(0);
+      return;
+    }
+    const onlineCount = friendsList.filter((f: any) => f.isOnline).length;
+    setFriendCount(onlineCount);
+  }, [friendsList]);
+
+  // Convex reactive query for booking intents (wallet stats)
+  const bookingIntents = useQuery(
+    api.bookings.listIntentsByUser,
+    user?._id ? { userId: user._id as Id<"users"> } : "skip"
+  );
+
+  useEffect(() => {
+    if (!bookingIntents) {
+      setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
+      return;
+    }
+    const totals = bookingIntents.reduce(
+      (acc: { totalSpent: number; pendingAmount: number }, intent: any) => {
+        const total = Number(intent?.pricing?.totalCost || intent?.pricing?.total || 0);
+        if (total <= 0) return acc;
+        if (intent.paymentStatus === "paid") {
+          acc.totalSpent += total;
+        } else {
+          acc.pendingAmount += total;
+        }
+        return acc;
+      },
+      { totalSpent: 0, pendingAmount: 0 },
+    );
+    setWalletStats({
+      totalSpent: Math.round(totals.totalSpent),
+      pendingAmount: Math.round(totals.pendingAmount),
+      transactions: bookingIntents.length,
+    });
+  }, [bookingIntents]);
+
   const loadDashboardData = useCallback(async () => {
     if (!user?._id) return;
 
@@ -367,23 +437,14 @@ export default function PlayerDashboard() {
         zonesResult,
         requestsResult,
         offersResult,
-        intentsSnapshot,
-        friendsSnapshot,
       ] = await Promise.all([
-        getUserProfile(user._id),
+        getUserProfile(user._id as Id<"users">),
         getUserMatchrooms(user._id),
         getMatchrooms(40),
         getUserTeams(user._id),
         getActiveZones(),
         getUserRequests(user._id),
         getOffersForUser(user._id),
-        getDocs(
-          query(
-            collection(db, "booking_intents"),
-            where("createdByUid", "==", user._id),
-          ),
-        ),
-        getDocs(collection(db, "users", user._id, "friends")),
       ]);
 
       const profileData = profileResult.ok ? profileResult.data : null;
@@ -454,43 +515,8 @@ export default function PlayerDashboard() {
         myOffers:
           offersResult.ok && offersResult.data ? offersResult.data.length : 0,
       });
-      const totals = intentsSnapshot.docs.reduce(
-        (acc: { totalSpent: number; pendingAmount: number }, docSnap: any) => {
-          const data = docSnap.data() || {};
-          const total = Number(data?.pricing?.total || 0);
-          if (total <= 0) return acc;
-          if (data.paymentStatus === "paid") {
-            acc.totalSpent += total;
-          } else {
-            acc.pendingAmount += total;
-          }
-          return acc;
-        },
-        { totalSpent: 0, pendingAmount: 0 },
-      );
-      setWalletStats({
-        totalSpent: Math.round(totals.totalSpent),
-        pendingAmount: Math.round(totals.pendingAmount),
-        transactions: intentsSnapshot.docs.length,
-      });
-      const friendUids = friendsSnapshot.docs.map((docSnap: any) => docSnap.id);
-      if (friendUids.length > 0) {
-        const profileResults = await Promise.all(
-          friendUids.map((friendUid: string) => getUserProfile(friendUid as Id<"users">)),
-        );
-        const onlineFriends = profileResults.reduce(
-          (count, result) =>
-            count + (result.ok && result.data?.isOnline ? 1 : 0),
-          0,
-        );
-        setFriendCount(onlineFriends);
-      } else {
-        setFriendCount(0);
-      }
     } catch (error) {
       Logger.error("Dashboard", "Failed loading dashboard feed", error);
-      setWalletStats({ totalSpent: 0, pendingAmount: 0, transactions: 0 });
-      setFriendCount(0);
     }
   }, [user?._id]);
 
@@ -499,46 +525,6 @@ export default function PlayerDashboard() {
       loadDashboardData();
     }, [loadDashboardData]),
   );
-
-  useEffect(() => {
-    if (!user) return;
-
-    const q = query(
-      collection(db, "notifications"),
-      where("toUid", "==", user._id),
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot: any) => {
-      const items: DashboardNotification[] = [];
-      let count = 0;
-      snapshot.forEach((docSnap: any) => {
-        const data = docSnap.data();
-
-        // Count unread notifications
-        if (data.isRead === false) {
-          count += 1;
-        }
-
-        // Logic for showing latest notifications in the dashboard
-        if (data.status !== "pending") return;
-        if (data.expiresAt && getMillis(data.expiresAt) < Date.now()) {
-          return;
-        }
-
-        items.push({
-          id: docSnap.id,
-          message: data.message || data.title || "New update",
-          icon: notificationIcon(data.type),
-          createdAtMs: getMillis(data.createdAt),
-        });
-      });
-      items.sort((a, b) => b.createdAtMs - a.createdAtMs);
-      setNotificationCount(count);
-      setLatestNotifications(items.slice(0, 2));
-    });
-
-    return () => unsubscribe();
-  }, [user]);
 
   useEffect(() => {
     if (!user?._id) {

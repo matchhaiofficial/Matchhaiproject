@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -8,7 +7,6 @@ import {
     FlatList,
     Pressable,
     RefreshControl,
-    ScrollView,
     Text,
     TextInput,
     TouchableOpacity,
@@ -17,7 +15,6 @@ import {
 
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserTeams, Team } from "../../src/services/convex/teamService";
 import { COLORS } from "../../src/theme";
@@ -33,42 +30,6 @@ export default function MyTeams() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
-
-    // Repair logic (kept for admin/captain utility if needed, strictly for 'my' context)
-    const repairTeams = async () => {
-        if (!user) return;
-        try {
-            setRefreshing(true);
-            const q = query(
-                collection(db, 'teams'),
-                where('captainUid', '==', user._id)
-            );
-            const snap = await getDocs(q);
-            const batchPromises = [];
-
-            for (const teamDoc of snap.docs) {
-                const data = teamDoc.data();
-                if (!data.memberUids) {
-                    batchPromises.push(updateDoc(doc(db, 'teams', teamDoc.id), {
-                        memberUids: [user._id]
-                    }));
-                }
-            }
-
-            if (batchPromises.length > 0) {
-                await Promise.all(batchPromises);
-                Alert.alert("Success", `Repaired ${batchPromises.length} teams.`);
-                fetchTeams();
-            } else {
-                Alert.alert("Info", "All your teams are healthy.");
-            }
-        } catch (e) {
-            Logger.error("MyTeams", "Repair error", e);
-            Alert.alert("Error", "Failed to repair teams.");
-        } finally {
-            setRefreshing(false);
-        }
-    };
 
     const fetchTeams = async () => {
         if (!user) return;

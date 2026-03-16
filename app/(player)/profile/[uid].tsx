@@ -1,11 +1,11 @@
 import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { formatDistanceToNow } from "date-fns";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Linking, ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { db } from "../../../src/config/firebaseConfig";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
@@ -160,35 +160,29 @@ export default function PlayerProfile() {
     const checkFriendStatus = async () => {
         if (!user || !uid) return;
         try {
-            const friendsSnap = await getDocs(collection(db, "users", user._id, "friends"));
-            const friends = new Set<string>();
-            friendsSnap.forEach(doc => friends.add(doc.id));
-            setIsFriend(friends.has(uid));
+            // Check if already friends via Convex
+            const areFriends = await convex.query(api.social.areFriends, {
+                userId: user._id as Id<"users">,
+                friendId: uid as Id<"users">,
+            });
+            setIsFriend(areFriends);
 
-            if (!friends.has(uid)) {
+            if (!areFriends) {
                 // Check for outgoing request (I sent to them)
-                const outgoingQ = query(
-                    collection(db, "notifications"),
-                    where("fromUid", "==", user._id),
-                    where("toUid", "==", uid),
-                    where("type", "==", "friend_request"),
-                    where("status", "==", "pending")
-                );
-                const outgoingSnap = await getDocs(outgoingQ);
-                setIsPending(!outgoingSnap.empty);
+                const outgoing = await convex.query(api.notifications.checkPendingFriendRequest, {
+                    fromUid: user._id as Id<"users">,
+                    toUid: uid as Id<"users">,
+                });
+                setIsPending(outgoing.exists);
 
                 // Check for incoming request (they sent to me)
-                const incomingQ = query(
-                    collection(db, "notifications"),
-                    where("fromUid", "==", uid),
-                    where("toUid", "==", user._id),
-                    where("type", "==", "friend_request"),
-                    where("status", "==", "pending")
-                );
-                const incomingSnap = await getDocs(incomingQ);
-                if (!incomingSnap.empty) {
+                const incoming = await convex.query(api.notifications.checkPendingFriendRequest, {
+                    fromUid: uid as Id<"users">,
+                    toUid: user._id as Id<"users">,
+                });
+                if (incoming.exists) {
                     setHasIncomingRequest(true);
-                    setIncomingRequestId(incomingSnap.docs[0].id);
+                    setIncomingRequestId(incoming.notificationId);
                 } else {
                     setHasIncomingRequest(false);
                     setIncomingRequestId(null);

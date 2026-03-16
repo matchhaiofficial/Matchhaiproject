@@ -1,7 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+// Auth operations handled via Better Auth
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,7 +19,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
-import { auth, db } from "../../../src/config/firebaseConfig";
+import { authClient } from "../../../src/lib/auth-client";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
@@ -217,67 +219,66 @@ export default function EditProfile() {
         const fetchProfile = async () => {
             if (!user?._id) return;
             try {
-                const docRef = doc(db, "users", user._id);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+                const data = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                if (data) {
                     console.log("EditProfile loaded data:", JSON.stringify(data, null, 2));
-                    setFullName(data.fullName || "");
-                    setUsername(data.username || "");
-                    setOriginalUsername(data.username || "");
-                    setCity(data.city || "Karachi");
-                    setAgeRange(data.ageRange || "");
+                    setFullName((data as any).fullName || "");
+                    setUsername((data as any).username || "");
+                    setOriginalUsername((data as any).username || "");
+                    setCity((data as any).city || "Karachi");
+                    setAgeRange((data as any).ageRange || "");
                     // Store full email as-is
-                    const userEmail = auth.currentUser?.email || "";
+                    const session = await authClient.getSession();
+                    const userEmail = session?.data?.user?.email || (data as any).email || "";
                     setEmail(userEmail);
                     setOriginalEmail(userEmail);
-                    setPhone(data.phone || "");
-                    setOriginalPhone(data.phone || "");
-                    setSelectedAreas(data.areasPreferred || []);
+                    setPhone((data as any).phone || "");
+                    setOriginalPhone((data as any).phone || "");
+                    setSelectedAreas((data as any).areasPreferred || []);
 
                     // Load pending email if exists
-                    setPendingEmail(data.pendingEmail || "");
+                    setPendingEmail((data as any).pendingEmail || "");
 
-                    setSteamProfileUrl(data.steamProfileUrl || "");
-                    setFaceitProfileUrl(data.faceitProfileUrl || "");
-                    setPsnOnlineId(data.psnOnlineId || "");
-                    setEaProfileUrl(data.eaProfileUrl || "");
-                    setXboxGamertag(data.xboxGamertag || "");
+                    setSteamProfileUrl((data as any).steamProfileUrl || "");
+                    setFaceitProfileUrl((data as any).faceitProfileUrl || "");
+                    setPsnOnlineId((data as any).psnOnlineId || "");
+                    setEaProfileUrl((data as any).eaProfileUrl || "");
+                    setXboxGamertag((data as any).xboxGamertag || "");
 
-                    setHideAreasPublicly(data.hideAreasPublicly || false);
-                    setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
-                    setRestrictInvitesToFriends(data.restrictInvitesToFriends || false);
+                    setHideAreasPublicly((data as any).hideAreasPublicly || false);
+                    setHidePlatformsPublicly((data as any).hidePlatformsPublicly || false);
+                    setRestrictInvitesToFriends((data as any).restrictInvitesToFriends || false);
 
                     // Hydrate verified profiles if available
-                    if (data.steamId) {
+                    if ((data as any).steamId) {
                         setSteamProfile({
-                            steamId: data.steamId,
-                            personaName: data.steamPersonaName,
-                            cs2Hours: data.steamCs2Hours,
+                            steamId: (data as any).steamId,
+                            personaName: (data as any).steamPersonaName,
+                            cs2Hours: (data as any).steamCs2Hours,
                         } as SteamProfileSummary);
                         setSteamStatus("available");
                     }
 
-                    if (data.faceitId) {
+                    if ((data as any).faceitId) {
                         setFaceitProfile({
-                            faceitId: data.faceitId,
-                            nickname: data.faceitNickname,
-                            game: data.faceitGame,
-                            elo: data.faceitElo,
-                            skillLevel: data.faceitSkillLevel,
+                            faceitId: (data as any).faceitId,
+                            nickname: (data as any).faceitNickname,
+                            game: (data as any).faceitGame,
+                            elo: (data as any).faceitElo,
+                            skillLevel: (data as any).faceitSkillLevel,
                         } as FaceitProfileSummary);
                         setFaceitStatus("available");
                     }
 
-                    if (data.psnStats) {
-                        setPsnStats(data.psnStats);
+                    if ((data as any).psnStats) {
+                        setPsnStats((data as any).psnStats);
                         setPsnStatus("available");
                     }
 
-                    if (data.eaId) {
+                    if ((data as any).eaId) {
                         setEaStatus("available");
                     }
-                    if (data.xboxId) {
+                    if ((data as any).xboxId) {
                         setXboxStatus("available");
                     }
                 }
@@ -297,22 +298,19 @@ export default function EditProfile() {
 
         const checkEmailUpdate = async () => {
             try {
-                if (!auth.currentUser) return;
+                // Check current session for email update
+                const session = await authClient.getSession();
+                if (!session?.data?.user) return;
 
-                // Reload auth state
-                await reload(auth.currentUser);
-
-                // Check if email has been updated
-                const currentEmail = auth.currentUser.email || "";
+                const currentEmail = session.data.user.email || "";
                 if (currentEmail === pendingEmail) {
                     // Email verified and updated!
                     console.log("Email verified! Updating Firestore...");
 
-                    // Clear pending email from Firestore
-                    const userRef = doc(db, "users", user._id);
-                    await updateDoc(userRef, {
-                        pendingEmail: null,
-                        updatedAt: new Date()
+                    // Clear pending email from Convex
+                    await convex.mutation(api.users.updateFullProfile, {
+                        userId: user._id as Id<"users">,
+                        updates: { pendingEmail: null },
                     });
 
                     // Update local state
@@ -586,14 +584,15 @@ export default function EditProfile() {
 
         setPasswordUpdating(true);
         try {
-            if (!auth.currentUser || !auth.currentUser.email) return;
+            // Use Better Auth to change password
+            const result = await (authClient as any).changePassword({
+                currentPassword,
+                newPassword: password,
+            });
 
-            // Re-authenticate
-            const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-            await reauthenticateWithCredential(auth.currentUser, cred);
-
-            // Update
-            await updatePassword(auth.currentUser, password);
+            if (result?.error) {
+                throw result.error;
+            }
 
             showToast({ type: "success", title: "Success", message: "Password updated successfully." });
 
@@ -604,8 +603,8 @@ export default function EditProfile() {
         } catch (e: any) {
             console.error("Password update failed", e);
             let msg = "Failed to update password.";
-            if (e.code === 'auth/wrong-password') msg = "Current password is incorrect.";
-            if (e.code === 'auth/requires-recent-login') msg = "Session too old. Please re-login.";
+            if (e.message?.includes("incorrect") || e.message?.includes("wrong")) msg = "Current password is incorrect.";
+            if (e.message?.includes("recent") || e.message?.includes("session")) msg = "Session too old. Please re-login.";
             showToast({ type: "error", title: "Error", message: msg });
         } finally {
             setPasswordUpdating(false);
@@ -614,17 +613,20 @@ export default function EditProfile() {
 
     // Email update handler
     const handleUpdateEmail = async () => {
-        if (!auth.currentUser || !isNewEmailValid || !user?._id) return;
+        if (!isNewEmailValid || !user?._id) return;
 
         try {
             setEmailUpdating(true);
-            await verifyBeforeUpdateEmail(auth.currentUser, newEmail.trim());
+            // Use Better Auth to change email
+            const result = await (authClient as any).changeEmail({
+                newEmail: newEmail.trim(),
+            });
+            if (result?.error) throw result.error;
 
-            // Store pending email in Firestore
-            const userRef = doc(db, "users", user._id);
-            await updateDoc(userRef, {
-                pendingEmail: newEmail.trim(),
-                updatedAt: new Date()
+            // Store pending email in Convex
+            await convex.mutation(api.users.updateFullProfile, {
+                userId: user._id as Id<"users">,
+                updates: { pendingEmail: newEmail.trim() },
             });
 
             // Update local state
@@ -781,8 +783,10 @@ export default function EditProfile() {
 
             // Auth Updates - Email is read-only, no updates needed
 
-            const userRef = doc(db, "users", user._id);
-            await updateDoc(userRef, updates);
+            await convex.mutation(api.users.updateFullProfile, {
+                userId: user._id as Id<"users">,
+                updates,
+            });
 
             showToast({ type: "success", title: "Saved", message: "Profile updated successfully" });
             router.back();

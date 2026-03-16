@@ -1,6 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -29,8 +32,6 @@ import {
     PICKLEBALL_ROLES
 } from "../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../src/constants/timelineFilters";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
@@ -72,8 +73,28 @@ export default function MatchroomsIndex() {
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
 
-    // Social State
-    const [requestedRoomIds, setRequestedRoomIds] = useState<Set<string>>(new Set());
+    // Social State - use Convex reactive query for pending join requests from current user
+    const pendingJoinRequests = useQuery(
+        api.notifications.listByFromUid,
+        user?._id
+            ? {
+                fromUid: user._id as Id<"users">,
+                type: "match_join_request",
+                status: "pending" as const,
+            }
+            : "skip"
+    );
+
+    const requestedRoomIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (pendingJoinRequests) {
+            pendingJoinRequests.forEach((n: any) => {
+                if (n.matchroomId) ids.add(n.matchroomId);
+                if (n.data?.matchroomId) ids.add(n.data.matchroomId);
+            });
+        }
+        return ids;
+    }, [pendingJoinRequests]);
 
     // Filter states
     const [selectedGame, setSelectedGame] = useState<string>('all');
@@ -115,27 +136,6 @@ export default function MatchroomsIndex() {
         }
     };
 
-    const fetchSocialState = async () => {
-        if (!user) return;
-        try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user._id),
-                where("type", "==", "match_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
-            const requested = new Set<string>();
-            snap.forEach((doc: any) => {
-                const data = doc.data();
-                if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
-            });
-            setRequestedRoomIds(requested);
-        } catch (e) {
-            Logger.error("MatchroomsIndex", "Error fetching social state", e);
-        }
-    };
-
     const handleRequestToJoin = async (room: Matchroom) => {
         if (!user) {
             Alert.alert("Login Required", "Please login to join matchrooms.");
@@ -155,7 +155,7 @@ export default function MatchroomsIndex() {
             });
             if (res.ok) {
                 Alert.alert("Success", "Join request sent to host.");
-                setRequestedRoomIds(prev => new Set(prev).add(room.id!));
+                // requestedRoomIds will update automatically via the reactive query
             } else {
                 Alert.alert("Error", res.message || "Failed to send request.");
             }
@@ -169,15 +169,10 @@ export default function MatchroomsIndex() {
         if (!user) return;
         try {
             const res = await cancelMatchJoinRequest(room.id!, user._id);
-            if (res.ok) {
-                setRequestedRoomIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(room.id!);
-                    return next;
-                });
-            } else {
+            if (!res.ok) {
                 Alert.alert("Error", res.message || "Failed to cancel request.");
             }
+            // requestedRoomIds will update automatically via the reactive query
         } catch (e) {
             Logger.error("MatchroomsIndex", "Cancel request error", e);
         }
@@ -192,17 +187,7 @@ export default function MatchroomsIndex() {
         }
         setLoading(true);
         fetchRooms();
-        fetchSocialState();
     }, [user]);
-
-    // Refetch social state on focus to catch host rejections or external cancellations
-    useFocusEffect(
-        useCallback(() => {
-            if (user) {
-                fetchSocialState();
-            }
-        }, [user])
-    );
 
     // Reset contextual filters when game changes
     useEffect(() => {

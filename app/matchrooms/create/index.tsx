@@ -1,11 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import {
-  collection,
-  doc,
-  runTransaction,
-  serverTimestamp,
-} from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +13,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import type { BookingRequest } from "../../../src/services/bookingRequestService";
@@ -1655,36 +1650,14 @@ export default function CreateMatchroom() {
     if (amount <= 0) return { ok: true as const };
 
     try {
-      const userRef = doc(db, "users", user._id);
-      const walletTxRef = doc(collection(db, "users", user._id, "wallet_transactions"));
-      await runTransaction(db, async (transaction) => {
-        const userSnap = await transaction.get(userRef);
-        const currentBalance = userSnap.exists()
-          ? Number(userSnap.data()?.walletBalance || 0)
-          : 0;
-        if (!Number.isFinite(currentBalance) || currentBalance < amount) {
-          throw new Error("insufficient_wallet");
-        }
-        transaction.set(
-          userRef,
-          {
-            walletBalance: currentBalance - amount,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-        transaction.set(walletTxRef, {
-          uid: user._id,
-          type: "debit",
-          amount,
-          status: "completed",
-          source: "matchroom_create",
-          createdAt: serverTimestamp(),
-        });
+      await convex.mutation(api.wallet.deductFunds, {
+        userId: user._id as any,
+        amount,
+        source: "matchroom_create",
       });
       return { ok: true as const };
     } catch (error: any) {
-      if (error?.message === "insufficient_wallet") {
+      if (error?.message?.includes("Insufficient")) {
         return {
           ok: false as const,
           message: "Insufficient wallet balance. Please add funds from Wallet.",
@@ -1845,7 +1818,7 @@ export default function CreateMatchroom() {
 
       // Phase 3: If broadcast mode, create booking request instead of matchroom
       if (locationMode === "broadcast") {
-        const requestData: Omit<BookingRequest, "id" | "createdAt" | "status"> =
+        const requestData: any =
         {
           userId: user._id,
           userName:
@@ -1873,14 +1846,14 @@ export default function CreateMatchroom() {
           hostSkillContext: {
             gameKey: selectedGame!,
             answers: hostSkillAnswers || {},
-          },
+          } as any,
 
           overs: formData.overs || null,
           teamMode: teamMode,
           teamId: teamMode === "team" ? selectedTeamId || null : null,
           reservedSlots: teamMode === "team" ? reservedSlots : 1,
-          preferredDate: formData.date || undefined,
-          preferredTime: formData.time || undefined,
+          preferredDate: formData.date ? new Date(formData.date).getTime() : undefined,
+          preferredTime: formData.time || undefined as any,
           flexibilityWindow: "Exact time",
           preferredAreas:
             broadcastAreas.length > 0

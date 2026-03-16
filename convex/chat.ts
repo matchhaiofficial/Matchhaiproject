@@ -21,6 +21,7 @@ export const getOrCreateForMatchroom = mutation({
   args: {
     matchroomId: v.id("matchrooms"),
     participantUids: v.array(v.string()),
+    zoneId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Check if chatroom exists
@@ -49,7 +50,9 @@ export const getOrCreateForMatchroom = mutation({
     const chatroomId = await ctx.db.insert("chatrooms", {
       matchroomId: args.matchroomId,
       participantUids: args.participantUids,
+      zoneId: args.zoneId,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     });
 
     return chatroomId;
@@ -60,7 +63,7 @@ export const getOrCreateForMatchroom = mutation({
 // MESSAGE QUERIES
 // ============================================
 
-// List messages for chatroom
+// List messages for chatroom (real-time via useQuery)
 export const listMessages = query({
   args: {
     chatroomId: v.id("chatrooms"),
@@ -105,13 +108,21 @@ export const listMessagesForMatchroom = query({
 // MESSAGE MUTATIONS
 // ============================================
 
-// Send message
+// Send message with full features (reply, clientMessageId)
 export const sendMessage = mutation({
   args: {
     chatroomId: v.id("chatrooms"),
     senderUid: v.id("users"),
     senderUsername: v.string(),
     content: v.string(),
+    clientMessageId: v.optional(v.string()),
+    replyTo: v.optional(
+      v.object({
+        messageId: v.string(),
+        senderName: v.string(),
+        text: v.string(),
+      })
+    ),
   },
   handler: async (ctx, args) => {
     const chatroom = await ctx.db.get(args.chatroomId);
@@ -122,12 +133,27 @@ export const sendMessage = mutation({
       throw new Error("You are not a participant in this chat");
     }
 
+    const now = Date.now();
+
     const messageId = await ctx.db.insert("chatMessages", {
       chatroomId: args.chatroomId,
       senderUid: args.senderUid,
       senderUsername: args.senderUsername,
       content: args.content,
-      createdAt: Date.now(),
+      clientMessageId: args.clientMessageId,
+      replyTo: args.replyTo,
+      createdAt: now,
+    });
+
+    // Update chatroom's lastMessage
+    await ctx.db.patch(args.chatroomId, {
+      lastMessage: {
+        text: args.content,
+        senderUid: args.senderUid,
+        senderName: args.senderUsername,
+        createdAt: now,
+      },
+      updatedAt: now,
     });
 
     return messageId;
@@ -141,6 +167,14 @@ export const sendMessageToMatchroom = mutation({
     senderUid: v.id("users"),
     senderUsername: v.string(),
     content: v.string(),
+    clientMessageId: v.optional(v.string()),
+    replyTo: v.optional(
+      v.object({
+        messageId: v.string(),
+        senderName: v.string(),
+        text: v.string(),
+      })
+    ),
   },
   handler: async (ctx, args) => {
     // Get or create chatroom
@@ -150,7 +184,6 @@ export const sendMessageToMatchroom = mutation({
       .unique();
 
     if (!chatroom) {
-      // Get matchroom to get participants
       const matchroom = await ctx.db.get(args.matchroomId);
       if (!matchroom) throw new Error("Matchroom not found");
 
@@ -158,6 +191,7 @@ export const sendMessageToMatchroom = mutation({
         matchroomId: args.matchroomId,
         participantUids: matchroom.playerUids,
         createdAt: Date.now(),
+        updatedAt: Date.now(),
       });
 
       chatroom = await ctx.db.get(chatroomId);
@@ -172,19 +206,74 @@ export const sendMessageToMatchroom = mutation({
       });
     }
 
+    const now = Date.now();
+
     const messageId = await ctx.db.insert("chatMessages", {
       chatroomId: chatroom._id,
       senderUid: args.senderUid,
       senderUsername: args.senderUsername,
       content: args.content,
-      createdAt: Date.now(),
+      clientMessageId: args.clientMessageId,
+      replyTo: args.replyTo,
+      createdAt: now,
+    });
+
+    // Update chatroom's lastMessage
+    await ctx.db.patch(chatroom._id, {
+      lastMessage: {
+        text: args.content,
+        senderUid: args.senderUid,
+        senderName: args.senderUsername,
+        createdAt: now,
+      },
+      updatedAt: now,
     });
 
     return messageId;
   },
 });
 
-// Delete message
+// Soft-delete message for a user (adds to deletedFor array)
+export const deleteForMe = mutation({
+  args: {
+    messageId: v.id("chatMessages"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) throw new Error("Message not found");
+
+    const deletedFor = message.deletedFor || [];
+    if (!deletedFor.includes(args.userId)) {
+      await ctx.db.patch(args.messageId, {
+        deletedFor: [...deletedFor, args.userId],
+      });
+    }
+    return true;
+  },
+});
+
+// Mark chat as read for a user
+export const markRead = mutation({
+  args: {
+    chatroomId: v.id("chatrooms"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const chatroom = await ctx.db.get(args.chatroomId);
+    if (!chatroom) return;
+
+    const lastReadBy = (chatroom.lastReadBy as Record<string, number>) || {};
+    lastReadBy[args.userId] = Date.now();
+
+    await ctx.db.patch(args.chatroomId, {
+      lastReadBy,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// Delete message permanently
 export const deleteMessage = mutation({
   args: { messageId: v.id("chatMessages") },
   handler: async (ctx, args) => {

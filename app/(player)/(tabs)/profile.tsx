@@ -1,8 +1,10 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useCallback, useRef, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import React, { useCallback, useRef, useState, useEffect } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -18,7 +20,6 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 
 import SkillBadge from "../../../src/components/SkillBadge";
-import { db } from "../../../src/config/firebaseConfig";
 import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
@@ -96,29 +97,37 @@ export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
     const tabBarHeight = useBottomTabBarHeight();
-    const [profile, setProfile] = useState<FullUserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [myTeams, setMyTeams] = useState<Team[]>([]);
     const [loadingTeams, setLoadingTeams] = useState(false);
 
-    // Prevent double fetch
+    // Convex reactive query for user profile (replaces getDoc)
+    const convexProfile = useQuery(
+        api.users.getById,
+        user?._id ? { userId: user._id as Id<"users"> } : "skip"
+    );
+
+    // Derive profile from reactive query
+    const profile: FullUserProfile | null = convexProfile
+        ? { uid: convexProfile._id, ...convexProfile } as any as FullUserProfile
+        : null;
+
+    // Update loading state when profile loads
+    useEffect(() => {
+        if (convexProfile !== undefined) {
+            setLoading(false);
+        }
+    }, [convexProfile]);
+
+    // Prevent double fetch for teams
     const isFetching = useRef(false);
 
-    const fetchProfile = useCallback(async (isRefresh = false) => {
+    const fetchTeams = useCallback(async (isRefresh = false) => {
         if (!user?._id || (isFetching.current && !isRefresh)) return;
 
         try {
             isFetching.current = true;
-            if (!isRefresh && !profile) setLoading(true); // Initial load only
-
-            const userRef = doc(db, "users", user._id);
-            const snap = await getDoc(userRef);
-
-            if (snap.exists()) {
-                setProfile({ uid: snap.id, ...snap.data() } as FullUserProfile);
-            }
-
             setLoadingTeams(true);
             const teamsRes = await getUserTeams(user._id);
             if (teamsRes.ok && teamsRes.data) {
@@ -127,26 +136,25 @@ export default function Profile() {
                 setMyTeams([]);
             }
         } catch (e) {
-            console.error("[Profile] Failed to fetch profile", e);
+            console.error("[Profile] Failed to fetch teams", e);
             if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
         } finally {
-            setLoading(false);
             setRefreshing(false);
             setLoadingTeams(false);
             isFetching.current = false;
         }
     }, [user?._id]);
 
-    // Focus Effect: Re-fetch only if data might be stale (simplified to always fetch on focus for now to ensure sync after edit)
+    // Focus Effect: Re-fetch teams on focus
     useFocusEffect(
         useCallback(() => {
-            fetchProfile();
-        }, [fetchProfile])
+            fetchTeams();
+        }, [fetchTeams])
     );
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchProfile(true);
+        fetchTeams(true);
     };
 
     const handleLogout = async () => {
@@ -254,6 +262,18 @@ export default function Profile() {
             case 'pickleball': return profile.pickleballRole || 'No mode set';
             default: return 'Active';
         }
+    };
+
+    // Format updatedAt for sync display
+    const formatSyncDate = (updatedAt: any) => {
+        if (!updatedAt) return 'Just now';
+        if (typeof updatedAt === 'number') {
+            return new Date(updatedAt).toLocaleDateString();
+        }
+        if (updatedAt?.toDate) {
+            return updatedAt.toDate().toLocaleDateString();
+        }
+        return 'Just now';
     };
 
     if (loading) {
@@ -403,7 +423,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.steamPersonaName}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
@@ -422,7 +442,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.faceitNickname}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}
@@ -441,7 +461,7 @@ export default function Profile() {
                                     <>
                                         <Text style={styles.platformValue}>{profile.psnStats.psnOnlineId}</Text>
                                         <Text style={styles.syncText}>
-                                            Synced: {profile.updatedAt?.toDate?.().toLocaleDateString() || 'Just now'}
+                                            Synced: {formatSyncDate(profile.updatedAt)}
                                         </Text>
                                     </>
                                 ) : <Text style={styles.platformNotLinked}>Not linked</Text>}

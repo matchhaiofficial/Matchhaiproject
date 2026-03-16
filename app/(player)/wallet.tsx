@@ -1,14 +1,7 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    runTransaction,
-    serverTimestamp,
-    where,
-} from "firebase/firestore";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -22,10 +15,9 @@ import {
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
-import { getOffersForUser, getUserRequests } from "../../src/services/bookingRequestService";
-import { BookingIntent } from "../../src/services/bookingService";
+import { getOffersForUser, getUserRequests } from "../../src/services/convex/bookingRequestService";
+import { BookingIntent } from "../../src/services/convex/bookingService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import styles from "./wallet.styles";
@@ -58,74 +50,83 @@ export default function WalletScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<WalletTab>("overview");
-    const [loading, setLoading] = useState(true);
-    const [bookingIntents, setBookingIntents] = useState<BookingIntent[]>([]);
     const [requestsCount, setRequestsCount] = useState(0);
     const [offersCount, setOffersCount] = useState(0);
-    const [walletBalance, setWalletBalance] = useState(0);
     const [addAmount, setAddAmount] = useState("");
     const [addingFunds, setAddingFunds] = useState(false);
+    const [serviceLoading, setServiceLoading] = useState(true);
 
-    const fetchWalletData = useCallback(async () => {
+    const userId = user?._id as Id<"users"> | undefined;
+
+    // Convex reactive queries
+    const walletBalance = useQuery(
+        api.wallet.getBalance,
+        userId ? { userId } : "skip"
+    ) ?? 0;
+
+    const bookingIntents = useQuery(
+        api.bookings.listIntentsByUser,
+        userId ? { userId } : "skip"
+    );
+
+    const addFundsMutation = useMutation(api.wallet.addFunds);
+
+    // Fetch requests/offers counts via service layer
+    const fetchServiceData = useCallback(async () => {
         if (!user?._id) {
-            setBookingIntents([]);
             setRequestsCount(0);
             setOffersCount(0);
-            setWalletBalance(0);
-            setLoading(false);
+            setServiceLoading(false);
             return;
         }
-        setLoading(true);
+        setServiceLoading(true);
         try {
-            const [intentsSnap, requestsResult, offersResult, userDoc] = await Promise.all([
-                getDocs(query(collection(db, "booking_intents"), where("createdByUid", "==", user._id))),
+            const [requestsResult, offersResult] = await Promise.all([
                 getUserRequests(user._id),
                 getOffersForUser(user._id),
-                getDoc(doc(db, "users", user._id)),
             ]);
 
-            const intents = intentsSnap.docs
-                .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as BookingIntent))
-                .sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
-
-            setBookingIntents(intents);
             setRequestsCount(requestsResult.ok && requestsResult.data ? requestsResult.data.length : 0);
             setOffersCount(offersResult.ok && offersResult.data ? offersResult.data.length : 0);
-            setWalletBalance(userDoc.exists() ? Number(userDoc.data()?.walletBalance || 0) : 0);
         } catch (error) {
-            Logger.error("Wallet", "Failed to fetch wallet data", error);
-            setBookingIntents([]);
+            Logger.error("Wallet", "Failed to fetch service data", error);
             setRequestsCount(0);
             setOffersCount(0);
-            setWalletBalance(0);
         } finally {
-            setLoading(false);
+            setServiceLoading(false);
         }
     }, [user?._id]);
 
     useFocusEffect(useCallback(() => {
-        fetchWalletData();
-    }, [fetchWalletData]));
+        fetchServiceData();
+    }, [fetchServiceData]));
+
+    const intents = useMemo(() => {
+        if (!bookingIntents) return [];
+        return [...bookingIntents].sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
+    }, [bookingIntents]);
 
     const totals = useMemo(() => {
-        const totalSpent = bookingIntents
+        const totalSpent = intents
             .filter((item) => item.paymentStatus === "paid")
-            .reduce((acc, item) => acc + (item.pricing?.total || 0), 0);
-        const pendingAmount = bookingIntents
+            .reduce((acc, item) => acc + (item.pricing?.totalCost || 0), 0);
+        const pendingAmount = intents
             .filter((item) => item.paymentStatus !== "paid")
-            .reduce((acc, item) => acc + (item.pricing?.total || 0), 0);
+            .reduce((acc, item) => acc + (item.pricing?.totalCost || 0), 0);
         return {
             totalSpent,
             pendingAmount,
-            paidCount: bookingIntents.filter((item) => item.paymentStatus === "paid").length,
-            pendingCount: bookingIntents.filter((item) => item.paymentStatus !== "paid").length,
+            paidCount: intents.filter((item) => item.paymentStatus === "paid").length,
+            pendingCount: intents.filter((item) => item.paymentStatus !== "paid").length,
         };
-    }, [bookingIntents]);
+    }, [intents]);
+
+    const loading = bookingIntents === undefined || serviceLoading;
 
     const quickAmounts = [500, 1000, 2000, 5000];
 
     const handleAddFunds = async () => {
-        if (!user?._id || addingFunds) return;
+        if (!userId || addingFunds) return;
         const amount = Number(addAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
             Alert.alert("Invalid amount", "Enter a valid amount to add funds.");
@@ -134,34 +135,12 @@ export default function WalletScreen() {
 
         setAddingFunds(true);
         try {
-            const userRef = doc(db, "users", user._id);
-            const txRef = doc(collection(db, "users", user._id, "wallet_transactions"));
-            await runTransaction(db, async (transaction: any) => {
-                const userSnap = await transaction.get(userRef);
-                const currentBalance = userSnap.exists()
-                    ? Number(userSnap.data()?.walletBalance || 0)
-                    : 0;
-
-                transaction.set(
-                    userRef,
-                    {
-                        walletBalance: currentBalance + amount,
-                        updatedAt: serverTimestamp(),
-                    },
-                    { merge: true },
-                );
-                transaction.set(txRef, {
-                    uid: user._id,
-                    type: "credit",
-                    amount,
-                    status: "completed",
-                    source: "manual_topup",
-                    createdAt: serverTimestamp(),
-                });
+            await addFundsMutation({
+                userId,
+                amount,
             });
 
             setAddAmount("");
-            await fetchWalletData();
             Alert.alert("Funds added", `Rs ${Math.round(amount)} added to your wallet.`);
         } catch (error) {
             Logger.error("Wallet", "Failed to add funds", error);
@@ -178,7 +157,7 @@ export default function WalletScreen() {
             <SegmentedTabs
                 items={[
                     { key: "overview", label: "Overview" },
-                    { key: "transactions", label: `Transactions (${bookingIntents.length})` },
+                    { key: "transactions", label: `Transactions (${intents.length})` },
                 ]}
                 value={activeTab}
                 onChange={(value) => setActiveTab(value as WalletTab)}
@@ -275,23 +254,23 @@ export default function WalletScreen() {
                         </>
                     ) : (
                         <>
-                            {bookingIntents.length > 0 ? bookingIntents.map((item) => {
+                            {intents.length > 0 ? intents.map((item) => {
                                 const statusStyle = getStatusStyles(item.status);
                                 return (
-                                    <View key={item.id} style={styles.transactionCard}>
+                                    <View key={item._id} style={styles.transactionCard}>
                                         <View style={styles.transactionTopRow}>
                                             <Text style={styles.transactionTitle} numberOfLines={1}>
-                                                {item.game?.toUpperCase()} • {item.side} Side
+                                                {(item as any).game?.toUpperCase()} • {item.side} Side
                                             </Text>
                                             <Text style={styles.transactionAmount}>
-                                                Rs {Math.round(item.pricing?.total || 0)}
+                                                Rs {Math.round(item.pricing?.totalCost || 0)}
                                             </Text>
                                         </View>
                                         <Text style={styles.transactionMeta}>
                                             Matchroom: {item.matchroomId}
                                         </Text>
                                         <Text style={styles.transactionMeta}>
-                                            Players: {item.invitees?.length || 0}
+                                            Players: {(item as any).invitees?.length || 0}
                                         </Text>
                                         <Text style={styles.transactionMeta}>
                                             Created: {getMillis(item.createdAt) ? new Date(getMillis(item.createdAt)).toLocaleString() : "Unknown"}

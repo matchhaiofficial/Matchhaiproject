@@ -1,8 +1,9 @@
 // src/services/skillRatingService.ts
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebaseConfig';
+import { convex } from '../lib/convex';
+import { api } from '../../convex/_generated/api';
+import { Id } from '../../convex/_generated/dataModel';
 import { SKILL_ASSESSMENT_CONFIG } from '../constants/skillQuestions';
-import type { UserProfile } from './userService';
+import type { UserProfile } from './convex/userService';
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -25,8 +26,8 @@ export interface GameSkillScore {
     initialRating: number;
 
     // Timestamps
-    lastMatchDate: any; // Firestore Timestamp or Date
-    lastUpdated: any;
+    lastMatchDate: number | null;
+    lastUpdated: number;
 }
 
 export type GameKey = 'cs2' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' | 'padel' | 'pickleball' | 'fc25';
@@ -114,9 +115,9 @@ export function calculateInitialRating(
                 }
             }
             // 2. Steam Hours
-            if (userProfile.steamFc26Hours) { // Assuming mapped in profile
-                if (userProfile.steamFc26Hours > 200) rating = Math.max(rating, 50);
-                if (userProfile.steamFc26Hours > 500) rating = Math.max(rating, 70);
+            if ((userProfile as any).steamFc26Hours) { // Assuming mapped in profile
+                if ((userProfile as any).steamFc26Hours > 200) rating = Math.max(rating, 50);
+                if ((userProfile as any).steamFc26Hours > 500) rating = Math.max(rating, 70);
                 source = 'steam';
             }
             break;
@@ -165,7 +166,7 @@ export function calculateScoreFromAnswers(
     // We assume thresholds are sorted by maxScore ascending
     for (const thresh of config.thresholds) {
         if (totalScore <= thresh.maxScore) {
-            // The threshold.rating in config is expected to be 0-100 now. 
+            // The threshold.rating in config is expected to be 0-100 now.
             // If the existing config uses old values, we might need to interpret specifically.
             // As per instruction, we use the config's mapping.
             const normalizedRating = clampRating(thresh.rating);
@@ -197,21 +198,22 @@ export async function saveSelfAssessment(
         const normalizedRating = clampRating(result.rating);
         const normalizedTier = getTierFromRating(normalizedRating);
 
-        const skillScore: GameSkillScore = {
+        const skillScore = {
             rating: normalizedRating,
             tier: normalizedTier,
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
-            initialSource: 'questionnaire',
+            initialSource: 'questionnaire' as const,
             initialRating: normalizedRating,
-            lastMatchDate: null,
-            lastUpdated: serverTimestamp(),
+            lastMatchDate: null as number | null,
+            lastUpdated: Date.now(),
         };
 
-        const userRef = doc(db, 'users', uid);
-        await updateDoc(userRef, {
-            [`skillScores.${gameKey}`]: skillScore
+        await convex.mutation(api.users.updateSkillScores, {
+            userId: uid as Id<"users">,
+            game: gameKey as any,
+            skillScore,
         });
 
         return { ok: true, rating: normalizedRating, tier: normalizedTier };
@@ -233,8 +235,8 @@ export async function initializeSkillIfMissing(
 ): Promise<GameSkillScore | null> {
 
     // Check if already exists locally in the passed profile to avoid read
-    if (userProfile.skillScores?.[gameKey]) {
-        return userProfile.skillScores[gameKey]!;
+    if (userProfile.skillScores?.[gameKey as keyof typeof userProfile.skillScores]) {
+        return userProfile.skillScores[gameKey as keyof typeof userProfile.skillScores] as unknown as GameSkillScore;
     }
 
     // Attempt to calculate from external data
@@ -258,12 +260,14 @@ export async function initializeSkillIfMissing(
         initialSource: source,
         initialRating: normalizedRating,
         lastMatchDate: null,
-        lastUpdated: serverTimestamp(),
+        lastUpdated: Date.now(),
     };
 
     try {
-        await updateDoc(doc(db, 'users', uid), {
-            [`skillScores.${gameKey}`]: newScore
+        await convex.mutation(api.users.updateSkillScores, {
+            userId: uid as Id<"users">,
+            game: gameKey as any,
+            skillScore: newScore,
         });
         return newScore;
     } catch (e) {
@@ -328,9 +332,7 @@ export const applyMatchResult = async (
     confidence: number = 1.0
 ) => {
     try {
-        const { writeBatch } = await import('firebase/firestore');
-        const batch = writeBatch(db);
-        const { getUserProfile } = await import('./userService');
+        const { getUserProfile } = await import('./convex/userService');
 
         // Fetch all profiles
         const allUids = [...sideA, ...sideB];
@@ -338,7 +340,7 @@ export const applyMatchResult = async (
 
         // We need existing ratings to calculate team averages
         for (const uid of allUids) {
-            const res = await getUserProfile(uid);
+            const res = await getUserProfile(uid as Id<"users">);
             if (res.ok && res.data) {
                 profiles[uid] = res.data;
             }
@@ -349,8 +351,6 @@ export const applyMatchResult = async (
             const p = profiles[uid];
             if (!p || !p.skillScores) return 45;
 
-            // Dynamic access with type safety check?
-            // Just cast to any for dynamic property access to avoid TS complexity here
             const scores = p.skillScores as any;
             const s = scores[gameKey];
             if (typeof s?.rating === 'number') {
@@ -363,8 +363,8 @@ export const applyMatchResult = async (
         const ratingA = sideA.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideA.length);
         const ratingB = sideB.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideB.length);
 
-        // Apply updates
-        allUids.forEach(uid => {
+        // Build batch updates
+        const updates = allUids.map(uid => {
             const isSideA = sideA.includes(uid);
             const userRating = getRating(uid);
 
@@ -396,25 +396,31 @@ export const applyMatchResult = async (
             const newWins = currentStats.wins + (result === 'win' ? 1 : 0);
             const newLosses = currentStats.losses + (result === 'loss' ? 1 : 0);
 
-            const userRef = doc(db, 'users', uid);
-            const updatePath = `skillScores.${gameKey}`;
+            // Get existing initial values if present
+            const existingScore = p?.skillScores ? (p.skillScores as any)[gameKey] : null;
 
-            batch.update(userRef, {
-                [`${updatePath}.rating`]: newRating,
-                [`${updatePath}.tier`]: getTierFromRating(newRating),
-                [`${updatePath}.wins`]: newWins,
-                [`${updatePath}.losses`]: newLosses,
-                [`${updatePath}.matchesPlayed`]: currentStats.matchesPlayed + 1,
-                [`${updatePath}.lastMatchDate`]: serverTimestamp(),
-                [`${updatePath}.lastUpdated`]: serverTimestamp(),
-            });
+            return {
+                userId: uid as Id<"users">,
+                game: gameKey,
+                skillScore: {
+                    rating: newRating,
+                    tier: getTierFromRating(newRating),
+                    wins: newWins,
+                    losses: newLosses,
+                    matchesPlayed: currentStats.matchesPlayed + 1,
+                    initialSource: existingScore?.initialSource,
+                    initialRating: existingScore?.initialRating,
+                    lastMatchDate: Date.now(),
+                    lastUpdated: Date.now(),
+                },
+            };
         });
 
-        // Mark match as processed
-        const matchRef = doc(db, 'matchrooms', matchId);
-        batch.update(matchRef, { skillUpdateApplied: true });
+        await convex.mutation(api.users.applyMatchSkillUpdates, {
+            updates,
+            matchroomId: matchId as Id<"matchrooms">,
+        });
 
-        await batch.commit();
         return { ok: true };
 
     } catch (e) {

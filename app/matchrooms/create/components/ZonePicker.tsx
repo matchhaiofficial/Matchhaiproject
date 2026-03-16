@@ -29,17 +29,17 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
         const result = await getActiveZones(gameKey || undefined);
         if (result.ok) {
             // Deduplicate zones based on venue name and area label
-            const uniqueZones = result.data.filter((zone, index, self) =>
+            const uniqueZones = result.data!.filter((zone, index, self) =>
                 index === self.findIndex((t) => (
                     t.venueBrandName === zone.venueBrandName &&
-                    t.primaryBranch.areaLabel === zone.primaryBranch.areaLabel
+                    t.primaryBranch?.areaLabel === zone.primaryBranch?.areaLabel
                 ))
             );
 
             // Sort zones: Preferred areas first, then alphabetical
             const sortedZones = uniqueZones.sort((a, b) => {
-                const aPreferred = userPreferredAreas.some(area => a.primaryBranch.areaLabel?.includes(area));
-                const bPreferred = userPreferredAreas.some(area => b.primaryBranch.areaLabel?.includes(area));
+                const aPreferred = userPreferredAreas.some(area => a.primaryBranch?.areaLabel?.includes(area));
+                const bPreferred = userPreferredAreas.some(area => b.primaryBranch?.areaLabel?.includes(area));
                 if (aPreferred && !bPreferred) return -1;
                 if (!aPreferred && bPreferred) return 1;
                 return a.venueBrandName.localeCompare(b.venueBrandName);
@@ -53,7 +53,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             const matchesName = zone.venueBrandName.toLowerCase().includes(query);
-            const matchesArea = zone.primaryBranch.areaLabel?.toLowerCase().includes(query);
+            const matchesArea = zone.primaryBranch?.areaLabel?.toLowerCase().includes(query);
             return matchesName || matchesArea;
         }
         return true;
@@ -161,7 +161,7 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                         {zone.venueBrandName}
                                     </Text>
                                     <Text style={styles.zoneDetail} numberOfLines={1} ellipsizeMode="tail">
-                                        {zone.primaryBranch.areaLabel}
+                                        {zone.primaryBranch?.areaLabel}
                                     </Text>
                                 </View>
                                 <View style={styles.zonePriceWrapper}>

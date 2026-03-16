@@ -1,17 +1,17 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
 import { leaveTeam, removeMember, requestToJoinTeam, respondToJoinRequest, transferCaptain } from "../../src/services/functions";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/convex/teamService";
-import { getCaptainedTeams } from "../../src/services/teamMatchService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
@@ -37,14 +37,7 @@ export default function TeamDetails() {
     const router = useRouter();
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
-    const [team, setTeam] = useState<Team | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-
-    // Join Request States
-    const [pendingRequests, setPendingRequests] = useState<any[]>([]);
-    const [myPendingRequest, setMyPendingRequest] = useState<boolean>(false);
 
     // Rename States
     const [showRenameModal, setShowRenameModal] = useState(false);
@@ -52,123 +45,78 @@ export default function TeamDetails() {
 
     // Invite States
     const [showInviteSheet, setShowInviteSheet] = useState(false);
-    const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
-    // Optimized fetchTeam: 1 doc read + 1 members query + 1 request check = 3 reads total
-    const fetchTeam = async () => {
-        if (!id || !user) return;
-        try {
-            // Read 1: Team doc
-            const teamDoc = await getDoc(doc(db, 'teams', id as string));
-            if (!teamDoc.exists()) {
-                Alert.alert("Error", "Team not found");
-                router.back();
-                return;
-            }
+    // ---- Convex reactive queries ----
 
-            const teamData = { id: teamDoc.id, ...teamDoc.data() } as Team;
+    // Team with members (real-time)
+    const teamWithMembers = useQuery(
+        api.teams.getWithMembers,
+        id ? { teamId: id as Id<"teams"> } : "skip"
+    );
 
-            // Read 2: Members subcollection
-            const membersSnapshot = await getDocs(
-                query(
-                    collection(db, 'teams', id as string, 'members')
-                )
-            );
-            const members: any[] = [];
-            membersSnapshot.forEach(doc => members.push({ ...doc.data() }));
-            // Prefer subcollection members, but merge in memberUids if subcollection is incomplete/stale.
-            const memberUids = Array.isArray(teamData.memberUids) ? teamData.memberUids : [];
-            if (memberUids.length > 0) {
-                const membersByUid = new Map<string, any>();
-                members.forEach(m => {
-                    if (m?.uid) membersByUid.set(m.uid, m);
-                });
-                teamData.members = memberUids.map(uid => {
-                    const existing = membersByUid.get(uid);
-                    if (existing) return existing;
-                    return { uid, username: uid.slice(0, 6) + '…', role: 'member', joinedAt: null };
-                });
-            } else {
-                teamData.members = members;
-            }
+    // Captain's teams (for challenge button)
+    const captainedTeamsRaw = useQuery(
+        api.teams.listByCaptain,
+        user?._id ? { captainUid: user._id as Id<"users"> } : "skip"
+    );
+    const captainedTeams: Team[] = (captainedTeamsRaw ?? []).map((t: any) => ({ ...t, id: t._id })) as Team[];
 
-            setTeam(teamData);
+    // Build team object from Convex data
+    const team: Team | null = teamWithMembers
+        ? {
+              ...teamWithMembers,
+              id: teamWithMembers._id,
+              members: (teamWithMembers.members ?? []).map((m: any) => ({
+                  uid: m.odxerId ?? m.uid,
+                  username: m.username,
+                  role: m.role,
+                  joinedAt: m.joinedAt,
+              })),
+          } as Team
+        : null;
 
-            // Read 3: Check if viewer has pending request (deterministic ID)
-            if (!members.some(m => m.uid === user._id)) {
-                const requestId = `team_join_request_${id}_${user._id}`;
-                const requestDoc = await getDoc(doc(db, 'notifications', requestId));
-                if (requestDoc.exists() && requestDoc.data()?.status === 'pending') {
-                    setMyPendingRequest(true);
-                } else {
-                    setMyPendingRequest(false);
-                }
-            } else {
-                setMyPendingRequest(false);
-            }
-        } catch (error) {
-            Logger.error("TeamDetails", "Error fetching team", error);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+    // Determine isCaptain early so we can conditionally query pending requests
+    const isCaptain = team?.captainUid === user?._id;
+    const isMember = team?.members?.some(m => m.uid === user?._id) || false;
 
-    useEffect(() => {
-        fetchTeam();
-    }, [id, user]);
+    // Captain-only: real-time pending join requests
+    const pendingRequestsRaw = useQuery(
+        api.notifications.listTeamJoinRequests,
+        id && user?._id && isCaptain
+            ? { captainUid: user._id as Id<"users">, teamId: id as Id<"teams"> }
+            : "skip"
+    );
+    const pendingRequests = (pendingRequestsRaw ?? []).map((r: any) => ({
+        ...r,
+        id: r._id,
+    }));
 
-    useEffect(() => {
-        if (!user?._id) return;
-        getCaptainedTeams(user._id).then((result) => {
-            if (result.ok && result.data) {
-                setCaptainedTeams(result.data);
-            } else {
-                setCaptainedTeams([]);
-            }
-        });
-    }, [user?._id]);
+    // Non-member: check if viewer has a pending join request
+    const entityKey = id && user?._id ? `team_join_request_${id}_${user._id}` : "";
+    const myPendingRequest = useQuery(
+        api.notifications.checkPendingTeamJoinRequest,
+        id && user?._id && !isMember && entityKey
+            ? { entityKey }
+            : "skip"
+    ) ?? false;
+
+    const loading = teamWithMembers === undefined;
 
     // Role & Permission Checks
-    const isMember = team?.members?.some(m => m.uid === user?._id) || false;
-    const isCaptain = team?.captainUid === user?._id;
     const memberCount = team?.members?.length ?? team?.memberUids?.length ?? team?.memberCount ?? 0;
     const maxMembers = team ? (team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5) : 0;
     const memberCountDisplay = maxMembers > 0 ? Math.min(memberCount, maxMembers) : memberCount;
     const isFull = team ? memberCountDisplay >= maxMembers : false;
     const isPrivate = team?.visibility === 'private';
 
-    // Real-time Listeners (Captain only)
+    // Redirect if team not found (after loading completes)
     useEffect(() => {
-        if (!id || !user || !isCaptain) return;
-
-        // Captain-only: listen to join requests
-        const q = query(
-            collection(db, "notifications"),
-            where("type", "==", "team_join_request"),
-            where("toUid", "==", user._id),
-            where("meta.teamId", "==", id),
-            where("status", "==", "pending")
-        );
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const list: any[] = [];
-            snapshot.forEach(doc => list.push({ id: doc.id, ...doc.data() }));
-            list.sort((a, b) => {
-                const timeA = a.createdAt?.toMillis?.() || 0;
-                const timeB = b.createdAt?.toMillis?.() || 0;
-                return timeB - timeA;
-            });
-            setPendingRequests(list);
-        });
-
-        return () => unsubscribe();
-    }, [id, user, isCaptain]);
-
-    const onRefresh = () => {
-        setRefreshing(true);
-        fetchTeam();
-    };
+        if (teamWithMembers === null) {
+            Alert.alert("Error", "Team not found");
+            router.back();
+        }
+    }, [teamWithMembers]);
 
     const handleJoinRequest = async () => {
         if (!id || submitting || !user) return;
@@ -247,7 +195,6 @@ export default function TeamDetails() {
             const res = await requestToJoinTeam({ teamId: id as string });
             if (res.ok) {
                 Alert.alert("Success", "Request sent to captain!");
-                setMyPendingRequest(true);
             } else {
                 Alert.alert("Error", res.message || "Failed to send request.");
             }
@@ -262,11 +209,7 @@ export default function TeamDetails() {
         setSubmitting(true);
         try {
             const res = await respondToJoinRequest({ notificationId: notifId, decision });
-            if (res.ok) {
-                if (decision === 'accept') {
-                    fetchTeam(); // Refresh roster
-                }
-            } else {
+            if (!res.ok) {
                 Alert.alert("Error", res.message || "Action failed.");
             }
         } catch (e: any) {
@@ -289,9 +232,7 @@ export default function TeamDetails() {
                         setSubmitting(true);
                         try {
                             const res = await removeMember({ teamId: id as string, memberUid });
-                            if (res.ok) {
-                                fetchTeam();
-                            } else {
+                            if (!res.ok) {
                                 Alert.alert("Error", res.message || "Failed to remove.");
                             }
                         } catch (e: any) {
@@ -318,9 +259,7 @@ export default function TeamDetails() {
                         setSubmitting(true);
                         try {
                             const res = await transferCaptain({ teamId: id as string, newCaptainUid: memberUid });
-                            if (res.ok) {
-                                fetchTeam();
-                            } else {
+                            if (!res.ok) {
                                 Alert.alert("Error", res.message || "Failed to transfer.");
                             }
                         } catch (e: any) {
@@ -370,7 +309,6 @@ export default function TeamDetails() {
             const res = await updateTeamName(id as string, newName.trim());
             if (res.ok) {
                 setShowRenameModal(false);
-                fetchTeam();
             } else {
                 Alert.alert("Error", res.message || "Failed to rename team.");
             }
@@ -395,9 +333,7 @@ export default function TeamDetails() {
             if (!result.canceled && result.assets && result.assets.length > 0) {
                 setSubmitting(true);
                 const res = await uploadTeamLogo(id as string, result.assets[0].uri);
-                if (res.ok) {
-                    fetchTeam();
-                } else {
+                if (!res.ok) {
                     Alert.alert("Error", res.message || "Failed to upload logo.");
                 }
             }
@@ -561,7 +497,6 @@ export default function TeamDetails() {
             />
 
             <ScrollView
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
                 contentContainerStyle={styles.scrollContent}
             >
                 {/* Team Info Section */}
@@ -657,12 +592,12 @@ export default function TeamDetails() {
                             <View key={req.id} style={styles.requestCard}>
                                 <View style={styles.requestHeader}>
                                     <Text style={styles.requestUser}>{req.fromUsername}</Text>
-                                    <Text style={styles.snapshotText}>{req.meta.requesterSnapshot?.city || 'No city'}</Text>
+                                    <Text style={styles.snapshotText}>{req.data?.requesterSnapshot?.city || 'No city'}</Text>
                                 </View>
                                 <View style={styles.requestSnapshot}>
                                     <Text style={styles.snapshotText}>
-                                        Tier: {req.meta.requesterSnapshot?.skillTier?.[team.game] || 'Unranked'}
-                                        {req.meta.requesterSnapshot?.stats?.faceitLevel ? ` • Faceit Lvl ${req.meta.requesterSnapshot.stats.faceitLevel}` : ''}
+                                        Tier: {req.data?.requesterSnapshot?.skillTier?.[team.game] || 'Unranked'}
+                                        {req.data?.requesterSnapshot?.stats?.faceitLevel ? ` • Faceit Lvl ${req.data.requesterSnapshot.stats.faceitLevel}` : ''}
                                     </Text>
                                 </View>
                                 <View style={styles.requestActions}>

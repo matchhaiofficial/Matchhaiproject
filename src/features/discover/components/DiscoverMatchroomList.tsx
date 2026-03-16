@@ -25,10 +25,11 @@ import {
     PICKLEBALL_ROLES
 } from "../../../../constants/profileOptions";
 import { TIMELINE_FILTERS, TimelineFilterKey } from "../../../../src/constants/timelineFilters";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/matchService";
+import { convex } from "../../../../src/lib/convex";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
+import { getMatchrooms, Matchroom, Slot, requestJoinMatchroom, cancelMatchJoinRequest, isUserInActiveMatchroom } from "../../../../src/services/convex/matchService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { matchesTimeline } from "../../../../src/utils/timeFilters";
@@ -108,17 +109,15 @@ export default function DiscoverMatchroomList({ selectedGame, searchQuery, edgeP
     const fetchSocialState = async () => {
         if (!user) return;
         try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user._id),
-                where("type", "==", "match_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
+            const notifications = await convex.query(api.notifications.listByFromUid, {
+                fromUid: user._id as Id<"users">,
+                type: "match_join_request",
+                status: "pending",
+            });
             const requested = new Set<string>();
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.matchroomId) requested.add(data.meta.matchroomId);
+            notifications.forEach((notif: any) => {
+                const matchroomId = notif.matchroomId || notif.data?.matchroomId;
+                if (matchroomId) requested.add(matchroomId);
             });
             setRequestedRoomIds(requested);
         } catch (e) {

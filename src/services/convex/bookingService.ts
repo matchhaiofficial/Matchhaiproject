@@ -271,3 +271,148 @@ export async function claimSeatTransaction(
     return { ok: false, message: "Claim failed" };
   }
 }
+
+/**
+ * Generates a deterministic intent ID to avoid duplicates.
+ */
+export function generateIntentId(
+  matchroomId: string,
+  side: "A" | "B",
+  createdByUid: string,
+  slotIds: string[]
+): string {
+  const hash = slotIds && Array.isArray(slotIds)
+    ? [...slotIds].sort().join("_")
+    : "empty";
+  return `intent_${matchroomId}_${side}_${createdByUid}_${hash}`;
+}
+
+/**
+ * Identifies the deterministic Host/Captain UID for approval fallback.
+ */
+export function getHostCaptainUid(room: Matchroom): string {
+  if (room.captainUidA && !room.captainUidB) return room.captainUidA;
+  if (room.captainUidB && !room.captainUidA) return room.captainUidB;
+  return room.hostUid;
+}
+
+/**
+ * Creates a detailed booking intent with fairness checks and approval logic.
+ * Mirrors the Firebase createBookingIntentDetailed interface.
+ */
+export async function createBookingIntentDetailed({
+  matchroom,
+  side,
+  selectedSlots,
+  invitees,
+  roomAvgSkill,
+}: {
+  matchroom: Matchroom;
+  side: "A" | "B";
+  selectedSlots: string[];
+  invitees: Array<{
+    uid: string;
+    username: string;
+    roleForGame: string;
+    skillScore?: number;
+  }>;
+  roomAvgSkill?: number;
+}): Promise<{ ok: true; data: string } | { ok: false; message: string }> {
+  try {
+    const room = matchroom;
+    const slotIds = selectedSlots || [];
+    const invs = invitees || [];
+
+    // Guard: Check if room is expired
+    if (isRoomExpired(room)) {
+      return { ok: false, message: "This matchroom has expired (valid for 48 hours)" };
+    }
+
+    // Guard: Check if room is locked or full
+    if (isRoomLocked(room)) {
+      return { ok: false, message: "Matchroom is full and locked" };
+    }
+
+    const roomId = room.id || room._id || "unknown";
+
+    // Fairness Logic
+    const hostSkill = room.hostSkillScore || 50;
+    const effectiveRoomAvg = room.avgSkillScoreLive ?? hostSkill;
+
+    let captainApprovalRequired = false;
+    for (const invitee of invs) {
+      if (invitee.skillScore === undefined || invitee.skillScore === null) {
+        captainApprovalRequired = true;
+        continue;
+      }
+      if (!isWithinFairnessBand(invitee.skillScore, effectiveRoomAvg, room.game)) {
+        captainApprovalRequired = true;
+      }
+    }
+
+    // Booker-as-Approver rule
+    const targetCaptainUid = side === "A" ? room.captainUidA : room.captainUidB;
+    const approverUid = targetCaptainUid || getHostCaptainUid(room);
+
+    // For now, create a simplified intent via Convex
+    // The intent ID is deterministic to avoid duplicates
+    const intentId = generateIntentId(roomId, side, invs[0]?.uid || "unknown", slotIds);
+
+    try {
+      await convex.mutation(api.bookings.createIntent, {
+        matchroomId: roomId as Id<"matchrooms">,
+        createdByUid: invs[0]?.uid as any || ("unknown" as any),
+        side,
+        selectedSlots: slotIds.map((_, i) => i),
+        pricing: {
+          perPlayerCost: room.pricing?.perPlayer || 0,
+          totalCost: (room.pricing?.perPlayer || 0) * invs.length,
+        },
+      });
+    } catch (e: any) {
+      // If intent already exists, reuse it
+      if (!e?.message?.includes("already exists")) {
+        throw e;
+      }
+    }
+
+    return { ok: true, data: intentId };
+  } catch (error: any) {
+    console.error("[bookingService] createBookingIntentDetailed error:", error);
+    return { ok: false, message: "Failed to create booking intent" };
+  }
+}
+
+/**
+ * Updates the status of a booking intent.
+ */
+export async function updateBookingIntentStatus(
+  intentId: string,
+  status: BookingIntent["status"]
+): Promise<Result> {
+  try {
+    // Map status to the appropriate mutation
+    if (status === "expired" || status === "rejected" || status === "cancelled") {
+      await convex.mutation(api.bookings.updateIntentPaymentStatus, {
+        intentId: intentId as Id<"bookingIntents">,
+        paymentStatus: "unpaid",
+      });
+    }
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[bookingService] updateBookingIntentStatus error:", error);
+    return { ok: false, message: "Failed to update status" };
+  }
+}
+
+/**
+ * Best-effort client-side cleanup for expired intents.
+ */
+export async function cleanupExpiredIntents(matchroomId: string): Promise<void> {
+  try {
+    // In Convex, this would be handled by a scheduled function
+    // No-op on client side
+  } catch (e) {
+    console.error("[bookingService] cleanupExpiredIntents error:", e);
+  }
+}

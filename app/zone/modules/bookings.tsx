@@ -12,7 +12,6 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
-import { collection, doc, getDocs, limit, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 
 import AppHeader from "../../../src/components/AppHeader";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
@@ -20,7 +19,9 @@ import Screen from "../../../src/components/Screen";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { db } from "../../../src/config/firebaseConfig";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { type Matchroom } from "../../../src/services/convex/matchService";
 import {
     acceptZoneBookingRequest,
@@ -51,14 +52,6 @@ const toMillis = (value: any) => {
     if (value instanceof Date) return value.getTime();
     if (typeof value === "number") return value;
     return 0;
-};
-
-const chunk = <T,>(items: T[], size: number) => {
-    const result: T[][] = [];
-    for (let i = 0; i < items.length; i += size) {
-        result.push(items.slice(i, i + size));
-    }
-    return result;
 };
 
 const normalizeGameKey = (value: unknown) => String(value || "").trim().toLowerCase();
@@ -275,11 +268,7 @@ export default function ZoneBookingsModule() {
             },
             (error) => {
                 setLoadingQueue(false);
-                if (error?.code === "permission-denied") {
-                    setErrorText("Booking queue permission denied by Firestore rules.");
-                } else {
-                    setErrorText("Failed to load booking queue.");
-                }
+                setErrorText("Failed to load booking queue.");
             },
         );
 
@@ -292,11 +281,7 @@ export default function ZoneBookingsModule() {
             },
             (error) => {
                 setLoadingMatchrooms(false);
-                if (error?.code === "permission-denied") {
-                    setErrorText("Matchroom list permission denied by Firestore rules.");
-                } else {
-                    setErrorText("Failed to load matchrooms.");
-                }
+                setErrorText("Failed to load matchrooms.");
             },
             {
                 locationHints: [
@@ -317,67 +302,67 @@ export default function ZoneBookingsModule() {
     useEffect(() => {
         let cancelled = false;
         const resolveLinkedRequests = async () => {
-            if (!matchrooms.length) {
+            if (!matchrooms.length || !zone?.id) {
                 setLinkedRequests([]);
                 return;
             }
             try {
                 setBackfillInProgress(true);
-                const ids = Array.from(new Set(matchrooms.map((item) => item.id).filter(Boolean)));
-                const batches = chunk(ids, 10);
+                // Use Convex to fetch booking requests by zone
+                const allRequests = await convex.query(api.bookings.listRequestsByZone, {
+                    zoneId: zone.id as Id<"zones">,
+                });
+
                 const collected: ZoneBookingQueueItem[] = [];
                 const linkedMatchroomIds = new Set<string>();
 
-                for (const batch of batches) {
-                    const q = query(
-                        collection(db, "booking_requests"),
-                        where("matchroomId", "in", batch),
-                    );
-                    const snapshot = await getDocs(q);
-                    snapshot.docs.forEach((docSnap: any) => {
-                        const data = docSnap.data() as Record<string, any>;
-                        const status = String(data.status || "open");
-                        if (data.matchroomId) {
-                            linkedMatchroomIds.add(String(data.matchroomId));
-                        }
-                        if (ACTIVE_QUEUE_STATUSES.has(status)) {
-                            collected.push(normalizeLinkedRequest(docSnap.id, data));
-                        }
-                    });
+                for (const req of allRequests) {
+                    const data = req as any;
+                    const status = String(data.status || "open");
+                    if (data.matchroomId) {
+                        linkedMatchroomIds.add(String(data.matchroomId));
+                    }
+                    if (ACTIVE_QUEUE_STATUSES.has(status)) {
+                        collected.push(normalizeLinkedRequest(data._id, data));
+                    }
                 }
 
                 const matchroomMap = new Map(matchrooms.map((room) => [room.id, room]));
+                const ids = Array.from(new Set(matchrooms.map((item) => item.id).filter(Boolean)));
                 const missing = ids.filter((id) => !linkedMatchroomIds.has(id));
+
                 for (const matchroomId of missing) {
                     const room = matchroomMap.get(matchroomId);
                     if (!room || room.bookingSource === "walkin") continue;
-                    const docId = `matchroom_request_${matchroomId}`;
                     const gameKey = normalizeGameKey(room.game);
-                    const requestData = {
-                        userId: room.hostUid || "",
-                        userName: room.hostName || "Player",
-                        gameKey,
-                        title: room.title || "Matchroom Booking",
-                        description: "Matchroom created. Awaiting zone admin approval.",
-                        maxPlayers: Number(room.maxPlayers || 0),
-                        reservedSlots: Number(room.currentPlayers || 0) || undefined,
-                        preferredDate: room.scheduledDate || null,
-                        preferredTime: room.scheduledTime || null,
-                        flexibilityWindow: "Exact time",
-                        preferredAreas: room.location ? [room.location] : [],
-                        budgetPerPlayer: Number(room.pricePerPlayer || 0) || 0,
-                        currency: room.currency || "PKR",
-                        locationMode: "zone",
-                        zoneId: zone?.id || null,
-                        status: "open",
-                        paymentStatus: room.paymentStatus || "unpaid",
-                        lifecycleStatus: "matchroom_admin_pending",
-                        matchroomId,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp(),
-                    };
-                    await setDoc(doc(db, "booking_requests", docId), requestData, { merge: true });
-                    collected.push(normalizeLinkedRequest(docId, requestData));
+                    // Create a booking request via Convex mutation
+                    try {
+                        const requestId = await convex.mutation(api.bookings.createRequest, {
+                            userId: (room.hostUid || "") as Id<"users">,
+                            gameKey,
+                            zoneId: zone.id as Id<"zones">,
+                            preferredDate: room.scheduledDate ? new Date(room.scheduledDate).getTime() : undefined,
+                            preferredTime: room.scheduledTime || undefined,
+                            playerCount: Number(room.maxPlayers || 0),
+                            notes: "Matchroom created. Awaiting zone admin approval.",
+                        });
+                        collected.push(normalizeLinkedRequest(requestId as string, {
+                            userId: room.hostUid || "",
+                            userName: room.hostName || "Player",
+                            gameKey,
+                            title: room.title || "Matchroom Booking",
+                            maxPlayers: Number(room.maxPlayers || 0),
+                            status: "open",
+                            paymentStatus: room.paymentStatus || "unpaid",
+                            lifecycleStatus: "matchroom_admin_pending",
+                            matchroomId,
+                            zoneId: zone.id,
+                            createdAt: Date.now(),
+                            updatedAt: Date.now(),
+                        }));
+                    } catch (e) {
+                        Logger.error("bookings", "Failed to create linked request", e);
+                    }
                 }
 
                 if (!cancelled) {
@@ -419,21 +404,18 @@ export default function ZoneBookingsModule() {
         let cancelled = false;
         const resolveRequestId = async () => {
             try {
-                const q = query(
-                    collection(db, "booking_requests"),
-                    where("matchroomId", "==", deepMatchroomId),
-                    limit(1),
-                );
-                const snapshot = await getDocs(q);
-                const docSnap = snapshot.docs[0];
-                if (!cancelled && docSnap) {
-                    setSelectedRequestId(docSnap.id);
+                // Use Convex to look up booking requests by zone, then filter by matchroomId
+                const allRequests = await convex.query(api.bookings.listRequestsByZone, {
+                    zoneId: zone.id as Id<"zones">,
+                });
+                const match = allRequests.find((r: any) => r.matchroomId === deepMatchroomId);
+                if (!cancelled && match) {
+                    setSelectedRequestId((match as any)._id);
                 }
                 if (!cancelled) {
                     setMatchroomLookupDone(true);
                 }
             } catch (e) {
-                // If we can't resolve, leave selection empty and let admin handle manually.
                 if (!cancelled) {
                     setMatchroomLookupDone(true);
                 }
@@ -912,4 +894,3 @@ export default function ZoneBookingsModule() {
         </Screen>
     );
 }
-

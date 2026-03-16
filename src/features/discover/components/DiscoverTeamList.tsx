@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -13,9 +12,11 @@ import {
     View,
     ScrollView
 } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
-import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/teamService";
+import { convex } from "../../../../src/lib/convex";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
+import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../../src/services/convex/teamService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import SegmentedTabs from "../../../../src/components/SegmentedTabs";
@@ -64,17 +65,15 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
     const fetchSocialState = async () => {
         if (!user) return;
         try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user._id),
-                where("type", "==", "team_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
+            const notifications = await convex.query(api.notifications.listByFromUid, {
+                fromUid: user._id as Id<"users">,
+                type: "team_join_request",
+                status: "pending",
+            });
             const requested = new Set<string>();
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.teamId) requested.add(data.meta.teamId);
+            notifications.forEach((notif: any) => {
+                const teamId = notif.teamId || notif.data?.teamId || notif.meta?.teamId;
+                if (teamId) requested.add(String(teamId));
             });
             setRequestedTeamIds(requested);
         } catch (e) {
@@ -127,7 +126,7 @@ export default function DiscoverTeamList({ selectedGame, searchQuery, initialMod
                 } else {
                     setPublicTeams(filteredData);
                 }
-                setLastVisible(result.lastVisible);
+                setLastVisible((result as any).lastVisible);
                 setHasMore(result.data.length === 10);
             }
         } catch (error) {

@@ -13,6 +13,19 @@ export const getById = query({
   },
 });
 
+// Get zone by ID (string version for compatibility)
+export const getByIdString = query({
+  args: { zoneId: v.string() },
+  handler: async (ctx, args) => {
+    try {
+      const id = args.zoneId as any;
+      return await ctx.db.get(id);
+    } catch {
+      return null;
+    }
+  },
+});
+
 // Get zone by owner
 export const getByOwner = query({
   args: { ownerUid: v.id("users") },

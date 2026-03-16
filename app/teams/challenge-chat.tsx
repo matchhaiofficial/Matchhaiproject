@@ -1,16 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-    addDoc,
-    collection,
-    doc,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    updateDoc,
-} from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, useMutation } from "convex/react";
+import React, { useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -24,26 +15,17 @@ import {
 
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
+import { api } from "../../convex/_generated/api";
 import { useAuth } from "../../src/context/AuthContext";
 import { COLORS } from "../../src/theme";
 import styles from "./challenge-chat.styles";
 
 type ChallengeMessage = {
-    id: string;
+    _id: string;
     text: string;
     senderUid: string;
     senderName: string;
-    createdAt?: any;
-};
-
-const toMillis = (value: any) => {
-    if (!value) return 0;
-    if (typeof value?.toMillis === "function") return value.toMillis();
-    if (typeof value?.seconds === "number") return value.seconds * 1000;
-    if (value instanceof Date) return value.getTime();
-    if (typeof value === "number") return value;
-    return 0;
+    createdAt: number;
 };
 
 export default function TeamChallengeChatScreen() {
@@ -52,53 +34,41 @@ export default function TeamChallengeChatScreen() {
     const { user } = useAuth();
     const chatId = Array.isArray(params.id) ? params.id[0] : params.id;
 
-    const [loading, setLoading] = useState(true);
-    const [messages, setMessages] = useState<ChallengeMessage[]>([]);
     const [draft, setDraft] = useState("");
     const [sending, setSending] = useState(false);
 
-    useEffect(() => {
-        if (!chatId || !user?._id) return;
-        const chatRef = doc(db, "team_match_chats", chatId);
-        const unsubChat = onSnapshot(chatRef, (snap: any) => {
-            setLoading(!snap.exists());
-        });
+    // Real-time query for chat existence
+    const chatData = useQuery(
+        api.teamChallengeChat.getChat,
+        chatId ? { chatId } : "skip"
+    );
 
-        const q = query(
-            collection(db, "team_match_chats", chatId, "messages"),
-            orderBy("createdAt", "asc"),
-        );
-        const unsubMessages = onSnapshot(q, (snapshot: any) => {
-            const rows = snapshot.docs.map((item: any) => ({ id: item.id, ...item.data() } as ChallengeMessage));
-            rows.sort((a: ChallengeMessage, b: ChallengeMessage) => toMillis(a.createdAt) - toMillis(b.createdAt));
-            setMessages(rows);
-        });
+    // Real-time query for messages
+    const messages = useQuery(
+        api.teamChallengeChat.listMessages,
+        chatId ? { chatId } : "skip"
+    );
 
-        return () => {
-            unsubChat();
-            unsubMessages();
-        };
-    }, [chatId, user?._id]);
+    const sendMessageMutation = useMutation(api.teamChallengeChat.sendMessage);
+
+    const loading = chatId && chatData === undefined && messages === undefined;
 
     const sendMessage = async () => {
         if (!chatId || !user?._id || !draft.trim() || sending) return;
         setSending(true);
         const text = draft.trim();
         setDraft("");
-        await addDoc(collection(db, "team_match_chats", chatId, "messages"), {
-            senderUid: user._id,
-            senderName: user.fullName || "Captain",
-            text,
-            createdAt: serverTimestamp(),
-        });
-        await updateDoc(doc(db, "team_match_chats", chatId), {
-            updatedAt: serverTimestamp(),
-            lastMessage: {
-                text,
+        try {
+            await sendMessageMutation({
+                chatId,
                 senderUid: user._id,
-            },
-            [`lastReadBy.${user._id}`]: serverTimestamp(),
-        });
+                senderName: user.fullName || "Captain",
+                text,
+            });
+        } catch (error) {
+            // Message failed, restore draft
+            setDraft(text);
+        }
         setSending(false);
     };
 
@@ -114,8 +84,8 @@ export default function TeamChallengeChatScreen() {
             ) : (
                 <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex1}>
                     <FlatList
-                        data={messages}
-                        keyExtractor={(item) => item.id}
+                        data={messages ?? []}
+                        keyExtractor={(item) => item._id}
                         contentContainerStyle={styles.listContent}
                         renderItem={({ item }) => {
                             const mine = item.senderUid === user?._id;

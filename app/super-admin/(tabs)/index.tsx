@@ -68,7 +68,7 @@ export default function PendingApprovals() {
                 </View>
                 <View style={styles.headerText}>
                     <Text style={styles.venueName}>{item.venueBrandName}</Text>
-                    <Text style={styles.typeText}>{item.type.charAt(0).toUpperCase() + item.type.slice(1)}</Text>
+                    <Text style={styles.typeText}>{item.type ? item.type.charAt(0).toUpperCase() + item.type.slice(1) : "Unknown"}</Text>
                 </View>
                 <MaterialIcons name="chevron-right" size={24} color={COLORS.muted} />
             </View>

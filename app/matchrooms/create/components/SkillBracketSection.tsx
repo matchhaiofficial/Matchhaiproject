@@ -162,7 +162,7 @@ export default function SkillBracketSection({
                     initialSource: 'questionnaire',
                     initialRating: normalizedRating,
                     lastMatchDate: null,
-                    lastUpdated: new Date()
+                    lastUpdated: Date.now()
                 };
                 setLocalSkill(newSkill);
                 onChange({ score: normalizedRating, tier: res.tier });

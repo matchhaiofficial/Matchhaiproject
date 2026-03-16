@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -18,10 +20,8 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 
-import { db } from "../../../src/config/firebaseConfig";
 import { useAuth } from "../../../src/context/AuthContext";
 import { getPublicTeams, getUserTeams, requestToJoinTeam, Team } from "../../../src/services/convex/teamService";
-import { getCaptainedTeams } from "../../../src/services/teamMatchService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./teams.styles";
@@ -59,40 +59,39 @@ export default function Teams() {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedGame, setSelectedGame] = useState<string>('all');
 
-    const repairTeams = async () => {
-        if (!user) return;
-        try {
-            setRefreshing(true);
-            const q = query(
-                collection(db, 'teams'),
-                where('captainUid', '==', user._id)
-            );
-            const snap = await getDocs(q);
-            const batchPromises = [];
+    // Convex real-time query for captained teams (replaces getCaptainedTeams from teamMatchService)
+    const captainedTeamsData = useQuery(
+        api.teams.listByCaptain,
+        user?._id ? { captainUid: user._id as Id<"users"> } : "skip"
+    );
 
-            for (const teamDoc of snap.docs) {
-                const data = teamDoc.data();
-                if (!data.memberUids) {
-                    batchPromises.push(updateDoc(doc(db, 'teams', teamDoc.id), {
-                        memberUids: [user._id]
-                    }));
-                }
-            }
+    // Convex real-time query for pending join requests (replaces fetchSocialState Firebase query)
+    const pendingJoinRequests = useQuery(
+        api.notifications.listByFromUid,
+        user?._id ? {
+            fromUid: user._id as Id<"users">,
+            type: "team_join_request",
+            status: "pending",
+        } : "skip"
+    );
 
-            if (batchPromises.length > 0) {
-                await Promise.all(batchPromises);
-                Alert.alert("Success", `Repaired ${batchPromises.length} teams.`);
-                fetchTeams();
-            } else {
-                Alert.alert("Info", "All your teams are healthy.");
-            }
-        } catch (e) {
-            Logger.error("Teams", "Repair error", e);
-            Alert.alert("Error", "Failed to repair teams.");
-        } finally {
-            setRefreshing(false);
+    // Derive captained teams from query
+    useEffect(() => {
+        if (captainedTeamsData) {
+            setCaptainedTeams(captainedTeamsData.map((t: any) => ({ ...t, id: t._id })) as Team[]);
         }
-    };
+    }, [captainedTeamsData]);
+
+    // Derive requested team IDs from notifications query
+    useEffect(() => {
+        if (pendingJoinRequests) {
+            const requested = new Set<string>();
+            pendingJoinRequests.forEach((notif: any) => {
+                if (notif.teamId) requested.add(notif.teamId);
+            });
+            setRequestedTeamIds(requested);
+        }
+    }, [pendingJoinRequests]);
 
     const fetchTeams = async () => {
         if (!user) return;
@@ -106,16 +105,6 @@ export default function Teams() {
         } finally {
             setLoading(false);
             setRefreshing(false);
-        }
-    };
-
-    const fetchCaptainedTeams = async () => {
-        if (!user?._id) return;
-        const result = await getCaptainedTeams(user._id);
-        if (result.ok && result.data) {
-            setCaptainedTeams(result.data);
-        } else {
-            setCaptainedTeams([]);
         }
     };
 
@@ -155,36 +144,14 @@ export default function Teams() {
         }
     };
 
-    const fetchSocialState = async () => {
-        if (!user) return;
-        try {
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user._id),
-                where("type", "==", "team_join_request"),
-                where("status", "==", "pending")
-            );
-            const snap = await getDocs(q);
-            const requested = new Set<string>();
-            snap.forEach(doc => {
-                const data = doc.data();
-                if (data.meta?.teamId) requested.add(data.meta.teamId);
-            });
-            setRequestedTeamIds(requested);
-        } catch (e) {
-            Logger.error("Teams", "Error fetching social state", e);
-        }
-    };
-
     useEffect(() => {
         if (mode === 'my') {
             fetchTeams();
         } else {
             fetchPublicTeams();
-            fetchSocialState();
         }
-        fetchCaptainedTeams();
     }, [user, mode, selectedGame]); // Intentionally not including searchQuery here to prevent instant fetch spam
+    // Note: captainedTeams and social state (requestedTeamIds) are now driven by Convex real-time queries above
 
     const handleSearch = () => {
         if (mode === 'discover') {
@@ -197,7 +164,6 @@ export default function Teams() {
         if (mode === 'my') fetchTeams();
         else {
             fetchPublicTeams();
-            fetchSocialState();
         }
     };
 

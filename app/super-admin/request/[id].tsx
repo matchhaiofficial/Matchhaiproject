@@ -114,20 +114,20 @@ export default function RequestDetail() {
                 <View style={styles.header}>
                     <Text style={styles.brandName}>{request.venueBrandName}</Text>
                     <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{request.type.toUpperCase()}</Text>
+                        <Text style={styles.badgeText}>{request.type?.toUpperCase()}</Text>
                     </View>
                 </View>
 
                 <Section title="Account Details" icon="person">
-                    <InfoRow label="Owner Name" value={request.ownerFullName} />
-                    <InfoRow label="Contact Email" value={request.contactEmail} />
+                    <InfoRow label="Owner Name" value={request.ownerFullName || ""} />
+                    <InfoRow label="Contact Email" value={request.contactEmail || ""} />
                     <InfoRow label="Contact Phone" value={request.contactPhone || "N/A"} />
                 </Section>
 
-                <Section title={`Branches (${request.branches?.length || 0})`} icon="location-on">
-                    {request.branches?.length > 0 ? (
-                        request.branches.map((branch, idx) => (
-                            <View key={branch.id} style={{ marginBottom: idx < request.branches.length - 1 ? 20 : 0, paddingBottom: idx < request.branches.length - 1 ? 20 : 0, borderBottomWidth: idx < request.branches.length - 1 ? 1 : 0, borderBottomColor: COLORS.divider }}>
+                <Section title={`Branches (${request.branches?.length ?? 0})`} icon="location-on">
+                    {(request.branches?.length ?? 0) > 0 ? (
+                        request.branches!.map((branch: any, idx: number) => (
+                            <View key={branch.id} style={{ marginBottom: idx < request.branches!.length - 1 ? 20 : 0, paddingBottom: idx < request.branches!.length - 1 ? 20 : 0, borderBottomWidth: idx < request.branches!.length - 1 ? 1 : 0, borderBottomColor: COLORS.divider }}>
                                 <Text style={{ color: COLORS.accent, fontWeight: 'bold', marginBottom: 8 }}>{branch.branchDisplayName}</Text>
                                 <InfoRow label="Address" value={branch.addressLine1 || "N/A"} />
                                 <InfoRow label="Area" value={branch.areaLabel || "N/A"} />
@@ -136,20 +136,20 @@ export default function RequestDetail() {
                         ))
                     ) : (
                         <View>
-                            <InfoRow label="Address" value={request.primaryBranch.addressLine1 || "N/A"} />
-                            <InfoRow label="Area" value={request.primaryBranch.areaLabel || "N/A"} />
-                            <InfoRow label="City" value={request.primaryBranch.city || "N/A"} />
+                            <InfoRow label="Address" value={request.primaryBranch?.addressLine1 || "N/A"} />
+                            <InfoRow label="Area" value={request.primaryBranch?.areaLabel || "N/A"} />
+                            <InfoRow label="City" value={request.primaryBranch?.city || "N/A"} />
                         </View>
                     )}
                 </Section>
 
                 <Section title="Inventory Summary" icon="inventory">
-                    {request.games.supportsCs2 && <Text style={styles.summaryItem}>• PC Gaming (CS2 Support)</Text>}
-                    {(request.games.supportsFc25 || request.games.supportsTekken8) && <Text style={styles.summaryItem}>• Console Gaming (FC/Tekken Support)</Text>}
-                    {request.games.supportsFutsal && <Text style={styles.summaryItem}>• Futsal Courts</Text>}
-                    {request.games.supportsIndoorCricket && <Text style={styles.summaryItem}>• Indoor Cricket Nets</Text>}
-                    {request.games.supportsPadel && <Text style={styles.summaryItem}>• Padel Courts</Text>}
-                    {request.games.supportsPickleball && <Text style={styles.summaryItem}>• Pickleball Courts</Text>}
+                    {request.games?.supportsCs2 && <Text style={styles.summaryItem}>• PC Gaming (CS2 Support)</Text>}
+                    {(request.games?.supportsFc25 || request.games?.supportsTekken8) && <Text style={styles.summaryItem}>• Console Gaming (FC/Tekken Support)</Text>}
+                    {request.games?.supportsFutsal && <Text style={styles.summaryItem}>• Futsal Courts</Text>}
+                    {request.games?.supportsIndoorCricket && <Text style={styles.summaryItem}>• Indoor Cricket Nets</Text>}
+                    {request.games?.supportsPadel && <Text style={styles.summaryItem}>• Padel Courts</Text>}
+                    {request.games?.supportsPickleball && <Text style={styles.summaryItem}>• Pickleball Courts</Text>}
                 </Section>
 
                 <View style={styles.buttonRow}>

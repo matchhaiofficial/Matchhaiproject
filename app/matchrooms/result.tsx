@@ -11,7 +11,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from '../../src/config/firebaseConfig';
+import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
 import Logger from '../../src/utils/logger';
@@ -38,8 +38,9 @@ export default function MatchResultSubmission() {
     const [selectedWinner, setSelectedWinner] = useState<'team1' | 'team2' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const { user } = useAuth();
 
-    const currentUserId = auth.currentUser?.uid;
+    const currentUserId = user?._id;
 
     const loadMatchData = useCallback(async () => {
         if (!matchroomId) return;

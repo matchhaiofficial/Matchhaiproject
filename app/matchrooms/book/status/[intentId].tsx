@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, onSnapshot } from "firebase/firestore";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -12,8 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { db } from "../../../../src/config/firebaseConfig";
-import { BookingIntent, updateBookingIntentStatus } from "../../../../src/services/bookingService";
+import { BookingIntent } from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import styles from "./status.styles";
@@ -21,46 +22,34 @@ import styles from "./status.styles";
 export default function BookingStatusScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };
     const router = useRouter();
-    const [intent, setIntent] = useState<BookingIntent | null>(null);
-    const [loading, setLoading] = useState(true);
     const [timeLeft, setTimeLeft] = useState<number>(0);
+    const [cancelling, setCancelling] = useState(false);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
+    // Real-time query for booking intent (replaces onSnapshot)
+    const intentData = useQuery(api.bookings.getIntentById,
+        intentId ? { intentId: intentId as Id<"bookingIntents"> } : "skip"
+    );
+    const intent = intentData as BookingIntent | null | undefined;
+
+    // Handle not found
     useEffect(() => {
-        if (!intentId) return;
+        if (intentData === null) {
+            Alert.alert("Error", "Booking request not found.");
+            router.replace("/matchrooms" as any);
+        }
+    }, [intentData]);
 
-        const unsubscribe = onSnapshot(doc(db, "booking_intents", intentId), (snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.data() as BookingIntent;
-                setIntent(data);
-
-                // Calculate time left for timer
-                if (data.expiresAt) {
-                    let expiresAt: Date;
-                    // Handle Firestore Timestamp or serialized object
-                    if (data.expiresAt.toDate) {
-                        expiresAt = data.expiresAt.toDate();
-                    } else if (data.expiresAt.seconds) {
-                        expiresAt = new Date(data.expiresAt.seconds * 1000);
-                    } else {
-                        expiresAt = new Date(data.expiresAt);
-                    }
-
-                    const diff = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-                    setTimeLeft(diff);
-                }
-            } else {
-                Alert.alert("Error", "Booking request not found.");
-                router.replace("/matchrooms" as any);
-            }
-            setLoading(false);
-        }, (error) => {
-            Logger.error("BookingStatus", "Snapshot error", error);
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
-    }, [intentId]);
+    // Calculate time left when intent data changes
+    useEffect(() => {
+        if (intent?.expiresAt) {
+            const expiresAt = typeof intent.expiresAt === 'number'
+                ? intent.expiresAt
+                : new Date(intent.expiresAt).getTime();
+            const diff = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+            setTimeLeft(diff);
+        }
+    }, [intent?.expiresAt]);
 
     // Expiry timer
     useEffect(() => {
@@ -87,6 +76,8 @@ export default function BookingStatusScreen() {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const updateStatus = useMutation(api.bookings.updateRequestStatus);
+
     const handleCancel = async () => {
         if (!intentId) return;
         Alert.alert("Cancel Request", "Are you sure you want to cancel this booking?", [
@@ -95,20 +86,25 @@ export default function BookingStatusScreen() {
                 text: "Yes, Cancel",
                 style: "destructive",
                 onPress: async () => {
-                    setLoading(true);
-                    const res = await updateBookingIntentStatus(intentId, 'cancelled');
-                    if (res.ok) {
+                    setCancelling(true);
+                    try {
+                        await updateStatus({
+                            requestId: intentId as Id<"bookingRequests">,
+                            status: 'cancelled',
+                        });
                         router.back();
-                    } else {
-                        Alert.alert("Error", res.message);
-                        setLoading(false);
+                    } catch (error: any) {
+                        Alert.alert("Error", error?.message || "Failed to cancel booking");
+                        setCancelling(false);
                     }
                 }
             }
         ]);
     };
 
-    if (loading && !intent) {
+    const loading = intent === undefined;
+
+    if (loading && !cancelling) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator color={COLORS.accent} size="large" />
@@ -224,7 +220,7 @@ export default function BookingStatusScreen() {
                     </View>
                     <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Total Amount</Text>
-                        <Text style={styles.totalAmount}>{intent.pricing.currency} {intent.pricing.total}</Text>
+                        <Text style={styles.totalAmount}>{intent.pricing?.totalCost ?? 0}</Text>
                     </View>
 
                     {isApproved && (

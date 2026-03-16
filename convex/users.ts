@@ -401,8 +401,14 @@ export const updateSkillScores = mutation({
     game: v.union(
       v.literal("cs2"),
       v.literal("tekken"),
+      v.literal("tekken8"),
       v.literal("futsal"),
-      v.literal("cricket")
+      v.literal("cricket"),
+      v.literal("indoor_cricket"),
+      v.literal("fc25"),
+      v.literal("fc26"),
+      v.literal("padel"),
+      v.literal("pickleball")
     ),
     skillScore: v.object({
       rating: v.number(),
@@ -410,6 +416,9 @@ export const updateSkillScores = mutation({
       matchesPlayed: v.number(),
       wins: v.number(),
       losses: v.number(),
+      initialSource: v.optional(v.string()),
+      initialRating: v.optional(v.number()),
+      lastMatchDate: v.optional(v.union(v.number(), v.null())),
       lastUpdated: v.number(),
     }),
   },
@@ -427,6 +436,60 @@ export const updateSkillScores = mutation({
       skillScores: updatedScores,
       updatedAt: Date.now(),
     });
+
+    return true;
+  },
+});
+
+// Batch update skill scores for multiple users after a match result
+export const applyMatchSkillUpdates = mutation({
+  args: {
+    updates: v.array(
+      v.object({
+        userId: v.id("users"),
+        game: v.string(),
+        skillScore: v.object({
+          rating: v.number(),
+          tier: v.string(),
+          matchesPlayed: v.number(),
+          wins: v.number(),
+          losses: v.number(),
+          initialSource: v.optional(v.string()),
+          initialRating: v.optional(v.number()),
+          lastMatchDate: v.optional(v.union(v.number(), v.null())),
+          lastUpdated: v.number(),
+        }),
+      })
+    ),
+    matchroomId: v.optional(v.id("matchrooms")),
+  },
+  handler: async (ctx, args) => {
+    // Apply each user's skill update
+    for (const update of args.updates) {
+      const user = await ctx.db.get(update.userId);
+      if (!user) continue;
+
+      const currentScores = (user.skillScores || {}) as Record<string, unknown>;
+      const updatedScores = {
+        ...currentScores,
+        [update.game]: update.skillScore,
+      };
+
+      await ctx.db.patch(update.userId, {
+        skillScores: updatedScores,
+        updatedAt: Date.now(),
+      });
+    }
+
+    // Mark match as processed if matchroomId provided
+    if (args.matchroomId) {
+      const match = await ctx.db.get(args.matchroomId);
+      if (match) {
+        await ctx.db.patch(args.matchroomId, {
+          updatedAt: Date.now(),
+        });
+      }
+    }
 
     return true;
   },
@@ -589,9 +652,60 @@ export const saveOnboardingStep3 = mutation({
   },
 });
 
+// List players (users with accountType === "player")
+export const listPlayers = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
+      .take(args.limit || 200);
+
+    return users.map((u) => ({ ...u, id: u._id }));
+  },
+});
+
 // ============================================
 // INTERNAL QUERIES/MUTATIONS
 // ============================================
+
+// Update game preferences and skill scores (used by game-details page)
+export const updateGamePreferences = mutation({
+  args: {
+    userId: v.id("users"),
+    updates: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found");
+
+    await ctx.db.patch(args.userId, {
+      ...args.updates,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
+
+// Update full profile fields (used by edit profile page)
+export const updateFullProfile = mutation({
+  args: {
+    userId: v.id("users"),
+    updates: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found");
+
+    await ctx.db.patch(args.userId, {
+      ...args.updates,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
 
 export const internalGetByAuthId = internalQuery({
   args: { authId: v.string() },

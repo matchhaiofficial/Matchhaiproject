@@ -74,6 +74,22 @@ export const countPending = query({
   },
 });
 
+// Count unread notifications for user (all non-read statuses for badge)
+export const countUnread = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid", (q) => q.eq("toUid", args.userId))
+      .collect();
+
+    const now = Date.now();
+    return notifications.filter(
+      (n) => n.status !== "read" && n.status !== "expired" && (!n.expiresAt || n.expiresAt > now)
+    ).length;
+  },
+});
+
 // Check for existing notification (dedup)
 export const checkExists = query({
   args: { entityKey: v.string() },
@@ -289,6 +305,26 @@ export const listByFromUid = query({
   },
 });
 
+// Check for pending friend request between two users
+export const checkPendingFriendRequest = query({
+  args: {
+    fromUid: v.id("users"),
+    toUid: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const entityKey = `friend_request:${args.fromUid}:${args.toUid}`;
+    const existing = await ctx.db
+      .query("notifications")
+      .withIndex("by_entityKey", (q) => q.eq("entityKey", entityKey))
+      .unique();
+
+    if (existing && existing.status === "pending") {
+      return { exists: true, notificationId: existing._id };
+    }
+    return { exists: false, notificationId: null };
+  },
+});
+
 // List pending join requests for a matchroom (for hosts/admins)
 export const listMatchroomJoinRequests = query({
   args: {
@@ -310,5 +346,41 @@ export const listMatchroomJoinRequests = query({
     }
 
     return filtered;
+  },
+});
+
+// List pending team join requests for a captain (for team detail page)
+export const listTeamJoinRequests = query({
+  args: {
+    captainUid: v.id("users"),
+    teamId: v.id("teams"),
+  },
+  handler: async (ctx, args) => {
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid_and_status", (q) =>
+        q.eq("toUid", args.captainUid).eq("status", "pending")
+      )
+      .order("desc")
+      .collect();
+
+    return notifications.filter(
+      (n) => n.type === "team_join_request" && n.teamId === args.teamId
+    );
+  },
+});
+
+// Check if a user has a pending join request for a team
+export const checkPendingTeamJoinRequest = query({
+  args: {
+    entityKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("notifications")
+      .withIndex("by_entityKey", (q) => q.eq("entityKey", args.entityKey))
+      .unique();
+
+    return existing !== null && existing.status === "pending";
   },
 });

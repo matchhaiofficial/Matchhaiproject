@@ -1,13 +1,14 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, updateDoc, where, doc, getDocs, writeBatch, deleteDoc } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, useMutation } from "convex/react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
 import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
@@ -20,30 +21,25 @@ import styles from "./notifications.styles";
 
 type AdminNotification = {
     id: string;
+    _id: string;
     type: string;
     title?: string;
     message?: string;
+    body?: string;
     status?: string;
     createdAt?: any;
     fromUid?: string;
     fromUsername?: string;
     toUid?: string;
-    meta?: Record<string, any>;
-};
-
-const toMillis = (value: any) => {
-    if (!value) return 0;
-    if (typeof value?.toMillis === "function") return value.toMillis();
-    if (typeof value?.seconds === "number") return value.seconds * 1000;
-    if (value instanceof Date) return value.getTime();
-    if (typeof value === "number") return value;
-    return 0;
+    data?: Record<string, any>;
+    matchroomId?: string;
 };
 
 const formatTime = (value: any) => {
-    const ms = toMillis(value);
-    if (!ms) return "Now";
-    return new Date(ms).toLocaleString();
+    if (!value) return "Now";
+    if (typeof value === "number") return new Date(value).toLocaleString();
+    if (value instanceof Date) return value.toLocaleString();
+    return "Now";
 };
 
 const getTypeLabel = (value?: string) =>
@@ -65,49 +61,48 @@ export default function ZoneNotificationsModule() {
     const router = useRouter();
     const { user } = useAuth();
 
-    const [items, setItems] = useState<AdminNotification[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [errorText, setErrorText] = useState<string | null>(null);
-    const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "seen">("all");
+    const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "read">("all");
     const [processingId, setProcessingId] = useState<string | null>(null);
     const [clearing, setClearing] = useState(false);
 
-    useEffect(() => {
-        if (!user?._id) {
-            setLoading(false);
-            return;
-        }
+    // Convex mutations
+    const markAsReadMutation = useMutation(api.notifications.markAsRead);
+    const markAllAsReadMutation = useMutation(api.notifications.markAllAsRead);
+    const removeAllMutation = useMutation(api.notifications.removeAllForUser);
 
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user._id),
-        );
+    // Real-time notifications via Convex query
+    const rawNotifications = useQuery(
+        api.notifications.listForUser,
+        user?._id ? { userId: user._id as Id<"users">, limit: 100 } : "skip",
+    );
 
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => {
-                const rows = snapshot.docs
-                    .map((item: any) => ({ id: item.id, ...item.data() } as AdminNotification))
-                    .filter((item: AdminNotification) => {
-                        const type = String(item.type || "").toLowerCase();
-                        return type.includes("booking") || type.includes("resource") || type.includes("admin") || type.includes("match");
-                    })
-                    .sort((a: AdminNotification, b: AdminNotification) => toMillis(b.createdAt) - toMillis(a.createdAt));
-                setItems(rows);
-                setLoading(false);
-            },
-            (error: any) => {
-                setLoading(false);
-                if (error?.code === "permission-denied") {
-                    setErrorText("Notifications access denied by Firestore rules.");
-                    return;
-                }
-                setErrorText("Failed to load notifications.");
-            },
-        );
+    const loading = rawNotifications === undefined;
 
-        return () => unsub();
-    }, [user?._id]);
+    // Transform and filter to admin-relevant notifications
+    const items: AdminNotification[] = useMemo(() => {
+        if (!rawNotifications) return [];
+        return rawNotifications
+            .map((n: any) => ({
+                id: n._id,
+                _id: n._id,
+                type: n.type || "general",
+                title: n.title,
+                message: n.body || n.title,
+                body: n.body,
+                status: n.status === "read" ? "seen" : n.status,
+                createdAt: n.createdAt,
+                fromUid: n.fromUid,
+                fromUsername: n.fromUsername,
+                toUid: n.toUid,
+                data: n.data || {},
+                matchroomId: n.matchroomId,
+            }))
+            .filter((item: AdminNotification) => {
+                const type = String(item.type || "").toLowerCase();
+                return type.includes("booking") || type.includes("resource") || type.includes("admin") || type.includes("match");
+            })
+            .sort((a: AdminNotification, b: AdminNotification) => (b.createdAt || 0) - (a.createdAt || 0));
+    }, [rawNotifications]);
 
     const pendingCount = useMemo(
         () => items.filter((item) => item.status !== "seen").length,
@@ -118,15 +113,20 @@ export default function ZoneNotificationsModule() {
         [items],
     );
     const filteredItems = useMemo(
-        () => items.filter((item) => (statusFilter === "all" ? true : item.status === statusFilter)),
+        () => items.filter((item) => {
+            if (statusFilter === "all") return true;
+            if (statusFilter === "pending") return item.status === "pending";
+            if (statusFilter === "read") return item.status === "seen";
+            return true;
+        }),
         [items, statusFilter],
     );
 
     const markSeenIfPending = async (item: AdminNotification) => {
         try {
             if (item.status === "pending") {
-                await updateDoc(doc(db, "notifications", item.id), {
-                    status: "seen",
+                await markAsReadMutation({
+                    notificationId: item._id as Id<"notifications">,
                 });
             }
         } catch (error) {
@@ -168,19 +168,15 @@ export default function ZoneNotificationsModule() {
                     onPress: async () => {
                         setClearing(true);
                         try {
-                            const batch = writeBatch(db);
                             if (hasPending) {
-                                items.forEach((item) => {
-                                    if (item.status !== "seen") {
-                                        batch.update(doc(db, "notifications", item.id), { status: "seen", isRead: true });
-                                    }
+                                await markAllAsReadMutation({
+                                    userId: user._id as Id<"users">,
                                 });
                             } else {
-                                items.forEach((item) => {
-                                    batch.delete(doc(db, "notifications", item.id));
+                                await removeAllMutation({
+                                    userId: user._id as Id<"users">,
                                 });
                             }
-                            await batch.commit();
                         } catch (e) {
                             Logger.error("ZoneNotifications", "Clear all failed", e);
                         } finally {
@@ -193,11 +189,11 @@ export default function ZoneNotificationsModule() {
     };
 
     const handleAcceptRejectBooking = async (item: AdminNotification, decision: 'accept' | 'reject') => {
-        if (!user?._id || !item.meta?.requestId) return;
+        if (!user?._id || !item.data?.requestId) return;
         setProcessingId(item.id);
         try {
-            const requestId = item.meta.requestId;
-            const zoneId = item.meta.zoneId || (user as any).zoneId; // Fallback if meta missing info
+            const requestId = item.data.requestId;
+            const zoneId = item.data.zoneId || (user as any).zoneId;
 
             if (!zoneId) {
                 Alert.alert("Error", "Zone ID not found. Cannot process request.");
@@ -223,7 +219,9 @@ export default function ZoneNotificationsModule() {
             }
 
             if (res.ok) {
-                await updateDoc(doc(db, "notifications", item.id), { status: "seen", isRead: true });
+                await markAsReadMutation({
+                    notificationId: item._id as Id<"notifications">,
+                });
                 Alert.alert("Success", `Request has been ${decision}ed.`);
             } else {
                 Alert.alert("Error", res.message);
@@ -259,20 +257,20 @@ export default function ZoneNotificationsModule() {
     const openNotification = async (item: AdminNotification) => {
         await markSeenIfPending(item);
 
-        const meta = item.meta || {};
+        const meta = item.data || {};
         const type = String(item.type || "").toLowerCase();
 
-        // Match join requests → go directly to matchroom detail page
-        if (type.includes("match") && meta.matchroomId) {
-            router.push(`/matchrooms/${meta.matchroomId}` as any);
+        // Match join requests - go directly to matchroom detail page
+        if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
+            router.push(`/matchrooms/${meta.matchroomId || item.matchroomId}` as any);
             return;
         }
 
-        if (meta.requestId || meta.matchroomId || type.includes("booking")) {
+        if (meta.requestId || meta.matchroomId || item.matchroomId || type.includes("booking")) {
             openBookings({
-                segment: meta.matchroomId ? "matchrooms" : "requests",
+                segment: (meta.matchroomId || item.matchroomId) ? "matchrooms" : "requests",
                 requestId: meta.requestId,
-                matchroomId: meta.matchroomId,
+                matchroomId: meta.matchroomId || item.matchroomId,
             });
             return;
         }
@@ -301,18 +299,12 @@ export default function ZoneNotificationsModule() {
                 items={[
                     { key: "all", label: "All", badge: items.length },
                     { key: "pending", label: "Pending", badge: pendingCount },
-                    { key: "seen", label: "Seen", badge: seenCount },
+                    { key: "read", label: "Seen", badge: seenCount },
                 ]}
                 value={statusFilter}
-                onChange={(value) => setStatusFilter(value as "all" | "pending" | "seen")}
+                onChange={(value) => setStatusFilter(value as "all" | "pending" | "read")}
                 style={styles.segmentTabs}
             />
-
-            {errorText ? (
-                <View style={styles.errorBox}>
-                    <Text style={styles.errorText}>{errorText}</Text>
-                </View>
-            ) : null}
 
             {/* Clear All Button */}
             {items.length > 0 && (
@@ -357,7 +349,7 @@ export default function ZoneNotificationsModule() {
                     <Text style={styles.emptyText}>No admin notifications yet.</Text>
                 ) : (
                     filteredItems.map((item) => {
-                        const meta = item.meta || {};
+                        const meta = item.data || {};
                         const status = String(item.status || "new").toLowerCase();
                         const typeLabel = getTypeLabel(item.type);
                         const iconName = getTypeIcon(item.type);
@@ -369,7 +361,7 @@ export default function ZoneNotificationsModule() {
                                 : "";
                         const requestId = String(meta.requestId || meta.requestRef || "").trim();
                         const requestLabel = requestId || "";
-                        const matchroomId = String(meta.matchroomId || "").trim();
+                        const matchroomId = String(meta.matchroomId || item.matchroomId || "").trim();
                         const matchroomLabel = String(meta.matchroomTitle || matchroomId || "").trim();
                         const hasResourceContext = !!meta.resourceId || !!meta.branchId;
                         const resourceLabel = String(meta.resourceName || meta.resourceId || "Resources").trim();
@@ -398,7 +390,7 @@ export default function ZoneNotificationsModule() {
                                 {isMatchRequest ? (
                                     <View style={{ marginTop: 6 }}>
                                         <Text style={styles.cardMessage}>
-                                            Room: {meta.matchroomTitle || meta.matchroomId || 'Unknown'} • Game: {meta.game || '—'}
+                                            Room: {meta.matchroomTitle || meta.matchroomId || item.matchroomId || 'Unknown'} • Game: {meta.game || '--'}
                                         </Text>
                                         <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 2 }}>
                                             Role: {meta.role || 'Flex'} • Team: {meta.targetTeam || 'Any'}

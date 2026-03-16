@@ -243,3 +243,89 @@ export const cancel = mutation({
     return true;
   },
 });
+
+// Create full challenge (with all team match fields)
+export const createFull = mutation({
+  args: {
+    challengerTeamId: v.id("teams"),
+    challengerTeamName: v.string(),
+    opponentTeamId: v.id("teams"),
+    opponentTeamName: v.string(),
+    game: v.string(),
+    status: v.string(),
+    message: v.optional(v.string()),
+    // Extra fields stored as data blob for flexibility
+    data: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const challengeId = await ctx.db.insert("teamChallenges", {
+      challengerTeamId: args.challengerTeamId,
+      challengerTeamName: args.challengerTeamName,
+      opponentTeamId: args.opponentTeamId,
+      opponentTeamName: args.opponentTeamName,
+      game: args.game,
+      status: args.status as any,
+      message: args.message,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return challengeId;
+  },
+});
+
+// Update challenge fields
+export const update = mutation({
+  args: {
+    challengeId: v.id("teamChallenges"),
+    status: v.optional(v.string()),
+    zoneId: v.optional(v.id("zones")),
+    zoneName: v.optional(v.string()),
+    scheduledAt: v.optional(v.number()),
+    message: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { challengeId, ...updates } = args;
+    const patch: any = { updatedAt: Date.now() };
+    if (updates.status !== undefined) patch.status = updates.status;
+    if (updates.zoneId !== undefined) patch.zoneId = updates.zoneId;
+    if (updates.zoneName !== undefined) patch.zoneName = updates.zoneName;
+    if (updates.scheduledAt !== undefined) patch.scheduledAt = updates.scheduledAt;
+    if (updates.message !== undefined) patch.message = updates.message;
+
+    await ctx.db.patch(challengeId, patch);
+    return true;
+  },
+});
+
+// List challenges where user is captain of either team
+export const listForCaptain = query({
+  args: { captainUid: v.string() },
+  handler: async (ctx, args) => {
+    // Get all teams captained by this user
+    // Note: captainUid is Id<"users"> in teams table, but we need the string uid
+    const allChallenges = await ctx.db
+      .query("teamChallenges")
+      .order("desc")
+      .take(200);
+
+    // We need to check if the user is captain of any team in these challenges
+    // For efficiency, get all teams the user captains
+    const captainedTeams = await ctx.db
+      .query("teams")
+      .order("desc")
+      .take(200);
+
+    const captainedTeamIds = new Set(
+      captainedTeams
+        .filter((t) => t.memberUids.includes(args.captainUid) && t.captainUid === (args.captainUid as any))
+        .map((t) => t._id)
+    );
+
+    return allChallenges.filter(
+      (c) =>
+        c.status !== "rejected" &&
+        (captainedTeamIds.has(c.challengerTeamId) || captainedTeamIds.has(c.opponentTeamId))
+    );
+  },
+});

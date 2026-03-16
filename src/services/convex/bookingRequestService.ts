@@ -104,16 +104,11 @@ export async function getBookingRequest(
  * Get user's booking requests
  */
 export async function getUserRequests(
-  userAuthId: string
+  userId: string
 ): Promise<Result<BookingRequest[]>> {
   try {
-    const user = await convex.query(api.users.getByAuthId, { authId: userAuthId });
-    if (!user) {
-      return { ok: false, message: "User not found" };
-    }
-
     const requests = await convex.query(api.bookings.listRequestsByUser, {
-      userId: user._id,
+      userId: userId as Id<"users">,
     });
 
     return {
@@ -171,34 +166,35 @@ export async function getOpenRequestsByGame(
 }
 
 /**
- * Create a booking request
+ * Create a booking request.
+ * Accepts the full BookingRequest-like data shape (Firebase-compatible) or a simplified shape.
  */
-export async function createBookingRequest(data: {
-  userAuthId: string;
-  gameKey: string;
-  zoneId?: string;
-  preferredDate?: number;
-  preferredTime?: string;
-  playerCount: number;
-  notes?: string;
-}): Promise<Result<{ id: string }>> {
+export async function createBookingRequest(
+  data: Omit<BookingRequest, "id" | "createdAt" | "status" | "_id"> & {
+    userAuthId?: string;
+    playerCount?: number;
+    notes?: string;
+  },
+  options?: { status?: BookingRequest["status"] }
+): Promise<{ ok: boolean; id?: string; message?: string }> {
   try {
-    const user = await convex.query(api.users.getByAuthId, { authId: data.userAuthId });
-    if (!user) {
-      return { ok: false, message: "User not found" };
+    // Resolve the userId - it may already be a Convex user ID
+    const userId = data.userId;
+    if (!userId) {
+      return { ok: false, message: "User ID is required" };
     }
 
     const requestId = await convex.mutation(api.bookings.createRequest, {
-      userId: user._id,
+      userId: userId as Id<"users">,
       gameKey: data.gameKey,
       zoneId: data.zoneId as Id<"zones"> | undefined,
       preferredDate: data.preferredDate,
       preferredTime: data.preferredTime,
-      playerCount: data.playerCount,
-      notes: data.notes,
+      playerCount: data.playerCount || data.maxPlayers || 10,
+      notes: data.notes || data.description,
     });
 
-    return { ok: true, data: { id: requestId } };
+    return { ok: true, id: requestId };
   } catch (error: any) {
     console.error("[bookingRequestService] createBookingRequest error:", error);
     return { ok: false, message: error?.message || "Failed to create booking request" };
@@ -279,11 +275,11 @@ export async function getOffersForRequest(
  * Get offers for user's requests
  */
 export async function getOffersForUser(
-  userAuthId: string
+  userId: string
 ): Promise<Result<ZoneOffer[]>> {
   try {
     // First get user's requests
-    const requestsResult = await getUserRequests(userAuthId);
+    const requestsResult = await getUserRequests(userId);
     if (!requestsResult.ok || !requestsResult.data) {
       return { ok: true, data: [] };
     }

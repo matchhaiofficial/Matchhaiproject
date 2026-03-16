@@ -220,6 +220,9 @@ export default defineSchema({
     hidePlatformsPublicly: v.optional(v.boolean()),
     restrictInvitesToFriends: v.optional(v.boolean()),
 
+    // Wallet
+    walletBalance: v.optional(v.number()),
+
     // Timestamps
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -473,8 +476,12 @@ export default defineSchema({
       v.object({
         totalCost: v.number(),
         perPlayerCost: v.number(),
+        currency: v.optional(v.string()),
       })
     ),
+
+    // Game reference
+    game: v.optional(v.string()),
 
     // Payment
     paymentStatus: v.union(v.literal("unpaid"), v.literal("paid")),
@@ -632,6 +639,34 @@ export default defineSchema({
     .index("by_challengerTeamId", ["challengerTeamId"])
     .index("by_opponentTeamId", ["opponentTeamId"])
     .index("by_status", ["status"]),
+
+  // ============================================
+  // TEAM CHALLENGE CHAT MESSAGES
+  // ============================================
+  teamChallengeChatMessages: defineTable({
+    chatId: v.string(), // The challenge chat ID (matches teamChallenge ID or custom chat ID)
+    senderUid: v.string(),
+    senderName: v.string(),
+    text: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_chatId", ["chatId"])
+    .index("by_chatId_and_createdAt", ["chatId", "createdAt"]),
+
+  // ============================================
+  // TEAM CHALLENGE CHATS (metadata)
+  // ============================================
+  teamChallengeChats: defineTable({
+    chatId: v.string(), // External chat ID
+    lastMessage: v.optional(v.object({
+      text: v.string(),
+      senderUid: v.string(),
+    })),
+    lastReadBy: v.optional(v.any()),
+    updatedAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_chatId", ["chatId"]),
 
   // ============================================
   // ZONES
@@ -864,7 +899,16 @@ export default defineSchema({
   chatrooms: defineTable({
     matchroomId: v.id("matchrooms"),
     participantUids: v.array(v.string()),
+    lastMessage: v.optional(v.object({
+      text: v.string(),
+      senderUid: v.string(),
+      senderName: v.string(),
+      createdAt: v.number(),
+    })),
+    lastReadBy: v.optional(v.any()), // Record<userId, timestamp>
+    zoneId: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
   }).index("by_matchroomId", ["matchroomId"]),
 
   // ============================================
@@ -875,6 +919,13 @@ export default defineSchema({
     senderUid: v.id("users"),
     senderUsername: v.string(),
     content: v.string(),
+    clientMessageId: v.optional(v.string()),
+    replyTo: v.optional(v.object({
+      messageId: v.string(),
+      senderName: v.string(),
+      text: v.string(),
+    })),
+    deletedFor: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_chatroomId", ["chatroomId"])

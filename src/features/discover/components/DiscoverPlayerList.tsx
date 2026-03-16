@@ -1,10 +1,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { db } from "../../../../src/config/firebaseConfig";
 import { useAuth } from "../../../../src/context/AuthContext";
+import { convex } from "../../../../src/lib/convex";
+import { api } from "../../../../convex/_generated/api";
+import { Id } from "../../../../convex/_generated/dataModel";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { GameKey } from "../types";
@@ -118,22 +119,24 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
     const fetchSocialState = async () => {
         if (!user) return;
         try {
-            // 1. Fetch Friends
-            const friendsSnap = await getDocs(collection(db, "users", user._id, "friends"));
+            // 1. Fetch Friends via Convex
+            const friendsList = await convex.query(api.social.listFriends, {
+                userId: user._id as Id<"users">,
+            });
             const friends = new Set<string>();
-            friendsSnap.forEach(doc => friends.add(doc.id));
+            friendsList.forEach((f: any) => friends.add(String(f.friendId)));
             setFriendUids(friends);
 
-            // 2. Fetch Pending Outgoing Requests
-            const q = query(
-                collection(db, "notifications"),
-                where("fromUid", "==", user._id),
-                where("type", "==", "friend_request"),
-                where("status", "==", "pending")
-            );
-            const pendingSnap = await getDocs(q);
+            // 2. Fetch Pending Outgoing Requests via Convex
+            const pendingNotifications = await convex.query(api.notifications.listByFromUid, {
+                fromUid: user._id as Id<"users">,
+                type: "friend_request",
+                status: "pending",
+            });
             const pending = new Set<string>();
-            pendingSnap.forEach(doc => pending.add(doc.data().toUid));
+            pendingNotifications.forEach((notif: any) => {
+                if (notif.toUid) pending.add(String(notif.toUid));
+            });
             setPendingUids(pending);
 
         } catch (e) {
@@ -144,15 +147,14 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
     const fetchPlayers = async () => {
         if (!user) return;
         try {
-            let q = query(collection(db, "users"), where("accountType", "==", "player"));
-
-            const snapshot = await getDocs(q);
+            const playerDocs = await convex.query(api.users.listPlayers, {
+                limit: 200,
+            });
             const loadedPlayers: Player[] = [];
 
-            snapshot.forEach(doc => {
-                const data = doc.data();
+            playerDocs.forEach((data: any) => {
                 // Exclude self
-                if (doc.id === user?._id) return;
+                if (String(data._id) === user?._id) return;
 
                 // Construct roles object from flattened fields
                 const roles: Record<string, string> = {};
@@ -167,7 +169,7 @@ export default function DiscoverPlayerList({ selectedGame, searchQuery, edgePadd
                 // Add other roles as needed
 
                 loadedPlayers.push({
-                    uid: doc.id,
+                    uid: String(data._id),
                     username: data.username || "Unknown",
                     primaryGames: data.primaryGames || [],
                     skillLevel: data.skillLevel || "Beginner",

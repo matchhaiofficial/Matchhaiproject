@@ -15,12 +15,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import { useScreenPadding } from "../../../src/hooks/useScreenPadding";
 import { useAuth } from "../../../src/context/AuthContext";
-import { db } from "../../../src/config/firebaseConfig";
-import { arrayUnion, collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, addDoc, setDoc, updateDoc, where } from "firebase/firestore";
 import { COLORS, SPACING } from "../../../src/theme";
 import styles from "./chat.styles";
 import Logger from "../../../src/utils/logger";
@@ -31,7 +32,7 @@ type ChatMessage = {
   text: string;
   senderUid: string;
   senderName: string;
-  createdAt?: any;
+  createdAt?: number;
   replyTo?: {
     messageId: string;
     senderName: string;
@@ -63,213 +64,145 @@ export default function MatchroomChat() {
   const insets = useSafeAreaInsets();
   const screenPadding = useScreenPadding();
 
-  const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
-  const [roomTitle, setRoomTitle] = useState<string>("Matchroom Chat");
-  const [roomMeta, setRoomMeta] = useState<any>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [roomDocId, setRoomDocId] = useState<string>("");
-  const [chatMeta, setChatMeta] = useState<any>(null);
-  const [participantNames, setParticipantNames] = useState<Record<string, string>>({});
+  const [input, setInput] = useState("");
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [resolvedMatchroomId, setResolvedMatchroomId] = useState<string | null>(null);
   const lastReadMessageId = useRef<string | null>(null);
   const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
 
   const chatroomId = typeof id === "string" ? id : "";
-  const activeRoomId = roomDocId || chatroomId;
 
-  const checkAuthorization = useCallback(async () => {
-    if (!chatroomId || !user?._id) return;
-    setLoading(true);
-    try {
-      Logger.info("MatchroomChat", "Access check start", { chatroomId, uid: user._id });
-      let resolvedId = chatroomId;
-      let roomSnap = await getDoc(doc(db, "matchrooms", resolvedId));
-      if (!roomSnap.exists()) {
-        const q = query(
-          collection(db, "matchrooms"),
-          where("matchCode", "==", chatroomId),
-          limit(1)
-        );
-        const qs = await getDocs(q);
-        if (!qs.empty) {
-          resolvedId = qs.docs[0].id;
-          roomSnap = qs.docs[0];
-          setRoomDocId(resolvedId);
-          Logger.info("MatchroomChat", "Resolved matchCode to docId", { chatroomId, resolvedId });
-        } else {
-          Logger.warn("MatchroomChat", "No matchroom found for code", { chatroomId });
-        }
-      }
-      if (!roomSnap.exists()) {
-        setAuthorized(false);
-        setLoading(false);
-        Logger.warn("MatchroomChat", "Room not found", { chatroomId, resolvedId });
-        return;
-      }
-      const roomData: any = roomSnap.data();
-      setRoomTitle(roomData.title || "Matchroom Chat");
-      setRoomMeta(roomData);
+  // Try to get matchroom by ID first
+  const matchroomById = useQuery(
+    api.matchrooms.getById,
+    chatroomId ? { matchroomId: chatroomId } : "skip"
+  );
 
-      const tryGetChatroom = async () => {
-        try {
-          return await getDoc(doc(db, "chatrooms", resolvedId));
-        } catch (err) {
-          Logger.warn("MatchroomChat", "Chatroom read failed", { resolvedId, err });
-          return null;
-        }
-      };
+  // If not found by ID, try by matchCode
+  const matchroomByCode = useQuery(
+    api.matchrooms.getByMatchCode,
+    chatroomId && matchroomById === null ? { matchCode: chatroomId } : "skip"
+  );
 
-      let chatSnap = await tryGetChatroom();
-      if ((!chatSnap || !chatSnap.exists()) && (roomData.hostUid === user._id || roomData.zoneOwnerUid === user._id)) {
-        try {
-          const participantUids = Array.from(new Set([
-            roomData.hostUid,
-            ...(roomData.playerUids || []),
-            ...(roomData.zoneOwnerUid ? [roomData.zoneOwnerUid] : []),
-          ].filter(Boolean)));
-          await setDoc(doc(db, "chatrooms", resolvedId), {
-            matchroomId: resolvedId,
-            zoneId: roomData.zoneId || null,
-            participantUids,
-            lastMessage: null,
-            lastReadBy: {},
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
-          Logger.info("MatchroomChat", "Chatroom created by host/venue owner", { resolvedId });
-        } catch (err) {
-          Logger.warn("MatchroomChat", "Chatroom create failed", { resolvedId, err });
-        }
-        chatSnap = await tryGetChatroom();
-      }
+  const roomMeta = matchroomById || matchroomByCode;
+  const matchroomId = roomMeta?._id;
 
-      if (!chatSnap || !chatSnap.exists()) {
-        setAuthorized(false);
-        Logger.warn("MatchroomChat", "Chatroom missing after sync", { resolvedId });
-        return;
-      }
-
-      let participantUids: string[] = chatSnap.data()?.participantUids || [];
-      let isParticipant = participantUids.includes(user._id);
-      setAuthorized(isParticipant);
-      Logger.info("MatchroomChat", "Access check result", {
-        resolvedId,
-        isParticipant,
-        participantUidsCount: participantUids.length,
-        hostUid: roomData.hostUid,
-        zoneOwnerUid: roomData.zoneOwnerUid,
-      });
-    } catch (error) {
-      setAuthorized(false);
-      Logger.error("MatchroomChat", "Access check failed", error);
-    } finally {
-      setLoading(false);
+  // Update resolvedMatchroomId when we find the matchroom
+  useEffect(() => {
+    if (matchroomId) {
+      setResolvedMatchroomId(matchroomId);
     }
-  }, [chatroomId, user?._id]);
+  }, [matchroomId]);
 
-  useEffect(() => {
-    checkAuthorization();
-  }, [checkAuthorization]);
+  // Get chatroom for this matchroom (real-time)
+  const chatroom = useQuery(
+    api.chat.getByMatchroom,
+    matchroomId ? { matchroomId: matchroomId as Id<"matchrooms"> } : "skip"
+  );
 
-  useEffect(() => {
-    if (!activeRoomId || !authorized) return;
-    const messagesRef = collection(db, "chatrooms", activeRoomId, "messages");
-    const q = query(messagesRef, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        const data: any = docSnap.data();
-        list.push({
-          id: docSnap.id,
-          text: data.text || "",
-          senderUid: data.senderUid,
-          senderName: data.senderName || "Player",
-          createdAt: data.createdAt,
-          replyTo: data.replyTo,
-          deletedFor: data.deletedFor,
-        });
-      });
-      setMessages(list);
-    });
-    return () => unsubscribe();
-  }, [activeRoomId, authorized]);
+  // Get messages for this matchroom (real-time - replaces onSnapshot)
+  const rawMessages = useQuery(
+    api.chat.listMessagesForMatchroom,
+    matchroomId ? { matchroomId: matchroomId as Id<"matchrooms">, limit: 100 } : "skip"
+  );
 
-  useEffect(() => {
-    if (!activeRoomId || !authorized) return;
-    const chatRef = doc(db, "chatrooms", activeRoomId);
-    const unsubscribe = onSnapshot(chatRef, (snap) => {
-      setChatMeta(snap.exists() ? snap.data() : null);
-    });
-    return () => unsubscribe();
-  }, [activeRoomId, authorized]);
+  // Get participant user data
+  const participantUids = chatroom?.participantUids || [];
+  const participantUserIds = useMemo(
+    () => participantUids.filter(Boolean).map((uid) => uid as Id<"users">),
+    [participantUids]
+  );
+  const participantUsers = useQuery(
+    api.users.getMany,
+    participantUserIds.length > 0 ? { userIds: participantUserIds } : "skip"
+  );
 
-  useEffect(() => {
-    const participantUids = Array.isArray(chatMeta?.participantUids) ? chatMeta.participantUids.filter(Boolean) : [];
-    if (!participantUids.length) {
-      setParticipantNames({});
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadParticipantNames = async () => {
-      try {
-        const uniqueUids = Array.from(new Set(participantUids));
-        const names: Record<string, string> = {};
-
-        for (let index = 0; index < uniqueUids.length; index += 10) {
-          const batch = uniqueUids.slice(index, index + 10);
-          const usersSnap = await getDocs(
-            query(collection(db, "users"), where(documentId(), "in", batch))
-          );
-          usersSnap.forEach((userDoc) => {
-            const data: any = userDoc.data();
-            names[userDoc.id] =
-              data?.username ||
-              data?.displayName ||
-              data?.fullName ||
-              "Player";
-          });
+  const participantNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    if (participantUsers) {
+      for (const u of participantUsers) {
+        if (u) {
+          names[u._id] = u.username || u.fullName || "Player";
         }
-
-        if (!cancelled) {
-          if (user?._id && !names[user._id]) {
-            names[user._id] = user.fullName || "You";
-          }
-          setParticipantNames(names);
-        }
-      } catch (error) {
-        Logger.warn("MatchroomChat", "Failed to load participant names", error);
       }
-    };
+    }
+    if (user?._id && !names[user._id]) {
+      names[user._id] = user.fullName || "You";
+    }
+    return names;
+  }, [participantUsers, user?._id, user?.fullName]);
 
-    loadParticipantNames();
+  // Mutations
+  const getOrCreateChatroom = useMutation(api.chat.getOrCreateForMatchroom);
+  const sendMessageMutation = useMutation(api.chat.sendMessage);
+  const deleteForMeMutation = useMutation(api.chat.deleteForMe);
+  const markReadMutation = useMutation(api.chat.markRead);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [chatMeta?.participantUids, user?._id, user?.fullName]);
+  // Authorization check
+  const authorized = useMemo(() => {
+    if (!chatroom || !user?._id) return false;
+    return chatroom.participantUids.includes(user._id);
+  }, [chatroom, user?._id]);
 
+  // Loading state
+  const loading = matchroomById === undefined && matchroomByCode === undefined;
+
+  // Auto-create chatroom if host/owner and no chatroom exists
+  useEffect(() => {
+    if (!matchroomId || !user?._id || !roomMeta) return;
+    if (chatroom !== null) return; // Chatroom exists or still loading
+
+    const isHostOrOwner = roomMeta.hostUid === user._id ||
+      (roomMeta as any).zoneOwnerUid === user._id;
+
+    if (!isHostOrOwner) return;
+
+    const participantUids = Array.from(new Set([
+      roomMeta.hostUid,
+      ...((roomMeta as any).playerUids || []),
+      ...((roomMeta as any).zoneOwnerUid ? [(roomMeta as any).zoneOwnerUid] : []),
+    ].filter(Boolean)));
+
+    getOrCreateChatroom({
+      matchroomId: matchroomId as Id<"matchrooms">,
+      participantUids,
+      zoneId: (roomMeta as any).zoneId,
+    }).catch((err: any) => {
+      Logger.warn("MatchroomChat", "Chatroom create failed", err);
+    });
+  }, [matchroomId, user?._id, roomMeta, chatroom]);
+
+  // Transform messages to ChatMessage format
+  const messages: ChatMessage[] = useMemo(() => {
+    if (!rawMessages) return [];
+    return rawMessages.map((msg) => ({
+      id: msg._id,
+      text: msg.content || "",
+      senderUid: msg.senderUid,
+      senderName: msg.senderUsername || "Player",
+      createdAt: msg.createdAt,
+      replyTo: msg.replyTo ? {
+        messageId: msg.replyTo.messageId,
+        senderName: msg.replyTo.senderName,
+        snippet: msg.replyTo.text,
+      } : undefined,
+      deletedFor: msg.deletedFor,
+    }));
+  }, [rawMessages]);
+
+  // Mark as read
   const markRead = useCallback(async () => {
-    if (!activeRoomId || !user?._id) return;
+    if (!chatroom?._id || !user?._id) return;
     try {
-      await setDoc(
-        doc(db, "chatrooms", activeRoomId),
-        {
-          lastReadBy: {
-            [user._id]: serverTimestamp(),
-          },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await markReadMutation({
+        chatroomId: chatroom._id,
+        userId: user._id,
+      });
     } catch (error) {
       Logger.warn("MatchroomChat", "Failed to update lastReadBy", error);
     }
-  }, [activeRoomId, user?._id]);
+  }, [chatroom?._id, user?._id, markReadMutation]);
 
   useEffect(() => {
     if (!authorized || !messages.length || !user?._id) return;
@@ -282,14 +215,15 @@ export default function MatchroomChat() {
   }, [messages, authorized, markRead, user?._id]);
 
   useEffect(() => {
-    if (!authorized || !activeRoomId) return;
+    if (!authorized || !chatroom?._id) return;
     markRead();
-  }, [authorized, activeRoomId, markRead]);
+  }, [authorized, chatroom?._id, markRead]);
 
+  // Send message
   const sendMessage = async (overrideText?: string) => {
-    if (!activeRoomId || !user?._id) {
+    if (!chatroom?._id || !user?._id) {
       Logger.warn("MatchroomChat", "Send skipped due to missing context", {
-        activeRoomId,
+        chatroomId: chatroom?._id,
         uid: user?._id,
       });
       return;
@@ -298,41 +232,21 @@ export default function MatchroomChat() {
     if (!trimmed) return;
     setSending(true);
     try {
-      Logger.debug("MatchroomChat", "Send start", {
-        roomId: activeRoomId,
-        uid: user._id,
-        viaQuickChip: Boolean(overrideText),
-        length: trimmed.length,
-      });
-      const payload: any = {
-        type: "text",
-        text: trimmed,
-        senderUid: user._id,
-        senderName: user.fullName || "Player",
-        createdAt: serverTimestamp(),
-        clientMessageId: `${user._id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      };
-      if (replyTo) {
-        payload.replyTo = {
+      const clientMessageId = `${user._id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      await sendMessageMutation({
+        chatroomId: chatroom._id,
+        senderUid: user._id as Id<"users">,
+        senderUsername: user.fullName || user.username || "Player",
+        content: trimmed,
+        clientMessageId,
+        replyTo: replyTo ? {
           messageId: replyTo.id,
           senderName: replyTo.senderName || "Player",
-          snippet: (replyTo.text || "").slice(0, 80),
-        };
-      }
-      await addDoc(collection(db, "chatrooms", activeRoomId, "messages"), payload);
-      try {
-        await updateDoc(doc(db, "chatrooms", activeRoomId), {
-          lastMessage: {
-            type: "text",
-            text: trimmed,
-            senderUid: user._id,
-            createdAt: serverTimestamp(),
-          },
-          updatedAt: serverTimestamp(),
-        });
-      } catch (e) {
-        Logger.warn("MatchroomChat", "Failed to update lastMessage", e);
-      }
+          text: (replyTo.text || "").slice(0, 80),
+        } : undefined,
+      });
+
       if (!overrideText) {
         setInput("");
       }
@@ -346,11 +260,11 @@ export default function MatchroomChat() {
   };
 
   const deleteForMe = async (messageId: string) => {
-    if (!activeRoomId || !user?._id) return;
+    if (!user?._id) return;
     try {
-      await updateDoc(doc(db, "chatrooms", activeRoomId, "messages", messageId), {
-        deletedFor: arrayUnion(user._id),
-        updatedAt: serverTimestamp(),
+      await deleteForMeMutation({
+        messageId: messageId as Id<"chatMessages">,
+        userId: user._id,
       });
     } catch (error) {
       Logger.warn("MatchroomChat", "deleteForMe failed", error);
@@ -392,12 +306,14 @@ export default function MatchroomChat() {
     return messages.find((m) => m.senderUid === user._id)?.id || null;
   }, [messages, user?._id]);
 
+  const roomTitle = roomMeta?.title || "Matchroom Chat";
+
   const contextCard = useMemo(() => {
     if (!roomMeta) return null;
-    const gameLabel = GAME_LABELS[roomMeta.game] || (roomMeta.game ? String(roomMeta.game).toUpperCase() : "Matchroom");
-    const dateText = roomMeta.scheduledDate ? String(roomMeta.scheduledDate) : "Date TBD";
-    const timeText = roomMeta.scheduledTime ? String(roomMeta.scheduledTime) : "Time TBD";
-    const status = roomMeta.status ? String(roomMeta.status).replace('-', ' ') : 'open';
+    const gameLabel = GAME_LABELS[(roomMeta as any).game] || ((roomMeta as any).game ? String((roomMeta as any).game).toUpperCase() : "Matchroom");
+    const dateText = (roomMeta as any).scheduledDate ? String((roomMeta as any).scheduledDate) : "Date TBD";
+    const timeText = (roomMeta as any).scheduledTime ? String((roomMeta as any).scheduledTime) : "Time TBD";
+    const status = (roomMeta as any).status ? String((roomMeta as any).status).replace('-', ' ') : 'open';
     return (
       <View style={styles.contextCard}>
         <View style={styles.contextTopRow}>
@@ -406,7 +322,7 @@ export default function MatchroomChat() {
             <Text style={styles.contextStatusText}>{status}</Text>
           </View>
         </View>
-        <Text style={styles.contextVenue}>{roomMeta.location || "Venue TBD"}</Text>
+        <Text style={styles.contextVenue}>{(roomMeta as any).location || "Venue TBD"}</Text>
         <Text style={styles.contextTime}>{dateText} · {timeText}</Text>
       </View>
     );
@@ -418,12 +334,13 @@ export default function MatchroomChat() {
     const isLastOutgoing = isMine && item.id === lastOutgoingId;
     let seen = false;
     let seenByNames: string[] = [];
-    if (isLastOutgoing && chatMeta?.lastReadBy && item.createdAt?.toDate) {
-      const sentAt = item.createdAt.toDate();
-      const seenEntries = Object.entries(chatMeta.lastReadBy).filter(([uid, ts]: any) => {
+    if (isLastOutgoing && chatroom?.lastReadBy && item.createdAt) {
+      const sentAt = item.createdAt;
+      const lastReadBy = chatroom.lastReadBy as Record<string, number>;
+      const seenEntries = Object.entries(lastReadBy).filter(([uid, ts]) => {
         if (uid === user?._id) return false;
-        if (!ts?.toDate) return false;
-        return ts.toDate() >= sentAt;
+        if (typeof ts !== 'number') return false;
+        return ts >= sentAt;
       });
       seen = seenEntries.length > 0;
       seenByNames = seenEntries.map(([uid]) => participantNames[uid] || "Player");
@@ -435,6 +352,9 @@ export default function MatchroomChat() {
       : "";
     const isDeletedForMe = Array.isArray(item.deletedFor) && !!user?._id && item.deletedFor.includes(user._id);
     const avatarLetter = (item.senderName || "P").trim().charAt(0).toUpperCase();
+    const timeString = item.createdAt
+      ? new Date(item.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : "";
     return (
       <View style={[styles.bubbleRow, isMine ? styles.bubbleRowOutgoing : styles.bubbleRowIncoming]}>
         {!isMine && (
@@ -461,7 +381,7 @@ export default function MatchroomChat() {
               <Text style={styles.bubbleText}>{item.text}</Text>
             )}
             <Text style={isLastOutgoing && seen ? styles.bubbleStatus : styles.bubbleTime}>
-              {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : ""}
+              {timeString}
               {isLastOutgoing && seen ? " · Seen" : ""}
             </Text>
             {isLastOutgoing && seen && seenLabel ? (

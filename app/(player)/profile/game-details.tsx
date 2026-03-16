@@ -1,6 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,7 +19,9 @@ import {
     TEKKEN_CHARACTERS
 } from "../../../constants/profileOptions";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
-import { db } from "../../../src/config/firebaseConfig";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
@@ -113,59 +114,56 @@ export default function GameDetails() {
         const fetchProfile = async () => {
             if (!user?._id || !gameId) return;
             try {
-                const docRef = doc(db, "users", user._id);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
-
+                const data = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                if (data) {
                     // Common Stats
-                    setFaceitLevel(data.faceitSkillLevel || null);
-                    setFaceitElo(data.faceitElo || null);
-                    setSteamStats(data.steamStats || null);
-                    setSteamCs2Hours(data.steamCs2Hours || null);
-                    setSteamTekken8Hours(data.steamTekken8Hours || null);
-                    setSteamFc26Hours(data.steamFc26Hours || null);
-                    setPsnStats(data.psnStats || null);
-                    setTekkenSkillScore(data.tekkenSkillScore || null);
-                    setTekkenBracket(data.tekkenSkillBracket || null);
-                    setSkillScores(normalizeSkillScores(data.skillScores || {}));
+                    setFaceitLevel((data as any).faceitSkillLevel || null);
+                    setFaceitElo((data as any).faceitElo || null);
+                    setSteamStats((data as any).steamStats || null);
+                    setSteamCs2Hours((data as any).steamCs2Hours || null);
+                    setSteamTekken8Hours((data as any).steamTekken8Hours || null);
+                    setSteamFc26Hours((data as any).steamFc26Hours || null);
+                    setPsnStats((data as any).psnStats || null);
+                    setTekkenSkillScore((data as any).tekkenSkillScore || null);
+                    setTekkenBracket((data as any).tekkenSkillBracket || null);
+                    setSkillScores(normalizeSkillScores((data as any).skillScores || {}));
 
                     // Initialize Game State
                     switch (gameId) {
                         case 'cs2':
-                            setActive(!!data.playsCs2);
-                            setRole(data.cs2Role || null);
+                            setActive(!!(data as any).playsCs2);
+                            setRole((data as any).cs2Role || null);
                             break;
                         case 'fc26':
-                            setActive(!!data.playsFc);
-                            setFcTeam(data.fcTeam || "");
-                            setFcFormation(data.fcFormation || null);
-                            if (data.selectedFcLeagueId) {
-                                setSelectedFcLeagueId(data.selectedFcLeagueId);
-                            } else if (data.fcTeam) {
-                                const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes(data.fcTeam));
+                            setActive(!!(data as any).playsFc);
+                            setFcTeam((data as any).fcTeam || "");
+                            setFcFormation((data as any).fcFormation || null);
+                            if ((data as any).selectedFcLeagueId) {
+                                setSelectedFcLeagueId((data as any).selectedFcLeagueId);
+                            } else if ((data as any).fcTeam) {
+                                const league = FC_LEAGUES.find(l => (l.teams as readonly string[]).includes((data as any).fcTeam));
                                 if (league) setSelectedFcLeagueId(league.id);
                             }
                             break;
                         case 'tekken8':
-                            setActive(!!data.playsTekken);
-                            setMultiRoles(data.tekkenFavorites || []);
+                            setActive(!!(data as any).playsTekken);
+                            setMultiRoles((data as any).tekkenFavorites || []);
                             break;
                         case 'futsal':
-                            setActive(!!data.playsFutsal);
-                            setMultiRoles(data.futsalPositions || []);
+                            setActive(!!(data as any).playsFutsal);
+                            setMultiRoles((data as any).futsalPositions || []);
                             break;
                         case 'indoor_cricket':
-                            setActive(!!data.playsIndoorCricket);
-                            setRole(data.indoorCricketRole || null);
+                            setActive(!!(data as any).playsIndoorCricket);
+                            setRole((data as any).indoorCricketRole || null);
                             break;
                         case 'padel':
-                            setActive(!!data.playsPadel);
-                            setRole(data.padelRole || null);
+                            setActive(!!(data as any).playsPadel);
+                            setRole((data as any).padelRole || null);
                             break;
                         case 'pickleball':
-                            setActive(!!data.playsPickleball);
-                            setRole(data.pickleballRole || null);
+                            setActive(!!(data as any).playsPickleball);
+                            setRole((data as any).pickleballRole || null);
                             break;
                     }
                 }
@@ -195,9 +193,9 @@ export default function GameDetails() {
 
         setSaving(true);
         try {
-            const updates: any = { updatedAt: new Date() };
+            const updates: any = {};
 
-            // Mapping generic state to Firestore fields
+            // Mapping generic state to fields
             switch (gameId) {
                 case 'cs2':
                     updates.playsCs2 = active;
@@ -265,17 +263,22 @@ export default function GameDetails() {
                                 initialSource: initial.source,
                                 initialRating: rating,
                                 lastMatchDate: null,
-                                lastUpdated: serverTimestamp()
+                                lastUpdated: Date.now()
                             };
 
-                            updates[`skillScores.${gameId}`] = newScore;
+                            // For Convex, we need to update skillScores as a nested object
+                            const userData = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                            const existingScores = (userData as any)?.skillScores || {};
+                            updates.skillScores = { ...existingScores, [gameId]: newScore };
                         }
                     }
                 }
             }
 
-            const userRef = doc(db, "users", user._id);
-            await updateDoc(userRef, updates);
+            await convex.mutation(api.users.updateGamePreferences, {
+                userId: user._id as Id<"users">,
+                updates,
+            });
 
             showToast({ type: "success", title: "Saved", message: `${gameName} preferences updated` });
             router.back();
@@ -316,21 +319,20 @@ export default function GameDetails() {
             initialSource: 'questionnaire',
             initialRating: normalizedRating,
             lastMatchDate: null,
-            lastUpdated: new Date()
+            lastUpdated: Date.now()
         };
 
         setSkillScores(prev => ({ ...prev, [gameId]: newScore })); // Optimistic UI
 
-        // We override persistChanges here slightly to ensure this score is included
-        // Actually persistChanges logic for physical games relies on this being done?
-        // No, persistChanges doesn't read from state for physical games usually. 
-        // We should just direct update Firestore or pass it to persistChanges.
-        // Let's call persistChanges but inject the score update manually since state might lag.
-
         const asyncUpdate = async () => {
-            const userRef = doc(db, "users", user!._id as string);
-            await updateDoc(userRef, {
-                [`skillScores.${gameId}`]: newScore
+            // Fetch current user to get existing skillScores
+            const userData = await convex.query(api.users.getById, { userId: user!._id as Id<"users"> });
+            const existingScores = (userData as any)?.skillScores || {};
+            await convex.mutation(api.users.updateGamePreferences, {
+                userId: user!._id as Id<"users">,
+                updates: {
+                    skillScores: { ...existingScores, [gameId]: newScore },
+                },
             });
             persistChanges(); // Save other pref changes
         };

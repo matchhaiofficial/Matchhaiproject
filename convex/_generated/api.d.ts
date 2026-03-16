@@ -19,9 +19,14 @@ import type * as psnTokenCache from "../psnTokenCache.js";
 import type * as reports from "../reports.js";
 import type * as social from "../social.js";
 import type * as storage from "../storage.js";
+import type * as teamChallengeChat from "../teamChallengeChat.js";
 import type * as teamChallenges from "../teamChallenges.js";
 import type * as teams from "../teams.js";
 import type * as users from "../users.js";
+import type * as wallet from "../wallet.js";
+import type * as zoneAdminBooking from "../zoneAdminBooking.js";
+import type * as zoneAdminResources from "../zoneAdminResources.js";
+import type * as zoneBranchMigration from "../zoneBranchMigration.js";
 import type * as zones from "../zones.js";
 
 import type {
@@ -42,9 +47,14 @@ declare const fullApi: ApiFromModules<{
   reports: typeof reports;
   social: typeof social;
   storage: typeof storage;
+  teamChallengeChat: typeof teamChallengeChat;
   teamChallenges: typeof teamChallenges;
   teams: typeof teams;
   users: typeof users;
+  wallet: typeof wallet;
+  zoneAdminBooking: typeof zoneAdminBooking;
+  zoneAdminResources: typeof zoneAdminResources;
+  zoneBranchMigration: typeof zoneBranchMigration;
   zones: typeof zones;
 }>;
 

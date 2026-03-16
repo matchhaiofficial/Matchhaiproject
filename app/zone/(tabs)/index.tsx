@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { useQuery } from "convex/react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,7 +17,8 @@ import AppHeader from "../../../src/components/AppHeader";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
-import { db } from "../../../src/config/firebaseConfig";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
 import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useZoneData } from "../../../src/hooks/useZoneData";
@@ -100,13 +101,18 @@ export default function ZoneDashboardHome() {
     const { user } = useAuth();
 
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [notificationCount, setNotificationCount] = useState(0);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
     const [branches, setBranches] = useState<ZoneBranch[]>([]);
     const [resourcesByBranch, setResourcesByBranch] = useState<Record<string, ZoneBranchResource[]>>({});
 
     const entrance = useRef(new Animated.Value(0)).current;
+
+    // Use Convex query for notification count (real-time)
+    const notificationCount = useQuery(
+        api.notifications.countPending,
+        user?._id ? { userId: user._id as Id<"users"> } : "skip",
+    ) ?? 0;
 
     const branchAreas = useMemo(() => {
         const areas = new Set<string>();
@@ -193,21 +199,6 @@ export default function ZoneDashboardHome() {
             unsubMatchrooms();
         };
     }, [branchAreas, user?._id, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
-
-    useEffect(() => {
-        if (!user?._id) return;
-        const q = query(
-            collection(db, "notifications"),
-            where("toUid", "==", user._id),
-            where("status", "==", "pending"),
-        );
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => setNotificationCount(snapshot.size || 0),
-            () => setNotificationCount(0),
-        );
-        return () => unsub();
-    }, [user?._id]);
 
     const allResources = useMemo(
         () => Object.values(resourcesByBranch).flat(),

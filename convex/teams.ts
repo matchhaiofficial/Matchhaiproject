@@ -407,3 +407,382 @@ export const remove = mutation({
     return true;
   },
 });
+
+// Check if user is already in a team for this game
+export const checkUserTeamLimit = query({
+  args: { uid: v.string(), game: v.string() },
+  handler: async (ctx, args) => {
+    const allTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_game", (q) => q.eq("game", args.game))
+      .collect();
+
+    const existingTeam = allTeams.find((t) => t.memberUids.includes(args.uid));
+    if (existingTeam) {
+      return { inTeam: true, teamName: existingTeam.name };
+    }
+    return { inTeam: false, teamName: null };
+  },
+});
+
+// Check team name uniqueness
+export const isNameAvailable = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("teams")
+      .withIndex("by_nameLower", (q) => q.eq("nameLower", args.name.toLowerCase()))
+      .unique();
+    return existing === null;
+  },
+});
+
+// Invite to team (creates notification)
+export const inviteToTeam = mutation({
+  args: {
+    teamId: v.id("teams"),
+    fromUid: v.id("users"),
+    toUid: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId);
+    if (!team) throw new Error("Team not found");
+    if (team.captainUid !== args.fromUid) throw new Error("Only captain can invite members");
+
+    // Check if already a member
+    if (team.memberUids.includes(args.toUid)) {
+      throw new Error("User is already a member");
+    }
+
+    // Check if friends
+    const friendship = await ctx.db
+      .query("friendships")
+      .withIndex("by_userId_and_friendId", (q) =>
+        q.eq("userId", args.fromUid).eq("friendId", args.toUid)
+      )
+      .unique();
+    if (!friendship) throw new Error("Can only invite friends");
+
+    // Dedup key
+    const entityKey = `team_invite__${args.teamId}__${args.toUid}`;
+
+    // Check for existing pending invite
+    const existing = await ctx.db
+      .query("notifications")
+      .withIndex("by_entityKey", (q) => q.eq("entityKey", entityKey))
+      .unique();
+
+    if (existing && existing.status === "pending") {
+      if (!existing.expiresAt || existing.expiresAt > Date.now()) {
+        throw new Error("Invitation already pending");
+      }
+      // Expired - delete old one
+      await ctx.db.delete(existing._id);
+    } else if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+    const fromUser = await ctx.db.get(args.fromUid);
+
+    const notificationId = await ctx.db.insert("notifications", {
+      type: "team_invite",
+      toUid: args.toUid,
+      fromUid: args.fromUid,
+      fromUsername: fromUser?.username || team.captainUsername || "Captain",
+      status: "pending",
+      entityKey,
+      teamId: args.teamId,
+      teamName: team.name,
+      title: "Team Invite",
+      body: `You've been invited to join ${team.name}`,
+      data: { teamId: args.teamId, teamName: team.name, game: team.game },
+      expiresAt: now + sevenDaysMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return notificationId;
+  },
+});
+
+// Respond to team invite
+export const respondToTeamInvite = mutation({
+  args: {
+    notificationId: v.id("notifications"),
+    userId: v.id("users"),
+    accept: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const notif = await ctx.db.get(args.notificationId);
+    if (!notif) throw new Error("Invite not found");
+    if (notif.type !== "team_invite") throw new Error("Invalid notification type");
+    if (notif.toUid !== args.userId) throw new Error("Not authorized");
+    if (notif.status !== "pending") throw new Error("Invite already processed");
+
+    // Expiry check
+    if (notif.expiresAt && notif.expiresAt < Date.now()) {
+      throw new Error("Invitation has expired");
+    }
+
+    const now = Date.now();
+
+    if (!args.accept) {
+      await ctx.db.patch(args.notificationId, { status: "declined", updatedAt: now });
+      return { ok: true, message: "Invite declined." };
+    }
+
+    // Accept: get team
+    const teamId = notif.teamId;
+    if (!teamId) throw new Error("Team reference missing");
+
+    const team = await ctx.db.get(teamId);
+    if (!team) throw new Error("Team no longer exists");
+
+    // Check user not already in a team for this game
+    const gameTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_game", (q) => q.eq("game", team.game))
+      .collect();
+    const existingTeam = gameTeams.find((t) => t.memberUids.includes(args.userId) && t._id !== teamId);
+    if (existingTeam) {
+      throw new Error(`You are already in a ${team.game} team (${existingTeam.name}). You must leave it to join a new one.`);
+    }
+
+    // Already a member check
+    if (team.memberUids.includes(args.userId)) {
+      await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+      return { ok: true, message: "Already a member." };
+    }
+
+    // Capacity check
+    if (team.memberCount >= team.maxMembers) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      throw new Error("Team is full");
+    }
+
+    // Get user
+    const user = await ctx.db.get(args.userId);
+    const username = user?.username || "Member";
+
+    // Add member
+    const memberUids = [...team.memberUids, args.userId];
+    await ctx.db.patch(teamId, {
+      memberUids,
+      memberCount: team.memberCount + 1,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      odxerId: args.userId,
+      username,
+      role: "member",
+      joinedAt: now,
+    });
+
+    await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+
+    return { ok: true, message: "Joined team successfully!" };
+  },
+});
+
+// Respond to join request (captain responds)
+export const respondToJoinRequest = mutation({
+  args: {
+    notificationId: v.id("notifications"),
+    captainUid: v.id("users"),
+    accept: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const notif = await ctx.db.get(args.notificationId);
+    if (!notif) throw new Error("Request not found");
+    if (notif.status !== "pending") throw new Error("Already handled");
+
+    const now = Date.now();
+
+    // Get team from notification data
+    const teamId = notif.teamId;
+    if (!teamId) throw new Error("Team reference missing");
+
+    const team = await ctx.db.get(teamId);
+    if (!team) throw new Error("Team not found");
+    if (team.captainUid !== args.captainUid) throw new Error("Only the current captain can respond");
+
+    if (!args.accept) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      return { ok: true };
+    }
+
+    // Accept flow
+    const requesterUid = notif.fromUid;
+    if (!requesterUid) throw new Error("Requester not found");
+
+    // Check capacity
+    if (team.memberCount >= team.maxMembers) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      throw new Error("Team is full");
+    }
+
+    // Already a member?
+    if (team.memberUids.includes(requesterUid)) {
+      await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+      return { ok: true, message: "User is already a member." };
+    }
+
+    // Check user not already in a team for this game
+    const gameTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_game", (q) => q.eq("game", team.game))
+      .collect();
+    const existingTeam = gameTeams.find((t) => t.memberUids.includes(requesterUid) && t._id !== teamId);
+    if (existingTeam) {
+      await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      throw new Error(`User is already in a ${team.game} team`);
+    }
+
+    // Add member
+    const requester = await ctx.db.get(requesterUid);
+    const username = requester?.username || notif.fromUsername || "Unknown";
+
+    const memberUids = [...team.memberUids, requesterUid];
+    await ctx.db.patch(teamId, {
+      memberUids,
+      memberCount: team.memberCount + 1,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("teamMembers", {
+      teamId,
+      odxerId: requesterUid,
+      username,
+      role: "member",
+      joinedAt: now,
+    });
+
+    await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
+
+    // Notify requester
+    const captain = await ctx.db.get(args.captainUid);
+    await ctx.db.insert("notifications", {
+      type: "team_join_decision",
+      toUid: requesterUid,
+      fromUid: args.captainUid,
+      fromUsername: captain?.username || team.captainUsername || "Captain",
+      status: "pending",
+      teamId,
+      teamName: team.name,
+      title: "Join Request Accepted",
+      body: `Your request to join ${team.name} was accepted!`,
+      data: { teamId, teamName: team.name, game: team.game },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { ok: true };
+  },
+});
+
+// Leave team (for non-captains)
+export const leaveTeam = mutation({
+  args: {
+    teamId: v.id("teams"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId);
+    if (!team) throw new Error("Team not found");
+
+    if (team.captainUid === args.userId) {
+      throw new Error("Captains cannot leave. Delete the team instead.");
+    }
+
+    if (!team.memberUids.includes(args.userId)) {
+      throw new Error("You are not a member of this team");
+    }
+
+    // Remove from memberUids
+    const memberUids = team.memberUids.filter((uid) => uid !== args.userId);
+
+    await ctx.db.patch(args.teamId, {
+      memberUids,
+      memberCount: team.memberCount - 1,
+      updatedAt: Date.now(),
+    });
+
+    // Delete member record
+    const memberRecord = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_teamId_and_userId", (q) =>
+        q.eq("teamId", args.teamId).eq("odxerId", args.userId)
+      )
+      .unique();
+
+    if (memberRecord) {
+      await ctx.db.delete(memberRecord._id);
+    }
+
+    return true;
+  },
+});
+
+// Request to join team (full version with dedup + snapshot)
+export const requestToJoinTeam = mutation({
+  args: {
+    teamId: v.id("teams"),
+    fromUid: v.id("users"),
+    fromUsername: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId);
+    if (!team) throw new Error("Team not found");
+
+    if (team.memberCount >= team.maxMembers) throw new Error("Team is full");
+
+    // Already a member?
+    if (team.memberUids.includes(args.fromUid)) throw new Error("Already a member");
+
+    // Dedup key
+    const entityKey = `team_join_request_${args.teamId}_${args.fromUid}`;
+
+    // Check existing
+    const existing = await ctx.db
+      .query("notifications")
+      .withIndex("by_entityKey", (q) => q.eq("entityKey", entityKey))
+      .unique();
+
+    if (existing && existing.status === "pending") {
+      if (!existing.expiresAt || existing.expiresAt > Date.now()) {
+        throw new Error("Request already pending");
+      }
+      // Expired - overwrite
+      await ctx.db.delete(existing._id);
+    } else if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+    const notificationId = await ctx.db.insert("notifications", {
+      type: "team_join_request",
+      toUid: team.captainUid,
+      fromUid: args.fromUid,
+      fromUsername: args.fromUsername,
+      status: "pending",
+      entityKey,
+      teamId: args.teamId,
+      teamName: team.name,
+      title: "Join Request",
+      body: `${args.fromUsername} wants to join ${team.name}`,
+      data: { teamId: args.teamId, teamName: team.name, game: team.game },
+      expiresAt: now + sevenDaysMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return notificationId;
+  },
+});
