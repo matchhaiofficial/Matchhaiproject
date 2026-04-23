@@ -12,7 +12,14 @@ export type UserProfile = Doc<"users">;
 
 /** Helper to normalize phone numbers (keeps digits only) */
 function normalizePhone(raw: string) {
-  return raw.replace(/\D/g, "");
+  const trimmed = String(raw || "").trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+  if (trimmed.startsWith("+")) return `+${digits}`;
+  if (digits.startsWith("00")) return `+${digits.slice(2)}`;
+  if (digits.startsWith("92")) return `+${digits}`;
+  if (digits.startsWith("0")) return `+92${digits.slice(1)}`;
+  return `+${digits}`;
 }
 
 export function normalizePhoneForSave(phone: string) {
@@ -111,6 +118,10 @@ export interface OnboardingStep2Prefs {
   areasPreferred: string[];
   playsCs2: boolean;
   cs2Role: string | null;
+  playsCs16: boolean;
+  cs16Role: string | null;
+  playsValorant: boolean;
+  valorantRole: string | null;
   playsFc: boolean;
   fcTeam: string | null;
   fcFormation: string | null;
@@ -152,6 +163,8 @@ export interface OnboardingSummary {
   username: string | null;
   areasPreferred: string[];
   playsCs2: boolean;
+  playsCs16: boolean;
+  playsValorant: boolean;
   playsFc: boolean;
   playsTekken: boolean;
 }
@@ -176,6 +189,8 @@ export async function fetchOnboardingSummary(
         username: user.username ?? null,
         areasPreferred: (user as any).areasPreferred ?? [],
         playsCs2: !!(user as any).playsCs2,
+        playsCs16: !!(user as any).playsCs16,
+        playsValorant: !!(user as any).playsValorant,
         playsFc: !!(user as any).playsFc,
         playsTekken: !!(user as any).playsTekken,
       },
@@ -239,6 +254,33 @@ export async function getUserProfile(
     return { ok: true, data: user };
   } catch (e) {
     console.log("[userService] getUserProfile error", e);
+    return {
+      ok: false,
+      message: "Could not load user profile. Please try again.",
+    };
+  }
+}
+
+export async function getPublicUserProfile(
+  userId: Id<"users">,
+  viewerUserId?: Id<"users">
+): Promise<
+  | { ok: true; data: UserProfile }
+  | { ok: false; message: string }
+> {
+  try {
+    const user = await convex.query(api.users.getPublicById, {
+      userId,
+      viewerUserId,
+    });
+
+    if (!user) {
+      return { ok: false, message: "User profile not found." };
+    }
+
+    return { ok: true, data: user };
+  } catch (e) {
+    console.log("[userService] getPublicUserProfile error", e);
     return {
       ok: false,
       message: "Could not load user profile. Please try again.",
@@ -416,6 +458,15 @@ export async function getUserFriends(
         fullName?: string;
         photoURL?: string;
         isOnline?: boolean;
+        playsCs2?: boolean;
+        playsCs16?: boolean;
+        playsValorant?: boolean;
+        playsFc?: boolean;
+        playsTekken?: boolean;
+        playsFutsal?: boolean;
+        playsIndoorCricket?: boolean;
+        playsPadel?: boolean;
+        playsPickleball?: boolean;
       }>;
     }
   | { ok: false; message: string }
@@ -430,6 +481,15 @@ export async function getUserFriends(
       fullName: f.fullName,
       photoURL: f.photoURL,
       isOnline: f.isOnline,
+      playsCs2: f.playsCs2,
+      playsCs16: f.playsCs16,
+      playsValorant: f.playsValorant,
+      playsFc: f.playsFc,
+      playsTekken: f.playsTekken,
+      playsFutsal: f.playsFutsal,
+      playsIndoorCricket: f.playsIndoorCricket,
+      playsPadel: f.playsPadel,
+      playsPickleball: f.playsPickleball,
     }));
     return { ok: true, data };
   } catch (e) {

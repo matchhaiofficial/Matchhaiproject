@@ -4,6 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import { currentUser, ensureVerifiedEmailAccess } from "./authService";
 
 export interface TeamMember {
   uid: string;
@@ -48,6 +49,11 @@ export async function createTeam(
   data: Omit<Team, "id" | "createdAt" | "stats" | "memberUids">
 ): Promise<Result<{ id: string }>> {
   try {
+    const verificationGate = await ensureVerifiedEmailAccess();
+    if (!verificationGate.ok) {
+      return { ok: false, message: verificationGate.message };
+    }
+
     // Get the captain user to verify they exist
     const captain = await convex.query(api.users.getByAuthId, {
       authId: data.captainUid,
@@ -138,6 +144,11 @@ export async function joinTeam(
   user: { uid: string; username: string }
 ): Promise<Result> {
   try {
+    const verificationGate = await ensureVerifiedEmailAccess();
+    if (!verificationGate.ok) {
+      return { ok: false, message: verificationGate.message };
+    }
+
     // Get the user's Convex ID
     const convexUser = await convex.query(api.users.getByAuthId, {
       authId: user.uid,
@@ -236,21 +247,30 @@ export async function getPublicTeams(
  */
 export async function requestToJoinTeam(teamId: string): Promise<Result> {
   try {
-    // This will be implemented with the notifications service
-    // For now, create a notification for the captain
+    const verificationGate = await ensureVerifiedEmailAccess();
+    if (!verificationGate.ok) {
+      return { ok: false, message: verificationGate.message };
+    }
+
+    const authUser = await currentUser();
+    if (!authUser) {
+      return { ok: false, message: "Not authenticated" };
+    }
+
+    const me = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+    if (!me) {
+      return { ok: false, message: "User not found" };
+    }
+
     const team = await convex.query(api.teams.getByIdString, { teamId }) as Team | null;
     if (!team) {
       return { ok: false, message: "Team not found" };
     }
 
-    // Create notification for captain
-    await convex.mutation(api.notifications.create, {
-      type: "team_join_request" as any,
-      toUid: team.captainUid as any,
-      teamId: teamId as any,
-      teamName: team.name,
-      title: "Join Request",
-      body: `Someone wants to join ${team.name}`,
+    await convex.mutation(api.teams.requestToJoinTeam, {
+      teamId: teamId as Id<"teams">,
+      fromUid: me._id,
+      fromUsername: me.username || authUser.name || "Player",
     });
 
     return { ok: true, message: "Join request sent" };

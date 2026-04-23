@@ -5,6 +5,15 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import Logger from "../../utils/logger";
+import { recordRateMetric } from "../../utils/perfInstrumentation";
+import {
+    createSharedPollingState,
+    PollingSubscriptionCallback,
+    publishPollingRows,
+    releasePollingSubscription,
+    replayPollingRows,
+    SharedPollingState,
+} from "./sharedPollingRegistry";
 
 export type ZoneBookingAssetType = "pc" | "court" | "mixed" | "unknown";
 export type ZoneBookingQueueStatus =
@@ -16,16 +25,22 @@ export type ZoneBookingQueueStatus =
 
 export interface ZoneBookingQueueItem {
     id: string;
+    requestId?: string;
+    matchroomId?: string;
+    requestKind?: "direct_zone" | "broadcast_fanout" | string;
     userId: string;
     userName: string;
     title: string;
     gameKey: string;
     maxPlayers: number;
+    playerCount?: number;
     reservedSlots?: number;
     teamMode?: "solo" | "team";
     preferredDate?: any;
     preferredTime?: string;
     preferredAreas: string[];
+    responseExpiresAt?: any;
+    targetAreaLabel?: string;
     budgetPerPlayer?: number;
     currency?: string;
     status: ZoneBookingQueueStatus | string;
@@ -33,6 +48,10 @@ export interface ZoneBookingQueueItem {
     locationMode?: "zone" | "broadcast" | string;
     zoneId?: string;
     lifecycleStatus?: string;
+    allocatedBranchId?: string;
+    allocatedResourceIds?: string[];
+    allocatedAt?: any;
+    allocatedByUid?: string;
     createdAt?: any;
     updatedAt?: any;
     assetType: ZoneBookingAssetType;
@@ -73,6 +92,40 @@ export interface ZoneMatchroomListItem {
     slotsB?: any[];
 }
 
+const POLL_INTERVAL_MS = 5000;
+const queuePollingState = new Map<string, SharedPollingState<ZoneBookingQueueItem>>();
+const matchroomPollingState = new Map<string, SharedPollingState<ZoneMatchroomListItem>>();
+
+function normalizeHintList(values?: string[]) {
+    return (values || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 10)
+        .sort();
+}
+
+function normalizeAreaList(values: string[]) {
+    return values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .sort();
+}
+
+function makeQueueSubscriptionKey(zoneId: string, branchAreas: string[]) {
+    return JSON.stringify({
+        zoneId,
+        branchAreas: normalizeAreaList(branchAreas),
+    });
+}
+
+function makeMatchroomSubscriptionKey(zoneId: string, ownerUid?: string, locationHints?: string[]) {
+    return JSON.stringify({
+        zoneId,
+        ownerUid: ownerUid || "",
+        locationHints: normalizeHintList(locationHints),
+    });
+}
+
 const ACTIVE_QUEUE_STATUSES = new Set([
     "open",
     "pending_payment",
@@ -83,7 +136,7 @@ const normalizeGameKey = (value: unknown) =>
     String(value || "").trim().toLowerCase();
 
 const computeAssetTypeFromGame = (gameKey: string): ZoneBookingAssetType => {
-    if (["cs2", "fc25", "fc26", "tekken8"].includes(gameKey)) return "pc";
+    if (["cs2", "cs16", "valorant", "fc25", "fc26", "tekken8"].includes(gameKey)) return "pc";
     if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(gameKey)) return "court";
     return "unknown";
 };
@@ -111,7 +164,7 @@ const toDurationMinutes = (request: Record<string, any>) => {
         if (overs === "5") return 120;
         return 120;
     }
-    if (gameKey === "cs2") {
+    if (gameKey === "cs2" || gameKey === "cs16" || gameKey === "valorant") {
         if (seriesType === "BO1") return 60;
         if (seriesType === "BO3") return 180;
         if (seriesType === "BO5") return 300;
@@ -166,16 +219,22 @@ const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueIte
 
     return {
         id: String(id),
+        requestId: String(data.requestId || id),
+        matchroomId: data.matchroomId ? String(data.matchroomId) : undefined,
         userId: data.userId || "",
         userName: data.userName || "Player",
         title: data.title || "Booking Request",
         gameKey,
         maxPlayers: Number(data.maxPlayers || data.playerCount || 0),
+        playerCount: Number(data.playerCount || data.maxPlayers || 0) || undefined,
         reservedSlots: Number(data.reservedSlots || 0) || undefined,
         teamMode: data.teamMode,
         preferredDate: data.preferredDate,
         preferredTime: data.preferredTime,
         preferredAreas: Array.isArray(data.preferredAreas) ? data.preferredAreas : [],
+        requestKind: data.requestKind || "direct_zone",
+        responseExpiresAt: data.responseExpiresAt,
+        targetAreaLabel: data.targetAreaLabel || undefined,
         budgetPerPlayer: Number(data.budgetPerPlayer || 0) || undefined,
         currency: data.currency || "PKR",
         status: data.status || "open",
@@ -183,6 +242,12 @@ const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueIte
         locationMode: data.locationMode,
         zoneId: data.zoneId ? String(data.zoneId) : undefined,
         lifecycleStatus: data.lifecycleStatus,
+        allocatedBranchId: data.allocatedBranchId || undefined,
+        allocatedResourceIds: Array.isArray(data.allocatedResourceIds)
+            ? data.allocatedResourceIds.map((resourceId: any) => String(resourceId))
+            : undefined,
+        allocatedAt: data.allocatedAt,
+        allocatedByUid: data.allocatedByUid || undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
         assetType: computeAssetTypeFromGame(gameKey),
@@ -201,38 +266,52 @@ export function subscribeZoneBookingQueue(
     onData: (rows: ZoneBookingQueueItem[]) => void,
     onError: (error: any) => void,
 ) {
-    let active = true;
+    const key = makeQueueSubscriptionKey(zoneId, branchAreas);
+    const callbackRef: PollingSubscriptionCallback<ZoneBookingQueueItem> = { onData, onError };
+    let state = queuePollingState.get(key);
 
-    const poll = async () => {
+    if (!state) {
+        state = createSharedPollingState();
+        queuePollingState.set(key, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneBookingQueueItem>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
         try {
             const results = await convex.query(api.zoneAdminBooking.listBookingQueueForZone, {
                 zoneId,
-                branchAreas: branchAreas.map((a) => String(a || "").trim()).filter(Boolean),
+                branchAreas: normalizeAreaList(branchAreas),
             });
-
-            if (!active) return;
 
             const normalized = results
                 .map((r: any) => normalizeBookingRequest(r))
                 .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
+            recordRateMetric("zone_admin.booking_queue_reads_per_minute", normalized.length, {
+                zoneId,
+            });
 
-            onData(normalized);
+            publishPollingRows(currentState, normalized);
         } catch (error: any) {
-            if (!active) return;
             Logger.error("zoneAdminBooking", "Queue poll failed", error);
-            onError(error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
         }
     };
 
-    // Initial poll
-    poll();
-
-    // Poll every 5 seconds
-    const interval = setInterval(poll, 5000);
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
 
     return () => {
-        active = false;
-        clearInterval(interval);
+        releasePollingSubscription(queuePollingState, key, callbackRef);
     };
 }
 
@@ -249,20 +328,27 @@ export function subscribeZoneMatchrooms(
         locationHints?: string[];
     },
 ) {
-    let active = true;
+    const key = makeMatchroomSubscriptionKey(zoneId, ownerUid, options?.locationHints);
+    const callbackRef: PollingSubscriptionCallback<ZoneMatchroomListItem> = { onData, onError };
+    let state = matchroomPollingState.get(key);
 
-    const poll = async () => {
+    if (!state) {
+        state = createSharedPollingState();
+        matchroomPollingState.set(key, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneMatchroomListItem>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
         try {
             const results = await convex.query(api.zoneAdminBooking.listMatchroomsForZone, {
                 zoneId,
                 ownerUid: ownerUid || undefined,
-                locationHints: options?.locationHints
-                    ?.map((v) => String(v || "").trim())
-                    .filter(Boolean)
-                    .slice(0, 10),
+                locationHints: normalizeHintList(options?.locationHints),
             });
-
-            if (!active) return;
 
             const rows: ZoneMatchroomListItem[] = results.map((data: any) => {
                 const perPlayer = Number(data.pricing?.perPlayer ?? data.pricePerPlayer ?? 0);
@@ -308,23 +394,28 @@ export function subscribeZoneMatchrooms(
                 };
             });
 
-            onData(rows);
+            recordRateMetric("zone_admin.matchroom_reads_per_minute", rows.length, {
+                zoneId,
+            });
+
+            publishPollingRows(currentState, rows);
         } catch (error: any) {
-            if (!active) return;
             Logger.error("zoneAdminBooking", "Matchroom poll failed", error);
-            onError(error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
         }
     };
 
-    // Initial poll
-    poll();
-
-    // Poll every 5 seconds
-    const interval = setInterval(poll, 5000);
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
 
     return () => {
-        active = false;
-        clearInterval(interval);
+        releasePollingSubscription(matchroomPollingState, key, callbackRef);
     };
 }
 
@@ -332,9 +423,10 @@ export async function acceptZoneBookingRequest(input: {
     requestId: string;
     adminUid: string;
     zoneId: string;
+    branchId: string;
+    resourceIds: string[];
     requestOwnerUid?: string;
     note?: string;
-    branchId?: string;
     branchName?: string;
     location?: string;
     zoneName?: string;
@@ -347,6 +439,10 @@ export async function acceptZoneBookingRequest(input: {
 
         if (!request) {
             return { ok: false, message: "Booking request not found." };
+        }
+
+        if (!input.resourceIds.length) {
+            return { ok: false, message: "Select at least one resource." };
         }
 
         const requestData = request as any;
@@ -410,9 +506,10 @@ export async function acceptZoneBookingRequest(input: {
             requestId: input.requestId as Id<"bookingRequests">,
             adminUid: input.adminUid,
             zoneId: input.zoneId,
+            branchId: input.branchId,
+            resourceIds: input.resourceIds as Id<"zoneResources">[],
             requestOwnerUid: input.requestOwnerUid,
             note: input.note,
-            branchId: input.branchId,
             branchName: input.branchName,
             location: input.location,
             zoneName: input.zoneName,
@@ -459,10 +556,13 @@ export async function sendZoneCounterOffer(input: {
     zoneId: string;
     zoneName: string;
     zoneOwnerUid: string;
+    adminUid?: string;
     branchId?: string;
     branchName?: string;
-    proposedDate: string;
-    proposedTime: string;
+    scheduleOptions: Array<{
+        date: string;
+        time: string;
+    }>;
     pricePerPlayer: number;
     currency?: string;
     location?: string;
@@ -476,10 +576,10 @@ export async function sendZoneCounterOffer(input: {
             zoneId: input.zoneId as Id<"zones">,
             zoneName: input.zoneName,
             zoneOwnerUid: input.zoneOwnerUid,
+            adminUid: input.adminUid,
             branchId: input.branchId,
             branchName: input.branchName,
-            proposedDate: input.proposedDate,
-            proposedTime: input.proposedTime,
+            scheduleOptions: input.scheduleOptions,
             pricePerPlayer: input.pricePerPlayer,
             currency: input.currency,
             location: input.location,
@@ -491,6 +591,31 @@ export async function sendZoneCounterOffer(input: {
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to send counter offer", error);
         return { ok: false, message: error?.message || "Failed to send counter-offer." };
+    }
+}
+
+export async function respondToZoneCounterOffer(input: {
+    offerId: string;
+    responderUid: string;
+    decision: "accepted" | "rejected";
+    selectedOptionIndex?: number;
+}): Promise<{ ok: true; matchroomId?: string; locked?: boolean } | { ok: false; message: string }> {
+    try {
+        const result = await convex.mutation(api.zoneAdminBooking.respondToCounterOffer, {
+            offerId: input.offerId as Id<"zoneOffers">,
+            responderUid: input.responderUid,
+            decision: input.decision,
+            selectedOptionIndex: input.selectedOptionIndex,
+        });
+
+        return {
+            ok: true,
+            matchroomId: result?.matchroomId,
+            locked: result?.locked === true,
+        };
+    } catch (error: any) {
+        Logger.error("zoneAdminBooking", "Failed to respond to counter offer", error);
+        return { ok: false, message: error?.message || "Failed to respond to time options." };
     }
 }
 
@@ -513,10 +638,10 @@ export async function createZoneWalkInMatchroom(input: {
     pricePerPlayer?: number;
     currency?: string;
     captainSeatNumber?: number | null;
-    knownPlayers?: Array<{
+        knownPlayers?: Array<{
         uid: string;
         username: string;
-        skillTier?: "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+        skillTier?: "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite";
         seatNumber?: number;
         isCaptain?: boolean;
     }>;
@@ -524,7 +649,7 @@ export async function createZoneWalkInMatchroom(input: {
     try {
         const knownPlayersRaw = Array.isArray(input.knownPlayers) ? input.knownPlayers : [];
         const totalSeats = Math.max(1, Math.floor(input.seatCount));
-        const allowedSkillTiers = new Set(["Beginner", "Intermediate", "Advanced", "Pro", "Elite"]);
+        const allowedSkillTiers = new Set(["Beginner", "Casual", "Intermediate", "Advanced", "Pro", "Elite"]);
 
         const knownPlayers = knownPlayersRaw.slice(0, totalSeats).map((player, index) => {
             const rawTier = String(player?.skillTier || "").trim();
@@ -532,7 +657,7 @@ export async function createZoneWalkInMatchroom(input: {
             return {
                 uid: String(player?.uid || `walkin_guest_${index + 1}`),
                 username: String(player?.username || "").trim() || `Player ${index + 1}`,
-                skillTier: normalizedTier as "Beginner" | "Intermediate" | "Advanced" | "Pro" | "Elite",
+                skillTier: normalizedTier as "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite",
                 seatNumber: Number.isFinite(player?.seatNumber)
                     ? Math.max(1, Math.floor(Number(player.seatNumber)))
                     : index + 1,

@@ -7,7 +7,7 @@ export default function MatchroomsLayout() {
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.background },
+                contentStyle: { backgroundColor: COLORS.backgroundDark },
                 animation: "slide_from_right",
             }}
         >
@@ -16,3 +16,4 @@ export default function MatchroomsLayout() {
         </Stack>
     );
 }
+

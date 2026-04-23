@@ -1,6 +1,8 @@
 // src/context/AuthContext.tsx
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { AppState } from "react-native";
 import { authClient, AuthUser, AuthSession } from "../lib/auth-client";
+import { clearCachedAuthSession, loadCachedAuthSession, saveCachedAuthSession } from "../lib/authSessionCache";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { Id, Doc } from "../../convex/_generated/dataModel";
@@ -43,6 +45,24 @@ export default function AuthProvider({ children }: { children: any }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const applySessionState = useCallback(async (nextSession: AuthSession, persist = true) => {
+    setAuthUser(nextSession.user);
+    setSession(nextSession);
+    if (persist) {
+      await saveCachedAuthSession(nextSession);
+    }
+  }, []);
+
+  const clearAuthState = useCallback((clearCache = true) => {
+    setAuthUser(null);
+    setSession(null);
+    setUser(null);
+    setUserId(null);
+    if (clearCache) {
+      void clearCachedAuthSession();
+    }
+  }, []);
+
   // Fetch user profile from Convex
   const fetchUserProfile = useCallback(async (authId: string) => {
     try {
@@ -70,36 +90,91 @@ export default function AuthProvider({ children }: { children: any }) {
 
   // Refresh session - call this after login/signup to ensure auth state is updated
   const refreshSession = useCallback(async (): Promise<boolean> => {
-    try {
+    const existingSession = session;
+
+    const getLiveSession = async () => {
       const { data } = await authClient.getSession();
-      if (data?.user) {
-        setAuthUser(data.user as AuthUser);
-        setSession(data as AuthSession);
-        await fetchUserProfile(data.user.id);
+      return (data as AuthSession | null) ?? null;
+    };
+
+    const retryableFetch = async () => {
+      const first = await getLiveSession();
+      if (first?.user) return first;
+
+      if (!existingSession?.user) {
+        return first;
+      }
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const retry = await getLiveSession();
+        if (retry?.user) {
+          return retry;
+        }
+      }
+
+      return first;
+    };
+
+    try {
+      const liveSession = await retryableFetch();
+      if (liveSession?.user) {
+        await applySessionState(liveSession);
+        await fetchUserProfile(liveSession.user.id);
         return true;
       }
+
+      if (existingSession?.user) {
+        return true;
+      }
+
+      clearAuthState();
       return false;
     } catch (error) {
       console.error("[AuthContext] refreshSession failed:", error);
+      if (existingSession?.user) {
+        return true;
+      }
+      clearAuthState(false);
       return false;
     }
-  }, [fetchUserProfile]);
+  }, [applySessionState, clearAuthState, fetchUserProfile, session]);
 
   useEffect(() => {
-    // Get initial session
-    authClient.getSession().then(({ data }) => {
-      if (data?.user) {
-        setAuthUser(data.user as AuthUser);
-        setSession(data as AuthSession);
-        fetchUserProfile(data.user.id).finally(() => setLoading(false));
-      } else {
-        setAuthUser(null);
-        setSession(null);
-        setUser(null);
-        setUserId(null);
-        setLoading(false);
+    let isMounted = true;
+
+    const bootstrap = async () => {
+      try {
+        const cachedSession = await loadCachedAuthSession();
+        if (cachedSession?.user && isMounted) {
+          await applySessionState(cachedSession, false);
+          void fetchUserProfile(cachedSession.user.id);
+        }
+
+        const { data } = await authClient.getSession();
+        if (!isMounted) return;
+
+        if (data?.user) {
+          await applySessionState(data as AuthSession);
+          await fetchUserProfile(data.user.id);
+        } else if (!cachedSession?.user) {
+          clearAuthState();
+        }
+      } catch {
+        if (isMounted) {
+          const cachedSession = await loadCachedAuthSession();
+          if (!cachedSession?.user) {
+            clearAuthState(false);
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
-    });
+    };
+
+    void bootstrap();
 
     // Subscribe to session changes
     // Note: The $store API may vary by Better Auth version, using type assertion for compatibility
@@ -109,22 +184,31 @@ export default function AuthProvider({ children }: { children: any }) {
     if (store?.listen) {
       unsubscribe = store.listen("session", (newSession: any) => {
         if (newSession?.user) {
-          setAuthUser(newSession.user as AuthUser);
-          setSession(newSession as AuthSession);
-          fetchUserProfile(newSession.user.id);
+          void applySessionState(newSession as AuthSession);
+          void fetchUserProfile(newSession.user.id);
         } else {
-          setAuthUser(null);
-          setSession(null);
-          setUser(null);
-          setUserId(null);
+          clearAuthState();
         }
       });
     }
 
     return () => {
+      isMounted = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [fetchUserProfile]);
+  }, [applySessionState, clearAuthState, fetchUserProfile]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshSession();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [refreshSession]);
 
   return (
     <AuthContext.Provider value={{ authUser, user, userId, loading, session, refreshUser, refreshSession }}>

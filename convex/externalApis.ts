@@ -119,6 +119,7 @@ export const fetchSteamProfile = action({
 // ============================================
 
 const FACEIT_API_KEY = process.env.FACEIT_API_KEY;
+const ANTIDEO_API_KEY = process.env.ANTIDEO_API_KEY;
 
 export const fetchFaceitProfile = action({
   args: {
@@ -164,6 +165,71 @@ export const fetchFaceitProfile = action({
       skillLevel: gameStats?.skill_level || null,
       country: data.country || null,
       avatarUrl: data.avatar || null,
+    };
+  },
+});
+
+// ============================================
+// PHONE VALIDATION
+// ============================================
+
+const isE164Phone = (value: string) => /^\+\d{8,15}$/.test(value);
+
+export const validatePhoneNumber = action({
+  args: {
+    phone: v.string(),
+    countryCode: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    if (!ANTIDEO_API_KEY) {
+      throw new Error("ANTIDEO_API_KEY is not configured");
+    }
+
+    const normalized = String(args.phone || "").trim();
+    if (!normalized) {
+      throw new Error("Phone number is required");
+    }
+
+    const countryCode = String(args.countryCode || "PK").trim().toLowerCase();
+    const basePath = isE164Phone(normalized)
+      ? `https://api.antideo.com/phone/${encodeURIComponent(normalized)}`
+      : `https://api.antideo.com/phone/${countryCode}/${encodeURIComponent(normalized)}`;
+
+    const requestOptions = {
+      method: "GET",
+      headers: {
+        "x-api-key": ANTIDEO_API_KEY,
+        "api-key": ANTIDEO_API_KEY,
+        apikey: ANTIDEO_API_KEY,
+        "Api-Key": ANTIDEO_API_KEY,
+        Authorization: `Bearer ${ANTIDEO_API_KEY}`,
+        Accept: "application/json",
+      },
+    } as const;
+
+    let response = await fetch(basePath, requestOptions);
+
+    if (response.status === 401) {
+      response = await fetch(`${basePath}?apiKey=${encodeURIComponent(ANTIDEO_API_KEY)}`, requestOptions);
+    }
+
+    if (response.status === 401) {
+      response = await fetch(`${basePath}&apiKey=${encodeURIComponent(ANTIDEO_API_KEY)}`, requestOptions);
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Phone validation failed: ${response.status} ${body}`);
+    }
+
+    const result = await response.json();
+    return {
+      phone: result.phone || normalized,
+      valid: Boolean(result.valid),
+      type: result.type || null,
+      carrier: result.carrier || null,
+      location: result.location || null,
+      formats: result.formats || null,
     };
   },
 });

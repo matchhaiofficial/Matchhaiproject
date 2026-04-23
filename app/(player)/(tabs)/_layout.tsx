@@ -1,23 +1,28 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { Redirect, Tabs } from "expo-router";
 import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS, FONTS } from "../../../src/theme";
+import { getDefaultSignedInRoute, isSuperAdminProfile, isZoneAccount } from "../../../src/utils/accountRouting";
+import { hasVerifiedEmail } from "../../../src/utils/emailVerificationGate";
 
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === '1';
+const TAB_BAR_BASE_HEIGHT = 65;
+const TAB_BAR_EXTRA_BOTTOM_PADDING = 18;
 
 export default function PlayerTabsLayout() {
     const insets = useSafeAreaInsets();
-    const { user, loading } = useAuth();
+    const { user, authUser, loading } = useAuth();
 
     // ✅ If super-admin, force redirect to their dashboard
-    const isSuperAdmin = (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user?._id === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+    const isSuperAdmin = isSuperAdminProfile(user);
+    const isZoneUser = isZoneAccount(user);
+    const emailVerified = hasVerifiedEmail(authUser);
 
-    if (!loading && isSuperAdmin) {
-        return <Redirect href="/super-admin/(tabs)" />;
+    if (!loading && (isSuperAdmin || isZoneUser)) {
+        return <Redirect href={getDefaultSignedInRoute(user) as any} />;
     }
 
     return (
@@ -31,8 +36,8 @@ export default function PlayerTabsLayout() {
                         backgroundColor: COLORS.cardDark,
                         borderTopWidth: 1,
                         borderTopColor: 'rgba(255,255,255,0.1)',
-                        height: 65 + insets.bottom,
-                        paddingBottom: insets.bottom + 8,
+                        height: TAB_BAR_BASE_HEIGHT + insets.bottom + TAB_BAR_EXTRA_BOTTOM_PADDING,
+                        paddingBottom: insets.bottom + TAB_BAR_EXTRA_BOTTOM_PADDING,
                         paddingTop: 12,
                         paddingHorizontal: 16,
                         borderTopLeftRadius: 20,
@@ -64,7 +69,7 @@ export default function PlayerTabsLayout() {
                 options={{
                     title: "Home",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons
+                        <AppIcon
                             name="home"
                             size={24}
                             color={color}
@@ -75,9 +80,10 @@ export default function PlayerTabsLayout() {
             <Tabs.Screen
                 name="discover"
                 options={{
+                    href: emailVerified ? undefined : null,
                     title: "Discover",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons
+                        <AppIcon
                             name="explore"
                             size={24}
                             color={color}
@@ -102,7 +108,7 @@ export default function PlayerTabsLayout() {
                 options={{
                     title: "Profile",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons
+                        <AppIcon
                             name="person"
                             size={24}
                             color={color}

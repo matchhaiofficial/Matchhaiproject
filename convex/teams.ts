@@ -4,6 +4,89 @@ import {
   internalMutation,
 } from "./_generated/server";
 import { v } from "convex/values";
+import { authComponent } from "./auth";
+import { api, internal } from "./_generated/api";
+
+function doesUserPlayGame(user: any, game: string): boolean {
+  switch (game) {
+    case "cs2": return !!user?.playsCs2;
+    case "cs16": return !!user?.playsCs16;
+    case "valorant": return !!user?.playsValorant;
+    case "fc25":
+    case "fc26": return !!user?.playsFc;
+    case "tekken8": return !!user?.playsTekken;
+    case "futsal": return !!user?.playsFutsal;
+    case "indoor_cricket": return !!user?.playsIndoorCricket;
+    case "padel": return !!user?.playsPadel;
+    case "pickleball": return !!user?.playsPickleball;
+    default: return false;
+  }
+}
+
+function getGameLabel(game: string): string {
+  const labels: Record<string, string> = {
+    cs2: "CS2", cs16: "CS 1.6", valorant: "Valorant",
+    fc25: "FC26", fc26: "FC26", tekken8: "Tekken 8",
+    futsal: "Futsal", indoor_cricket: "Indoor Cricket",
+    padel: "Padel", pickleball: "Pickleball",
+  };
+  return labels[game] || game.toUpperCase();
+}
+
+async function resolveUserByAnyId(ctx: any, value?: string | null) {
+  if (!value) return null;
+
+  try {
+    const directUser = await ctx.db.get(value);
+    if (directUser) return directUser;
+  } catch {
+    // Not a valid Convex document id.
+  }
+
+  return await ctx.db
+    .query("users")
+    .withIndex("by_authId", (q: any) => q.eq("authId", value))
+    .unique();
+}
+
+async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string) {
+  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
+  try {
+    authUser = await authComponent.getAuthUser(ctx);
+  } catch {
+    authUser = null;
+  }
+
+  const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
+  console.log("[teams] auth gate", {
+    authId: authUser?.userId ?? null,
+    emailVerified: authUser?.emailVerified ?? null,
+    email: authUser?.email ?? null,
+    expectedUid: expectedUid ?? null,
+    expectedAuthId: expectedUser?.authId ?? null,
+  });
+
+  if (authUser?.userId) {
+    if (authUser.emailVerified !== true) {
+      throw new Error("Please verify your email to unlock matchrooms and team actions.");
+    }
+
+    const user = await resolveUserByAnyId(ctx, authUser.userId);
+    if (!user) {
+      throw new Error("User profile not found");
+    }
+    if (expectedUser && expectedUser._id !== user._id) {
+      throw new Error("You can only perform this action for your own account");
+    }
+    return user;
+  }
+
+  if (!expectedUser) {
+    throw new Error("Not authenticated");
+  }
+
+  return expectedUser;
+}
 
 // ============================================
 // QUERIES
@@ -148,7 +231,12 @@ export const create = mutation({
     maxMembers: v.optional(v.number()),
     description: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
+    const actor = await getAuthenticatedConvexUser(ctx, args.captainUid);
+    if (actor._id !== args.captainUid) {
+      throw new Error("You can only create a team for your own account");
+    }
+
     const now = Date.now();
 
     // Create the team
@@ -223,6 +311,11 @@ export const addMember = mutation({
     username: v.string(),
   },
   handler: async (ctx, args) => {
+    const actor = await getAuthenticatedConvexUser(ctx, args.userId);
+    if (actor._id !== args.userId) {
+      throw new Error("You can only join a team as yourself");
+    }
+
     const team = await ctx.db.get(args.teamId);
     if (!team) throw new Error("Team not found");
 
@@ -234,6 +327,12 @@ export const addMember = mutation({
     // Check roster cap
     if (team.memberCount >= team.maxMembers) {
       throw new Error("Team is full");
+    }
+
+    // Check player has this game in their profile
+    if (team.game && !doesUserPlayGame(actor, team.game)) {
+      const label = getGameLabel(team.game);
+      throw new Error(`You need to add ${label} to your game profile before joining this team. Go to Edit Profile → Games to add it.`);
     }
 
     const now = Date.now();
@@ -283,10 +382,12 @@ export const removeMember = mutation({
     // Remove from memberUids
     const memberUids = team.memberUids.filter((uid) => uid !== args.userId);
 
+    const now = Date.now();
+
     await ctx.db.patch(args.teamId, {
       memberUids,
       memberCount: team.memberCount - 1,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     // Delete member record
@@ -300,6 +401,27 @@ export const removeMember = mutation({
     if (memberRecord) {
       await ctx.db.delete(memberRecord._id);
     }
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "team.member_removed",
+      toUid: args.userId,
+      fromUid: team.captainUid,
+      fromUsername: team.captainUsername || "Captain",
+      status: "pending",
+      dedupeKey: `team.member_removed:${String(args.teamId)}:${String(args.userId)}:${now}`,
+      dedupePolicy: "versioned_new",
+      teamId: args.teamId,
+      teamName: team.name,
+      route: "/teams",
+      title: "Removed from team",
+      body: `You were removed from ${team.name}.`,
+      data: {
+        teamId: String(args.teamId),
+        teamName: team.name,
+        game: team.game,
+        href: "/teams",
+      },
+    });
 
     return true;
   },
@@ -315,6 +437,8 @@ export const transferCaptain = mutation({
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
     if (!team) throw new Error("Team not found");
+    const previousCaptainUid = team.captainUid;
+    const previousCaptainUsername = team.captainUsername || "Captain";
 
     // Check if new captain is a member
     if (!team.memberUids.includes(args.newCaptainUid)) {
@@ -352,6 +476,50 @@ export const transferCaptain = mutation({
 
     if (newCaptainRecord) {
       await ctx.db.patch(newCaptainRecord._id, { role: "captain" });
+    }
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "team.captain_transferred",
+      toUid: args.newCaptainUid,
+      fromUid: previousCaptainUid,
+      fromUsername: previousCaptainUsername,
+      status: "pending",
+      dedupeKey: `team.captain_transferred:${String(args.teamId)}:${String(args.newCaptainUid)}:${now}`,
+      dedupePolicy: "versioned_new",
+      teamId: args.teamId,
+      teamName: team.name,
+      route: `/teams/${args.teamId}`,
+      title: "You are now captain",
+      body: `Captaincy for ${team.name} was transferred to you.`,
+      data: {
+        teamId: String(args.teamId),
+        teamName: team.name,
+        game: team.game,
+        href: `/teams/${args.teamId}`,
+      },
+    });
+
+    if (String(previousCaptainUid) !== String(args.newCaptainUid)) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "team.captain_transferred",
+        toUid: previousCaptainUid,
+        fromUid: args.newCaptainUid,
+        fromUsername: args.newCaptainUsername,
+        status: "pending",
+        dedupeKey: `team.captain_transferred:${String(args.teamId)}:${String(previousCaptainUid)}:${now}`,
+        dedupePolicy: "versioned_new",
+        teamId: args.teamId,
+        teamName: team.name,
+        route: `/teams/${args.teamId}`,
+        title: "Captaincy transferred",
+        body: `You transferred captaincy of ${team.name} to ${args.newCaptainUsername}.`,
+        data: {
+          teamId: String(args.teamId),
+          teamName: team.name,
+          game: team.game,
+          href: `/teams/${args.teamId}`,
+        },
+      });
     }
 
     return true;
@@ -392,11 +560,49 @@ export const updateStats = mutation({
 export const remove = mutation({
   args: { teamId: v.id("teams") },
   handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId);
+    if (!team) throw new Error("Team not found");
+
     // Delete all member records first
     const members = await ctx.db
       .query("teamMembers")
       .withIndex("by_teamId", (q) => q.eq("teamId", args.teamId))
       .collect();
+
+    const notifiedMemberIds = new Set<string>();
+    const recipientIds = [
+      team.captainUid,
+      ...members.map((member) => member.odxerId),
+      ...team.memberUids,
+    ].filter(Boolean);
+    const now = Date.now();
+    for (const memberId of recipientIds) {
+      const memberKey = String(memberId);
+      if (!memberId || notifiedMemberIds.has(memberKey)) continue;
+      notifiedMemberIds.add(memberKey);
+      const memberUser = await resolveUserByAnyId(ctx, memberKey);
+      if (!memberUser) continue;
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "team.deleted",
+        toUid: memberUser._id,
+        fromUid: team.captainUid,
+        fromUsername: team.captainUsername || "Captain",
+        status: "pending",
+        dedupeKey: `team.deleted:${String(args.teamId)}:${memberId}:${now}`,
+        dedupePolicy: "versioned_new",
+        teamId: args.teamId,
+        teamName: team.name,
+        route: "/teams",
+        title: "Team deleted",
+        body: `${team.name} was deleted.`,
+        data: {
+          teamId: String(args.teamId),
+          teamName: team.name,
+          game: team.game,
+          href: "/teams",
+        },
+      });
+    }
 
     for (const member of members) {
       await ctx.db.delete(member._id);
@@ -464,7 +670,7 @@ export const inviteToTeam = mutation({
     if (!friendship) throw new Error("Can only invite friends");
 
     // Dedup key
-    const entityKey = `team_invite__${args.teamId}__${args.toUid}`;
+    const entityKey = `team.invite:${args.teamId}:${args.toUid}`;
 
     // Check for existing pending invite
     const existing = await ctx.db
@@ -474,7 +680,12 @@ export const inviteToTeam = mutation({
 
     if (existing && existing.status === "pending") {
       if (!existing.expiresAt || existing.expiresAt > Date.now()) {
-        throw new Error("Invitation already pending");
+        return {
+          ok: true,
+          notificationId: existing._id,
+          alreadyPending: true,
+          message: "Invitation already pending",
+        };
       }
       // Expired - delete old one
       await ctx.db.delete(existing._id);
@@ -487,24 +698,29 @@ export const inviteToTeam = mutation({
 
     const fromUser = await ctx.db.get(args.fromUid);
 
-    const notificationId = await ctx.db.insert("notifications", {
-      type: "team_invite",
+    const notificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "team.invite",
       toUid: args.toUid,
       fromUid: args.fromUid,
       fromUsername: fromUser?.username || team.captainUsername || "Captain",
       status: "pending",
-      entityKey,
+      dedupeKey: entityKey,
+      dedupePolicy: "replace_active",
       teamId: args.teamId,
       teamName: team.name,
+      route: `/teams/${args.teamId}`,
       title: "Team Invite",
       body: `You've been invited to join ${team.name}`,
-      data: { teamId: args.teamId, teamName: team.name, game: team.game },
+      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: `/teams/${args.teamId}` },
       expiresAt: now + sevenDaysMs,
-      createdAt: now,
-      updatedAt: now,
     });
 
-    return notificationId;
+    return {
+      ok: true,
+      notificationId: notificationResult.notificationId,
+      alreadyPending: false,
+      message: "Invitation sent",
+    };
   },
 });
 
@@ -518,7 +734,9 @@ export const respondToTeamInvite = mutation({
   handler: async (ctx, args) => {
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Invite not found");
-    if (notif.type !== "team_invite") throw new Error("Invalid notification type");
+    if (!["team_invite", "team.invite"].includes(String(notif.type || ""))) {
+      throw new Error("Invalid notification type");
+    }
     if (notif.toUid !== args.userId) throw new Error("Not authorized");
     if (notif.status !== "pending") throw new Error("Invite already processed");
 
@@ -528,9 +746,34 @@ export const respondToTeamInvite = mutation({
     }
 
     const now = Date.now();
+    const invitee = await ctx.db.get(args.userId);
+    const inviteeName = invitee?.username || invitee?.fullName || "Player";
 
     if (!args.accept) {
       await ctx.db.patch(args.notificationId, { status: "declined", updatedAt: now });
+      if (notif.fromUid) {
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: "team.invite_response",
+          toUid: notif.fromUid,
+          fromUid: args.userId,
+          fromUsername: inviteeName,
+          status: "pending",
+          dedupeKey: `team.invite_response:${String(args.notificationId)}:declined`,
+          dedupePolicy: "replace_active",
+          teamId: notif.teamId,
+          teamName: notif.teamName,
+          route: `/teams/${String(notif.teamId)}`,
+          title: "Team Invite Declined",
+          body: `${inviteeName} declined your invite to ${notif.teamName || "the team"}.`,
+          data: {
+            teamId: String(notif.teamId || ""),
+            teamName: notif.teamName || null,
+            decision: "declined",
+            inviteNotificationId: String(args.notificationId),
+            href: `/teams/${String(notif.teamId || "")}`,
+          },
+        });
+      }
       return { ok: true, message: "Invite declined." };
     }
 
@@ -585,6 +828,30 @@ export const respondToTeamInvite = mutation({
 
     await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
 
+    if (notif.fromUid) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "team.invite_response",
+        toUid: notif.fromUid,
+        fromUid: args.userId,
+        fromUsername: username,
+        status: "pending",
+        dedupeKey: `team.invite_response:${String(args.notificationId)}:accepted`,
+        dedupePolicy: "replace_active",
+        teamId,
+        teamName: team.name,
+        route: `/teams/${teamId}`,
+        title: "Team Invite Accepted",
+        body: `${username} accepted your invite to join ${team.name}.`,
+        data: {
+          teamId: String(teamId),
+          teamName: team.name,
+          decision: "accepted",
+          inviteNotificationId: String(args.notificationId),
+          href: `/teams/${teamId}`,
+        },
+      });
+    }
+
     return { ok: true, message: "Joined team successfully!" };
   },
 });
@@ -613,6 +880,24 @@ export const respondToJoinRequest = mutation({
 
     if (!args.accept) {
       await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
+      const captain = await ctx.db.get(args.captainUid);
+      if (notif.fromUid) {
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: "team.join_request_decision",
+          toUid: notif.fromUid,
+          fromUid: args.captainUid,
+          fromUsername: captain?.username || team.captainUsername || "Captain",
+          status: "pending",
+          teamId,
+          teamName: team.name,
+          dedupeKey: `team.join_request_decision:${teamId}:${String(notif.fromUid)}:rejected`,
+          dedupePolicy: "replace_active",
+          route: `/teams/${teamId}`,
+          title: "Join Request Rejected",
+          body: `Your request to join ${team.name} was declined.`,
+          data: { teamId, teamName: team.name, game: team.game, decision: "rejected", href: `/teams/${teamId}` },
+        });
+      }
       return { ok: true };
     }
 
@@ -666,19 +951,20 @@ export const respondToJoinRequest = mutation({
 
     // Notify requester
     const captain = await ctx.db.get(args.captainUid);
-    await ctx.db.insert("notifications", {
-      type: "team_join_decision",
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "team.join_request_decision",
       toUid: requesterUid,
       fromUid: args.captainUid,
       fromUsername: captain?.username || team.captainUsername || "Captain",
       status: "pending",
       teamId,
       teamName: team.name,
+      dedupeKey: `team.join_request_decision:${teamId}:${requesterUid}:accepted`,
+      dedupePolicy: "replace_active",
+      route: `/teams/${teamId}`,
       title: "Join Request Accepted",
       body: `Your request to join ${team.name} was accepted!`,
-      data: { teamId, teamName: team.name, game: team.game },
-      createdAt: now,
-      updatedAt: now,
+      data: { teamId, teamName: team.name, game: team.game, decision: "accepted", href: `/teams/${teamId}` },
     });
 
     return { ok: true };
@@ -735,17 +1021,28 @@ export const requestToJoinTeam = mutation({
     fromUid: v.id("users"),
     fromUsername: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
+    const actor = await getAuthenticatedConvexUser(ctx, args.fromUid);
+    if (actor._id !== args.fromUid) {
+      throw new Error("You can only request to join a team as yourself");
+    }
+
     const team = await ctx.db.get(args.teamId);
     if (!team) throw new Error("Team not found");
 
     if (team.memberCount >= team.maxMembers) throw new Error("Team is full");
 
+    // Check player has this game in their profile
+    if (team.game && !doesUserPlayGame(actor, team.game)) {
+      const label = getGameLabel(team.game);
+      throw new Error(`You need to add ${label} to your game profile before joining this team. Go to Edit Profile → Games to add it.`);
+    }
+
     // Already a member?
     if (team.memberUids.includes(args.fromUid)) throw new Error("Already a member");
 
     // Dedup key
-    const entityKey = `team_join_request_${args.teamId}_${args.fromUid}`;
+    const entityKey = `team.join_request:${args.teamId}:${args.fromUid}`;
 
     // Check existing
     const existing = await ctx.db
@@ -766,23 +1063,23 @@ export const requestToJoinTeam = mutation({
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
-    const notificationId = await ctx.db.insert("notifications", {
-      type: "team_join_request",
+    const notificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "team.join_request",
       toUid: team.captainUid,
       fromUid: args.fromUid,
       fromUsername: args.fromUsername,
       status: "pending",
-      entityKey,
+      dedupeKey: entityKey,
+      dedupePolicy: "upsert_active",
       teamId: args.teamId,
       teamName: team.name,
+      route: `/teams/${args.teamId}`,
       title: "Join Request",
       body: `${args.fromUsername} wants to join ${team.name}`,
-      data: { teamId: args.teamId, teamName: team.name, game: team.game },
+      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: `/teams/${args.teamId}` },
       expiresAt: now + sevenDaysMs,
-      createdAt: now,
-      updatedAt: now,
     });
 
-    return notificationId;
+    return notificationResult.notificationId;
   },
 });

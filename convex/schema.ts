@@ -8,6 +8,9 @@ const skillScoreValidator = v.object({
   matchesPlayed: v.number(),
   wins: v.number(),
   losses: v.number(),
+  initialSource: v.optional(v.string()),
+  initialRating: v.optional(v.number()),
+  lastMatchDate: v.optional(v.union(v.number(), v.null())),
   lastUpdated: v.number(),
 });
 
@@ -111,6 +114,31 @@ const playerValidator = v.object({
   formation: v.optional(v.string()),
 });
 
+// Chat message attachment (image or file)
+const chatAttachmentValidator = v.object({
+  storageId: v.id("_storage"),
+  fileName: v.optional(v.string()),
+  mimeType: v.optional(v.string()),
+  sizeBytes: v.optional(v.number()),
+  width: v.optional(v.number()),
+  height: v.optional(v.number()),
+});
+
+// Chat message reaction entry
+const chatReactionValidator = v.object({
+  emoji: v.string(),
+  userId: v.id("users"),
+  createdAt: v.number(),
+});
+
+// Extended chat message type union (text/voice/image/file)
+const chatMessageTypeValidator = v.union(
+  v.literal("text"),
+  v.literal("voice"),
+  v.literal("image"),
+  v.literal("file")
+);
+
 export default defineSchema({
   // ============================================
   // USERS TABLE
@@ -125,6 +153,9 @@ export default defineSchema({
     username: v.string(),
     usernameLower: v.string(),
     phone: v.optional(v.string()),
+    phoneValidated: v.optional(v.boolean()),
+    phoneValidationProvider: v.optional(v.string()),
+    phoneValidationCheckedAt: v.optional(v.number()),
     accountType: v.union(v.literal("player"), v.literal("zone")),
 
     // Profile
@@ -142,10 +173,15 @@ export default defineSchema({
 
     // Game preferences (Step 2)
     playsCs2: v.optional(v.boolean()),
-    cs2Role: v.optional(v.string()),
+    cs2Role: v.optional(v.union(v.string(), v.null())),
+    playsCs16: v.optional(v.boolean()),
+    cs16Role: v.optional(v.union(v.string(), v.null())),
+    playsValorant: v.optional(v.boolean()),
+    valorantRole: v.optional(v.union(v.string(), v.null())),
     playsFc: v.optional(v.boolean()),
-    fcTeam: v.optional(v.string()),
-    fcFormation: v.optional(v.string()),
+    fcTeam: v.optional(v.union(v.string(), v.null())),
+    fcFormation: v.optional(v.union(v.string(), v.null())),
+    selectedFcLeagueId: v.optional(v.union(v.string(), v.null())),
     playsTekken: v.optional(v.boolean()),
     tekkenFavorites: v.optional(v.array(v.string())),
 
@@ -154,13 +190,13 @@ export default defineSchema({
     playsIndoorCricket: v.optional(v.boolean()),
     playsPadel: v.optional(v.boolean()),
     playsPickleball: v.optional(v.boolean()),
-    futsalPosition: v.optional(v.string()),
+    futsalPosition: v.optional(v.union(v.string(), v.null())),
     futsalPositions: v.optional(v.array(v.string())),
-    indoorCricketRole: v.optional(v.string()),
-    indoorCricketBowlingStyle: v.optional(v.string()),
-    indoorCricketBattingStyle: v.optional(v.string()),
-    padelRole: v.optional(v.string()),
-    pickleballRole: v.optional(v.string()),
+    indoorCricketRole: v.optional(v.union(v.string(), v.null())),
+    indoorCricketBowlingStyle: v.optional(v.union(v.string(), v.null())),
+    indoorCricketBattingStyle: v.optional(v.union(v.string(), v.null())),
+    padelRole: v.optional(v.union(v.string(), v.null())),
+    pickleballRole: v.optional(v.union(v.string(), v.null())),
 
     // Platform URLs (Step 3)
     steamProfileUrl: v.optional(v.string()),
@@ -190,6 +226,8 @@ export default defineSchema({
     skillScores: v.optional(
       v.object({
         cs2: v.optional(skillScoreValidator),
+        cs16: v.optional(skillScoreValidator),
+        valorant: v.optional(skillScoreValidator),
         tekken: v.optional(skillScoreValidator),
         tekken8: v.optional(skillScoreValidator),
         futsal: v.optional(skillScoreValidator),
@@ -223,6 +261,10 @@ export default defineSchema({
     // Wallet
     walletBalance: v.optional(v.number()),
 
+    // Chat presence & preferences
+    lastActiveAt: v.optional(v.number()),
+    chatMuted: v.optional(v.array(v.string())),
+
     // Timestamps
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -236,7 +278,10 @@ export default defineSchema({
     .index("by_eaId", ["eaId"])
     .index("by_xboxGamertag", ["xboxGamertag"])
     .index("by_accountType", ["accountType"])
-    .index("by_authId", ["authId"]),
+    .index("by_authId", ["authId"])
+    .index("by_role", ["role"])
+    .index("by_updatedAt", ["updatedAt"])
+    .index("by_accountType_updatedAt", ["accountType", "updatedAt"]),
 
   // ============================================
   // FRIENDSHIPS
@@ -280,10 +325,54 @@ export default defineSchema({
       v.literal("failed")
     ),
     reference: v.optional(v.string()),
+    metadata: v.optional(v.any()),
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
-    .index("by_userId_and_status", ["userId", "status"]),
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_reference", ["reference"]),
+
+  paymentTransactions: defineTable({
+    provider: v.union(v.literal("easypaisa")),
+    kind: v.union(v.literal("booking_intent"), v.literal("wallet_topup")),
+    status: v.union(
+      v.literal("created"),
+      v.literal("redirected"),
+      v.literal("token_received"),
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("expired"),
+      v.literal("cancelled")
+    ),
+    userId: v.id("users"),
+    bookingIntentId: v.optional(v.id("bookingIntents")),
+    amount: v.number(),
+    currency: v.string(),
+    orderRefNum: v.string(),
+    checkoutToken: v.string(),
+    checkoutUrl: v.optional(v.string()),
+    appReturnUrl: v.string(),
+    providerStatus: v.optional(v.string()),
+    providerDescription: v.optional(v.string()),
+    paymentMethod: v.optional(v.string()),
+    authToken: v.optional(v.string()),
+    providerReference: v.optional(v.string()),
+    providerPayload: v.optional(v.any()),
+    callbackCount: v.optional(v.number()),
+    lastCallbackAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    processedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_orderRefNum", ["orderRefNum"])
+    .index("by_checkoutToken", ["checkoutToken"])
+    .index("by_bookingIntentId", ["bookingIntentId"])
+    .index("by_status", ["status"]),
 
   // ============================================
   // MATCHROOMS
@@ -318,8 +407,29 @@ export default defineSchema({
     })),
     locationMode: v.optional(v.union(v.literal("zone"), v.literal("broadcast"))),
     broadcastAreas: v.optional(v.array(v.string())),
+    broadcastRequestStatus: v.optional(
+      v.union(
+        v.literal("idle"),
+        v.literal("waiting_for_fill"),
+        v.literal("waiting_for_zones"),
+        v.literal("zone_confirmed"),
+        v.literal("expired"),
+        v.literal("cancelled")
+      )
+    ),
+    broadcastRequestStartedAt: v.optional(v.number()),
+    broadcastRequestExpiresAt: v.optional(v.number()),
+    confirmedZoneId: v.optional(v.string()),
+    confirmedBranchId: v.optional(v.string()),
+    venueConfirmedAt: v.optional(v.number()),
+    refundStatus: v.optional(
+      v.union(v.literal("none"), v.literal("pending"), v.literal("completed"))
+    ),
+    refundCompletedAt: v.optional(v.number()),
     zoneId: v.optional(v.string()),
     zoneOwnerUid: v.optional(v.string()),
+    branchId: v.optional(v.string()),
+    resourceIds: v.optional(v.array(v.id("zoneResources"))),
 
     // Timing & Pricing
     startTime: v.optional(v.number()),
@@ -440,6 +550,7 @@ export default defineSchema({
     .index("by_game", ["game"])
     .index("by_status_and_game", ["status", "game"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_matchCode", ["matchCode"])
     .index("by_createdAt", ["createdAt"]),
 
   // ============================================
@@ -448,13 +559,27 @@ export default defineSchema({
   bookingIntents: defineTable({
     matchroomId: v.id("matchrooms"),
     createdByUid: v.id("users"),
+    createdByUsername: v.optional(v.string()),
     side: v.union(v.literal("A"), v.literal("B")),
     selectedSlots: v.array(v.number()),
+    selectedSlotIds: v.optional(v.array(v.string())),
+    role: v.optional(v.string()),
+    source: v.optional(
+      v.union(
+        v.literal("direct_join"),
+        v.literal("captain_approved_join"),
+        v.literal("captain_invite")
+      )
+    ),
+    sourceNotificationId: v.optional(v.id("notifications")),
     status: v.union(
       v.literal("pending_approvals"),
       v.literal("approved"),
+      v.literal("approved_pending_payment"),
+      v.literal("confirmed"),
       v.literal("rejected"),
-      v.literal("expired")
+      v.literal("expired"),
+      v.literal("cancelled")
     ),
 
     // Approvals
@@ -485,13 +610,16 @@ export default defineSchema({
 
     // Payment
     paymentStatus: v.union(v.literal("unpaid"), v.literal("paid")),
+    expiresAt: v.optional(v.number()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_matchroomId", ["matchroomId"])
     .index("by_createdByUid", ["createdByUid"])
-    .index("by_status", ["status"]),
+    .index("by_createdByUid_matchroomId", ["createdByUid", "matchroomId"])
+    .index("by_status", ["status"])
+    .index("by_sourceNotificationId", ["sourceNotificationId"]),
 
   // ============================================
   // BOOKING REQUESTS
@@ -500,6 +628,29 @@ export default defineSchema({
     userId: v.id("users"),
     gameKey: v.string(),
     zoneId: v.optional(v.id("zones")),
+    userName: v.optional(v.string()),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    maxPlayers: v.optional(v.number()),
+    format: v.optional(v.string()),
+    seriesType: v.optional(v.string()),
+    durationHours: v.optional(v.number()),
+    selectedMaps: v.optional(v.array(v.string())),
+    skillLevel: v.optional(v.string()),
+    hostSkillScore: v.optional(v.number()),
+    hostSkillTier: v.optional(v.string()),
+    hostSkillContext: v.optional(v.any()),
+    overs: v.optional(v.string()),
+    teamMode: v.optional(v.union(v.literal("solo"), v.literal("team"))),
+    teamId: v.optional(v.string()),
+    reservedSlots: v.optional(v.number()),
+    requestKind: v.optional(
+      v.union(v.literal("direct_zone"), v.literal("broadcast_fanout"))
+    ),
+    fanoutGroupKey: v.optional(v.string()),
+    responseExpiresAt: v.optional(v.number()),
+    targetAreaLabel: v.optional(v.string()),
+    closedReason: v.optional(v.string()),
     status: v.union(
       v.literal("open"),
       v.literal("pending_payment"),
@@ -510,7 +661,21 @@ export default defineSchema({
 
     preferredDate: v.optional(v.number()),
     preferredTime: v.optional(v.string()),
+    flexibilityWindow: v.optional(v.string()),
+    locationMode: v.optional(v.union(v.literal("zone"), v.literal("broadcast"))),
+    preferredAreas: v.optional(v.array(v.string())),
+    budgetPerPlayer: v.optional(v.number()),
+    currency: v.optional(v.string()),
     playerCount: v.number(),
+    paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("unpaid"))),
+    paymentAmount: v.optional(v.number()),
+    paymentReservedSlots: v.optional(v.number()),
+    matchroomId: v.optional(v.id("matchrooms")),
+    allocatedBranchId: v.optional(v.string()),
+    allocatedResourceIds: v.optional(v.array(v.id("zoneResources"))),
+    allocatedAt: v.optional(v.number()),
+    allocatedByUid: v.optional(v.string()),
+    lifecycleStatus: v.optional(v.string()),
     notes: v.optional(v.string()),
 
     createdAt: v.number(),
@@ -518,6 +683,7 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_matchroomId", ["matchroomId"])
     .index("by_status", ["status"])
     .index("by_gameKey", ["gameKey"]),
 
@@ -533,11 +699,34 @@ export default defineSchema({
       v.literal("rejected"),
       v.literal("expired")
     ),
+    requestKind: v.optional(
+      v.union(v.literal("direct_zone"), v.literal("broadcast_fanout"))
+    ),
 
     proposedPrice: v.number(),
     proposedDate: v.optional(v.number()),
     proposedTime: v.optional(v.string()),
+    scheduleOptions: v.optional(v.array(v.object({
+      date: v.string(),
+      time: v.string(),
+    }))),
+    recipientUids: v.optional(v.array(v.string())),
+    responses: v.optional(v.array(v.object({
+      uid: v.string(),
+      decision: v.union(v.literal("accepted"), v.literal("rejected")),
+      respondedAt: v.number(),
+      selectedOptionIndex: v.optional(v.number()),
+    }))),
+    selectedOptionIndex: v.optional(v.number()),
+    resolvedMatchroomId: v.optional(v.id("matchrooms")),
+    expiresAt: v.optional(v.number()),
+    zoneName: v.optional(v.string()),
+    zoneOwnerUid: v.optional(v.string()),
+    branchId: v.optional(v.string()),
+    branchName: v.optional(v.string()),
+    requestOwnerUid: v.optional(v.string()),
     message: v.optional(v.string()),
+    responseExpiresAt: v.optional(v.number()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -608,14 +797,55 @@ export default defineSchema({
     opponentTeamId: v.id("teams"),
     opponentTeamName: v.optional(v.string()),
     game: v.string(),
+    gameKey: v.optional(v.string()),
     status: v.union(
       v.literal("pending"),
       v.literal("accepted"),
       v.literal("venue_proposed"),
-      v.literal("confirmed"),
+      v.literal("venue_confirmed"),
+      v.literal("admin_pending"),
       v.literal("completed"),
       v.literal("rejected"),
       v.literal("expired")
+    ),
+    captainAUid: v.optional(v.id("users")),
+    captainAName: v.optional(v.string()),
+    captainBUid: v.optional(v.id("users")),
+    captainBName: v.optional(v.string()),
+    format: v.optional(v.string()),
+    seriesType: v.optional(v.string()),
+    maxPlayers: v.optional(v.number()),
+    scheduledDate: v.optional(v.string()),
+    scheduledTime: v.optional(v.string()),
+    pricePerPlayer: v.optional(v.number()),
+    commonAreas: v.optional(v.array(v.string())),
+    proposedVenueByCaptainA: v.optional(
+      v.object({
+        zoneId: v.string(),
+        venueName: v.string(),
+        areaLabel: v.optional(v.union(v.string(), v.null())),
+      })
+    ),
+    alternativeVenueByCaptainB: v.optional(
+      v.object({
+        zoneId: v.string(),
+        venueName: v.string(),
+        areaLabel: v.optional(v.union(v.string(), v.null())),
+      })
+    ),
+    captainVenueChoices: v.optional(v.any()),
+    confirmedVenue: v.optional(
+      v.object({
+        zoneId: v.string(),
+        venueName: v.string(),
+        areaLabel: v.optional(v.union(v.string(), v.null())),
+      })
+    ),
+    chatId: v.optional(v.string()),
+    matchroomId: v.optional(v.id("matchrooms")),
+    bookingRequestId: v.optional(v.string()),
+    adminReviewStatus: v.optional(
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.null())
     ),
 
     // Venue
@@ -645,9 +875,24 @@ export default defineSchema({
   // ============================================
   teamChallengeChatMessages: defineTable({
     chatId: v.string(), // The challenge chat ID (matches teamChallenge ID or custom chat ID)
+    // Kept as string for backwards compatibility with existing challenge chat messages.
+    // Target shape: v.id("users") after a dedicated migration.
     senderUid: v.string(),
     senderName: v.string(),
     text: v.string(),
+    type: v.optional(chatMessageTypeValidator),
+    audioStorageId: v.optional(v.id("_storage")),
+    audioDurationMs: v.optional(v.number()),
+    attachment: v.optional(chatAttachmentValidator),
+    reactions: v.optional(v.array(chatReactionValidator)),
+    editedAt: v.optional(v.number()),
+    clientMessageId: v.optional(v.string()),
+    replyTo: v.optional(v.object({
+      messageId: v.string(),
+      senderName: v.string(),
+      text: v.string(),
+    })),
+    deletedFor: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_chatId", ["chatId"])
@@ -658,15 +903,34 @@ export default defineSchema({
   // ============================================
   teamChallengeChats: defineTable({
     chatId: v.string(), // External chat ID
+    challengeId: v.optional(v.id("teamChallenges")),
+    participantUids: v.optional(v.array(v.id("users"))),
     lastMessage: v.optional(v.object({
       text: v.string(),
-      senderUid: v.string(),
+      senderUid: v.id("users"),
+      senderName: v.optional(v.string()),
+      type: v.optional(chatMessageTypeValidator),
+      audioDurationMs: v.optional(v.number()),
+      createdAt: v.optional(v.number()),
     })),
     lastReadBy: v.optional(v.any()),
+    pinnedMessageIds: v.optional(v.array(v.string())),
     updatedAt: v.number(),
     createdAt: v.number(),
   })
     .index("by_chatId", ["chatId"]),
+
+  teamChallengeChatMembers: defineTable({
+    chatId: v.string(),
+    userId: v.id("users"),
+    joinedAt: v.number(),
+    lastReadAt: v.optional(v.number()),
+    unreadCount: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_chatId", ["chatId"])
+    .index("by_userId", ["userId"])
+    .index("by_chatId_and_userId", ["chatId", "userId"]),
 
   // ============================================
   // ZONES
@@ -691,6 +955,7 @@ export default defineSchema({
 
     status: v.union(
       v.literal("pending-review"),
+      v.literal("approved_pending_migration"),
       v.literal("active"),
       v.literal("rejected"),
       v.literal("suspended")
@@ -718,6 +983,8 @@ export default defineSchema({
       v.array(v.string()),
       v.object({
         supportsCs2: v.optional(v.boolean()),
+        supportsCs16: v.optional(v.boolean()),
+        supportsValorant: v.optional(v.boolean()),
         supportsFc25: v.optional(v.boolean()),
         supportsTekken8: v.optional(v.boolean()),
         supportsFutsal: v.optional(v.boolean()),
@@ -760,12 +1027,30 @@ export default defineSchema({
     approvedAt: v.optional(v.number()),
     rejectedAt: v.optional(v.number()),
     rejectionReason: v.optional(v.string()),
+    migration: v.optional(v.object({
+      perBranchSeatModel: v.optional(v.boolean()),
+      status: v.optional(v.union(
+        v.literal("not_started"),
+        v.literal("pending"),
+        v.literal("succeeded"),
+        v.literal("failed")
+      )),
+      resourceModelVersion: v.optional(v.number()),
+      migratedAt: v.optional(v.number()),
+      lastAttemptAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+      retryCount: v.optional(v.number()),
+      branchCount: v.optional(v.number()),
+      resourceCount: v.optional(v.number()),
+    })),
 
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_ownerUid", ["ownerUid"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_updatedAt", ["updatedAt"])
+    .index("by_status_updatedAt", ["status", "updatedAt"]),
 
   // ============================================
   // ZONE PRICING RULES
@@ -776,11 +1061,17 @@ export default defineSchema({
     assetType: v.string(),
     isEnabled: v.boolean(),
     priority: v.number(),
+    tier: v.optional(v.string()),
+    surface: v.optional(v.string()),
+    ruleType: v.optional(v.union(v.literal("percentage_discount"), v.literal("fixed_override"))),
+    value: v.optional(v.number()),
 
     // Time-based rules
     timeStart: v.optional(v.string()),
     timeEnd: v.optional(v.string()),
     daysOfWeek: v.optional(v.array(v.number())),
+    validFrom: v.optional(v.string()),
+    validTo: v.optional(v.string()),
 
     // Price modifications
     priceMultiplier: v.optional(v.number()),
@@ -788,12 +1079,32 @@ export default defineSchema({
 
     name: v.optional(v.string()),
     description: v.optional(v.string()),
+    createdByUid: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_zoneId", ["zoneId"])
     .index("by_zoneId_and_assetType", ["zoneId", "assetType"]),
+
+  // ============================================
+  // ZONE AUDIT EVENTS
+  // ============================================
+  zoneAuditEvents: defineTable({
+    zoneId: v.string(),
+    module: v.string(),
+    action: v.string(),
+    actorUid: v.optional(v.string()),
+    actorLabel: v.optional(v.string()),
+    targetType: v.string(),
+    targetId: v.optional(v.string()),
+    summary: v.string(),
+    details: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_zoneId_createdAt", ["zoneId", "createdAt"])
+    .index("by_zoneId_module_createdAt", ["zoneId", "module", "createdAt"])
+    .index("by_zoneId_action_createdAt", ["zoneId", "action", "createdAt"]),
 
   // ============================================
   // ZONE RESOURCES
@@ -804,12 +1115,20 @@ export default defineSchema({
     kind: v.string(),
     name: v.string(),
     assetType: v.string(),
+    tier: v.optional(v.string()),
+    surface: v.optional(v.string()),
+    roomLabel: v.optional(v.string()),
     lifecycleStatus: v.union(
       v.literal("available"),
       v.literal("held"),
       v.literal("booked"),
       v.literal("maintenance")
     ),
+    bookingRequestId: v.optional(v.id("bookingRequests")),
+    matchroomId: v.optional(v.id("matchrooms")),
+    bookedAt: v.optional(v.number()),
+    bookedByUid: v.optional(v.string()),
+    isActive: v.optional(v.boolean()),
 
     // Capacity
     capacity: v.optional(v.number()),
@@ -822,7 +1141,8 @@ export default defineSchema({
   })
     .index("by_zoneId", ["zoneId"])
     .index("by_zoneId_and_branchId", ["zoneId", "branchId"])
-    .index("by_lifecycleStatus", ["lifecycleStatus"]),
+    .index("by_lifecycleStatus", ["lifecycleStatus"])
+    .index("by_bookingRequestId", ["bookingRequestId"]),
 
   // ============================================
   // NOTIFICATIONS
@@ -832,28 +1152,7 @@ export default defineSchema({
     fromUid: v.optional(v.id("users")),
     fromUsername: v.optional(v.string()),
 
-    type: v.union(
-      v.literal("friend_request"),
-      v.literal("team_invite"),
-      v.literal("team_join_request"),
-      v.literal("team_join_decision"),
-      v.literal("matchroom_invite"),
-      v.literal("match_join_request"),
-      v.literal("match_cancelled_admin"),
-      v.literal("admin_matchroom_created"),
-      v.literal("booking_update"),
-      v.literal("challenge_received"),
-      v.literal("challenge_accepted"),
-      v.literal("challenge_rejected"),
-      v.literal("match_booking_captain_approval"),
-      v.literal("match_seat_invitation"),
-      v.literal("team_match_challenge"),
-      v.literal("team_match_challenge_update"),
-      v.literal("booking_request_accepted"),
-      v.literal("booking_request_rejected"),
-      v.literal("booking_counter_offer"),
-      v.literal("general")
-    ),
+    type: v.string(),
 
     status: v.union(
       v.literal("pending"),
@@ -863,6 +1162,33 @@ export default defineSchema({
       v.literal("read"),
       v.literal("expired")
     ),
+    isRead: v.optional(v.boolean()),
+    isArchived: v.optional(v.boolean()),
+    archivedAt: v.optional(v.number()),
+    readAt: v.optional(v.number()),
+    recipientRole: v.optional(
+      v.union(
+        v.literal("player"),
+        v.literal("zone_admin"),
+        v.literal("super_admin")
+      )
+    ),
+    route: v.optional(v.string()),
+    dedupeKey: v.optional(v.string()),
+    pushPolicy: v.optional(
+      v.union(v.literal("none"), v.literal("eligible"), v.literal("force"))
+    ),
+    pushState: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("sent"),
+        v.literal("failed"),
+        v.literal("skipped")
+      )
+    ),
+    pushAttemptedAt: v.optional(v.number()),
+    pushDeliveredAt: v.optional(v.number()),
+    pushError: v.optional(v.string()),
 
     // Entity references
     entityKey: v.optional(v.string()),
@@ -889,27 +1215,88 @@ export default defineSchema({
     .index("by_toUid", ["toUid"])
     .index("by_toUid_and_status", ["toUid", "status"])
     .index("by_toUid_and_type", ["toUid", "type"])
+    .index("by_toUid_isRead_createdAt", ["toUid", "isRead", "createdAt"])
+    .index("by_toUid_status_createdAt", ["toUid", "status", "createdAt"])
     .index("by_fromUid", ["fromUid"])
+    .index("by_fromUid_type_status", ["fromUid", "type", "status"])
     .index("by_matchroomId", ["matchroomId"])
-    .index("by_entityKey", ["entityKey"]),
+    .index("by_matchroomId_type_status", ["matchroomId", "type", "status"])
+    .index("by_entityKey", ["entityKey"])
+    .index("by_dedupeKey", ["dedupeKey"]),
+
+  pushDevices: defineTable({
+    userId: v.id("users"),
+    installationId: v.string(),
+    provider: v.union(v.literal("expo")),
+    platform: v.union(
+      v.literal("ios"),
+      v.literal("android"),
+      v.literal("web"),
+      v.literal("unknown")
+    ),
+    expoPushToken: v.optional(v.string()),
+    projectId: v.optional(v.string()),
+    deviceName: v.optional(v.string()),
+    appVersion: v.optional(v.string()),
+    permissionStatus: v.union(
+      v.literal("granted"),
+      v.literal("denied"),
+      v.literal("undetermined")
+    ),
+    isActive: v.boolean(),
+    lastRegisteredAt: v.number(),
+    lastDeliveredAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_installationId", ["installationId"])
+    .index("by_expoPushToken", ["expoPushToken"]),
 
   // ============================================
-  // CHATROOMS (for matchrooms)
+  // CHATROOMS (for matchrooms + friend DMs)
   // ============================================
   chatrooms: defineTable({
-    matchroomId: v.id("matchrooms"),
+    // "matchroom" (default/legacy) or "dm" for friend direct messages
+    type: v.optional(v.union(v.literal("matchroom"), v.literal("dm"))),
+    // Matchroom-specific (optional for DMs)
+    matchroomId: v.optional(v.id("matchrooms")),
+    // DM-specific: sorted pair of user IDs for dedup lookup (e.g. "id1_id2")
+    dmPairKey: v.optional(v.string()),
+    // Stored as strings for compatibility with existing matchroom/chatroom records.
+    // Target shape: v.array(v.id("users")) after a dedicated migration.
     participantUids: v.array(v.string()),
     lastMessage: v.optional(v.object({
       text: v.string(),
       senderUid: v.string(),
       senderName: v.string(),
+      type: v.optional(chatMessageTypeValidator),
+      audioDurationMs: v.optional(v.number()),
       createdAt: v.number(),
     })),
     lastReadBy: v.optional(v.any()), // Record<userId, timestamp>
+    pinnedMessageIds: v.optional(v.array(v.string())),
     zoneId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
-  }).index("by_matchroomId", ["matchroomId"]),
+  })
+    .index("by_matchroomId", ["matchroomId"])
+    .index("by_dmPairKey", ["dmPairKey"]),
+
+  chatroomMembers: defineTable({
+    chatroomId: v.id("chatrooms"),
+    // Stored as strings to stay aligned with chatrooms.participantUids until a full migration is planned.
+    // Target shape: v.id("users") after chatrooms.participantUids migrates.
+    userId: v.string(),
+    joinedAt: v.number(),
+    lastReadAt: v.optional(v.number()),
+    unreadCount: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_chatroomId", ["chatroomId"])
+    .index("by_userId", ["userId"])
+    .index("by_chatroomId_and_userId", ["chatroomId", "userId"]),
 
   // ============================================
   // CHAT MESSAGES
@@ -919,6 +1306,12 @@ export default defineSchema({
     senderUid: v.id("users"),
     senderUsername: v.string(),
     content: v.string(),
+    type: v.optional(chatMessageTypeValidator),
+    audioStorageId: v.optional(v.id("_storage")),
+    audioDurationMs: v.optional(v.number()),
+    attachment: v.optional(chatAttachmentValidator),
+    reactions: v.optional(v.array(chatReactionValidator)),
+    editedAt: v.optional(v.number()),
     clientMessageId: v.optional(v.string()),
     replyTo: v.optional(v.object({
       messageId: v.string(),
@@ -930,6 +1323,18 @@ export default defineSchema({
   })
     .index("by_chatroomId", ["chatroomId"])
     .index("by_chatroomId_and_createdAt", ["chatroomId", "createdAt"]),
+
+  // ============================================
+  // CHAT TYPING STATUS
+  // ============================================
+  chatTypingStatus: defineTable({
+    chatKey: v.string(), // chatroomId (matchroom chat) or teamChallengeChat chatId
+    userId: v.id("users"),
+    userName: v.string(),
+    updatedAt: v.number(),
+  })
+    .index("by_chatKey", ["chatKey"])
+    .index("by_chatKey_and_userId", ["chatKey", "userId"]),
 
   // ============================================
   // REPORTS
@@ -955,14 +1360,27 @@ export default defineSchema({
     // Details
     game: v.optional(v.string()),
     reason: v.string(),
+    dedupeKey: v.optional(v.string()),
     description: v.optional(v.string()),
+    reviewedByUid: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    reviewerNote: v.optional(v.string()),
+    resolvedByUid: v.optional(v.id("users")),
+    resolvedAt: v.optional(v.number()),
+    resolutionSummary: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_reporterUid", ["reporterUid"])
     .index("by_status", ["status"])
-    .index("by_type", ["type"]),
+    .index("by_type", ["type"])
+    .index("by_dedupeKey", ["dedupeKey"])
+    .index("by_matchroomId", ["matchroomId"])
+    .index("by_zoneId", ["zoneId"])
+    .index("by_reportedUserId", ["reportedUserId"])
+    .index("by_updatedAt", ["updatedAt"])
+    .index("by_status_updatedAt", ["status", "updatedAt"]),
 
   // ============================================
   // PSN TOKEN CACHE (for PSN API authentication)

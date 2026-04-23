@@ -1,28 +1,82 @@
-import { FontAwesome5, MaterialIcons } from "@expo/vector-icons";
+import { FontAwesome5 } from "@expo/vector-icons";
 import { formatDistanceToNow } from "date-fns";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Image, Linking, ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import Animated from "react-native-reanimated";
 import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
+import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppImage } from "../../../src/components/AppImage";
+import { AppCard } from "../../../src/components/AppPrimitives";
+import ReportIssueModal from "../../../src/components/ReportIssueModal";
+import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { respondFriendRequest, sendFriendRequest } from "../../../src/services/functions";
-import { getUserProfile, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { useEntrance } from "../../../src/motion/useEntrance";
+import { usePressScale } from "../../../src/motion/usePressScale";
+import { respondFriendRequestDecision, sendFriendRequestToUser } from "../../../src/services/convex/socialService";
+import { submitUserReport } from "../../../src/services/convex/reportService";
+import { getPublicUserProfile, isProfileGameEnabled, refreshUserStats, UserProfile } from "../../../src/services/userService";
 import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function MainButton({
+    onPress,
+    onPressIn,
+    disabled,
+    style,
+    hitSlop,
+    children,
+}: {
+    onPress: () => void;
+    onPressIn?: () => void;
+    disabled?: boolean;
+    style?: any;
+    hitSlop?: { top: number; bottom: number; left: number; right: number };
+    children: React.ReactNode;
+}) {
+    const { animatedStyle, onPressIn: motionPressIn, onPressOut } = usePressScale({ activeScale: 0.99 });
+
+    return (
+        <AnimatedPressable
+            onPress={onPress}
+            onPressIn={() => {
+                motionPressIn();
+                onPressIn?.();
+            }}
+            onPressOut={onPressOut}
+            disabled={disabled}
+            hitSlop={hitSlop}
+            style={[styles.mainButton, style, animatedStyle]}
+        >
+            {children}
+        </AnimatedPressable>
+    );
+}
+
 const GAMES = [
     { key: 'cs2', label: 'CS2' },
     { key: 'tekken8', label: 'Tekken 8' },
-    { key: 'fc26', label: 'FC 26' },
+    { key: 'fc26', label: 'FC26' },
     { key: 'futsal', label: 'Futsal' },
     { key: 'indoor_cricket', label: 'Cricket' },
     { key: 'padel', label: 'Padel' },
     { key: 'pickleball', label: 'Pickleball' },
+];
+
+const REPORT_REASONS = [
+    "Toxic Behavior",
+    "Cheating/Hacking",
+    "Impersonation",
+    "Inappropriate Name",
+    "Spam/Harassment",
+    "Other",
 ];
 
 const getFaceitLevel = (elo: number): number => {
@@ -41,14 +95,15 @@ const getFaceitLevel = (elo: number): number => {
 const getPlayerGames = (profile: UserProfile): string[] => {
     const games: string[] = [];
 
-    // Check for explicit "plays" flags or existing skill scores
-    if (profile.playsCs2 || profile.skillScores?.cs2) games.push('cs2');
-    if (profile.playsTekken || profile.skillScores?.tekken8) games.push('tekken8');
-    if (profile.playsFc || profile.skillScores?.fc26) games.push('fc26');
-    if (profile.playsFutsal || profile.skillScores?.futsal) games.push('futsal');
-    if (profile.playsIndoorCricket || profile.skillScores?.indoor_cricket) games.push('indoor_cricket');
-    if (profile.playsPadel || profile.skillScores?.padel) games.push('padel');
-    if (profile.playsPickleball || profile.skillScores?.pickleball) games.push('pickleball');
+    if (isProfileGameEnabled(profile, 'cs2')) games.push('cs2');
+    if (isProfileGameEnabled(profile, 'cs16')) games.push('cs16');
+    if (isProfileGameEnabled(profile, 'valorant')) games.push('valorant');
+    if (isProfileGameEnabled(profile, 'tekken8')) games.push('tekken8');
+    if (isProfileGameEnabled(profile, 'fc26')) games.push('fc26');
+    if (isProfileGameEnabled(profile, 'futsal')) games.push('futsal');
+    if (isProfileGameEnabled(profile, 'indoor_cricket')) games.push('indoor_cricket');
+    if (isProfileGameEnabled(profile, 'padel')) games.push('padel');
+    if (isProfileGameEnabled(profile, 'pickleball')) games.push('pickleball');
 
     return games;
 };
@@ -68,7 +123,16 @@ export default function PlayerProfile() {
     const [incomingRequestId, setIncomingRequestId] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [showReportModal, setShowReportModal] = useState(false);
+    const [reportReason, setReportReason] = useState("");
+    const [reportDescription, setReportDescription] = useState("");
+    const [reporting, setReporting] = useState(false);
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const { animatedStyle: entranceStyle } = useEntrance({
+        axis: "y",
+        distance: 10,
+        initialScale: 0.995,
+    });
 
     // --- Derived Logic Helpers ---
 
@@ -142,13 +206,18 @@ export default function PlayerProfile() {
     const loadProfile = async () => {
         if (!uid) return;
         try {
-            const res = await getUserProfile(uid as Id<"users">);
+            const res = await getPublicUserProfile(
+                uid as Id<"users">,
+                user?._id as Id<"users"> | undefined
+            );
             if (res.ok) {
                 setProfile(res.data);
                 const userGames = getPlayerGames(res.data);
                 if (userGames.length > 0) {
                     setSelectedGame(userGames[0]);
                 }
+            } else {
+                setProfile(null);
             }
         } catch (error) {
             Logger.error("PlayerProfile", "Error loading profile", error);
@@ -197,7 +266,7 @@ export default function PlayerProfile() {
         if (!uid || actionLoading) return;
         setActionLoading(true);
         try {
-            const res = await sendFriendRequest({ toUid: uid });
+            const res = await sendFriendRequestToUser({ toUid: uid });
             if (res.ok) {
                 setIsPending(true);
             } else {
@@ -226,13 +295,38 @@ export default function PlayerProfile() {
         }
     };
 
+    const handleSubmitUserReport = async () => {
+        if (!uid || !reportReason) return;
+        setReporting(true);
+        const result = await submitUserReport({
+            reportedUserId: uid,
+            reason: reportReason,
+            description: reportDescription,
+        });
+        setReporting(false);
+
+        if (!result.ok) {
+            showToast({ type: "error", title: "Report failed", message: result.message });
+            return;
+        }
+
+        showToast({
+            type: "success",
+            title: result.data.created ? "Report submitted" : "Report already exists",
+            message: result.message || "Our moderation team will review it.",
+        });
+        setShowReportModal(false);
+        setReportReason("");
+        setReportDescription("");
+    };
+
     const renderFriendActions = () => {
         if (!uid || user?._id === uid) return null;
 
         if (isFriend) {
             return (
-                <View style={[styles.statusBadge, styles.friendBadge]}>
-                    <MaterialIcons name="check-circle" size={18} color={COLORS.success} />
+                <View style={[styles.statusBadge, styles.friendBadge, styles.primaryActionSurface]}>
+                    <AppIcon name="check-circle" size={18} color={COLORS.success} />
                     <Text style={[styles.statusBadgeText, { color: COLORS.success }]}>Connected</Text>
                 </View>
             );
@@ -241,7 +335,7 @@ export default function PlayerProfile() {
         if (hasIncomingRequest) {
             return (
                 <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
-                    <TouchableOpacity
+                    <MainButton
                         onPressIn={() => {
                             if (touchDebugEnabled) {
                                 Logger.debug("TouchDebug", "pressIn", { tag: "profile_friend_accept", targetUid: uid });
@@ -251,7 +345,7 @@ export default function PlayerProfile() {
                             if (!incomingRequestId) return;
                             setActionLoading(true);
                             try {
-                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'accept' });
+                                const res = await respondFriendRequestDecision({ notificationId: incomingRequestId, decision: 'accept' });
                                 if (res.ok) {
                                     setIsFriend(true);
                                     setHasIncomingRequest(false);
@@ -265,20 +359,19 @@ export default function PlayerProfile() {
                             }
                         }}
                         disabled={actionLoading}
-                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.success }]}
-                        activeOpacity={0.85}
+                        style={{ flex: 1, backgroundColor: COLORS.success }}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {actionLoading ? (
                             <ActivityIndicator color="#FFF" size="small" />
                         ) : (
                             <>
-                                <MaterialIcons name="check" size={18} color="#FFF" />
+                                <AppIcon name="check" size={18} color="#FFF" />
                                 <Text style={styles.mainButtonText}>Accept</Text>
                             </>
                         )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                    </MainButton>
+                    <MainButton
                         onPressIn={() => {
                             if (touchDebugEnabled) {
                                 Logger.debug("TouchDebug", "pressIn", { tag: "profile_friend_decline", targetUid: uid });
@@ -288,7 +381,7 @@ export default function PlayerProfile() {
                             if (!incomingRequestId) return;
                             setActionLoading(true);
                             try {
-                                const res = await respondFriendRequest({ notificationId: incomingRequestId, decision: 'decline' });
+                                const res = await respondFriendRequestDecision({ notificationId: incomingRequestId, decision: 'decline' });
                                 if (res.ok) {
                                     setHasIncomingRequest(false);
                                     setIncomingRequestId(null);
@@ -302,106 +395,180 @@ export default function PlayerProfile() {
                             }
                         }}
                         disabled={actionLoading}
-                        style={[styles.mainButton, { flex: 1, backgroundColor: COLORS.surfaceHighlight, borderWidth: 1, borderColor: COLORS.divider }]}
-                        activeOpacity={0.85}
+                        style={{ flex: 1, backgroundColor: COLORS.surfaceHighlight, borderWidth: 1, borderColor: COLORS.divider }}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                        <MaterialIcons name="close" size={18} color={COLORS.text} />
+                        <AppIcon name="close" size={18} color={COLORS.text} />
                         <Text style={[styles.mainButtonText, { color: COLORS.text }]}>Decline</Text>
-                    </TouchableOpacity>
+                    </MainButton>
                 </View>
             );
         }
 
         if (isPending) {
             return (
-                <View style={[styles.statusBadge, styles.pendingBadge]}>
-                    <MaterialIcons name="schedule" size={18} color={COLORS.warning} />
-                    <Text style={[styles.statusBadgeText, { color: COLORS.warning }]}>Request Sent</Text>
+                <View style={[styles.statusBadge, styles.pendingBadge, styles.primaryActionSurface]}>
+                    <AppIcon name="schedule" size={18} color={COLORS.warning} />
+                    <Text style={[styles.statusBadgeText, { color: COLORS.warning }]}>Pending</Text>
                 </View>
             );
         }
 
         return (
-            <TouchableOpacity
+            <MainButton
                 onPressIn={() => {
-                    if (touchDebugEnabled) {
-                        Logger.debug("TouchDebug", "pressIn", { tag: "profile_add_friend", targetUid: uid });
-                    }
+                    if (!touchDebugEnabled) return;
+                    Logger.debug("TouchDebug", "pressIn", { tag: "profile_add_friend", targetUid: uid });
                 }}
                 onPress={handleAddFriend}
                 disabled={actionLoading}
-                style={styles.mainButton}
-                activeOpacity={0.85}
+                style={styles.primaryActionButton}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
                 {actionLoading ? (
                     <ActivityIndicator color="#FFF" size="small" />
                 ) : (
                     <>
-                        <MaterialIcons name="person-add" size={18} color="#FFF" />
+                        <AppIcon name="person-add" size={18} color="#FFF" />
                         <Text style={styles.mainButtonText}>Add Friend</Text>
                     </>
                 )}
-            </TouchableOpacity>
+            </MainButton>
+        );
+    };
+
+    const renderReportIconButton = () => {
+        if (user?._id === uid) return null;
+
+        return (
+            <MainButton
+                onPress={() => setShowReportModal(true)}
+                style={styles.reportIconButton}
+            >
+                <AppIcon name="report-problem" size={20} color={COLORS.error} />
+            </MainButton>
         );
     };
 
     const renderSummary = () => {
         if (!profile) return null;
+        const trustPercent = Math.round((profile.trustScore || 0.5) * 100);
+        const trustLabel = trustPercent >= 80 ? 'High Trust' : trustPercent >= 60 ? 'Trusted' : 'Building Trust';
+        const trustBadgeStyle =
+            trustPercent >= 80
+                ? styles.summaryBadgeSuccess
+                : trustPercent >= 60
+                    ? styles.summaryBadgeAccent
+                    : styles.summaryBadgeNeutral;
+
         return (
-            <View style={styles.profileCard}>
-                <View style={styles.avatar}>
-                    <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                    {profile.isOnline && <View style={styles.onlineBadge} />}
+            <AppCard variant="elevated" style={styles.profileCard}>
+                <View style={styles.profileHeaderRow}>
+                    <View style={styles.avatar}>
+                        <AppImage source={{ uri: avatarUrl }} containerStyle={styles.avatarImage} />
+                        {profile.isOnline && <View style={styles.onlineBadge} />}
+                    </View>
+
+                    <View style={styles.profileHeaderContent}>
+                        <View style={styles.profileIdentityBlock}>
+                            <Text style={styles.profileName} numberOfLines={1} ellipsizeMode="tail">
+                                {profile.fullName || 'Player'}
+                            </Text>
+                            <Text style={styles.profileUsername} numberOfLines={1} ellipsizeMode="tail">
+                                @{profile.username}
+                            </Text>
+                        </View>
+
+                        <View style={styles.profileBadgeRow}>
+                            <View style={[styles.summaryBadge, trustBadgeStyle]}>
+                                <AppIcon name="verified-user" size={14} color={trustPercent >= 80 ? COLORS.success : trustPercent >= 60 ? COLORS.accent : COLORS.textSecondary} />
+                                <Text style={styles.summaryBadgeText} numberOfLines={1}>
+                                    {trustLabel}
+                                </Text>
+                            </View>
+                            <View style={[styles.summaryBadge, profile.isOnline ? styles.summaryBadgeSuccess : styles.summaryBadgeNeutral]}>
+                                <AppIcon name={profile.isOnline ? "radio-button-checked" : "access-time"} size={12} color={profile.isOnline ? COLORS.success : COLORS.textSecondary} />
+                                <Text style={styles.summaryBadgeText} numberOfLines={1}>
+                                    {profile.isOnline ? 'Online now' : 'Offline'}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
                 </View>
 
-                <Text style={styles.profileName}>{profile.fullName || 'Player'}</Text>
-                <Text style={styles.profileUsername}>@{profile.username}</Text>
+                <View style={styles.summaryDivider} />
 
-                {/* Mutual Context Chips */}
+                <View style={styles.summaryMetricRow}>
+                    {profile.city ? (
+                        <View style={styles.summaryMetricCard}>
+                            <Text style={styles.summaryMetricLabel}>Location</Text>
+                            <View style={styles.summaryMetricInline}>
+                                <AppIcon name="location-on" size={14} color={COLORS.textSecondary} />
+                                <Text style={styles.summaryMetricValue} numberOfLines={1} ellipsizeMode="tail">
+                                    {profile.city}
+                                </Text>
+                            </View>
+                        </View>
+                    ) : null}
+                    <View style={styles.summaryMetricCard}>
+                        <Text style={styles.summaryMetricLabel}>Trust</Text>
+                        <View style={styles.summaryMetricInline}>
+                            <AppIcon name="shield" size={14} color={COLORS.textSecondary} />
+                            <Text style={styles.summaryMetricValue} numberOfLines={1}>
+                                {trustPercent}%
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.summaryMetricCard}>
+                        <Text style={styles.summaryMetricLabel}>Recent Activity</Text>
+                        <View style={styles.summaryMetricInline}>
+                            <AppIcon
+                                name="access-time"
+                                size={14}
+                                color={activityStatus.includes('ago') || activityStatus === 'Online Now' ? COLORS.success : COLORS.muted}
+                            />
+                            <Text style={styles.summaryMetricValue} numberOfLines={1} ellipsizeMode="tail">
+                                {activityStatus}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+
                 {mutualContext.length > 0 && (
                     <View style={styles.mutualContextRow}>
                         {mutualContext.map((c, i) => (
                             <View key={i} style={styles.contextChip}>
-                                <MaterialIcons name="groups" size={14} color={COLORS.accent} />
-                                <Text style={styles.contextText}>{c}</Text>
+                                <AppIcon name="groups" size={14} color={COLORS.accent} />
+                                <Text style={styles.contextText} numberOfLines={1} ellipsizeMode="tail">{c}</Text>
                             </View>
                         ))}
                     </View>
                 )}
 
-                <View style={styles.profileMeta}>
-                    {profile.city && (
-                        <View style={styles.profileMetaItem}>
-                            <MaterialIcons name="location-on" size={14} color={COLORS.muted} />
-                            <Text style={styles.profileMetaText}>{profile.city}</Text>
-                        </View>
-                    )}
-                    <View style={styles.profileMetaItem}>
-                        <MaterialIcons name="security" size={14} color={COLORS.muted} />
-                        <Text style={styles.profileMetaText}>
-                            {Math.round((profile.trustScore || 0.5) * 100)}% Trust
-                        </Text>
-                    </View>
-                </View>
-
-                {/* Recent Activity Label */}
-                <View style={styles.activityCard}>
-                    <MaterialIcons
-                        name="access-time"
-                        size={14}
-                        color={activityStatus.includes('ago') || activityStatus === 'Online Now' ? COLORS.success : COLORS.muted}
-                    />
-                    <Text style={styles.activityText}>{activityStatus}</Text>
-                </View>
-
                 {user?._id !== uid && (
-                    <View style={styles.actionContainer}>
-                        {renderFriendActions()}
-                    </View>
+                    hasIncomingRequest ? (
+                        <View style={styles.actionContainer}>
+                            {renderFriendActions()}
+                            <MainButton
+                                onPress={() => setShowReportModal(true)}
+                                style={styles.reportButton}
+                            >
+                                <AppIcon name="report-problem" size={18} color={COLORS.error} />
+                                <Text style={[styles.mainButtonText, styles.reportButtonText]}>Report Player</Text>
+                            </MainButton>
+                        </View>
+                    ) : (
+                        <View style={styles.actionRow}>
+                            <View style={styles.primaryActionSlot}>
+                                {renderFriendActions()}
+                            </View>
+                            <View style={styles.secondaryActionSlot}>
+                                {renderReportIconButton()}
+                            </View>
+                        </View>
+                    )
                 )}
-            </View>
+            </AppCard>
         );
     };
 
@@ -429,7 +596,7 @@ export default function PlayerProfile() {
                     <View style={styles.ratingInfo}>
                         <Text style={styles.tierName}>{skillData.tier}</Text>
                         <View style={styles.confidenceRow}>
-                            <MaterialIcons
+                            <AppIcon
                                 name="verified"
                                 size={14}
                                 color={confidence === 'High' ? COLORS.success : confidence === 'Medium' ? COLORS.warning : COLORS.muted}
@@ -437,7 +604,7 @@ export default function PlayerProfile() {
                             <Text style={styles.confidenceText}>Confidence: {confidence}</Text>
 
                             {/* Trend Icon */}
-                            <MaterialIcons
+                            <AppIcon
                                 name={trend === 'Increasing' ? "trending-up" : trend === 'Decreasing' ? "trending-down" : "trending-flat"}
                                 size={16}
                                 style={[
@@ -479,9 +646,9 @@ export default function PlayerProfile() {
                         <Text style={styles.platformValue}>Not connected</Text>
                     </View>
                     {uid === user?._id && (
-                        <TouchableOpacity onPress={() => router.push('/(player)/profile/edit' as any)}>
-                            <MaterialIcons name="add-circle-outline" size={24} color={COLORS.muted} />
-                        </TouchableOpacity>
+                        <Pressable onPress={() => router.push('/(player)/profile/edit' as any)}>
+                            <AppIcon name="add-circle-outline" size={24} color={COLORS.muted} />
+                        </Pressable>
                     )}
                 </View>
             );
@@ -506,7 +673,7 @@ export default function PlayerProfile() {
                     </Text>
                 </View>
                 {uid === user?._id && (
-                    <TouchableOpacity
+                    <Pressable
                         onPressIn={() => {
                             if (touchDebugEnabled) {
                                 Logger.debug("TouchDebug", "pressIn", { tag: "profile_sync_stats", targetUid: uid });
@@ -515,20 +682,19 @@ export default function PlayerProfile() {
                         onPress={handleSync}
                         disabled={syncing}
                         style={styles.syncButton}
-                        activeOpacity={0.85}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {syncing ? (
                             <ActivityIndicator size="small" color={COLORS.accent} />
                         ) : (
-                            <MaterialIcons name="sync" size={20} color={COLORS.accent} />
+                            <AppIcon name="sync" size={20} color={COLORS.accent} />
                         )}
-                    </TouchableOpacity>
+                    </Pressable>
                 )}
                 {!isVerified && (
-                    <TouchableOpacity onPress={() => Linking.openURL(value)}>
-                        <MaterialIcons name="launch" size={20} color={COLORS.muted} style={{ marginLeft: 8 }} />
-                    </TouchableOpacity>
+                    <Pressable onPress={() => Linking.openURL(value)}>
+                        <AppIcon name="launch" size={20} color={COLORS.muted} style={{ marginLeft: 8 }} />
+                    </Pressable>
                 )}
             </View>
         );
@@ -661,25 +827,25 @@ export default function PlayerProfile() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     if (!profile) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.notFoundContainer}>
-                    <MaterialIcons name="person-off" size={64} color={COLORS.textSecondary} />
+                    <AppIcon name="person-off" size={64} color={COLORS.textSecondary} />
                     <Text style={styles.notFoundText}>Profile not found</Text>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButtonLarge}>
+                    <Pressable onPress={() => router.back()} style={styles.backButtonLarge}>
                         <Text style={styles.backButtonTextLarge}>Go Back</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
@@ -687,18 +853,19 @@ export default function PlayerProfile() {
     const avatarUrl = `https://ui-avatars.com/api/?name=${profile.username || 'Player'}&background=42a5f5&color=fff&size=200`;
 
     return (
-        <View style={styles.screen}>
-            <StatusBar barStyle="light-content" />
-            <SafeAreaView edges={['top']} style={styles.backgroundHeader}>
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Player Profile</Text>
-                </View>
-            </SafeAreaView>
+        <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
+            <AppHeader
+                title="Player Profile"
+                onBack={() => router.back()}
+                inlineTitle
+            />
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <Animated.View style={[styles.body, entranceStyle]}>
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+            >
                 {renderSummary()}
 
                 {/* Shared Games Section */}
@@ -717,7 +884,7 @@ export default function PlayerProfile() {
                                     const gameObj = GAMES.find(g => g.key === gameKey);
                                     const isSelected = selectedGame === gameKey;
                                     return (
-                                        <TouchableOpacity
+                                        <Pressable
                                             key={gameKey}
                                             onPress={() => setSelectedGame(gameKey)}
                                             style={[styles.optionChip, isSelected && styles.optionChipActive]}
@@ -725,7 +892,7 @@ export default function PlayerProfile() {
                                             <Text style={[styles.optionChipText, isSelected && styles.optionChipTextActive]}>
                                                 {gameObj?.label || gameKey}
                                             </Text>
-                                        </TouchableOpacity>
+                                        </Pressable>
                                     );
                                 })}
                             </View>
@@ -784,14 +951,29 @@ export default function PlayerProfile() {
                     </View>
                 </View>
             </ScrollView>
-        </View>
+            </Animated.View>
+            <ReportIssueModal
+                visible={showReportModal}
+                title="Report Player"
+                subtitle="Flag behavior that violates MatchHai policies."
+                reasons={REPORT_REASONS}
+                reason={reportReason}
+                description={reportDescription}
+                onChangeReason={setReportReason}
+                onChangeDescription={setReportDescription}
+                onSubmit={handleSubmitUserReport}
+                onClose={() => setShowReportModal(false)}
+                loading={reporting}
+                submitLabel="Submit Report"
+            />
+        </Screen>
     );
 }
 
 const StatRow = ({ icon, label, value, valueStyle }: { icon: string; label: string; value: string; valueStyle?: any }) => (
     <View style={styles.statRow}>
         <View style={styles.statLabelGroup}>
-            <MaterialIcons name={icon as any} size={18} color={COLORS.accent} />
+            <AppIcon name={icon as any} size={18} color={COLORS.accent} />
             <Text style={styles.statLabel}>{label}</Text>
         </View>
         <Text style={[styles.statValue, valueStyle]}>{value}</Text>

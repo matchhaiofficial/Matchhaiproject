@@ -117,8 +117,8 @@ const normalizeRule = (
     branchId: data.branchId || null,
     tier: data.tier || null,
     surface: data.surface || null,
-    ruleType: data.ruleType || "percentage_discount",
-    value: toNumber(data.value),
+    ruleType: data.ruleType || (data.flatRate != null ? "fixed_override" : "percentage_discount"),
+    value: toNumber(data.value ?? (data.flatRate != null ? data.flatRate : ((1 - Number(data.priceMultiplier || 1)) * 100))),
     daysOfWeek: Array.isArray(data.daysOfWeek)
         ? data.daysOfWeek.map((item: any) => Number(item)).filter((item: number) => Number.isFinite(item))
         : [],
@@ -361,11 +361,18 @@ export async function createZonePricingRule(
             branchId: input.branchId || undefined,
             isEnabled: true,
             priority: Number.isFinite(input.priority) ? Number(input.priority) : 0,
+            tier: input.tier || undefined,
+            surface: input.surface || undefined,
+            ruleType: input.ruleType,
+            value: clamp(input.value, 0, 999999),
             timeStart: input.timeStart || "00:00",
             timeEnd: input.timeEnd || "23:59",
             daysOfWeek: (input.daysOfWeek || []).filter((value) => value >= 0 && value <= 6),
+            validFrom: input.validFrom || undefined,
+            validTo: input.validTo || undefined,
             priceMultiplier: input.ruleType === "percentage_discount" ? (1 - clamp(input.value, 0, 100) / 100) : undefined,
             flatRate: input.ruleType === "fixed_override" ? clamp(input.value, 0, 999999) : undefined,
+            createdByUid,
         });
         zoneRulesCache.delete(zoneId);
         return { ok: true as const };
@@ -379,10 +386,12 @@ export async function setZonePricingRuleEnabled(
     zoneId: string,
     ruleId: string,
     isEnabled: boolean,
+    updatedByUid?: string,
 ) {
     try {
         await convex.mutation(api.zones.updatePricingRule, {
             ruleId: ruleId as Id<"pricingRules">,
+            updatedByUid,
             isEnabled,
         });
         zoneRulesCache.delete(zoneId);
@@ -393,10 +402,11 @@ export async function setZonePricingRuleEnabled(
     }
 }
 
-export async function deleteZonePricingRule(zoneId: string, ruleId: string) {
+export async function deleteZonePricingRule(zoneId: string, ruleId: string, deletedByUid?: string) {
     try {
         await convex.mutation(api.zones.deletePricingRule, {
             ruleId: ruleId as Id<"pricingRules">,
+            deletedByUid,
         });
         zoneRulesCache.delete(zoneId);
         return { ok: true as const };

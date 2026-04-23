@@ -4,6 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import { Perf } from "../../utils/perfInstrumentation";
 
 export interface BookingRequest {
   id?: string;
@@ -23,6 +24,7 @@ export interface BookingRequest {
   overs?: string | null;
   hostSkillScore?: number | null;
   hostSkillTier?: string | null;
+  hostSkillContext?: Record<string, any> | null;
   teamMode?: "team" | "solo";
   teamId?: string | null;
   reservedSlots?: number;
@@ -40,6 +42,8 @@ export interface BookingRequest {
   matchroomId?: string;
   paymentStatus?: "paid" | "unpaid";
   paymentAmount?: number;
+  paymentReservedSlots?: number;
+  lifecycleStatus?: string;
   createdAt: number;
   expiresAt?: number;
   updatedAt?: number;
@@ -58,6 +62,20 @@ export interface ZoneOffer {
   branchName?: string;
   proposedDate?: number;
   proposedTime?: string;
+  scheduleOptions?: Array<{
+    date: string;
+    time: string;
+  }>;
+  recipientUids?: string[];
+  responses?: Array<{
+    uid: string;
+    decision: "accepted" | "rejected";
+    respondedAt: number;
+    selectedOptionIndex?: number;
+  }>;
+  selectedOptionIndex?: number;
+  resolvedMatchroomId?: string;
+  expiresAt?: number;
   proposedPrice: number;
   pricePerPlayer?: number;
   currency?: string;
@@ -107,9 +125,11 @@ export async function getUserRequests(
   userId: string
 ): Promise<Result<BookingRequest[]>> {
   try {
-    const requests = await convex.query(api.bookings.listRequestsByUser, {
-      userId: userId as Id<"users">,
-    });
+    const requests = await Perf.measureAsync("BookingRequests.ListByUser", () =>
+      convex.query(api.bookings.listRequestsByUser, {
+        userId: userId as Id<"users">,
+      }),
+    );
 
     return {
       ok: true,
@@ -188,9 +208,35 @@ export async function createBookingRequest(
       userId: userId as Id<"users">,
       gameKey: data.gameKey,
       zoneId: data.zoneId as Id<"zones"> | undefined,
+      userName: data.userName,
+      title: data.title,
+      description: data.description,
+      maxPlayers: data.maxPlayers,
+      format: data.format,
+      seriesType: data.seriesType ?? undefined,
+      durationHours: data.durationHours ?? undefined,
+      selectedMaps: data.selectedMaps,
+      skillLevel: data.skillLevel,
+      hostSkillScore: data.hostSkillScore ?? undefined,
+      hostSkillTier: data.hostSkillTier ?? undefined,
+      hostSkillContext: (data as any).hostSkillContext,
+      overs: data.overs ?? undefined,
+      teamMode: data.teamMode,
+      teamId: data.teamId ?? undefined,
+      reservedSlots: data.reservedSlots,
       preferredDate: data.preferredDate,
       preferredTime: data.preferredTime,
+      flexibilityWindow: data.flexibilityWindow,
+      locationMode: data.locationMode,
+      preferredAreas: data.preferredAreas,
+      budgetPerPlayer: data.budgetPerPlayer,
+      currency: data.currency,
       playerCount: data.playerCount || data.maxPlayers || 10,
+      paymentStatus: data.paymentStatus,
+      paymentAmount: data.paymentAmount,
+      paymentReservedSlots: (data as any).paymentReservedSlots,
+      matchroomId: data.matchroomId as Id<"matchrooms"> | undefined,
+      lifecycleStatus: (data as any).lifecycleStatus,
       notes: data.notes || data.description,
     });
 
@@ -257,9 +303,11 @@ export async function getOffersForRequest(
   requestId: string
 ): Promise<Result<ZoneOffer[]>> {
   try {
-    const offers = await convex.query(api.bookings.listOffersForRequest, {
-      requestId: requestId as Id<"bookingRequests">,
-    });
+    const offers = await Perf.measureAsync("ZoneOffers.ListForRequest", () =>
+      convex.query(api.bookings.listOffersForRequest, {
+        requestId: requestId as Id<"bookingRequests">,
+      }),
+    );
 
     return {
       ok: true,
@@ -278,22 +326,16 @@ export async function getOffersForUser(
   userId: string
 ): Promise<Result<ZoneOffer[]>> {
   try {
-    // First get user's requests
-    const requestsResult = await getUserRequests(userId);
-    if (!requestsResult.ok || !requestsResult.data) {
-      return { ok: true, data: [] };
-    }
+    const offers = await Perf.measureAsync("ZoneOffers.ListForUser", () =>
+      convex.query(api.bookings.listOffersForUser, {
+        userId: userId as Id<"users">,
+      }),
+    );
 
-    // Get offers for each request
-    const allOffers: ZoneOffer[] = [];
-    for (const request of requestsResult.data) {
-      const offersResult = await getOffersForRequest(request.id || request._id!);
-      if (offersResult.ok && offersResult.data) {
-        allOffers.push(...offersResult.data);
-      }
-    }
-
-    return { ok: true, data: allOffers };
+    return {
+      ok: true,
+      data: offers.map((offer: any) => ({ ...offer, id: offer._id })) as ZoneOffer[],
+    };
   } catch (error: any) {
     console.error("[bookingRequestService] getOffersForUser error:", error);
     return { ok: false, message: "Failed to fetch offers" };

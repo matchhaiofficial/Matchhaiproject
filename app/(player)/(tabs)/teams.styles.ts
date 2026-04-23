@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         paddingBottom: SPACING.lg,
@@ -135,6 +135,9 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         ...SHADOWS.cardElevated,
+    },
+    teamCardPressed: {
+        opacity: 0.9,
     },
     teamTopRow: {
         flexDirection: 'row',
@@ -309,6 +312,9 @@ export default StyleSheet.create({
         shadowRadius: 8,
         zIndex: 10000, // Higher than TabBar (9999)
     },
+    fabPressed: {
+        opacity: 0.9,
+    },
 
     emptyState: {
         alignItems: 'center',
@@ -336,7 +342,8 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 });
+
 

@@ -1,6 +1,36 @@
-import { query, mutation, internalQuery, internalMutation } from "./_generated/server";
+import { query, mutation, action, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
+import { api } from "./_generated/api";
+import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
+
+function normalizeEmail(email: string) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function normalizePhone(phone: string) {
+  const trimmed = String(phone || "").trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (trimmed.startsWith("+")) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+  if (digits.startsWith("92")) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith("0")) {
+    return `+92${digits.slice(1)}`;
+  }
+  return `+${digits}`;
+}
+
+function normalizeUsername(username: string) {
+  return String(username || "").trim().toLowerCase();
+}
 
 // ============================================
 // QUERIES
@@ -14,13 +44,32 @@ export const getById = query({
   },
 });
 
+// Get user by ID if the target is publicly visible to the viewer
+export const getPublicById = query({
+  args: {
+    userId: v.id("users"),
+    viewerUserId: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const target = await ctx.db.get(args.userId);
+    if (!target) return null;
+
+    const viewer = args.viewerUserId ? await ctx.db.get(args.viewerUserId) : null;
+    if (!canViewerAccessPublicUser(viewer, target)) {
+      return null;
+    }
+
+    return target;
+  },
+});
+
 // Get user by email
 export const getByEmail = query({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email.toLowerCase()))
+      .withIndex("by_email", (q) => q.eq("email", normalizeEmail(args.email)))
       .unique();
   },
 });
@@ -32,7 +81,7 @@ export const getByUsername = query({
     return await ctx.db
       .query("users")
       .withIndex("by_usernameLower", (q) =>
-        q.eq("usernameLower", args.username.toLowerCase())
+        q.eq("usernameLower", normalizeUsername(args.username))
       )
       .unique();
   },
@@ -42,8 +91,7 @@ export const getByUsername = query({
 export const getByPhone = query({
   args: { phone: v.string() },
   handler: async (ctx, args) => {
-    // Normalize phone number
-    const normalized = args.phone.replace(/\D/g, "");
+    const normalized = normalizePhone(args.phone);
     return await ctx.db
       .query("users")
       .withIndex("by_phone", (q) => q.eq("phone", normalized))
@@ -91,7 +139,7 @@ export const getByAuthId = query({
 export const isUsernameAvailable = query({
   args: { username: v.string(), excludeUserId: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const trimmed = args.username.trim().toLowerCase();
+    const trimmed = normalizeUsername(args.username);
     if (!trimmed) return false;
 
     const existing = await ctx.db
@@ -108,7 +156,7 @@ export const isUsernameAvailable = query({
 export const isEmailAvailable = query({
   args: { email: v.string(), excludeUserId: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const trimmed = args.email.trim().toLowerCase();
+    const trimmed = normalizeEmail(args.email);
     if (!trimmed) return false;
 
     const existing = await ctx.db
@@ -125,7 +173,7 @@ export const isEmailAvailable = query({
 export const isPhoneAvailable = query({
   args: { phone: v.string(), excludeUserId: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const normalized = args.phone.replace(/\D/g, "");
+    const normalized = normalizePhone(args.phone);
     if (!normalized) return false;
 
     const existing = await ctx.db
@@ -136,6 +184,68 @@ export const isPhoneAvailable = query({
     if (!existing) return true;
     if (args.excludeUserId && existing._id === args.excludeUserId) return true;
     return false;
+  },
+});
+
+export const validateRegistrationIdentity = action({
+  args: {
+    email: v.string(),
+    phone: v.string(),
+    username: v.optional(v.union(v.string(), v.null())),
+    accountType: v.union(v.literal("player"), v.literal("zone")),
+  },
+  handler: async (ctx, args): Promise<{
+    email: string;
+    phone: string;
+    username: string | null;
+    usernameLower: string | null;
+    phoneValidated: true;
+    phoneValidationProvider: string;
+    phoneValidationCheckedAt: number;
+    phoneType: string | null;
+  }> => {
+    const email = normalizeEmail(args.email);
+    const phone = normalizePhone(args.phone);
+    const username = args.username ? String(args.username).trim() : "";
+    const usernameLower = username ? normalizeUsername(username) : "";
+
+    if (!email) throw new Error("Email is required.");
+    if (!phone) throw new Error("Phone number is required.");
+    if (args.accountType === "player" && !username) {
+      throw new Error("Username is required.");
+    }
+
+    const [emailAvailable, phoneAvailable, usernameAvailable] = await Promise.all([
+      ctx.runQuery(api.users.isEmailAvailable, { email }),
+      ctx.runQuery(api.users.isPhoneAvailable, { phone }),
+      username
+        ? ctx.runQuery(api.users.isUsernameAvailable, { username })
+        : Promise.resolve(true),
+    ]);
+
+    if (!emailAvailable) throw new Error("This email is already registered.");
+    if (!phoneAvailable) throw new Error("This phone number is already registered.");
+    if (!usernameAvailable) throw new Error("This username is already in use.");
+
+    const validation: any = await ctx.runAction(api.externalApis.validatePhoneNumber, {
+      phone,
+      countryCode: "PK",
+    });
+
+    if (!validation.valid) {
+      throw new Error("Please enter a valid phone number.");
+    }
+
+    return {
+      email,
+      phone: validation.formats?.E164 || phone,
+      username: username || null,
+      usernameLower: usernameLower || null,
+      phoneValidated: true,
+      phoneValidationProvider: "antideo",
+      phoneValidationCheckedAt: Date.now(),
+      phoneType: validation.type || null,
+    };
   },
 });
 
@@ -290,6 +400,9 @@ export const create = mutation({
     username: v.union(v.string(), v.null()),
     usernameLower: v.union(v.string(), v.null()),
     phone: v.union(v.string(), v.null()),
+    phoneValidated: v.optional(v.boolean()),
+    phoneValidationProvider: v.optional(v.string()),
+    phoneValidationCheckedAt: v.optional(v.number()),
     city: v.optional(v.string()),
     ageRange: v.optional(v.string()),
     accountType: v.union(v.literal("player"), v.literal("zone")),
@@ -297,20 +410,46 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
 
-    // Normalize phone if provided
-    const normalizedPhone = args.phone ? args.phone.replace(/\D/g, "") : undefined;
+    const email = normalizeEmail(args.email);
+    const normalizedPhone = args.phone ? normalizePhone(args.phone) : undefined;
 
     // Generate username if not provided
     const username = args.username || `user_${Date.now()}`;
-    const usernameLower = args.usernameLower || username.toLowerCase();
+    const usernameLower = args.usernameLower || normalizeUsername(username);
+
+    const [existingEmail, existingPhone, existingUsername] = await Promise.all([
+      ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .unique(),
+      normalizedPhone
+        ? ctx.db
+            .query("users")
+            .withIndex("by_phone", (q) => q.eq("phone", normalizedPhone))
+            .unique()
+        : Promise.resolve(null),
+      usernameLower
+        ? ctx.db
+            .query("users")
+            .withIndex("by_usernameLower", (q) => q.eq("usernameLower", usernameLower))
+            .unique()
+        : Promise.resolve(null),
+    ]);
+
+    if (existingEmail) throw new Error("This email is already registered.");
+    if (existingPhone) throw new Error("This phone number is already registered.");
+    if (existingUsername) throw new Error("This username is already in use.");
 
     const insertData: Record<string, unknown> = {
       authId: args.authId,
-      email: args.email.toLowerCase(),
+      email,
       fullName: args.fullName || "User",
       username,
       usernameLower,
       phone: normalizedPhone,
+      phoneValidated: args.phoneValidated ?? false,
+      phoneValidationProvider: args.phoneValidationProvider,
+      phoneValidationCheckedAt: args.phoneValidationCheckedAt,
       accountType: args.accountType,
       isOnline: true,
       onboardingCompleted: false,
@@ -341,6 +480,8 @@ export const updateProfile = mutation({
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
     const now = Date.now();
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found");
 
     const updateData: Record<string, unknown> = { updatedAt: now };
 
@@ -348,8 +489,19 @@ export const updateProfile = mutation({
       updateData.fullName = updates.fullName;
     }
     if (updates.username !== undefined) {
-      updateData.username = updates.username;
-      updateData.usernameLower = updates.username.toLowerCase();
+      const nextUsername = String(updates.username).trim();
+      const nextUsernameLower = normalizeUsername(nextUsername);
+      const existing = await ctx.db
+        .query("users")
+        .withIndex("by_usernameLower", (q) => q.eq("usernameLower", nextUsernameLower))
+        .unique();
+
+      if (existing && existing._id !== userId) {
+        throw new Error("This username is already in use.");
+      }
+
+      updateData.username = nextUsername;
+      updateData.usernameLower = nextUsernameLower;
     }
     if (updates.bio !== undefined) {
       updateData.bio = updates.bio;
@@ -400,6 +552,8 @@ export const updateSkillScores = mutation({
     userId: v.id("users"),
     game: v.union(
       v.literal("cs2"),
+      v.literal("cs16"),
+      v.literal("valorant"),
       v.literal("tekken"),
       v.literal("tekken8"),
       v.literal("futsal"),
@@ -523,6 +677,35 @@ export const updateOnlineStatus = mutation({
   },
 });
 
+export const touchPresence = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await ctx.auth.getUserIdentity();
+    if (!userId) return;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q: any) => q.eq("authId", userId.subject))
+      .unique();
+    if (!user) return;
+    const now = Date.now();
+    await ctx.db.patch(user._id, { lastActiveAt: now, isOnline: true });
+  },
+});
+
+export const goOffline = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await ctx.auth.getUserIdentity();
+    if (!userId) return;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q: any) => q.eq("authId", userId.subject))
+      .unique();
+    if (!user) return;
+    await ctx.db.patch(user._id, { isOnline: false });
+  },
+});
+
 // Save onboarding step 2 - Location & Game Preferences
 export const saveOnboardingStep2 = mutation({
   args: {
@@ -530,6 +713,10 @@ export const saveOnboardingStep2 = mutation({
     areasPreferred: v.array(v.string()),
     playsCs2: v.boolean(),
     cs2Role: v.optional(v.union(v.string(), v.null())),
+    playsCs16: v.boolean(),
+    cs16Role: v.optional(v.union(v.string(), v.null())),
+    playsValorant: v.optional(v.boolean()),
+    valorantRole: v.optional(v.union(v.string(), v.null())),
     playsFc: v.boolean(),
     fcTeam: v.optional(v.union(v.string(), v.null())),
     fcFormation: v.optional(v.union(v.string(), v.null())),
@@ -553,6 +740,8 @@ export const saveOnboardingStep2 = mutation({
     const updateData: Record<string, unknown> = {
       areasPreferred: prefs.areasPreferred,
       playsCs2: prefs.playsCs2,
+      playsCs16: prefs.playsCs16,
+      playsValorant: prefs.playsValorant ?? false,
       playsFc: prefs.playsFc,
       playsTekken: prefs.playsTekken,
       tekkenFavorites: prefs.tekkenFavorites,
@@ -562,6 +751,8 @@ export const saveOnboardingStep2 = mutation({
 
     // Only include string fields if they have a value (not null)
     if (prefs.cs2Role) updateData.cs2Role = prefs.cs2Role;
+    if (prefs.cs16Role) updateData.cs16Role = prefs.cs16Role;
+    if (prefs.valorantRole) updateData.valorantRole = prefs.valorantRole;
     if (prefs.fcTeam) updateData.fcTeam = prefs.fcTeam;
     if (prefs.fcFormation) updateData.fcFormation = prefs.fcFormation;
 
@@ -661,7 +852,9 @@ export const listPlayers = query({
       .withIndex("by_accountType", (q) => q.eq("accountType", "player"))
       .take(args.limit || 200);
 
-    return users.map((u) => ({ ...u, id: u._id }));
+    return users
+      .filter((user) => !isUserHiddenFromPublic(user))
+      .map((u) => ({ ...u, id: u._id }));
   },
 });
 

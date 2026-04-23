@@ -16,7 +16,6 @@ export default StyleSheet.create({
         borderTopRightRadius: RADII.xl,
         minHeight: '50%',
         maxHeight: '85%',
-        paddingBottom: 40,
     },
     header: {
         flexDirection: 'row',
@@ -44,8 +43,13 @@ export default StyleSheet.create({
         padding: 40,
         alignItems: 'center',
     },
+    listBody: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
     list: {
-        padding: SPACING.lg,
+        paddingBottom: SPACING.sm,
     },
     friendItem: {
         flexDirection: 'row',
@@ -113,17 +117,7 @@ export default StyleSheet.create({
         textAlign: 'center',
         marginTop: 4,
     },
-    doneBtn: {
-        marginHorizontal: SPACING.xl,
-        backgroundColor: COLORS.accent,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        marginTop: SPACING.lg,
-    },
-    doneBtnText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+    modalFooter: {
+        paddingHorizontal: SPACING.xl,
     },
 });

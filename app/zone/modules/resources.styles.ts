@@ -296,19 +296,112 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         marginTop: SPACING.md,
     },
-    grid: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
-        gap: SPACING.sm,
+    sectionStack: {
+        gap: SPACING.md,
     },
-    resourceCard: {
-        width: "48%",
+    accordionCard: {
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: 18,
         backgroundColor: COLORS.cardDark,
-        padding: SPACING.md,
+        overflow: "hidden",
+    },
+    accordionHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.md,
+    },
+    accordionHeaderTextWrap: {
+        flex: 1,
+    },
+    accordionTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.subheading,
+    },
+    accordionMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 2,
+    },
+    sectionBody: {
+        borderTopWidth: 1,
+        borderTopColor: COLORS.cardBorder,
+        paddingHorizontal: SPACING.md,
+        paddingBottom: SPACING.md,
+    },
+    roomStack: {
+        marginTop: SPACING.xs,
+    },
+    roomCard: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: "rgba(255,255,255,0.06)",
+    },
+    roomHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+        paddingVertical: SPACING.xs,
+    },
+    roomHeaderTextWrap: {
+        flex: 1,
+    },
+    roomHeaderActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.xs,
+    },
+    roomTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+    },
+    roomMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        marginTop: 2,
+    },
+    roomSelectButton: {
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: SPACING.xs + 1,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: "rgba(255,255,255,0.04)",
+    },
+    roomSelectButtonActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: "rgba(66, 165, 245, 0.2)",
+    },
+    roomSelectButtonText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        fontWeight: "700",
+    },
+    roomSelectButtonTextActive: {
+        color: COLORS.text,
+    },
+    grid: {
+        flexDirection: "column",
+        gap: SPACING.sm,
+        marginTop: SPACING.sm,
+    },
+    resourceCard: {
+        width: "100%",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.08)",
+        borderRadius: 14,
+        backgroundColor: "rgba(255,255,255,0.03)",
+        padding: SPACING.sm,
     },
     resourceCardSelected: {
         borderColor: COLORS.accent,

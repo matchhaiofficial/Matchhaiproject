@@ -6,17 +6,17 @@ const { width } = Dimensions.get('window');
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         paddingBottom: SPACING.lg,
@@ -57,7 +57,7 @@ export default StyleSheet.create({
     },
     filtersPanel: {
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     filterSection: {
         marginBottom: 15,
@@ -433,7 +433,7 @@ export default StyleSheet.create({
     modalSearchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         borderRadius: 12,
         paddingHorizontal: 12,
         height: 48,
@@ -463,3 +463,4 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     }
 });
+

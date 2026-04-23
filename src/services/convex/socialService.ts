@@ -4,6 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import { currentUser } from "./authService";
 
 export interface Friend {
   friendshipId: string;
@@ -27,6 +28,53 @@ export interface BlockedUser {
 type SuccessResult<T> = { ok: true; data?: T; message?: string };
 type ErrorResult = { ok: false; message: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
+
+export interface SendFriendRequestInput {
+  toUid: string;
+}
+
+export interface RespondFriendRequestInput {
+  notificationId: string;
+  decision: "accept" | "decline";
+}
+
+async function resolveAnyUserId(value: string): Promise<Id<"users"> | null> {
+  try {
+    const directUser = await convex.query(api.users.getById, {
+      userId: value as Id<"users">,
+    });
+    if (directUser) return directUser._id;
+  } catch {
+    // Ignore invalid direct-id attempts and fall back to authId lookup.
+  }
+
+  try {
+    const authUser = await convex.query(api.users.getByAuthId, { authId: value });
+    if (authUser) return authUser._id;
+  } catch {
+    // Ignore lookup failures and return null below.
+  }
+
+  return null;
+}
+
+async function getCurrentIdentity() {
+  const authUser = await currentUser();
+  if (!authUser) {
+    throw new Error("Not authenticated");
+  }
+
+  const convexUser = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+  if (!convexUser) {
+    throw new Error("User profile not found");
+  }
+
+  return {
+    authId: authUser.id,
+    convexId: convexUser._id,
+    username: convexUser.username,
+  };
+}
 
 /**
  * Get friends list for a user
@@ -123,6 +171,34 @@ export async function sendFriendRequest(
   }
 }
 
+export async function sendFriendRequestToUser(
+  data: SendFriendRequestInput
+): Promise<Result<{ notificationId: string }>> {
+  try {
+    const me = await getCurrentIdentity();
+    const toConvexId = await resolveAnyUserId(data.toUid);
+
+    if (!toConvexId) {
+      return { ok: false, message: "Recipient not found" };
+    }
+
+    if (String(me.convexId) === String(toConvexId)) {
+      return { ok: false, message: "Cannot add self" };
+    }
+
+    const notificationId = await convex.mutation(api.social.sendFriendRequest, {
+      fromUid: me.convexId,
+      fromUsername: me.username,
+      toUid: toConvexId,
+    });
+
+    return { ok: true, data: { notificationId }, message: "Request sent." };
+  } catch (error: any) {
+    console.error("[socialService] sendFriendRequestToUser error:", error);
+    return { ok: false, message: error?.message || "Failed to send friend request" };
+  }
+}
+
 /**
  * Respond to friend request
  */
@@ -140,6 +216,12 @@ export async function respondFriendRequest(
     console.error("[socialService] respondFriendRequest error:", error);
     return { ok: false, message: error?.message || "Failed to respond to friend request" };
   }
+}
+
+export async function respondFriendRequestDecision(
+  data: RespondFriendRequestInput
+): Promise<Result> {
+  return respondFriendRequest(data.notificationId, data.decision === "accept");
 }
 
 /**

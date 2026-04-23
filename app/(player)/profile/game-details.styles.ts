@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
@@ -14,7 +14,7 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -75,6 +75,11 @@ export default StyleSheet.create({
         marginBottom: SPACING.xl,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+        elevation: 5,
     },
     statsHeader: {
         flexDirection: 'row',
@@ -153,24 +158,24 @@ export default StyleSheet.create({
         marginTop: SPACING.xs,
     },
     chip: {
-        backgroundColor: COLORS.surface,
+        backgroundColor: COLORS.cardBackground,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         borderRadius: RADII.pill,
-        paddingHorizontal: SPACING.lg,
+        paddingHorizontal: SPACING.md,
         paddingVertical: SPACING.sm,
     },
     chipActive: {
-        backgroundColor: 'rgba(66, 165, 245, 0.15)', // transparent accent
+        backgroundColor: '#1e2a38',
         borderColor: COLORS.accent,
     },
     chipText: {
-        color: COLORS.textSecondary,
-        fontSize: TEXT_SIZES.body,
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.label - 1,
         fontFamily: FONTS.body,
     },
     chipTextActive: {
-        color: COLORS.accent,
+        color: COLORS.text,
         fontFamily: FONTS.bold,
     },
 
@@ -207,7 +212,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     verifiedCaption: {
         color: COLORS.muted,
@@ -216,3 +221,4 @@ export default StyleSheet.create({
         marginTop: 12,
     },
 });
+

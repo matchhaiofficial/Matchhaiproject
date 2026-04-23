@@ -4,6 +4,11 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import { currentUser, ensureVerifiedEmailAccess } from "./authService";
+import { normalizeGameKey } from "../../features/discover/utils/gameKeys";
+import { initializeSkillIfMissing, type GameKey, type GameSkillScore } from "../skillRatingService";
+import { isProfileGameEnabled } from "../userService";
+import { getCanonicalGameLabel } from "../../utils/gameLabels";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -29,6 +34,7 @@ export interface Slot {
 export interface Matchroom {
   id?: string;
   _id?: string;
+  friendJoinedCount?: number;
   hostUid: string;
   hostName: string;
   game: string;
@@ -53,8 +59,22 @@ export interface Matchroom {
   coordinates?: { latitude: number; longitude: number };
   locationMode?: "zone" | "broadcast";
   broadcastAreas?: string[];
+  broadcastRequestStatus?:
+    | "idle"
+    | "waiting_for_fill"
+    | "waiting_for_zones"
+    | "zone_confirmed"
+    | "expired"
+    | "cancelled";
+  broadcastRequestStartedAt?: number;
+  broadcastRequestExpiresAt?: number;
+  confirmedZoneId?: string;
+  confirmedBranchId?: string;
+  venueConfirmedAt?: number;
   zoneId?: string;
   zoneOwnerUid?: string;
+  branchId?: string;
+  resourceIds?: string[];
 
   // Timing & Pricing
   startTime?: any;
@@ -122,6 +142,8 @@ export interface Matchroom {
   paymentAmount?: number;
   paymentReservedSlots?: number;
   paymentCurrency?: string;
+  refundStatus?: "none" | "pending" | "completed";
+  refundCompletedAt?: number;
 
   // Result verification
   resultVerification?: {
@@ -141,6 +163,165 @@ export interface Matchroom {
 type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
 type ErrorResult = { ok: false; message: string; code?: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
+
+function normalizeMatchroomRequestError(error: any) {
+  const message = String(error?.message || "").trim();
+  if (message.includes("Request already pending")) {
+    return "Your join request is already pending captain approval.";
+  }
+  return message || "Failed to send request";
+}
+
+export type MatchParticipationPreparation =
+  | {
+      status: "ready";
+      gameKey: GameKey | null;
+      gameLabel: string;
+      profile: any;
+      skill: GameSkillScore | null;
+    }
+  | {
+      status: "needs_activation";
+      gameKey: GameKey;
+      gameLabel: string;
+      profile: any;
+      skill: null;
+    }
+  | {
+      status: "needs_assessment";
+      gameKey: GameKey;
+      gameLabel: string;
+      profile: any;
+      skill: null;
+    };
+
+export function getParticipationGameLabel(gameKey: GameKey) {
+  return getCanonicalGameLabel(gameKey);
+}
+
+export function getEnablePatchForGame(gameKey: GameKey) {
+  switch (gameKey) {
+    case "cs2":
+      return { playsCs2: true };
+    case "cs16":
+      return { playsCs16: true };
+    case "valorant":
+      return { playsValorant: true };
+    case "fc25":
+    case "fc26":
+      return { playsFc: true };
+    case "tekken8":
+      return { playsTekken: true };
+    case "futsal":
+      return { playsFutsal: true };
+    case "indoor_cricket":
+      return { playsIndoorCricket: true };
+    case "padel":
+      return { playsPadel: true };
+    case "pickleball":
+      return { playsPickleball: true };
+    default:
+      return {};
+  }
+}
+
+export function getExistingSkillForGame(profile: any, gameKey: GameKey): GameSkillScore | null {
+  const scores = profile?.skillScores || {};
+  if (gameKey === "tekken8") return scores.tekken8 || scores.tekken || null;
+  if (gameKey === "indoor_cricket") return scores.indoor_cricket || scores.cricket || null;
+  return scores[gameKey] || null;
+}
+
+export async function prepareProfileForMatchParticipation(
+  userId: string,
+  profile: any,
+  rawGameKey: string | null | undefined,
+): Promise<MatchParticipationPreparation> {
+  const normalizedGameKey = normalizeGameKey(rawGameKey) as GameKey | null;
+
+  if (!normalizedGameKey) {
+    return {
+      status: "ready",
+      gameKey: null,
+      gameLabel: "Game",
+      profile,
+      skill: null,
+    };
+  }
+
+  if (!isProfileGameEnabled(profile, normalizedGameKey)) {
+    return {
+      status: "needs_activation",
+      gameKey: normalizedGameKey,
+      gameLabel: getParticipationGameLabel(normalizedGameKey),
+      profile,
+      skill: null,
+    };
+  }
+
+  let workingProfile = profile;
+  let skill = getExistingSkillForGame(workingProfile, normalizedGameKey);
+
+  if (!skill) {
+    const initializedSkill = await initializeSkillIfMissing(userId, normalizedGameKey, workingProfile);
+    if (initializedSkill) {
+      workingProfile = {
+        ...workingProfile,
+        skillScores: { ...(workingProfile.skillScores || {}), [normalizedGameKey]: initializedSkill },
+      };
+      skill = initializedSkill;
+    }
+  }
+
+  if (!skill) {
+    return {
+      status: "needs_assessment",
+      gameKey: normalizedGameKey,
+      gameLabel: getParticipationGameLabel(normalizedGameKey),
+      profile: workingProfile,
+      skill: null,
+    };
+  }
+
+  return {
+    status: "ready",
+    gameKey: normalizedGameKey,
+    gameLabel: getParticipationGameLabel(normalizedGameKey),
+    profile: workingProfile,
+    skill,
+  };
+}
+
+async function getCurrentIdentity() {
+  const authUser = await currentUser();
+  if (!authUser) {
+    throw new Error("Not authenticated");
+  }
+
+  const convexUser = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+  if (!convexUser) {
+    throw new Error("User profile not found");
+  }
+
+  return {
+    authId: authUser.id,
+    convexId: convexUser._id,
+    username: convexUser.username,
+  };
+}
+
+async function getUserByAnyId(uid: string) {
+  try {
+    const directUser = await convex.query(api.users.getById, { userId: uid as Id<"users"> });
+    if (directUser) {
+      return directUser;
+    }
+  } catch {
+    // Not a Convex user id, fall back to authId lookup.
+  }
+
+  return await convex.query(api.users.getByAuthId, { authId: uid });
+}
 
 // Helper to parse scheduled date/time
 function parseScheduledStartAt(scheduledDate?: string, scheduledTime?: string): number | null {
@@ -175,6 +356,11 @@ export async function createMatchroom(
   roomData: Matchroom
 ): Promise<Result<{ id: string }>> {
   try {
+    const verificationGate = await ensureVerifiedEmailAccess();
+    if (!verificationGate.ok) {
+      return { ok: false, message: verificationGate.message, code: verificationGate.code };
+    }
+
     // Validate lead time for non-walk-ins
     if (roomData.bookingSource !== "walkin") {
       const scheduledStartAt = parseScheduledStartAt(
@@ -252,6 +438,8 @@ export async function createMatchroom(
       playerUids,
       location: roomData.location,
       locationMode: roomData.locationMode,
+      broadcastAreas: roomData.broadcastAreas,
+      broadcastRequestStatus: roomData.broadcastRequestStatus,
       zoneId: roomData.zoneId,
       zoneOwnerUid: roomData.zoneOwnerUid,
       scheduledDate: roomData.scheduledDate,
@@ -268,6 +456,7 @@ export async function createMatchroom(
       format: roomData.format,
       selectedMaps: roomData.selectedMaps,
       skillLevel: roomData.skillLevel,
+      hostSkillScore: roomData.hostSkillScore ?? undefined,
       hostSkillTier: roomData.hostSkillTier,
       hostRole: roomData.hostRole,
       teamMode: roomData.teamMode,
@@ -310,6 +499,14 @@ export async function getMatchrooms(
  */
 export async function getMatchroom(id: string): Promise<Result<Matchroom>> {
   try {
+    try {
+      await convex.mutation(api.matchrooms.syncLifecycleIfDue, {
+        matchroomId: id as Id<"matchrooms">,
+      });
+    } catch {
+      // Ignore invalid ids and fall back to the read path.
+    }
+
     const room = await convex.query(api.matchrooms.getById, { matchroomId: id });
     if (!room) {
       return { ok: false, message: "Matchroom not found" };
@@ -355,6 +552,11 @@ export async function joinMatchroom(
   _joinCode?: string
 ): Promise<Result> {
   try {
+    const verificationGate = await ensureVerifiedEmailAccess();
+    if (!verificationGate.ok) {
+      return { ok: false, message: verificationGate.message, code: verificationGate.code };
+    }
+
     // Check time conflicts first
     const room = await convex.query(api.matchrooms.getById, { matchroomId: roomId });
     if (!room) {
@@ -579,42 +781,34 @@ export async function requestJoinMatchroom(
   slotId?: string
 ): Promise<Result<{ id: string }>> {
   try {
+    // Note: email verification and time conflict checks are already performed
+    // by useMatchroomJoinFlow.startJoin() before this function is called.
+
     const roomId = room.id || room._id;
     if (!roomId) {
       return { ok: false, message: "Matchroom ID missing" };
     }
 
-    // Check time conflict
-    const conflict = await findUserTimeConflict(user.uid, room, roomId);
-    if (conflict.conflict) {
-      return { ok: false, message: conflict.message };
-    }
-
-    // Create notification for host
-    const now = Date.now();
-    const notificationId = await convex.mutation(api.notifications.create, {
-      type: "match_join_request" as any,
-      toUid: room.hostUid as any,
-      fromUid: user.uid as any,
+    const result = await convex.mutation(api.matchrooms.requestToJoinMatchroom, {
+      matchroomId: roomId as Id<"matchrooms">,
+      fromUid: user.uid as Id<"users">,
       fromUsername: user.username,
-      title: "Join Request",
-      body: `${user.username} wants to join ${room.title}`,
-      matchroomId: roomId as any,
-      data: {
-        matchroomId: roomId,
-        matchroomTitle: room.title,
-        game: room.game,
-        role: role || "Flex",
-        targetTeam: targetTeam || "Any",
-        slotId: slotId || null,
-      },
-      expiresAt: now + 24 * 60 * 60 * 1000,
+      role: role || "Player",
+      targetTeam: targetTeam || "Any",
+      slotId: slotId || undefined,
     });
 
-    return { ok: true, id: notificationId };
+    return {
+      ok: true,
+      id: Array.isArray((result as any)?.notificationIds)
+        ? String((result as any).notificationIds[0] || "")
+        : (typeof (result as any)?._id === "string" ? (result as any)._id : undefined),
+      data: result as any,
+      message: (result as any)?.message,
+    };
   } catch (error: any) {
     console.error("[matchService] requestJoinMatchroom error:", error);
-    return { ok: false, message: "Failed to send request" };
+    return { ok: false, message: normalizeMatchroomRequestError(error) };
   }
 }
 
@@ -623,12 +817,26 @@ export async function requestJoinMatchroom(
  */
 export async function cancelMatchJoinRequest(
   roomId: string,
-  userId: string
+  _userId: string
 ): Promise<Result> {
   try {
-    // Find and delete the notification
-    // This would require a query to find the notification by entityKey or similar
-    // For now, we'll implement this when notifications service is migrated
+    const me = await getCurrentIdentity();
+    const requests = await convex.query(api.notifications.listByFromUidAndType, {
+      fromUid: me.convexId,
+      type: "match.join_request",
+      status: "pending",
+      limit: 100,
+    });
+
+    const target = requests.find((item: any) => String(item.matchroomId || item.data?.matchroomId) === roomId);
+    if (!target) {
+      return { ok: false, message: "No pending request found" };
+    }
+
+    await convex.mutation(api.notifications.updateStatus, {
+      notificationId: target._id,
+      status: "expired",
+    });
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] cancelMatchJoinRequest error:", error);
@@ -642,14 +850,18 @@ export async function cancelMatchJoinRequest(
 export async function respondToMatchJoinRequest(
   requestId: string,
   decision: "accept" | "reject",
-  adminUid: string
+  _adminUid: string
 ): Promise<Result> {
   try {
-    // This will be implemented with the notifications service migration
-    // For now, return success
-    return { ok: true, message: decision === "accept" ? "Request accepted" : "Request rejected" };
+    const me = await getCurrentIdentity();
+    const result = await convex.mutation(api.matchrooms.respondToMatchroomJoinRequest, {
+      notificationId: requestId as Id<"notifications">,
+      hostUid: me.convexId,
+      accept: decision === "accept",
+    });
+    return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] respondToMatchJoinRequest error:", error);
-    return { ok: false, message: "Failed to process request" };
+    return { ok: false, message: error?.message || "Failed to process request" };
   }
 }

@@ -1,9 +1,7 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     Pressable,
@@ -14,6 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppIcon } from "../../../src/components/AppIcon";
+import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
@@ -24,6 +24,7 @@ export default function BranchDetails() {
     const { id } = useLocalSearchParams(); // "primary" or actual ID
     const { zone, loading } = useZoneData();
     const router = useRouter();
+    const { showToast } = useToast();
 
     const [saving, setSaving] = useState(false);
 
@@ -60,7 +61,7 @@ export default function BranchDetails() {
 
     const handleSave = async () => {
         if (!branchName.trim()) {
-            Alert.alert("Error", "Branch name is required");
+            showToast({ type: "warning", title: "Error", message: "Branch name is required" });
             return;
         }
 
@@ -80,16 +81,16 @@ export default function BranchDetails() {
                     "capacity.futsalCourts": futsalCourts.trim(),
                     "capacity.padelCourts": padelCourts.trim(),
                 });
-                Alert.alert("Success", "Branch updated successfully");
+                showToast({ type: "success", title: "Success", message: "Branch updated successfully" });
                 Logger.info('BranchDetails', 'Branch updated successfully');
                 router.back();
             } else {
                 // TODO: Handle other branches
-                Alert.alert("Error", "Editing other branches not implemented yet");
+                showToast({ type: "warning", title: "Error", message: "Editing other branches not implemented yet" });
             }
         } catch (error) {
             Logger.error('BranchDetails', 'Failed to update branch', error);
-            Alert.alert("Error", "Failed to update branch");
+            showToast({ type: "error", title: "Error", message: "Failed to update branch" });
         } finally {
             setSaving(false);
         }
@@ -113,7 +114,7 @@ export default function BranchDetails() {
             >
                 <View style={styles.header}>
                     <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
+                        <AppIcon name="arrow-back" size={24} color={COLORS.text} />
                     </Pressable>
                     <Text style={styles.headerTitle}>
                         {id === "primary" ? "Edit Primary Branch" : "Edit Branch"}

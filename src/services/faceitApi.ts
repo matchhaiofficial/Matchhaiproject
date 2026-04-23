@@ -1,6 +1,8 @@
 // src/services/faceitApi.ts
 import { API_BASE_URL } from "../config/apiConfig";
 
+const FACEIT_REQUEST_TIMEOUT_MS = 15000;
+
 export interface FaceitProfileSummary {
   faceitId: string;
   nickname: string;
@@ -49,6 +51,9 @@ export async function fetchFaceitProfileFromUrl(
     };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FACEIT_REQUEST_TIMEOUT_MS);
+
   try {
     const url = `${API_BASE_URL}/faceit/profile-from-value?value=${encodeURIComponent(
       value
@@ -58,8 +63,8 @@ export async function fetchFaceitProfileFromUrl(
 
     const res = await fetch(url, {
       method: "GET",
+      signal: controller.signal,
     });
-
     if (!res.ok) {
       const text = await res.text();
       console.log("[faceitApi] backend HTTP error:", res.status, text);
@@ -71,8 +76,16 @@ export async function fetchFaceitProfileFromUrl(
 
     const json = (await res.json()) as FaceitProfileSummary;
     return { ok: true, data: json };
-  } catch (e) {
+  } catch (e: any) {
     console.log("[faceitApi] error", e);
+    if (e?.name === "AbortError") {
+      return {
+        ok: false,
+        message: "FACEIT verification timed out. Please try again.",
+      };
+    }
     return { ok: false, message: "Could not reach FACEIT service." };
+  } finally {
+    clearTimeout(timeout);
   }
 }

@@ -1,10 +1,8 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     Pressable,
@@ -16,6 +14,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { addBranch } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
@@ -24,6 +24,7 @@ import styles from "./branch.styles";
 export default function AddBranch() {
     const { zone } = useZoneData();
     const router = useRouter();
+    const { showToast } = useToast();
     const [saving, setSaving] = useState(false);
 
     // Form State
@@ -35,11 +36,11 @@ export default function AddBranch() {
 
     const handleSave = async () => {
         if (!branchName.trim()) {
-            Alert.alert("Error", "Branch name is required");
+            showToast({ type: "warning", title: "Error", message: "Branch name is required" });
             return;
         }
         if (!address.trim()) {
-            Alert.alert("Error", "Address is required");
+            showToast({ type: "warning", title: "Error", message: "Address is required" });
             return;
         }
 
@@ -56,13 +57,13 @@ export default function AddBranch() {
             });
 
             if (result.ok) {
-                Alert.alert("Success", "Branch added successfully");
+                showToast({ type: "success", title: "Success", message: "Branch added successfully" });
                 router.back();
             } else {
-                Alert.alert("Error", result.message);
+                showToast({ type: "error", title: "Error", message: result.message });
             }
         } catch (error) {
-            Alert.alert("Error", "Failed to add branch");
+            showToast({ type: "error", title: "Error", message: "Failed to add branch" });
         } finally {
             setSaving(false);
         }
@@ -76,7 +77,7 @@ export default function AddBranch() {
             >
                 <View style={styles.header}>
                     <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
+                        <AppIcon name="arrow-back" size={24} color={COLORS.text} />
                     </Pressable>
                     <Text style={styles.headerTitle}>Add New Branch</Text>
                 </View>

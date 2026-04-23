@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../theme';
+import { COLORS, FONTS, SPACING, TEXT_SIZES } from '../../../theme';
 
 export default StyleSheet.create({
     loadingContainer: {
@@ -11,6 +11,7 @@ export default StyleSheet.create({
 
     // Mode toggle (My / Discover)
     segmentTabs: {
+        marginTop: SPACING.md,
         marginBottom: SPACING.md,
     },
 
@@ -95,13 +96,6 @@ export default StyleSheet.create({
     // Team card
     teamCard: {
         width: '100%',
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 20,
-        padding: SPACING.md,
-        marginBottom: SPACING.md,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        ...SHADOWS.cardElevated,
     },
     teamTopRow: {
         flexDirection: 'row',
@@ -116,21 +110,6 @@ export default StyleSheet.create({
         fontWeight: '700',
         textTransform: 'uppercase',
     },
-    memberCountRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: RADII.sm,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    memberCountText: {
-        color: COLORS.textSecondary,
-        fontSize: 11,
-        marginLeft: 4,
-    },
     teamTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -143,56 +122,6 @@ export default StyleSheet.create({
         fontSize: 18,
         flex: 1,
         marginRight: 8,
-    },
-    viewBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        backgroundColor: COLORS.overlayMedium,
-    },
-    viewBtnText: {
-        color: COLORS.text,
-        fontSize: 11,
-        fontFamily: FONTS.heading,
-    },
-    requestedBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: COLORS.warning,
-        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-    },
-    requestedBtnText: {
-        color: COLORS.warning,
-        fontSize: 11,
-        fontFamily: FONTS.heading,
-    },
-    fullBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: COLORS.error,
-        backgroundColor: 'rgba(239, 83, 80, 0.12)',
-    },
-    fullBtnText: {
-        color: COLORS.error,
-        fontSize: 11,
-        fontFamily: FONTS.heading,
-    },
-    requestBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: COLORS.accent,
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
-    },
-    requestBtnText: {
-        color: COLORS.accent,
-        fontSize: 11,
-        fontFamily: FONTS.heading,
     },
     teamBottomRow: {
         flexDirection: 'row',
@@ -208,43 +137,5 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: 11,
         marginLeft: 4,
-    },
-    statsTag: {
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
-    statsText: {
-        color: COLORS.textSecondary,
-        fontSize: 10,
-        fontFamily: FONTS.heading,
-        textTransform: 'uppercase',
-    },
-
-    // Empty
-    emptyState: {
-        alignItems: 'center',
-        marginTop: 60,
-    },
-    emptyIcon: {
-        opacity: 0.6,
-        marginBottom: SPACING.lg,
-    },
-    emptyTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.subheading,
-        marginBottom: SPACING.sm,
-    },
-    emptyText: {
-        color: COLORS.muted,
-        textAlign: 'center',
-        maxWidth: 300,
-        lineHeight: 20,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.body,
     },
 });

@@ -1,97 +1,40 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
-import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    ScrollView,
-    Text,
-    View,
-} from "react-native";
+import { useRouter } from "expo-router";
+import React from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import {
-    getZoneBranchesFromSubcollection,
-    migrateZoneBranchesToSubcollection,
-} from "../../../src/services/zoneBranchMigrationService";
 import { COLORS } from "../../../src/theme";
+import { getZoneLifecycleLabel, getZoneMigrationLabel } from "../../../src/utils/zoneLifecycle";
 import styles from "./settings.styles";
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+    return (
+        <View style={styles.pointRow}>
+            <Text style={styles.pointText}>
+                <Text style={styles.pointLabel}>{label}: </Text>
+                {value}
+            </Text>
+        </View>
+    );
+}
 
 export default function ZoneSettingsModule() {
     const router = useRouter();
     const { user } = useAuth();
     const { zone } = useZoneData();
-    const [branchCount, setBranchCount] = useState(0);
-    const [loading, setLoading] = useState(false);
-    const [migrating, setMigrating] = useState(false);
 
-    const refresh = useCallback(async () => {
-        if (!zone?.id) {
-            setBranchCount(0);
-            return;
-        }
-        setLoading(true);
-        try {
-            const branches = await getZoneBranchesFromSubcollection(zone.id);
-            setBranchCount(branches.length);
-        } catch {
-            setBranchCount(0);
-        } finally {
-            setLoading(false);
-        }
-    }, [zone?.id]);
+    useRouteLogger("ZoneSettingsModule", {
+        zoneId: zone?.id,
+        userId: user?._id,
+    });
 
-    useFocusEffect(
-        useCallback(() => {
-            refresh();
-        }, [refresh]),
-    );
-
-    const legacyCount = Array.isArray(zone?.branches) ? zone.branches.length : 0;
-    const migrationEnabled = Boolean(zone?.id && user?._id);
-    const migrated = Boolean(zone?.migration?.perBranchSeatModel) || branchCount > 0;
-
-    const statusLabel = useMemo(() => {
-        if (!zone) return "No zone found";
-        if (migrated) return "Per-branch seat model active";
-        return "Legacy embedded branch model";
-    }, [zone, migrated]);
-
-    const statusColor = migrated ? COLORS.success : COLORS.warning;
-
-    const runMigration = async () => {
-        if (!zone?.id || !user?._id) return;
-
-        Alert.alert(
-            "Run Branch Migration",
-            "This will create per-branch documents and seat/court resources from your existing branch data.",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Run Migration",
-                    onPress: async () => {
-                        setMigrating(true);
-                        const result = await migrateZoneBranchesToSubcollection(zone.id, user._id);
-                        setMigrating(false);
-
-                        if (result.ok) {
-                            await refresh();
-                            Alert.alert(
-                                "Migration Complete",
-                                `Branches: ${result.branchCount}\nResources: ${result.resourceCount}`,
-                            );
-                        } else {
-                            Alert.alert("Migration Failed", result.message);
-                        }
-                    },
-                },
-            ],
-        );
-    };
+    const primaryBranch = zone?.primaryBranch;
+    const branchCount = Array.isArray(zone?.branches) ? zone.branches.length : 0;
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -99,69 +42,69 @@ export default function ZoneSettingsModule() {
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 <View style={styles.card}>
-                    <View style={styles.statusRow}>
-                        <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                        <Text style={styles.statusText}>{statusLabel}</Text>
-                    </View>
-
-                    <Text style={styles.cardTitle}>Branch Data Model</Text>
+                    <Text style={styles.cardTitle}>Venue Profile</Text>
                     <Text style={styles.cardDescription}>
-                        Your chosen architecture uses per-branch ownership with seat-level resources.
+                        This surface now reflects venue configuration instead of system migration tools.
                     </Text>
 
-                    <View style={styles.metricsRow}>
-                        <View style={styles.metricCard}>
-                            <Text style={styles.metricValue}>{legacyCount}</Text>
-                            <Text style={styles.metricLabel}>Legacy Branches</Text>
-                        </View>
-                        <View style={styles.metricCard}>
-                            {loading ? (
-                                <ActivityIndicator size="small" color={COLORS.accent} />
-                            ) : (
-                                <Text style={styles.metricValue}>{branchCount}</Text>
-                            )}
-                            <Text style={styles.metricLabel}>Migrated Branches</Text>
-                        </View>
+                    <InfoRow label="Venue brand" value={zone?.venueBrandName || "Not set"} />
+                    <InfoRow label="Business type" value={zone?.type || "Not set"} />
+                    <InfoRow label="Owner" value={zone?.ownerFullName || user?.fullName || "Not set"} />
+                    <InfoRow label="Contact email" value={zone?.contactEmail || "Not set"} />
+                    <InfoRow label="Contact phone" value={zone?.contactPhone || "Not set"} />
+                    <InfoRow label="Lifecycle" value={getZoneLifecycleLabel(zone)} />
+                </View>
+
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Branch Details</Text>
+                    <Text style={styles.cardDescription}>
+                        Core venue location details are shown here from the current zone profile.
+                    </Text>
+
+                    <InfoRow label="Total branches" value={String(branchCount)} />
+                    <InfoRow label="Primary branch" value={primaryBranch?.branchDisplayName || "Not set"} />
+                    <InfoRow label="City" value={primaryBranch?.city || "Not set"} />
+                    <InfoRow label="Area" value={primaryBranch?.areaLabel || "Not set"} />
+                    <InfoRow label="Address" value={primaryBranch?.addressLine1 || "Not set"} />
+                </View>
+
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Configuration Panels</Text>
+                    <Text style={styles.cardDescription}>
+                        These settings are intentionally shown as explicit placeholders until editable forms are wired.
+                    </Text>
+
+                    <View style={styles.pointRow}>
+                        <AppIcon name="schedule" size="sm" tone="accent" />
+                        <Text style={styles.pointText}>Operating hours: read-only placeholder</Text>
                     </View>
+                    <View style={styles.pointRow}>
+                        <AppIcon name="policy" size="sm" tone="accent" />
+                        <Text style={styles.pointText}>Venue policies: read-only placeholder</Text>
+                    </View>
+                    <View style={styles.pointRow}>
+                        <AppIcon name="payments" size="sm" tone="accent" />
+                        <Text style={styles.pointText}>Payout and finance settings: read-only placeholder</Text>
+                    </View>
+                </View>
+
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>System Tools</Text>
+                    <Text style={styles.cardDescription}>
+                        Migration status and repair actions now live in a separate admin/system surface.
+                    </Text>
+                    <InfoRow label="Current migration state" value={getZoneMigrationLabel(zone)} />
 
                     <Pressable
                         style={({ pressed }) => [
                             styles.primaryButton,
-                            (!migrationEnabled || migrating) && styles.primaryButtonDisabled,
-                            pressed && migrationEnabled && !migrating && { opacity: 0.9 },
+                            pressed && styles.primaryButtonPressed,
                         ]}
-                        onPress={runMigration}
-                        disabled={!migrationEnabled || migrating}
+                        onPress={() => router.push("/zone/modules/migration-tools" as any)}
                     >
-                        {migrating ? (
-                            <ActivityIndicator color="#FFF" />
-                        ) : (
-                            <>
-                                <MaterialIcons name="sync" size={18} color="#FFF" />
-                                <Text style={styles.primaryButtonText}>Run Migration</Text>
-                            </>
-                        )}
+                        <AppIcon name="construction" size={18} color="#FFF" />
+                        <Text style={styles.primaryButtonText}>Open Migration Tools</Text>
                     </Pressable>
-                </View>
-
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Migration Scope</Text>
-                    <View style={styles.pointRow}>
-                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} />
-                        <Text style={styles.pointText}>Creates `zones/{'{zoneId}'}/branches/{'{branchId}'}` docs</Text>
-                    </View>
-                    <View style={styles.pointRow}>
-                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} />
-                        <Text style={styles.pointText}>Creates seat-level resources per branch and tier</Text>
-                    </View>
-                    <View style={styles.pointRow}>
-                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} />
-                        <Text style={styles.pointText}>Creates court resources with branch ownership</Text>
-                    </View>
-                    <View style={styles.pointRow}>
-                        <MaterialIcons name="check-circle" size={16} color={COLORS.accent} />
-                        <Text style={styles.pointText}>Marks migration metadata on the zone document</Text>
-                    </View>
                 </View>
             </ScrollView>
         </Screen>

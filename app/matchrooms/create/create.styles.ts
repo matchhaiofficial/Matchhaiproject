@@ -5,7 +5,7 @@ import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../.
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     scrollContent: {
         flexGrow: 1,
@@ -168,6 +168,7 @@ export default StyleSheet.create({
         paddingVertical: 8,
         marginRight: SPACING.sm,
         marginBottom: SPACING.sm,
+        minWidth: 0,
     },
     optionChipActive: {
         backgroundColor: COLORS.cardDark,
@@ -181,6 +182,16 @@ export default StyleSheet.create({
     optionChipTextActive: {
         color: COLORS.text,
         fontWeight: 'bold',
+    },
+    inlineChipContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        gap: 4,
+    },
+    inlineChipText: {
+        flexShrink: 1,
+        minWidth: 0,
     },
 
     // Button
@@ -201,7 +212,7 @@ export default StyleSheet.create({
         elevation: 30,
         borderTopWidth: 1,
         borderTopColor: COLORS.cardBorder,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         paddingTop: SPACING.md,
         paddingHorizontal: 0,
     },
@@ -506,19 +517,24 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
     },
     actionButton: {
-        backgroundColor: COLORS.accent,
+        minHeight: 54,
         paddingVertical: 12,
         paddingHorizontal: 24,
-        borderRadius: RADII.md,
+        borderRadius: RADII.xl,
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 8,
+        backgroundColor: COLORS.accent,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        ...SHADOWS.accentStrong,
     },
     actionButtonText: {
-        color: COLORS.background,
-        fontSize: TEXT_SIZES.body,
-        fontWeight: 'bold',
-        fontFamily: FONTS.heading,
+        color: '#FFFFFF',
+        fontSize: TEXT_SIZES.body + 1,
+        fontFamily: FONTS.interSemiBold,
+        letterSpacing: 0.2,
     },
     noResultsText: {
         color: COLORS.muted,
@@ -531,12 +547,13 @@ export default StyleSheet.create({
     },
     zoneInfoWrapper: {
         flex: 1,
-        maxWidth: '65%',
+        minWidth: 0,
         marginRight: 12,
     },
     zonePriceWrapper: {
         alignItems: 'flex-end',
         minWidth: 80,
+        flexShrink: 0,
     },
     memberGrid: {
         width: '100%',
@@ -758,4 +775,5 @@ export default StyleSheet.create({
         fontWeight: '700',
     },
 });
+
 

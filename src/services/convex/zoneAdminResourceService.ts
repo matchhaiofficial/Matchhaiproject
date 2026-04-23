@@ -9,6 +9,15 @@ import {
     ResourceLifecycleStatus,
 } from "../../features/zoneAdmin/types";
 import Logger from "../../utils/logger";
+import { recordRateMetric } from "../../utils/perfInstrumentation";
+import {
+    createSharedPollingState,
+    PollingSubscriptionCallback,
+    publishPollingRows,
+    releasePollingSubscription,
+    replayPollingRows,
+    SharedPollingState,
+} from "./sharedPollingRegistry";
 
 export interface ZoneBranch {
     id: string;
@@ -33,8 +42,16 @@ export interface ZoneBranchResource {
     isActive: boolean;
     heldUntil?: any;
     holdRequestId?: string | null;
+    bookingRequestId?: string | null;
+    matchroomId?: string | null;
+    bookedAt?: any;
+    bookedByUid?: string | null;
     updatedAt?: any;
 }
+
+const POLL_INTERVAL_MS = 5000;
+const branchPollingState = new Map<string, SharedPollingState<ZoneBranch>>();
+const resourcePollingState = new Map<string, SharedPollingState<ZoneBranchResource>>();
 
 const VALID_RESOURCE_STATUSES: ResourceLifecycleStatus[] = [
     "available",
@@ -68,6 +85,10 @@ const normalizeResource = (data: Record<string, any>): ZoneBranchResource => ({
     isActive: data.isActive !== false,
     heldUntil: data.heldUntil,
     holdRequestId: data.holdRequestId || null,
+    bookingRequestId: data.bookingRequestId ? String(data.bookingRequestId) : null,
+    matchroomId: data.matchroomId ? String(data.matchroomId) : null,
+    bookedAt: data.bookedAt,
+    bookedByUid: data.bookedByUid || null,
     updatedAt: data.updatedAt,
 });
 
@@ -80,34 +101,51 @@ export function subscribeZoneBranches(
     onData: (branches: ZoneBranch[]) => void,
     onError: (error: any) => void,
 ) {
-    let active = true;
+    const callbackRef: PollingSubscriptionCallback<ZoneBranch> = { onData, onError };
+    let state = branchPollingState.get(zoneId);
 
-    const poll = async () => {
+    if (!state) {
+        state = createSharedPollingState();
+        branchPollingState.set(zoneId, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneBranch>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
         try {
             const branches = await convex.query(api.zoneAdminResources.getZoneBranches, {
                 zoneId: zoneId as Id<"zones">,
             });
 
-            if (!active) return;
-
             const normalized = (branches as any[])
                 .map(normalizeBranch)
                 .sort((a, b) => a.branchDisplayName.localeCompare(b.branchDisplayName));
 
-            onData(normalized);
+            recordRateMetric("zone_admin.branch_reads_per_minute", normalized.length, {
+                zoneId,
+            });
+
+            publishPollingRows(currentState, normalized);
         } catch (error: any) {
-            if (!active) return;
             Logger.error("zoneAdminResources", "Branch poll failed", error);
-            onError(error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
         }
     };
 
-    poll();
-    const interval = setInterval(poll, 5000);
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
 
     return () => {
-        active = false;
-        clearInterval(interval);
+        releasePollingSubscription(branchPollingState, zoneId, callbackRef);
     };
 }
 
@@ -121,35 +159,54 @@ export function subscribeBranchResources(
     onData: (resources: ZoneBranchResource[]) => void,
     onError: (error: any) => void,
 ) {
-    let active = true;
+    const key = `${zoneId}:${branchId}`;
+    const callbackRef: PollingSubscriptionCallback<ZoneBranchResource> = { onData, onError };
+    let state = resourcePollingState.get(key);
 
-    const poll = async () => {
+    if (!state) {
+        state = createSharedPollingState();
+        resourcePollingState.set(key, state);
+    }
+
+    state.callbacks.add(callbackRef);
+    replayPollingRows(state, callbackRef);
+
+    const poll = async (currentState: SharedPollingState<ZoneBranchResource>) => {
+        if (currentState.inFlight) return;
+        currentState.inFlight = true;
         try {
             const resources = await convex.query(api.zoneAdminResources.listResourcesByZoneAndBranch, {
                 zoneId: zoneId as Id<"zones">,
                 branchId,
             });
 
-            if (!active) return;
-
             const normalized = (resources as any[])
                 .map(normalizeResource)
                 .sort((a, b) => a.label.localeCompare(b.label));
 
-            onData(normalized);
+            recordRateMetric("zone_admin.resource_reads_per_minute", normalized.length, {
+                zoneId,
+                branchId,
+            });
+
+            publishPollingRows(currentState, normalized);
         } catch (error: any) {
-            if (!active) return;
             Logger.error("zoneAdminResources", "Resource poll failed", error);
-            onError(error);
+            currentState.callbacks.forEach((callback) => callback.onError(error));
+        } finally {
+            currentState.inFlight = false;
         }
     };
 
-    poll();
-    const interval = setInterval(poll, 5000);
+    if (!state.interval) {
+        void poll(state);
+        state.interval = setInterval(() => {
+            void poll(state!);
+        }, POLL_INTERVAL_MS);
+    }
 
     return () => {
-        active = false;
-        clearInterval(interval);
+        releasePollingSubscription(resourcePollingState, key, callbackRef);
     };
 }
 
@@ -202,5 +259,32 @@ export async function allocateResourcesToBookingRequest(input: {
     } catch (error: any) {
         Logger.error("zoneAdminResources", "Failed to allocate resources", error);
         return { ok: false as const, message: error?.message || "Allocation failed." };
+    }
+}
+
+export async function reassignResourcesForBookingRequest(input: {
+    zoneId: string;
+    branchId: string;
+    requestId: string;
+    newResourceIds: string[];
+    adminUid: string;
+}) {
+    try {
+        if (!input.newResourceIds.length) {
+            return { ok: false as const, message: "Select at least one resource." };
+        }
+
+        await convex.mutation(api.zoneAdminResources.reassignResourcesForRequest, {
+            zoneId: input.zoneId as Id<"zones">,
+            branchId: input.branchId,
+            requestId: input.requestId as Id<"bookingRequests">,
+            newResourceIds: input.newResourceIds as Id<"zoneResources">[],
+            adminUid: input.adminUid,
+        });
+
+        return { ok: true as const };
+    } catch (error: any) {
+        Logger.error("zoneAdminResources", "Failed to reassign resources", error);
+        return { ok: false as const, message: error?.message || "Reassignment failed." };
     }
 }

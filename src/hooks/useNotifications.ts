@@ -6,27 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
 
-export type NotificationType =
-  | "friend_request"
-  | "team_invite"
-  | "team_join_request"
-  | "team_join_decision"
-  | "matchroom_invite"
-  | "match_join_request"
-  | "match_cancelled_admin"
-  | "admin_matchroom_created"
-  | "booking_update"
-  | "challenge_received"
-  | "challenge_accepted"
-  | "challenge_rejected"
-  | "match_booking_captain_approval"
-  | "match_seat_invitation"
-  | "team_match_challenge"
-  | "team_match_challenge_update"
-  | "booking_request_accepted"
-  | "booking_request_rejected"
-  | "booking_counter_offer"
-  | "general";
+export type NotificationType = string;
 
 export type NotificationStatus = "pending" | "accepted" | "rejected" | "read" | "expired" | "declined";
 
@@ -39,6 +19,7 @@ export interface Notification {
   type: NotificationType;
   status: NotificationStatus;
   isRead?: boolean;
+  isArchived?: boolean;
   entityKey?: string;
   entityId?: string;
   teamId?: string;
@@ -49,6 +30,8 @@ export interface Notification {
   message?: string;
   reason?: string;
   meta?: {
+    notificationId?: string;
+    entityId?: string;
     teamId?: string;
     teamName?: string;
     game?: string;
@@ -61,8 +44,21 @@ export interface Notification {
     matchroomId?: string;
     matchroomTitle?: string;
     intentId?: string;
+    requestId?: string;
+    offerId?: string;
+    scheduleOptions?: Array<{
+      date: string;
+      time: string;
+    }>;
+    expiresAt?: number;
+    zoneId?: string;
+    branchId?: string;
+    branchName?: string;
     side?: string;
     role?: string;
+    slotId?: string;
+    targetTeam?: string;
+    paymentRequired?: boolean;
     challengeId?: string;
     challengerTeamName?: string;
     opponentTeamName?: string;
@@ -75,26 +71,71 @@ export interface Notification {
   updatedAt?: number;
 }
 
+function normalizeGameKey(value: unknown) {
+  const gameKey = String(value || "").trim().toLowerCase();
+  return gameKey === "fc25" ? "fc26" : gameKey || undefined;
+}
+
+function toStringId(value: unknown) {
+  return value == null ? undefined : String(value);
+}
+
 function transformNotification(notif: any): Notification {
+  const rawMeta = (notif.data || {}) as Record<string, any>;
+  const canonicalMeta = {
+    ...rawMeta,
+    notificationId: toStringId(notif._id) || toStringId(rawMeta.notificationId),
+    entityId: toStringId(notif.entityId) || toStringId(rawMeta.entityId),
+    teamId: toStringId(notif.teamId) || toStringId(rawMeta.teamId),
+    teamName: notif.teamName || rawMeta.teamName,
+    matchroomId: toStringId(notif.matchroomId) || toStringId(rawMeta.matchroomId),
+    intentId: toStringId(rawMeta.intentId),
+    requestId: toStringId(rawMeta.requestId),
+    offerId: toStringId(rawMeta.offerId),
+    scheduleOptions: Array.isArray(rawMeta.scheduleOptions)
+      ? rawMeta.scheduleOptions
+          .map((option: any) => ({
+            date: String(option?.date || "").trim(),
+            time: String(option?.time || "").trim(),
+          }))
+          .filter((option: { date: string; time: string }) => option.date && option.time)
+      : undefined,
+    expiresAt: typeof rawMeta.expiresAt === "number" ? rawMeta.expiresAt : undefined,
+    zoneId: toStringId(rawMeta.zoneId),
+    branchId: toStringId(rawMeta.branchId),
+    branchName: rawMeta.branchName,
+    side: rawMeta.side || rawMeta.team,
+    role: rawMeta.role,
+    slotId: toStringId(rawMeta.slotId),
+    targetTeam: rawMeta.targetTeam || rawMeta.team,
+    paymentRequired: rawMeta.paymentRequired === true,
+    gameKey: normalizeGameKey(rawMeta.gameKey || rawMeta.game),
+    game: rawMeta.game || rawMeta.gameKey,
+    challengeId: toStringId(rawMeta.challengeId),
+    fromUid: toStringId(notif.fromUid) || toStringId(rawMeta.fromUid),
+    toUid: toStringId(notif.toUid) || toStringId(rawMeta.toUid),
+  };
+
   return {
-    id: notif._id,
-    _id: notif._id,
-    toUid: notif.toUid,
-    fromUid: notif.fromUid,
+    id: String(notif._id),
+    _id: String(notif._id),
+    toUid: String(notif.toUid),
+    fromUid: toStringId(notif.fromUid),
     fromUsername: notif.fromUsername,
     type: notif.type,
     status: notif.status,
-    isRead: notif.status === "read",
+    isRead: notif.isRead === true,
+    isArchived: notif.isArchived === true,
     entityKey: notif.entityKey,
-    entityId: notif.entityId,
-    teamId: notif.teamId,
+    entityId: canonicalMeta.entityId,
+    teamId: canonicalMeta.teamId,
     teamName: notif.teamName,
-    matchroomId: notif.matchroomId,
+    matchroomId: canonicalMeta.matchroomId,
     title: notif.title,
     body: notif.body,
     message: notif.body,
-    meta: notif.data,
-    data: notif.data,
+    meta: canonicalMeta,
+    data: canonicalMeta,
     expiresAt: notif.expiresAt,
     createdAt: notif.createdAt,
     updatedAt: notif.updatedAt,
@@ -104,26 +145,26 @@ function transformNotification(notif: any): Notification {
 /**
  * Custom hook for real-time notifications using Convex
  */
-export function useNotifications() {
+export function useNotifications(tab: "pending" | "resolved" = "pending") {
   const { user } = useAuth();
   const userId = user?._id as Id<"users"> | undefined;
 
-  // Real-time query for notifications
   const rawNotifications = useQuery(
-    api.notifications.listForUser,
-    userId ? { userId, limit: 100 } : "skip"
+    api.notifications.listInboxPage,
+    userId ? { userId, tab, limit: 100 } : "skip"
   );
 
-  // Mutations
   const markAsReadMutation = useMutation(api.notifications.markAsRead);
-  const markAllAsReadMutation = useMutation(api.notifications.markAllAsRead);
+  const markAllAsReadMutation = useMutation(api.notifications.markAllAsReadFast);
+  const markManyAsReadMutation = useMutation(api.notifications.markManyAsRead);
   const updateStatusMutation = useMutation(api.notifications.updateStatus);
-  const removeMutation = useMutation(api.notifications.remove);
-  const removeAllMutation = useMutation(api.notifications.removeAllForUser);
+  const archiveMutation = useMutation(api.notifications.archive);
+  const archiveManyMutation = useMutation(api.notifications.archiveMany);
 
-  // Transform notifications
   const notifications: Notification[] = rawNotifications
-    ? rawNotifications.map(transformNotification).sort((a, b) => b.createdAt - a.createdAt)
+    ? rawNotifications
+        .map(transformNotification)
+        .sort((a: Notification, b: Notification) => b.createdAt - a.createdAt)
     : [];
 
   const loading = rawNotifications === undefined;
@@ -138,6 +179,13 @@ export function useNotifications() {
     await markAllAsReadMutation({ userId });
   };
 
+  const markManyAsRead = async (notificationIds: string[]) => {
+    if (!notificationIds.length) return;
+    await markManyAsReadMutation({
+      notificationIds: notificationIds.map((id) => id as Id<"notifications">),
+    });
+  };
+
   const updateStatus = async (notificationId: string, status: NotificationStatus) => {
     await updateStatusMutation({
       notificationId: notificationId as Id<"notifications">,
@@ -146,12 +194,23 @@ export function useNotifications() {
   };
 
   const deleteNotification = async (notificationId: string) => {
-    await removeMutation({ notificationId: notificationId as Id<"notifications"> });
+    await archiveMutation({ notificationId: notificationId as Id<"notifications"> });
+  };
+
+  const deleteNotifications = async (notificationIds: string[]) => {
+    if (!notificationIds.length) return;
+    await archiveManyMutation({
+      notificationIds: notificationIds.map((id) => id as Id<"notifications">),
+    });
   };
 
   const deleteAllNotifications = async () => {
     if (!userId) return;
-    await removeAllMutation({ userId });
+    const resolvedIds = notifications
+      .filter((item) => item.status !== "pending")
+      .map((item) => item.id as Id<"notifications">);
+    if (!resolvedIds.length) return;
+    await archiveManyMutation({ notificationIds: resolvedIds });
   };
 
   // Pending count (excluding expired)
@@ -167,8 +226,10 @@ export function useNotifications() {
     pendingCount,
     markAsRead,
     markAllAsRead,
+    markManyAsRead,
     updateStatus,
     deleteNotification,
+    deleteNotifications,
     deleteAllNotifications,
   };
 }
@@ -181,7 +242,7 @@ export function useNotificationCount() {
   const userId = user?._id as Id<"users"> | undefined;
 
   const count = useQuery(
-    api.notifications.countPending,
+    api.notifications.countPendingFast,
     userId ? { userId } : "skip"
   );
 

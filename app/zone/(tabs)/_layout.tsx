@@ -1,9 +1,12 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppIcon } from "../../../src/components/AppIcon";
 import { COLORS, FONTS } from "../../../src/theme";
+
+const TAB_BAR_BASE_HEIGHT = 65;
+const TAB_BAR_EXTRA_BOTTOM_PADDING = 18;
 
 export default function ZoneTabsLayout() {
     const insets = useSafeAreaInsets();
@@ -20,8 +23,8 @@ export default function ZoneTabsLayout() {
                         backgroundColor: COLORS.cardDark,
                         borderTopWidth: 1,
                         borderTopColor: "rgba(255,255,255,0.1)",
-                        height: 65 + insets.bottom,
-                        paddingBottom: insets.bottom + 8,
+                        height: TAB_BAR_BASE_HEIGHT + insets.bottom + TAB_BAR_EXTRA_BOTTOM_PADDING,
+                        paddingBottom: insets.bottom + TAB_BAR_EXTRA_BOTTOM_PADDING,
                         paddingTop: 12,
                         paddingHorizontal: 16,
                         borderTopLeftRadius: 20,
@@ -53,7 +56,7 @@ export default function ZoneTabsLayout() {
                 options={{
                     title: "Home",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons name="home" size={24} color={color} />
+                        <AppIcon name="home" size={24} color={color} />
                     ),
                 }}
             />
@@ -62,7 +65,7 @@ export default function ZoneTabsLayout() {
                 options={{
                     title: "Branches",
                     tabBarIcon: ({ color }) => (
-                        <MaterialIcons name="store" size={24} color={color} />
+                        <AppIcon name="store" size={24} color={color} />
                     ),
                 }}
             />

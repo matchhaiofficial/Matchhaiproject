@@ -83,7 +83,7 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         borderRadius: RADII.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         paddingHorizontal: SPACING.md,
         alignItems: "center",
         justifyContent: "space-between",
@@ -439,4 +439,5 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
     },
 });
+
 

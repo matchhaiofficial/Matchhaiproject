@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import { expoClient } from "@better-auth/expo/client";
+import { convexClient } from "@convex-dev/better-auth/client/plugins";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 
@@ -12,6 +13,7 @@ if (!CONVEX_SITE_URL) {
 export const authClient = createAuthClient({
   baseURL: CONVEX_SITE_URL || "",
   plugins: [
+    convexClient(),
     expoClient({
       scheme: Constants.expoConfig?.scheme as string || "matchhai",
       storagePrefix: "matchhai",
@@ -74,4 +76,6 @@ export const phoneAuth = {
 export const emailAuth = {
   signIn: authClient.signIn.email,
   signUp: authClient.signUp.email,
+  sendVerificationEmail: (authClient as any).sendVerificationEmail,
+  verifyEmail: (authClient as any).verifyEmail,
 };

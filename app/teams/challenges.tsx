@@ -1,4 +1,3 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -6,11 +5,13 @@ import {
     RefreshControl,
     ScrollView,
     Text,
-    TouchableOpacity,
+    Pressable,
     View,
 } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
+import { AppIcon } from "../../src/components/AppIcon";
+import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import {
@@ -82,26 +83,28 @@ export default function TeamChallengesScreen() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
             >
                 {rows.length === 0 ? (
-                    <View style={styles.emptyCard}>
-                        <MaterialIcons name="sports-esports" size={28} color={COLORS.muted} />
+                    <AppCard variant="empty" style={styles.emptyCard}>
+                        <AppIcon name="sports-esports" size={28} tone="muted" />
                         <Text style={styles.emptyTitle}>No challenges yet</Text>
                         <Text style={styles.emptyText}>Send or accept a team challenge to see it here.</Text>
-                    </View>
+                    </AppCard>
                 ) : (
                     rows.map((item) => {
                         const created = toMillis(item.createdAt);
                         return (
-                            <TouchableOpacity
+                            <Pressable
                                 key={item.id}
-                                style={styles.card}
+                                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                                 onPress={() => router.push(`/teams/challenge?id=${item.id}` as any)}
-                                activeOpacity={0.85}
                             >
                                 <View style={styles.topRow}>
                                     <Text style={styles.title} numberOfLines={1}>
                                         {item.challengerTeamName} vs {item.opponentTeamName}
                                     </Text>
-                                    <Text style={styles.status}>{item.status}</Text>
+                                    <StatusPill
+                                        tone={item.status === "rejected" ? "danger" : item.status === "completed" ? "success" : item.status === "admin_pending" ? "warning" : "info"}
+                                        label={String(item.status || "pending").replace(/_/g, " ")}
+                                    />
                                 </View>
                                 <Text style={styles.meta}>Game: {String(item.gameKey || "").toUpperCase()}</Text>
                                 <Text style={styles.meta}>
@@ -111,10 +114,10 @@ export default function TeamChallengesScreen() {
                                     {created ? new Date(created).toLocaleString() : "Just now"}
                                 </Text>
                                 <View style={styles.linkRow}>
-                                    <MaterialIcons name="arrow-forward" size={16} color={COLORS.accent} />
+                                    <AppIcon name="arrow-forward" size="sm" tone="accent" />
                                     <Text style={styles.linkText}>Open challenge workspace</Text>
                                 </View>
-                            </TouchableOpacity>
+                            </Pressable>
                         );
                     })
                 )}

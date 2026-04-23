@@ -10,7 +10,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         padding: 8,
@@ -37,6 +37,9 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderWidth: 1,
         borderColor: COLORS.overlayLight,
+    },
+    tabPressed: {
+        opacity: 0.88,
     },
     activeTab: {
         backgroundColor: COLORS.accent,
@@ -82,6 +85,9 @@ export default StyleSheet.create({
         borderColor: COLORS.overlayLight,
         ...SHADOWS.cardElevated,
     },
+    matchCardPressed: {
+        opacity: 0.92,
+    },
     cardHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -104,6 +110,18 @@ export default StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: RADII.sm,
+    },
+    statusBadgeOpen: {
+        backgroundColor: COLORS.success,
+    },
+    statusBadgeLocked: {
+        backgroundColor: COLORS.warning,
+    },
+    statusBadgeExpired: {
+        backgroundColor: '#FF5722',
+    },
+    statusBadgeDefault: {
+        backgroundColor: COLORS.muted,
     },
     statusText: {
         fontFamily: FONTS.body,
@@ -148,16 +166,26 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
+    emptyIcon: {
+        color: COLORS.overlayLight,
+    },
+    fabIcon: {
+        color: '#FFF',
+    },
     viewButtonText: {
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
         color: COLORS.textSecondary,
         marginRight: 4,
     },
+    tabButtonActiveText: {
+        color: '#FFF',
+    },
     loadingContainer: {
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 });
+

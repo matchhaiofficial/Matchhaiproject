@@ -11,7 +11,6 @@ export default StyleSheet.create({
     logo: {
         width: LOGO_SIZE,
         height: LOGO_SIZE,
-        resizeMode: "contain",
         transform: [{ scale: 2 }],
     },
 });

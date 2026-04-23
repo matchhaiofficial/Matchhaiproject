@@ -2,6 +2,32 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
 
+function doesUserPlayGame(friend: any, game: string) {
+  switch (game) {
+    case "cs2":
+      return !!friend?.playsCs2;
+    case "cs16":
+      return !!friend?.playsCs16;
+    case "valorant":
+      return !!friend?.playsValorant;
+    case "fc25":
+    case "fc26":
+      return !!friend?.playsFc;
+    case "tekken8":
+      return !!friend?.playsTekken;
+    case "futsal":
+      return !!friend?.playsFutsal;
+    case "indoor_cricket":
+      return !!friend?.playsIndoorCricket;
+    case "padel":
+      return !!friend?.playsPadel;
+    case "pickleball":
+      return !!friend?.playsPickleball;
+    default:
+      return false;
+  }
+}
+
 // ============================================
 // FRIENDSHIP QUERIES
 // ============================================
@@ -16,6 +42,8 @@ export const listFriends = query({
       .collect();
 
     // Get friend user data
+    const now = Date.now();
+    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
     const friends = await Promise.all(
       friendships.map(async (f) => {
         const friend = await ctx.db.get(f.friendId);
@@ -26,10 +54,63 @@ export const listFriends = query({
               username: f.friendUsername,
               fullName: friend.fullName,
               photoURL: friend.photoURL,
-              isOnline: friend.isOnline,
+              isOnline: !!(friend.lastActiveAt && (now - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS),
+              playsCs2: !!friend.playsCs2,
+              playsCs16: !!friend.playsCs16,
+              playsValorant: !!friend.playsValorant,
+              playsFc: !!friend.playsFc,
+              playsTekken: !!friend.playsTekken,
+              playsFutsal: !!friend.playsFutsal,
+              playsIndoorCricket: !!friend.playsIndoorCricket,
+              playsPadel: !!friend.playsPadel,
+              playsPickleball: !!friend.playsPickleball,
               createdAt: f.createdAt,
             }
           : null;
+      })
+    );
+
+    return friends.filter((f) => f !== null);
+  },
+});
+
+// List friends who are eligible for a specific game
+export const listFriendsForGame = query({
+  args: {
+    userId: v.id("users"),
+    game: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const friendships = await ctx.db
+      .query("friendships")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .collect();
+
+    const now = Date.now();
+    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
+    const friends = await Promise.all(
+      friendships.map(async (f) => {
+        const friend = await ctx.db.get(f.friendId);
+        if (!friend || !doesUserPlayGame(friend, args.game)) return null;
+
+        return {
+          friendshipId: f._id,
+          friendId: f.friendId,
+          username: f.friendUsername,
+          fullName: friend.fullName,
+          photoURL: friend.photoURL,
+          isOnline: !!(friend.lastActiveAt && (now - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS),
+          playsCs2: !!friend.playsCs2,
+          playsCs16: !!friend.playsCs16,
+          playsValorant: !!friend.playsValorant,
+          playsFc: !!friend.playsFc,
+          playsTekken: !!friend.playsTekken,
+          playsFutsal: !!friend.playsFutsal,
+          playsIndoorCricket: !!friend.playsIndoorCricket,
+          playsPadel: !!friend.playsPadel,
+          playsPickleball: !!friend.playsPickleball,
+          createdAt: f.createdAt,
+        };
       })
     );
 
@@ -145,7 +226,7 @@ export const sendFriendRequest = mutation({
     fromUsername: v.string(),
     toUid: v.id("users"),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
     // Check if already friends
     const existingFriendship = await ctx.db
       .query("friendships")
@@ -178,7 +259,7 @@ export const sendFriendRequest = mutation({
     }
 
     // Create dedup key
-    const entityKey = `friend_request:${args.fromUid}:${args.toUid}`;
+    const entityKey = `social.friend_request:${args.fromUid}:${args.toUid}`;
 
     // Check for existing pending request
     const existingRequest = await ctx.db
@@ -193,23 +274,25 @@ export const sendFriendRequest = mutation({
     const now = Date.now();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
 
-    // Create notification
-    const notificationId = await ctx.db.insert("notifications", {
+    const notificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       toUid: args.toUid,
       fromUid: args.fromUid,
       fromUsername: args.fromUsername,
-      type: "friend_request",
+      type: "social.friend_request",
       status: "pending",
-      entityKey,
-      entityId: args.fromUid,
+      dedupeKey: entityKey,
+      dedupePolicy: "upsert_active",
+      entityId: String(args.fromUid),
+      route: "/(player)/inbox",
       title: "New Friend Request",
       body: `${args.fromUsername} wants to be your friend`,
       expiresAt: now + sevenDaysMs,
-      createdAt: now,
-      updatedAt: now,
+      data: {
+        href: "/(player)/inbox",
+      },
     });
 
-    return notificationId;
+    return notificationResult.notificationId;
   },
 });
 
@@ -222,7 +305,7 @@ export const respondFriendRequest = mutation({
   handler: async (ctx, args) => {
     const notification = await ctx.db.get(args.notificationId);
     if (!notification) throw new Error("Notification not found");
-    if (notification.type !== "friend_request") {
+    if (!["friend_request", "social.friend_request"].includes(String(notification.type || ""))) {
       throw new Error("Not a friend request");
     }
     if (notification.status !== "pending") {
@@ -230,6 +313,7 @@ export const respondFriendRequest = mutation({
     }
 
     const now = Date.now();
+    const decision = args.accept ? "accepted" : "rejected";
 
     if (args.accept && notification.fromUid) {
       // Get usernames
@@ -258,9 +342,34 @@ export const respondFriendRequest = mutation({
 
     // Update notification
     await ctx.db.patch(args.notificationId, {
-      status: args.accept ? "accepted" : "rejected",
+      status: decision,
       updatedAt: now,
     });
+
+    if (notification.fromUid) {
+      const responder = await ctx.db.get(notification.toUid);
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        toUid: notification.fromUid,
+        fromUid: notification.toUid,
+        fromUsername: responder?.username || "Player",
+        type: "social.friend_request_result",
+        status: "pending",
+        dedupeKey: `social.friend_request_result:${String(notification._id)}`,
+        dedupePolicy: "replace_active",
+        entity: { kind: "friend_request", id: String(notification._id) },
+        entityId: String(notification._id),
+        route: "/(player)/inbox",
+        title: args.accept ? "Friend Request Accepted" : "Friend Request Rejected",
+        body: args.accept
+          ? `${responder?.username || "A player"} accepted your friend request.`
+          : `${responder?.username || "A player"} declined your friend request.`,
+        data: {
+          href: "/(player)/inbox",
+          requestNotificationId: String(notification._id),
+          decision,
+        },
+      });
+    }
 
     return true;
   },

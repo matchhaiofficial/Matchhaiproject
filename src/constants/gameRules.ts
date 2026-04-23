@@ -1,4 +1,4 @@
-import { CS2_ROLES, FUTSAL_POSITIONS, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES } from "../../constants/profileOptions";
+import { CS2_ROLES, FUTSAL_POSITIONS, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES, VALORANT_ROLES } from "../../constants/profileOptions";
 
 export type PlatformStatus = 'idle' | 'verifying' | 'verified' | 'taken' | 'error';
 
@@ -11,6 +11,7 @@ export interface PlatformState<T = any> {
 
 export type GameRule = {
     label: string;
+    // Keep legacy field for compatibility, but treat it as a verification hint in UI.
     requiresOneOf?: string[];
     roles?: readonly string[];
     multi?: boolean;
@@ -48,8 +49,18 @@ export const GAME_FORMATS: Record<string, GameFormat[]> = {
     ],
     // Defaults for others to ensure no crash if not specified
     cs2: [{ label: '5v5', size: 5 }],
+    cs16: [{ label: '5v5', size: 5 }],
+    valorant: [{ label: '5v5', size: 5 }],
     pickleball: [{ label: 'Double', size: 2 }],
     padel: [{ label: 'Double', size: 2 }]
+};
+
+const FC_RULE: GameRule = {
+    label: 'FC26',
+    requiresOneOf: ['steam', 'psn', 'xbox'],
+    multi: false,
+    hasFormation: true,
+    skillSource: ['psn', 'steam']
 };
 
 export const GAME_RULES: Record<string, GameRule> = {
@@ -60,13 +71,20 @@ export const GAME_RULES: Record<string, GameRule> = {
         multi: false,
         skillSource: ['faceit', 'steam']
     },
-    fc26: {
-        label: 'FC 26',
-        requiresOneOf: ['steam', 'psn', 'xbox'],
+    cs16: {
+        label: 'CS 1.6',
+        roles: CS2_ROLES,
         multi: false,
-        hasFormation: true,
-        skillSource: ['psn', 'steam']
+        skillSource: ['questionnaire']
     },
+    valorant: {
+        label: 'Valorant',
+        roles: VALORANT_ROLES,
+        multi: false,
+        skillSource: ['questionnaire']
+    },
+    fc25: FC_RULE,
+    fc26: FC_RULE,
     tekken8: {
         label: 'Tekken 8',
         requiresOneOf: ['steam', 'psn', 'xbox'],

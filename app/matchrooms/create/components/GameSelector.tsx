@@ -1,11 +1,15 @@
-// app/matchrooms/create/components/GameSelector.tsx
-import { MaterialIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { GAME_OPTIONS, SPORT_OPTIONS } from '../../../../constants/profileOptions';
-import { COLORS } from '../../../../src/theme';
-import styles from '../create.styles';
+import { router } from "expo-router";
+import React from "react";
+import { Text, View } from "react-native";
+import Animated from "react-native-reanimated";
+
+import { GAME_OPTIONS, SPORT_OPTIONS } from "../../../../constants/profileOptions";
+import { AppIcon } from "../../../../src/components/AppIcon";
+import { useEntrance } from "../../../../src/motion/useEntrance";
+import { isProfileGameEnabled } from "../../../../src/services/userService";
+import { COLORS } from "../../../../src/theme";
+import { MotionPressable } from "./MotionPressable";
+import styles from "../create.styles";
 
 interface GameSelectorProps {
     selectedGame: string | null;
@@ -15,30 +19,21 @@ interface GameSelectorProps {
     allowedGameKeys?: string[];
 }
 
-const GAME_ICONS: Record<string, string> = {
-    cs2: 'sports-esports',
-    fc26: 'sports-soccer',
-    tekken8: 'sports-kabaddi',
-    futsal: 'sports-soccer',
-    indoor_cricket: 'sports-cricket',
-    padel: 'sports-tennis',
-    pickleball: 'sports-tennis',
+const GAME_ICONS: Record<string, React.ComponentProps<typeof AppIcon>["name"]> = {
+    cs2: "sports-esports",
+    cs16: "sports-esports",
+    valorant: "sports-esports",
+    fc26: "sports-soccer",
+    tekken8: "sports-kabaddi",
+    futsal: "sports-soccer",
+    indoor_cricket: "sports-cricket",
+    padel: "sports-tennis",
+    pickleball: "sports-tennis",
 };
 
 // Check if user has added this game to their profile
 const isGameActive = (gameKey: string, profile: any): boolean => {
-    if (!profile) return false;
-
-    switch (gameKey) {
-        case 'cs2': return !!(profile.cs2Role || profile.faceitSkillLevel);
-        case 'fc26': return !!(profile.fcTeam || profile.fcFormation);
-        case 'tekken8': return !!(profile.tekkenFavorites && profile.tekkenFavorites.length > 0);
-        case 'futsal': return !!(profile.futsalPosition || (Array.isArray(profile.futsalPositions) && profile.futsalPositions.length > 0));
-        case 'indoor_cricket': return !!(profile.indoorCricketRole || profile.indoorCricketBattingStyle || profile.indoorCricketBowlingStyle);
-        case 'padel': return !!(profile.padelRole);
-        case 'pickleball': return !!(profile.pickleballRole);
-        default: return false;
-    }
+    return isProfileGameEnabled(profile, gameKey);
 };
 
 export default function GameSelector({
@@ -48,6 +43,7 @@ export default function GameSelector({
     allowAllGames = false,
     allowedGameKeys,
 }: GameSelectorProps) {
+    const { animatedStyle } = useEntrance({ distance: 14 });
     const allGames = [
         ...GAME_OPTIONS.map(g => ({ key: g.key, label: g.label })),
         ...SPORT_OPTIONS.map(s => ({ key: s.key, label: s.label })),
@@ -63,10 +59,10 @@ export default function GameSelector({
     if (activeGames.length === 0) {
         const isVenueFiltered = allowAllGames && allowSet !== null;
         return (
-            <View style={styles.section}>
+            <Animated.View style={[styles.section, animatedStyle]}>
                 <Text style={styles.sectionLabel}>Select Game / Sport</Text>
                 <View style={styles.emptyContainer}>
-                    <MaterialIcons name="sports-esports" size={56} color={COLORS.muted} />
+                    <AppIcon name="sports-esports" size={56} color={COLORS.muted} />
                     <Text style={styles.emptyTitle}>
                         {isVenueFiltered ? 'No Supported Games' : 'No Games Added'}
                     </Text>
@@ -76,27 +72,26 @@ export default function GameSelector({
                             : 'Add games to your profile to start creating matchrooms and playing with others'}
                     </Text>
                     {!isVenueFiltered ? (
-                        <TouchableOpacity
+                        <MotionPressable
                             style={styles.actionButton}
                             onPress={() => router.push('/(player)/(tabs)/profile')}
                         >
-                            <MaterialIcons name="add-circle" size={20} color={COLORS.background} />
                             <Text style={styles.actionButtonText}>
                                 Add Games
                             </Text>
-                        </TouchableOpacity>
+                        </MotionPressable>
                     ) : null}
                 </View>
-            </View>
+            </Animated.View>
         );
     }
 
     return (
-        <View style={styles.section}>
+        <Animated.View style={[styles.section, animatedStyle]}>
             <Text style={styles.sectionLabel}>Select Game / Sport</Text>
             <View style={styles.gameGrid}>
                 {activeGames.map((game) => (
-                    <TouchableOpacity
+                    <MotionPressable
                         key={game.key}
                         style={[
                             styles.gameCard,
@@ -104,8 +99,8 @@ export default function GameSelector({
                         ]}
                         onPress={() => onSelectGame(game.key)}
                     >
-                        <MaterialIcons
-                            name={GAME_ICONS[game.key] as any || 'sports-esports'}
+                        <AppIcon
+                            name={GAME_ICONS[game.key] || "sports-esports"}
                             size={32}
                             color={selectedGame === game.key ? COLORS.accent : COLORS.muted}
                             style={styles.gameIcon}
@@ -118,9 +113,9 @@ export default function GameSelector({
                         >
                             {game.label}
                         </Text>
-                    </TouchableOpacity>
+                    </MotionPressable>
                 ))}
             </View>
-        </View>
+        </Animated.View>
     );
 }

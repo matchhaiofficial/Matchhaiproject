@@ -4,14 +4,14 @@ import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: SPACING.screenPadding,
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -253,24 +253,23 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
         backgroundColor: COLORS.cardBackground,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        marginRight: 8,
-        marginBottom: 8,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        marginRight: SPACING.sm,
+        marginBottom: SPACING.xs,
     },
     areaChipActive: {
-        backgroundColor: COLORS.accent + '15', // 15% opacity accent
+        backgroundColor: '#1e2a38',
         borderColor: COLORS.accent,
     },
     areaChipText: {
-        color: COLORS.textSecondary,
+        color: COLORS.muted,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.label - 1,
-        fontWeight: '500',
     },
     areaChipTextActive: {
-        color: COLORS.accent,
-        fontWeight: '700',
+        color: COLORS.text,
+        fontWeight: '600',
     },
 
     // Privacy Toggles
@@ -310,7 +309,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     disabledInput: {
         opacity: 0.6,
@@ -481,3 +480,4 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
     },
 });
+

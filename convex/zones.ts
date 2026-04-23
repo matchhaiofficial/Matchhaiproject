@@ -1,5 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import { recordZoneAuditEvent } from "./zoneAudit";
 
 // ============================================
 // ZONE QUERIES
@@ -68,21 +70,18 @@ export const create = mutation({
   args: {
     ownerUid: v.id("users"),
     ownerUsername: v.optional(v.string()),
+    ownerFullName: v.optional(v.string()),
     name: v.string(),
+    venueBrandName: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    type: v.optional(v.union(v.literal("gaming"), v.literal("sports"), v.literal("hybrid"))),
     description: v.optional(v.string()),
     address: v.optional(v.string()),
     city: v.optional(v.string()),
     phone: v.optional(v.string()),
     games: v.array(v.string()),
-    branches: v.array(
-      v.object({
-        id: v.string(),
-        name: v.string(),
-        address: v.optional(v.string()),
-        capacity: v.optional(v.number()),
-        isActive: v.optional(v.boolean()),
-      })
-    ),
+    branches: v.array(v.any()),
     defaultPricing: v.optional(
       v.object({
         hourlyRate: v.number(),
@@ -96,7 +95,12 @@ export const create = mutation({
     const zoneId = await ctx.db.insert("zones", {
       ownerUid: args.ownerUid,
       ownerUsername: args.ownerUsername,
+      ownerFullName: args.ownerFullName,
       name: args.name,
+      venueBrandName: args.venueBrandName,
+      contactEmail: args.contactEmail,
+      contactPhone: args.contactPhone,
+      type: args.type,
       status: "pending-review",
       description: args.description,
       address: args.address,
@@ -108,6 +112,50 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "zone.registration_submitted",
+      toUid: args.ownerUid,
+      recipientRole: "zone_admin",
+      status: "pending",
+      dedupeKey: `zone.registration_submitted:${String(zoneId)}`,
+      dedupePolicy: "replace_active",
+      route: "/zone/(tabs)/profile",
+      entity: { kind: "zone", id: String(zoneId) },
+      entityId: String(zoneId),
+      title: "Zone registration submitted",
+      body: "Your venue registration was submitted and is pending super-admin review.",
+      data: {
+        zoneId: String(zoneId),
+        status: "pending-review",
+        href: "/zone/(tabs)/profile",
+      },
+    });
+
+    const superAdmins = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+      .collect();
+    for (const superAdmin of superAdmins) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "moderation.review_needed",
+        toUid: superAdmin._id,
+        recipientRole: "super_admin",
+        status: "pending",
+        dedupeKey: `moderation.review_needed:zone:${String(zoneId)}:${String(superAdmin._id)}`,
+        dedupePolicy: "upsert_active",
+        route: "/super-admin",
+        entity: { kind: "zone", id: String(zoneId) },
+        entityId: String(zoneId),
+        title: "Zone review needed",
+        body: `${args.venueBrandName || args.name} was submitted for review.`,
+        data: {
+          zoneId: String(zoneId),
+          zoneName: args.venueBrandName || args.name,
+          href: "/super-admin",
+        },
+      });
+    }
 
     return zoneId;
   },
@@ -123,17 +171,15 @@ export const update = mutation({
     city: v.optional(v.string()),
     phone: v.optional(v.string()),
     games: v.optional(v.array(v.string())),
-    branches: v.optional(
-      v.array(
-        v.object({
-          id: v.string(),
-          name: v.string(),
-          address: v.optional(v.string()),
-          capacity: v.optional(v.number()),
-          isActive: v.optional(v.boolean()),
-        })
-      )
-    ),
+    branches: v.optional(v.array(v.any())),
+    primaryBranch: v.optional(v.any()),
+    venueBrandName: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    type: v.optional(v.union(v.literal("gaming"), v.literal("sports"), v.literal("hybrid"))),
+    pricing: v.optional(v.any()),
+    capacity: v.optional(v.any()),
+    migration: v.optional(v.any()),
     defaultPricing: v.optional(
       v.object({
         hourlyRate: v.number(),
@@ -153,9 +199,112 @@ export const update = mutation({
     if (updates.phone !== undefined) updateData.phone = updates.phone;
     if (updates.games !== undefined) updateData.games = updates.games;
     if (updates.branches !== undefined) updateData.branches = updates.branches;
+    if (updates.primaryBranch !== undefined) updateData.primaryBranch = updates.primaryBranch;
+    if (updates.venueBrandName !== undefined) updateData.venueBrandName = updates.venueBrandName;
+    if (updates.contactEmail !== undefined) updateData.contactEmail = updates.contactEmail;
+    if (updates.contactPhone !== undefined) updateData.contactPhone = updates.contactPhone;
+    if (updates.type !== undefined) updateData.type = updates.type;
+    if (updates.pricing !== undefined) updateData.pricing = updates.pricing;
+    if (updates.capacity !== undefined) updateData.capacity = updates.capacity;
+    if (updates.migration !== undefined) updateData.migration = updates.migration;
     if (updates.defaultPricing !== undefined) updateData.defaultPricing = updates.defaultPricing;
 
     await ctx.db.patch(zoneId, updateData);
+    return true;
+  },
+});
+
+export const addBranch = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branch: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
+
+    const branch = {
+      ...args.branch,
+      id: args.branch?.id || Math.random().toString(36).slice(2, 10),
+    };
+    const branches = [...(zone.branches || []), branch];
+
+    await ctx.db.patch(args.zoneId, {
+      branches,
+      primaryBranch: zone.primaryBranch || {
+        branchDisplayName: branch.branchDisplayName || branch.name,
+        city: branch.city,
+        areaLabel: branch.areaLabel,
+        addressLine1: branch.addressLine1 || branch.address,
+        googleMapsUrl: branch.googleMapsUrl,
+      },
+      updatedAt: Date.now(),
+    });
+
+    return branch.id;
+  },
+});
+
+export const updateBranch = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+    updates: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
+
+    const branches = (zone.branches || []).map((branch: any) =>
+      branch.id === args.branchId ? { ...branch, ...args.updates, id: branch.id } : branch
+    );
+
+    const primary = branches[0];
+
+    await ctx.db.patch(args.zoneId, {
+      branches,
+      primaryBranch: primary
+        ? {
+            branchDisplayName: primary.branchDisplayName || primary.name,
+            city: primary.city,
+            areaLabel: primary.areaLabel,
+            addressLine1: primary.addressLine1 || primary.address,
+            googleMapsUrl: primary.googleMapsUrl,
+          }
+        : undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
+
+export const deleteBranch = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
+
+    const branches = (zone.branches || []).filter((branch: any) => branch.id !== args.branchId);
+    const primary = branches[0];
+
+    await ctx.db.patch(args.zoneId, {
+      branches,
+      primaryBranch: primary
+        ? {
+            branchDisplayName: primary.branchDisplayName || primary.name,
+            city: primary.city,
+            areaLabel: primary.areaLabel,
+            addressLine1: primary.addressLine1 || primary.address,
+            googleMapsUrl: primary.googleMapsUrl,
+          }
+        : undefined,
+      updatedAt: Date.now(),
+    });
+
     return true;
   },
 });
@@ -225,13 +374,20 @@ export const createPricingRule = mutation({
     assetType: v.string(),
     isEnabled: v.boolean(),
     priority: v.number(),
+    tier: v.optional(v.string()),
+    surface: v.optional(v.string()),
+    ruleType: v.optional(v.union(v.literal("percentage_discount"), v.literal("fixed_override"))),
+    value: v.optional(v.number()),
     timeStart: v.optional(v.string()),
     timeEnd: v.optional(v.string()),
     daysOfWeek: v.optional(v.array(v.number())),
+    validFrom: v.optional(v.string()),
+    validTo: v.optional(v.string()),
     priceMultiplier: v.optional(v.number()),
     flatRate: v.optional(v.number()),
     name: v.optional(v.string()),
     description: v.optional(v.string()),
+    createdByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -242,6 +398,32 @@ export const createPricingRule = mutation({
       updatedAt: now,
     });
 
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(args.zoneId),
+      module: "pricing",
+      action: "create_pricing_rule",
+      actorUid: args.createdByUid || null,
+      targetType: "pricing_rule",
+      targetId: String(ruleId),
+      summary: `Created pricing rule "${args.name || "Untitled rule"}".`,
+      details: {
+        branchId: args.branchId || null,
+        assetType: args.assetType,
+        isEnabled: args.isEnabled,
+        priority: args.priority,
+        tier: args.tier || null,
+        surface: args.surface || null,
+        ruleType: args.ruleType || null,
+        value: args.value ?? null,
+        timeStart: args.timeStart || null,
+        timeEnd: args.timeEnd || null,
+        daysOfWeek: args.daysOfWeek || [],
+        validFrom: args.validFrom || null,
+        validTo: args.validTo || null,
+      },
+      createdAt: now,
+    });
+
     return ruleId;
   },
 });
@@ -250,11 +432,18 @@ export const createPricingRule = mutation({
 export const updatePricingRule = mutation({
   args: {
     ruleId: v.id("pricingRules"),
+    updatedByUid: v.optional(v.string()),
     isEnabled: v.optional(v.boolean()),
     priority: v.optional(v.number()),
+    tier: v.optional(v.string()),
+    surface: v.optional(v.string()),
+    ruleType: v.optional(v.union(v.literal("percentage_discount"), v.literal("fixed_override"))),
+    value: v.optional(v.number()),
     timeStart: v.optional(v.string()),
     timeEnd: v.optional(v.string()),
     daysOfWeek: v.optional(v.array(v.number())),
+    validFrom: v.optional(v.string()),
+    validTo: v.optional(v.string()),
     priceMultiplier: v.optional(v.number()),
     flatRate: v.optional(v.number()),
     name: v.optional(v.string()),
@@ -262,6 +451,10 @@ export const updatePricingRule = mutation({
   },
   handler: async (ctx, args) => {
     const { ruleId, ...updates } = args;
+    const existingRule = await ctx.db.get(ruleId);
+    if (!existingRule) {
+      throw new Error("Pricing rule not found.");
+    }
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     Object.entries(updates).forEach(([key, value]) => {
@@ -271,15 +464,66 @@ export const updatePricingRule = mutation({
     });
 
     await ctx.db.patch(ruleId, updateData);
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(existingRule.zoneId),
+      module: "pricing",
+      action: "update_pricing_rule",
+      actorUid: args.updatedByUid || existingRule.createdByUid || null,
+      targetType: "pricing_rule",
+      targetId: String(ruleId),
+      summary: `Updated pricing rule "${existingRule.name || "Untitled rule"}".`,
+      details: {
+        previous: {
+          isEnabled: existingRule.isEnabled,
+          priority: existingRule.priority,
+          tier: existingRule.tier || null,
+          surface: existingRule.surface || null,
+          ruleType: existingRule.ruleType || null,
+          value: existingRule.value ?? null,
+          timeStart: existingRule.timeStart || null,
+          timeEnd: existingRule.timeEnd || null,
+          daysOfWeek: existingRule.daysOfWeek || [],
+          validFrom: existingRule.validFrom || null,
+          validTo: existingRule.validTo || null,
+        },
+        updates,
+      },
+      createdAt: Number(updateData.updatedAt),
+    });
     return true;
   },
 });
 
 // Delete pricing rule
 export const deletePricingRule = mutation({
-  args: { ruleId: v.id("pricingRules") },
+  args: {
+    ruleId: v.id("pricingRules"),
+    deletedByUid: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    const existingRule = await ctx.db.get(args.ruleId);
+    if (!existingRule) {
+      throw new Error("Pricing rule not found.");
+    }
+
     await ctx.db.delete(args.ruleId);
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(existingRule.zoneId),
+      module: "pricing",
+      action: "delete_pricing_rule",
+      actorUid: args.deletedByUid || existingRule.createdByUid || null,
+      targetType: "pricing_rule",
+      targetId: String(args.ruleId),
+      summary: `Deleted pricing rule "${existingRule.name || "Untitled rule"}".`,
+      details: {
+        branchId: existingRule.branchId || null,
+        assetType: existingRule.assetType,
+        isEnabled: existingRule.isEnabled,
+        priority: existingRule.priority,
+      },
+    });
     return true;
   },
 });
@@ -318,6 +562,9 @@ export const createResource = mutation({
     kind: v.string(),
     name: v.string(),
     assetType: v.string(),
+    tier: v.optional(v.string()),
+    surface: v.optional(v.string()),
+    roomLabel: v.optional(v.string()),
     capacity: v.optional(v.number()),
     hourlyRate: v.optional(v.number()),
   },
@@ -327,6 +574,7 @@ export const createResource = mutation({
     const resourceId = await ctx.db.insert("zoneResources", {
       ...args,
       lifecycleStatus: "available",
+      isActive: true,
       createdAt: now,
       updatedAt: now,
     });

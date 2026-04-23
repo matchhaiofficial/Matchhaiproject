@@ -19,8 +19,13 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
     },
-    content: {
+    body: {
         flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
+    content: {
         padding: SPACING.screenPadding,
     },
 
@@ -227,7 +232,6 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
     },
     footer: {
-        paddingTop: SPACING.md,
         gap: SPACING.sm,
     },
     cancelHint: {

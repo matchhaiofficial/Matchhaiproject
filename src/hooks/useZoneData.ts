@@ -8,11 +8,17 @@ import { Id } from "../../convex/_generated/dataModel";
  * Transform Convex zone document to the shape expected by zone admin screens.
  */
 function transformZone(zone: any): any {
+    const ownerDisplayName = String(zone.ownerFullName || "").trim();
+    const ownerUsername = String(zone.ownerUsername || "").trim();
+    const resolvedOwnerName = ownerDisplayName || (ownerUsername.startsWith("user_") ? "" : ownerUsername);
+
     // Handle games array vs object format
     let gamesObj = zone.games;
     if (Array.isArray(zone.games)) {
         gamesObj = {
             supportsCs2: zone.games.includes("cs2"),
+            supportsCs16: zone.games.includes("cs16"),
+            supportsValorant: zone.games.includes("valorant"),
             supportsFc25: zone.games.includes("fc25") || zone.games.includes("fc26"),
             supportsTekken8: zone.games.includes("tekken8"),
             supportsFutsal: zone.games.includes("futsal"),
@@ -26,7 +32,7 @@ function transformZone(zone: any): any {
         id: zone._id,
         _id: zone._id,
         ownerUid: zone.ownerUid,
-        ownerFullName: zone.ownerFullName || zone.ownerUsername,
+        ownerFullName: resolvedOwnerName || undefined,
         venueBrandName: zone.venueBrandName || zone.name,
         contactEmail: zone.contactEmail,
         contactPhone: zone.contactPhone || zone.phone,

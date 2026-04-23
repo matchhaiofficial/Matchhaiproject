@@ -4,8 +4,8 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { currentUser } from "./authService";
-// createMatchroom and Matchroom available from ./matchService if needed for future use
+import { currentUser, ensureVerifiedEmailAccess } from "./authService";
+import { createMatchroom } from "./matchService";
 import Logger from "../../utils/logger";
 import { parseScheduledDateTime } from "../../utils/matchroomTime";
 
@@ -81,7 +81,7 @@ const isValidVenueChoice = (choice: any): choice is TeamChallengeVenueChoice => 
 const getSeriesHours = (gameKey: string, seriesType?: string | null) => {
     const game = String(gameKey || "").toLowerCase();
     const series = String(seriesType || "BO1").toUpperCase();
-    if (game === "cs2") return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
+    if (game === "cs2" || game === "cs16" || game === "valorant") return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
     if (game === "fc26" || game === "fc25") return series === "BO3" ? 1 : series === "BO5" ? 2 : 0.5;
     if (game === "tekken8") return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
     if (game === "padel" || game === "pickleball") return series === "BO3" ? 1 : series === "BO5" ? 2 : 1;
@@ -93,7 +93,7 @@ const getSeriesHours = (gameKey: string, seriesType?: string | null) => {
 const getZoneRateForChallenge = (zoneData: any, gameKey: string) => {
     const pricing: any = zoneData?.pricing || zoneData?.branches?.[0]?.pricing || {};
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2") {
+    if (game === "cs2" || game === "cs16" || game === "valorant") {
         const rates = [pricing?.pc?.regular?.price, pricing?.pc?.premium?.price, pricing?.pc?.elite?.price]
             .filter((n: any) => typeof n === "number" && n > 0);
         return rates.length ? Math.min(...rates) : 0;
@@ -144,7 +144,7 @@ const toChallengeTitle = (teamA: string, teamB: string) => `${teamA} vs ${teamB}
 const toDurationMinutes = (gameKey: string, seriesType?: string | null) => {
     const game = String(gameKey || "").toLowerCase();
     const series = String(seriesType || "").toUpperCase();
-    if (game === "cs2") return series === "BO3" ? 180 : series === "BO5" ? 300 : series === "BO10" ? 600 : 60;
+    if (game === "cs2" || game === "cs16" || game === "valorant") return series === "BO3" ? 180 : series === "BO5" ? 300 : series === "BO10" ? 600 : 60;
     if (game === "fc26" || game === "fc25") return series === "BO3" ? 60 : series === "BO5" ? 120 : series === "BO10" ? 180 : 30;
     if (game === "tekken8") return series === "BO20" ? 120 : series === "BO40" ? 180 : 60;
     if (game === "futsal") return 90;
@@ -195,6 +195,9 @@ export const sendTeamMatchChallenge = async (input: {
     maxPlayers?: number;
 }): Promise<ServerResponse> => {
     try {
+        const verificationGate = await ensureVerifiedEmailAccess();
+        if (!verificationGate.ok) return verificationGate;
+
         const me = await getCurrentUserInfo();
         if (!me) return { ok: false, message: "Not authenticated." };
 
@@ -233,7 +236,8 @@ export const sendTeamMatchChallenge = async (input: {
         const fallbackPlayers = Number(teamA.maxMembers || 0) + Number(teamB.maxMembers || 0);
         const requestedPlayers = Number(input.maxPlayers || 0);
         const computedPlayers = Math.max(2, requestedPlayers > 0 ? requestedPlayers : fallbackPlayers);
-        const maxPlayers = String(teamA.game || "").toLowerCase() === "cs2" ? 10 : computedPlayers;
+        const normalizedGame = String(teamA.game || "").toLowerCase();
+        const maxPlayers = normalizedGame === "cs2" || normalizedGame === "cs16" || normalizedGame === "valorant" ? 10 : computedPlayers;
 
         const computedPricePerPlayer = await computeChallengePricePerPlayer({
             zoneId: input.proposedVenueByCaptainA.zoneId,
@@ -254,45 +258,19 @@ export const sendTeamMatchChallenge = async (input: {
             game: teamA.game,
             status: "pending",
             message: input.message?.trim() || "",
-            data: {
-                captainAUid: me.convexId,
-                captainAName: teamA.captainUsername || me.username,
-                captainBUid: teamB.captainUid,
-                captainBName: teamB.captainUsername || "Captain",
-                gameKey: teamA.game,
-                format: input.format || null,
-                seriesType: input.seriesType || null,
-                maxPlayers,
-                scheduledDate: input.scheduledDate,
-                scheduledTime: input.scheduledTime,
-                pricePerPlayer: computedPricePerPlayer,
-                proposedVenueByCaptainA: input.proposedVenueByCaptainA,
-                commonAreas: [],
-            },
-        });
-
-        // Create notification for opponent captain
-        await convex.mutation(api.notifications.create, {
-            type: "team_match_challenge",
-            toUid: teamB.captainUid,
-            fromUid: me.convexId,
-            fromUsername: teamA.captainUsername || me.username,
-            title: "New team challenge",
-            body: `${teamA.name} challenged ${teamB.name || "your team"}`,
-            entityKey: `team_match_challenge_${challengeId}_${teamB.captainUid}`,
-            data: {
-                challengeId,
-                challengerTeamId: teamA._id,
-                challengerTeamName: teamA.name,
-                opponentTeamId: teamB._id,
-                opponentTeamName: teamB.name,
-                gameKey: teamA.game,
-                scheduledDate: input.scheduledDate,
-                scheduledTime: input.scheduledTime,
-                pricePerPlayer: computedPricePerPlayer,
-                seriesType: input.seriesType || null,
-                proposedVenueByCaptainA: input.proposedVenueByCaptainA,
-            },
+            captainAUid: me.convexId,
+            captainAName: teamA.captainUsername || me.username,
+            captainBUid: teamB.captainUid,
+            captainBName: teamB.captainUsername || "Captain",
+            gameKey: teamA.game,
+            format: input.format || null,
+            seriesType: input.seriesType || null,
+            maxPlayers,
+            scheduledDate: input.scheduledDate,
+            scheduledTime: input.scheduledTime,
+            pricePerPlayer: computedPricePerPlayer,
+            proposedVenueByCaptainA: input.proposedVenueByCaptainA,
+            commonAreas: [],
         });
 
         return { ok: true, challengeId };
@@ -321,33 +299,15 @@ export const acceptTeamMatchChallenge = async (input: {
         }
 
         // Accept the challenge
-        await convex.mutation(api.teamChallenges.respond, {
+        const response = await convex.mutation(api.teamChallenges.respond, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: true,
         });
 
-        // Create notification
-        const challengerTeam = await convex.query(api.teams.getById, { teamId: challenge.challengerTeamId });
-        const opponentTeam = await convex.query(api.teams.getById, { teamId: challenge.opponentTeamId });
-
-        if (challengerTeam) {
-            await convex.mutation(api.notifications.create, {
-                type: "team_match_challenge_update",
-                toUid: challengerTeam.captainUid,
-                fromUid: me.convexId,
-                fromUsername: me.username,
-                title: "Challenge accepted",
-                body: `${challenge.challengerTeamName || "Your team"} vs ${challenge.opponentTeamName || "Opponent"} accepted.`,
-                data: { challengeId: input.challengeId },
-            });
-        }
-
         // Create chat
-        const chatId = `challenge_${input.challengeId}`;
+        const chatId = response.chatId || String(input.challengeId);
         await convex.mutation(api.teamChallengeChat.sendMessage, {
             chatId,
-            senderUid: me.convexId as string,
-            senderName: me.username,
             text: "Challenge accepted! Let's discuss details.",
         });
 
@@ -381,20 +341,6 @@ export const rejectTeamMatchChallenge = async (input: {
             accept: false,
         });
 
-        // Notify the other captain
-        const challengerTeam = await convex.query(api.teams.getById, { teamId: challenge.challengerTeamId });
-        if (challengerTeam) {
-            await convex.mutation(api.notifications.create, {
-                type: "team_match_challenge_update",
-                toUid: challengerTeam.captainUid,
-                fromUid: me.convexId,
-                fromUsername: me.username,
-                title: "Challenge declined",
-                body: `${challenge.challengerTeamName || "Team"} vs ${challenge.opponentTeamName || "Team"} was declined.`,
-                data: { challengeId: input.challengeId },
-            });
-        }
-
         return { ok: true, challengeId: input.challengeId };
     } catch (error: any) {
         Logger.error("teamMatchService", "rejectTeamMatchChallenge failed", error);
@@ -423,28 +369,12 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
         await convex.mutation(api.teamChallenges.update, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             message: `Alternative venue proposed: ${input.venueName}`,
+            alternativeVenueByCaptainB: {
+                zoneId: input.zoneId,
+                venueName: input.venueName,
+                areaLabel: input.areaLabel || null,
+            },
         });
-
-        // Notify challenger captain
-        const challengerTeam = await convex.query(api.teams.getById, { teamId: challenge.challengerTeamId });
-        if (challengerTeam) {
-            await convex.mutation(api.notifications.create, {
-                type: "team_match_challenge_update",
-                toUid: challengerTeam.captainUid,
-                fromUid: me.convexId,
-                fromUsername: me.username,
-                title: "Alternative zone proposed",
-                body: `${challenge.opponentTeamName || "Opponent"} proposed an alternative venue.`,
-                data: {
-                    challengeId: input.challengeId,
-                    alternativeVenueByCaptainB: {
-                        zoneId: input.zoneId,
-                        venueName: input.venueName,
-                        areaLabel: input.areaLabel || null,
-                    },
-                },
-            });
-        }
 
         return { ok: true };
     } catch (error: any) {
@@ -477,7 +407,7 @@ export const respondToTeamMatchChallenge = async (input: {
             if (!rejection.ok) return rejection;
             await convex.mutation(api.notifications.updateStatus, {
                 notificationId: input.notificationId as Id<"notifications">,
-                status: "accepted",
+                status: "rejected",
             });
             return { ok: true, challengeId };
         }
@@ -510,16 +440,85 @@ export const proposeTeamChallengeVenue = async (input: {
             challengeId: input.challengeId as Id<"teamChallenges">,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
-        if (!["accepted", "venue_proposed", "confirmed"].includes(challenge.status)) {
+        if (!["accepted", "venue_proposed", "venue_confirmed"].includes(challenge.status)) {
             return { ok: false, message: "Challenge is not in venue proposal state." };
         }
 
-        await convex.mutation(api.teamChallenges.proposeVenue, {
+        const result = await convex.mutation(api.teamChallenges.proposeVenue, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             zoneId: input.zoneId as Id<"zones">,
             zoneName: input.venueName,
+            areaLabel: input.areaLabel || null,
             scheduledAt: Date.now(),
         });
+
+        if (result?.confirmedVenue) {
+            const latest = await convex.query(api.teamChallenges.getById, {
+                challengeId: input.challengeId as Id<"teamChallenges">,
+            });
+            if (!latest) {
+                return { ok: false, message: "Challenge not found after venue confirmation." };
+            }
+
+            const matchroom = await createMatchroom({
+                hostUid: String(latest.captainAUid || me.convexId),
+                hostName: latest.captainAName || me.username,
+                game: latest.gameKey || latest.game,
+                title: toChallengeTitle(latest.challengerTeamName || "Team A", latest.opponentTeamName || "Team B"),
+                description: latest.message || "Team challenge matchroom",
+                status: "open",
+                maxPlayers: Number(latest.maxPlayers || 10),
+                currentPlayers: 2,
+                players: [
+                    {
+                        uid: String(latest.captainAUid),
+                        username: latest.captainAName || "Captain A",
+                        joinedAt: Date.now(),
+                        role: "Captain A",
+                    },
+                    {
+                        uid: String(latest.captainBUid),
+                        username: latest.captainBName || "Captain B",
+                        joinedAt: Date.now(),
+                        role: "Captain B",
+                    },
+                ],
+                playerUids: [String(latest.captainAUid), String(latest.captainBUid)],
+                locationMode: "zone",
+                zoneId: result.confirmedVenue.zoneId,
+                location: result.confirmedVenue.venueName,
+                scheduledDate: latest.scheduledDate,
+                scheduledTime: latest.scheduledTime,
+                durationMinutes: toDurationMinutes(latest.gameKey || latest.game, latest.seriesType),
+                pricing: { perPlayer: Number(latest.pricePerPlayer || 0), currency: "PKR" },
+                format: latest.format,
+                seriesType: latest.seriesType,
+                slotsA: [],
+                slotsB: [],
+                captainUidA: String(latest.captainAUid),
+                captainUidB: String(latest.captainBUid),
+                teamMode: "team",
+                teamId: String(latest.challengerTeamId),
+                teamName: latest.challengerTeamName,
+                bookingSource: "challenge",
+                isPrivate: true,
+                paymentStatus: "unpaid",
+                zoneAdminApproved: false,
+            } as any);
+
+            if (!matchroom.ok || !matchroom.id) {
+                return { ok: false, message: matchroom.message || "Failed to create challenge matchroom." };
+            }
+
+            await convex.mutation(api.teamChallenges.update, {
+                challengeId: input.challengeId as Id<"teamChallenges">,
+                status: "venue_confirmed",
+                confirmedVenue: result.confirmedVenue,
+                matchroomId: matchroom.id as Id<"matchrooms">,
+            });
+
+            return { ok: true, matchroomId: matchroom.id };
+        }
 
         return { ok: true };
     } catch (error: any) {

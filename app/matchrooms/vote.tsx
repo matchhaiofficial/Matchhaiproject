@@ -1,5 +1,4 @@
 // app/matchrooms/vote.tsx
-import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -7,10 +6,10 @@ import {
     Pressable,
     ScrollView,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppIcon } from '../../src/components/AppIcon';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitParticipantVote } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
@@ -131,7 +130,7 @@ export default function ParticipantVoting() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.errorContainer}>
-                    <MaterialIcons name="error-outline" size={48} color={COLORS.error} />
+                    <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>{error}</Text>
                 </View>
             </SafeAreaView>
@@ -142,7 +141,7 @@ export default function ParticipantVoting() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.errorContainer}>
-                    <MaterialIcons name="error-outline" size={48} color={COLORS.error} />
+                    <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>Match not found</Text>
                 </View>
             </SafeAreaView>
@@ -162,7 +161,7 @@ export default function ParticipantVoting() {
     return (
         <SafeAreaView style={styles.container}>
             <Pressable onPress={() => router.back()} style={styles.backButton}>
-                <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
+                <AppIcon name="arrow-back" size={24} color={COLORS.text} />
             </Pressable>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -208,76 +207,80 @@ export default function ParticipantVoting() {
                 <Text style={styles.sectionLabel}>Who won the match?</Text>
 
                 {/* Team 1 Vote */}
-                <TouchableOpacity
-                    style={[
+                <Pressable
+                    style={({ pressed }) => [
                         styles.voteOption,
                         selectedVote === 'team1' && styles.voteOptionSelected,
                         alreadyVoted && styles.voteOptionDisabled,
+                        pressed && !alreadyVoted && styles.voteOptionPressed,
                     ]}
                     onPress={() => !alreadyVoted && setSelectedVote('team1')}
                     disabled={!!alreadyVoted}
                 >
                     <View style={styles.voteHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={styles.voteTitleRow}>
                             <Text style={styles.voteTeamName}>Team 1 Won</Text>
                             {selectedVote === 'team1' && (
-                                <MaterialIcons name="check-circle" size={20} color={COLORS.accent} style={{ marginLeft: 8 }} />
+                                <AppIcon name="check-circle" size={20} style={styles.selectedIcon} />
                             )}
                         </View>
                         <View style={styles.voteCount}>
                             <Text style={styles.voteCountText}>{team1Votes} votes</Text>
                         </View>
                     </View>
-                </TouchableOpacity>
+                </Pressable>
 
                 {/* Team 2 Vote */}
-                <TouchableOpacity
-                    style={[
+                <Pressable
+                    style={({ pressed }) => [
                         styles.voteOption,
                         selectedVote === 'team2' && styles.voteOptionSelected,
                         alreadyVoted && styles.voteOptionDisabled,
+                        pressed && !alreadyVoted && styles.voteOptionPressed,
                     ]}
                     onPress={() => !alreadyVoted && setSelectedVote('team2')}
                     disabled={!!alreadyVoted}
                 >
                     <View style={styles.voteHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={styles.voteTitleRow}>
                             <Text style={styles.voteTeamName}>Team 2 Won</Text>
                             {selectedVote === 'team2' && (
-                                <MaterialIcons name="check-circle" size={20} color={COLORS.accent} style={{ marginLeft: 8 }} />
+                                <AppIcon name="check-circle" size={20} style={styles.selectedIcon} />
                             )}
                         </View>
                         <View style={styles.voteCount}>
                             <Text style={styles.voteCountText}>{team2Votes} votes</Text>
                         </View>
                     </View>
-                </TouchableOpacity>
+                </Pressable>
 
                 {/* Unsure Option */}
-                <TouchableOpacity
-                    style={[
+                <Pressable
+                    style={({ pressed }) => [
                         styles.voteOption,
                         selectedVote === 'unknown' && styles.voteOptionSelected,
                         alreadyVoted && styles.voteOptionDisabled,
+                        pressed && !alreadyVoted && styles.voteOptionPressed,
                     ]}
                     onPress={() => !alreadyVoted && setSelectedVote('unknown')}
                     disabled={!!alreadyVoted}
                 >
                     <View style={styles.voteHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={styles.voteTitleRow}>
                             <Text style={styles.voteTeamName}>I Don't Know</Text>
                             {selectedVote === 'unknown' && (
-                                <MaterialIcons name="check-circle" size={20} color={COLORS.accent} style={{ marginLeft: 8 }} />
+                                <AppIcon name="check-circle" size={20} style={styles.selectedIcon} />
                             )}
                         </View>
                     </View>
-                </TouchableOpacity>
+                </Pressable>
 
                 {!alreadyVoted && (
-                    <TouchableOpacity
-                        style={[
+                    <Pressable
+                        style={({ pressed }) => [
                             styles.submitButton,
                             (!selectedVote || submitting) && styles.submitButtonDisabled,
+                            pressed && selectedVote && !submitting && styles.submitButtonPressed,
                         ]}
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -286,15 +289,14 @@ export default function ParticipantVoting() {
                         }}
                         onPress={handleSubmit}
                         disabled={!selectedVote || submitting}
-                        activeOpacity={0.85}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
-                            <ActivityIndicator size="small" color={COLORS.background} />
+                            <ActivityIndicator size="small" color={COLORS.backgroundDark} />
                         ) : (
                             <Text style={styles.submitButtonText}>Submit Vote</Text>
                         )}
-                    </TouchableOpacity>
+                    </Pressable>
                 )}
 
                 {/* Voting Progress */}
@@ -314,3 +316,4 @@ export default function ParticipantVoting() {
         </SafeAreaView>
     );
 }
+

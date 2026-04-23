@@ -1,9 +1,10 @@
-// app/matchrooms/create/components/TeamModeSelector.tsx
-import { MaterialIcons } from '@expo/vector-icons';
-import React from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { COLORS } from '../../../../src/theme';
-import styles from '../create.styles';
+import React from "react";
+import { Text, View } from "react-native";
+
+import { AppIcon } from "../../../../src/components/AppIcon";
+import { COLORS } from "../../../../src/theme";
+import { MotionPressable } from "./MotionPressable";
+import styles from "../create.styles";
 
 interface TeamModeSelectorProps {
     hasTeams: boolean;
@@ -18,11 +19,11 @@ export default function TeamModeSelector({ hasTeams, teamMode, onModeChange }: T
         <View style={styles.section}>
             <Text style={styles.sectionLabel}>Play As</Text>
             <View style={styles.chipRow}>
-                <TouchableOpacity
+                <MotionPressable
                     style={[styles.optionChip, teamMode === 'team' && styles.optionChipActive]}
                     onPress={() => onModeChange('team')}
                 >
-                    <MaterialIcons
+                    <AppIcon
                         name="groups"
                         size={16}
                         color={teamMode === 'team' ? COLORS.text : COLORS.muted}
@@ -31,13 +32,13 @@ export default function TeamModeSelector({ hasTeams, teamMode, onModeChange }: T
                     <Text style={[styles.optionChipText, teamMode === 'team' && styles.optionChipTextActive]}>
                         My Team
                     </Text>
-                </TouchableOpacity>
+                </MotionPressable>
 
-                <TouchableOpacity
+                <MotionPressable
                     style={[styles.optionChip, teamMode === 'solo' && styles.optionChipActive]}
                     onPress={() => onModeChange('solo')}
                 >
-                    <MaterialIcons
+                    <AppIcon
                         name="person"
                         size={16}
                         color={teamMode === 'solo' ? COLORS.text : COLORS.muted}
@@ -46,7 +47,7 @@ export default function TeamModeSelector({ hasTeams, teamMode, onModeChange }: T
                     <Text style={[styles.optionChipText, teamMode === 'solo' && styles.optionChipTextActive]}>
                         Solo / Ad-Hoc Stack
                     </Text>
-                </TouchableOpacity>
+                </MotionPressable>
             </View>
         </View>
     );

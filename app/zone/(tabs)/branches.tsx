@@ -1,4 +1,3 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQuery } from "convex/react";
 import React, { useMemo } from "react";
@@ -11,11 +10,13 @@ import {
 } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import Screen from "../../../src/components/Screen";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { COLORS } from "../../../src/theme";
+import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./branches.styles";
 
 export default function ZoneBranches() {
@@ -36,7 +37,7 @@ export default function ZoneBranches() {
     // Legacy detection: zones without migration flag use the old branch model
     const usingLegacyFallback = useMemo(() => {
         if (!zone) return false;
-        return !zone.migration?.perBranchSeatModel && branches.length > 0;
+        return !isZoneMigrationReady(zone) && branches.length > 0;
     }, [zone, branches.length]);
 
     if (loading) {
@@ -68,7 +69,7 @@ export default function ZoneBranches() {
                             Legacy branch model detected
                         </Text>
                         <Text style={styles.noticeText}>
-                            Run migration from Venue Settings to enable per-branch seat-level resources.
+                            This venue is still using the legacy branch model. Current migration state: {getZoneMigrationLabel(zone)}. Use Migration Tools if you need to inspect or retry migration.
                         </Text>
                     </View>
                 )}
@@ -80,7 +81,7 @@ export default function ZoneBranches() {
                             router.push("/zone/branch/new");
                         }}
                     >
-                        <MaterialIcons name="add" size={18} color="#fff" />
+                        <AppIcon name="add" size={18} color="#fff" />
                         <Text style={styles.addButtonText}>Add New Branch</Text>
                     </Pressable>
                 </View>
@@ -119,7 +120,7 @@ export default function ZoneBranches() {
                                         {branch.addressLine1 || branch.address}
                                     </Text>
                                 </View>
-                                <MaterialIcons name="chevron-right" size={24} color={COLORS.muted} />
+                                <AppIcon name="chevron-right" size="lg" tone="muted" />
                             </View>
                         </Pressable>
                     ))

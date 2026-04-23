@@ -29,6 +29,7 @@ export {
 
   // Profile access
   getUserProfile,
+  getPublicUserProfile,
   getUserProfileByAuthId,
 
   // Profile updates
@@ -46,12 +47,52 @@ import type { UserProfile } from "./convex/userService";
 
 // Utility functions for sport profiles
 
+const canonicalizeProfileGameKey = (gameKey: string) => gameKey === "fc25" ? "fc26" : gameKey;
+
+export const isProfileGameEnabled = (profile: UserProfile | null | undefined, gameKey: string): boolean => {
+  if (!profile) return false;
+
+  switch (canonicalizeProfileGameKey(gameKey)) {
+    case 'cs2':
+      return !!profile.playsCs2;
+    case 'cs16':
+      return !!(profile as any).playsCs16;
+    case 'valorant':
+      return !!(profile as any).playsValorant;
+    case 'fc25':
+    case 'fc26':
+      return !!profile.playsFc;
+    case 'tekken8':
+      return !!profile.playsTekken;
+    case 'futsal':
+      return !!profile.playsFutsal;
+    case 'indoor_cricket':
+      return !!profile.playsIndoorCricket;
+    case 'padel':
+      return !!profile.playsPadel;
+    case 'pickleball':
+      return !!profile.playsPickleball;
+    default:
+      return false;
+  }
+};
+
 export const getUserSportProfile = (profile: UserProfile, gameKey: string) => {
-  switch (gameKey) {
+  switch (canonicalizeProfileGameKey(gameKey)) {
     case 'cs2':
       return {
         role: profile.cs2Role,
         skillLevel: profile.faceitSkillLevel,
+      };
+    case 'cs16':
+      return {
+        role: (profile as any).cs16Role,
+        skillScore: (profile as any).skillScores?.cs16,
+      };
+    case 'valorant':
+      return {
+        role: (profile as any).valorantRole,
+        skillScore: (profile as any).skillScores?.valorant,
       };
     case 'fc25':
     case 'fc26':
@@ -87,16 +128,29 @@ export const getUserSportProfile = (profile: UserProfile, gameKey: string) => {
 };
 
 export const getUserSportRoleLabel = (profile: UserProfile, gameKey: string): string | null => {
-  const sportProfile: any = getUserSportProfile(profile, gameKey);
+  const canonicalGameKey = canonicalizeProfileGameKey(gameKey);
+  const sportProfile: any = getUserSportProfile(profile, canonicalGameKey);
   if (!sportProfile) return null;
 
-  switch (gameKey) {
+  switch (canonicalGameKey) {
     case 'cs2': {
       const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
       if (role) return role;
       const level = sportProfile.skillLevel;
       if (typeof level === 'number' && level > 0) return `FACEIT Lv ${level}`;
       return null;
+    }
+    case 'cs16': {
+      const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
+      if (role) return role;
+      const tier = sportProfile.skillScore?.tier;
+      return typeof tier === 'string' && tier.trim() ? tier : null;
+    }
+    case 'valorant': {
+      const role = typeof sportProfile.role === 'string' ? sportProfile.role.trim() : '';
+      if (role) return role;
+      const tier = sportProfile.skillScore?.tier;
+      return typeof tier === 'string' && tier.trim() ? tier : null;
     }
     case 'fc25':
     case 'fc26': {

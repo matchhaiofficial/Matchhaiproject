@@ -6,6 +6,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { Matchroom } from "./matchService";
 import { isRoomExpired, isRoomLocked } from "../../utils/matchroomLifecycle";
+import { getUnavailablePaymentMessage } from "../../config/featureReadiness";
 
 export interface BookingIntent {
   id?: string;
@@ -43,6 +44,10 @@ export interface BookingIntent {
     | "rejected"
     | "cancelled";
   paymentStatus: "unpaid" | "paid";
+  selectedSlotIds?: string[];
+  createdByUsername?: string;
+  role?: string;
+  source?: "direct_join" | "captain_approved_join" | "captain_invite";
   expiresAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -165,6 +170,9 @@ export async function createBookingIntent(data: {
   userAuthId: string;
   side: "A" | "B";
   selectedSlots: number[];
+  selectedSlotIds?: string[];
+  role?: string;
+  source?: "direct_join" | "captain_approved_join" | "captain_invite";
   pricing?: { perPlayerCost: number; totalCost: number };
 }): Promise<Result<{ id: string }>> {
   try {
@@ -176,8 +184,12 @@ export async function createBookingIntent(data: {
     const intentId = await convex.mutation(api.bookings.createIntent, {
       matchroomId: data.matchroomId as Id<"matchrooms">,
       createdByUid: user._id,
+      createdByUsername: user.username,
       side: data.side,
       selectedSlots: data.selectedSlots,
+      selectedSlotIds: data.selectedSlotIds,
+      role: data.role,
+      source: data.source,
       pricing: data.pricing,
     });
 
@@ -234,18 +246,17 @@ export async function updateIntentPaymentStatus(
  */
 export async function confirmBookingTransaction(
   intentId: string,
-  userAuthId: string,
+  userId: string,
   paymentMethod: "wallet" | "card" = "wallet"
 ): Promise<Result> {
   try {
     if (paymentMethod !== "wallet") {
-      return { ok: false, message: "Card payments are coming soon. Please pay via wallet." };
+      return { ok: false, message: getUnavailablePaymentMessage(paymentMethod) };
     }
 
-    // Update payment status
-    await convex.mutation(api.bookings.updateIntentPaymentStatus, {
+    await convex.mutation(api.matchrooms.payMatchroomSeatIntent, {
       intentId: intentId as Id<"bookingIntents">,
-      paymentStatus: "paid",
+      userId: userId as Id<"users">,
     });
 
     return { ok: true };
@@ -255,20 +266,19 @@ export async function confirmBookingTransaction(
   }
 }
 
-/**
- * Claim seat transaction (simplified)
- */
-export async function claimSeatTransaction(
-  matchroomId: string,
+export async function cancelBookingIntent(
   intentId: string,
-  slotIndex: number
+  userId: string,
 ): Promise<Result> {
   try {
-    // This would need a dedicated Convex mutation for full implementation
-    return { ok: false, message: "Not implemented in Convex yet" };
+    await convex.mutation(api.bookings.cancelIntent, {
+      intentId: intentId as Id<"bookingIntents">,
+      userId: userId as Id<"users">,
+    });
+    return { ok: true };
   } catch (error: any) {
-    console.error("[bookingService] claimSeatTransaction error:", error);
-    return { ok: false, message: "Claim failed" };
+    console.error("[bookingService] cancelBookingIntent error:", error);
+    return { ok: false, message: error?.message || "Failed to cancel booking" };
   }
 }
 

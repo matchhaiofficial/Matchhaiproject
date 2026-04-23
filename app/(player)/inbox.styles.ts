@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/th
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
@@ -12,7 +12,7 @@ export default StyleSheet.create({
         paddingBottom: SPACING.lg,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     backButton: {
         marginRight: SPACING.md,
@@ -35,6 +35,24 @@ export default StyleSheet.create({
     listContent: {
         paddingTop: SPACING.lg,
     },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    pendingCardSpacer: {
+        marginBottom: 12,
+    },
+
+    markAllReadButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+    },
+    markAllReadText: {
+        color: COLORS.accent,
+        fontSize: 13,
+        fontWeight: '700',
+    },
 
     // Notification Card
     notificationCard: {
@@ -45,6 +63,9 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
         ...SHADOWS.cardSoft,
+    },
+    notificationCardNoMargin: {
+        marginBottom: 0,
     },
     cardHeader: {
         flexDirection: 'row',
@@ -58,6 +79,22 @@ export default StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: SPACING.md,
+    },
+    iconContainerInfo: {
+        backgroundColor: 'rgba(66, 165, 245, 0.1)',
+    },
+    iconContainerSuccess: {
+        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    },
+    unreadDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: COLORS.accent,
+        position: "absolute",
+        left: -4,
+        top: "50%",
+        marginTop: -4,
     },
     headerInfo: {
         flex: 1,
@@ -158,6 +195,19 @@ export default StyleSheet.create({
         gap: SPACING.sm,
         marginTop: SPACING.xs,
     },
+    counterOfferOptionRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+        marginTop: 10,
+        marginBottom: 0,
+        alignItems: "center",
+    },
+    counterOfferOptionTextWrap: {
+        flex: 1,
+    },
+    requestMetaMarginTop: {
+        marginTop: 10,
+    },
     acceptButton: {
         flex: 1,
         minHeight: 44,
@@ -245,6 +295,11 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(239, 83, 80, 0.2)',
     },
+    clearHistoryContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     clearHistoryText: {
         color: COLORS.error,
         marginLeft: SPACING.sm,
@@ -253,3 +308,4 @@ export default StyleSheet.create({
         fontWeight: '600',
     },
 });
+

@@ -9,7 +9,7 @@ import type { UserProfile } from './convex/userService';
 // TYPES
 // ═══════════════════════════════════════════════════════════════
 
-export type SkillTier = 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
+export type SkillTier = 'Beginner' | 'Casual' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
 
 export interface GameSkillScore {
     // Current rating (0-100)
@@ -30,7 +30,21 @@ export interface GameSkillScore {
     lastUpdated: number;
 }
 
-export type GameKey = 'cs2' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' | 'padel' | 'pickleball' | 'fc25';
+export type GameKey = 'cs2' | 'cs16' | 'valorant' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' | 'padel' | 'pickleball' | 'fc25';
+
+function getCanonicalGameKey(gameKey: GameKey | string): GameKey {
+    return (gameKey === 'fc25' ? 'fc26' : gameKey) as GameKey;
+}
+
+function getStoredSkillScore(profile: Pick<UserProfile, "skillScores"> | null | undefined, gameKey: GameKey) {
+    const scores = profile?.skillScores as Record<string, GameSkillScore | undefined> | undefined;
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
+    if (!scores) return null;
+    if (canonicalGameKey === 'fc26') {
+        return scores.fc26 || scores.fc25 || null;
+    }
+    return scores[canonicalGameKey] || null;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -38,9 +52,10 @@ export type GameKey = 'cs2' | 'tekken8' | 'fc26' | 'futsal' | 'indoor_cricket' |
 
 export const SKILL_THRESHOLDS = {
     BEGINNER: 30,    // 0-30
-    INTERMEDIATE: 60, // 31-60
-    ADVANCED: 80,    // 61-80
-    // PRO: 81-100
+    CASUAL: 50,
+    INTERMEDIATE: 70,
+    ADVANCED: 85,
+    PRO: 95,
 };
 
 const DEFAULT_RATING = 45; // Intermediate by default
@@ -51,9 +66,11 @@ const DEFAULT_RATING = 45; // Intermediate by default
 
 export function getTierFromRating(rating: number): SkillTier {
     if (rating <= SKILL_THRESHOLDS.BEGINNER) return 'Beginner';
+    if (rating <= SKILL_THRESHOLDS.CASUAL) return 'Casual';
     if (rating <= SKILL_THRESHOLDS.INTERMEDIATE) return 'Intermediate';
     if (rating <= SKILL_THRESHOLDS.ADVANCED) return 'Advanced';
-    return 'Pro';
+    if (rating <= SKILL_THRESHOLDS.PRO) return 'Pro';
+    return 'Elite';
 }
 
 function clamp(num: number, min: number, max: number) {
@@ -76,10 +93,11 @@ export function calculateInitialRating(
     gameKey: GameKey,
     userProfile: UserProfile
 ): { rating: number; source: GameSkillScore['initialSource'] } {
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
     let rating = DEFAULT_RATING;
     let source: GameSkillScore['initialSource'] = 'questionnaire';
 
-    switch (gameKey) {
+    switch (canonicalGameKey) {
         case 'cs2': {
             // 1. FACEIT Level (1-10)
             if (userProfile.faceitSkillLevel) {
@@ -104,8 +122,15 @@ export function calculateInitialRating(
             break;
         }
 
-        case 'fc26':
-        case 'fc25': {
+        case 'cs16': {
+            break;
+        }
+
+        case 'valorant': {
+            break;
+        }
+
+        case 'fc26': {
             // 1. PSN Hours / Progress
             if (userProfile.psnStats?.fc) {
                 // If we have "progress" from trophies (0-100), use it as a base
@@ -149,6 +174,48 @@ export function calculateScoreFromAnswers(
     gameKey: string,
     answers: Record<string, number>
 ): { rating: number; tier: SkillTier } | null {
+    if (gameKey === 'valorant') {
+        const q1 = answers.recent_rank;
+        const q2 = answers.match_performance;
+        const q3 = answers.game_sense;
+        if ([q1, q2, q3].some((value) => typeof value !== 'number')) return null;
+
+        const totalScore = q1 + q2 + q3;
+        let result: { rating: number; tier: SkillTier };
+
+        if (totalScore <= 5) result = { rating: 20, tier: 'Beginner' };
+        else if (totalScore <= 8) result = { rating: 45, tier: 'Casual' };
+        else if (totalScore <= 11) result = { rating: 65, tier: 'Intermediate' };
+        else if (totalScore <= 13) result = { rating: 82, tier: 'Advanced' };
+        else result = { rating: 97, tier: 'Elite' };
+
+        const capTier = (() => {
+            let capped: SkillTier | null = null;
+            if (q1 === 1) capped = 'Casual';
+            else if (q1 === 2) capped = 'Intermediate';
+            if (q2 === 1) capped = 'Casual';
+            if (q3 === 1) capped = 'Casual';
+            return capped;
+        })();
+
+        if (capTier) {
+            const tierOrder: SkillTier[] = ['Beginner', 'Casual', 'Intermediate', 'Advanced', 'Pro', 'Elite'];
+            if (tierOrder.indexOf(result.tier) > tierOrder.indexOf(capTier)) {
+                const capRatings: Record<SkillTier, number> = {
+                    Beginner: 20,
+                    Casual: 45,
+                    Intermediate: 65,
+                    Advanced: 82,
+                    Pro: 90,
+                    Elite: 97,
+                };
+                result = { rating: capRatings[capTier], tier: capTier };
+            }
+        }
+
+        return result;
+    }
+
     const config = SKILL_ASSESSMENT_CONFIG[gameKey];
     if (!config) return null;
 
@@ -172,8 +239,7 @@ export function calculateScoreFromAnswers(
             const normalizedRating = clampRating(thresh.rating);
             return {
                 rating: normalizedRating,
-                // We re-calculate tier to ensure consistency with our new global logic
-                tier: getTierFromRating(normalizedRating)
+                tier: thresh.tier
             };
         }
     }
@@ -192,11 +258,12 @@ export async function saveSelfAssessment(
     answers: Record<string, number>
 ): Promise<{ ok: boolean; rating?: number; tier?: SkillTier }> {
     try {
-        const result = calculateScoreFromAnswers(gameKey, answers);
+        const canonicalGameKey = getCanonicalGameKey(gameKey);
+        const result = calculateScoreFromAnswers(canonicalGameKey, answers);
         if (!result) return { ok: false };
 
         const normalizedRating = clampRating(result.rating);
-        const normalizedTier = getTierFromRating(normalizedRating);
+        const normalizedTier = result.tier;
 
         const skillScore = {
             rating: normalizedRating,
@@ -212,7 +279,7 @@ export async function saveSelfAssessment(
 
         await convex.mutation(api.users.updateSkillScores, {
             userId: uid as Id<"users">,
-            game: gameKey as any,
+            game: canonicalGameKey as any,
             skillScore,
         });
 
@@ -233,14 +300,16 @@ export async function initializeSkillIfMissing(
     gameKey: GameKey,
     userProfile: UserProfile
 ): Promise<GameSkillScore | null> {
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
 
     // Check if already exists locally in the passed profile to avoid read
-    if (userProfile.skillScores?.[gameKey as keyof typeof userProfile.skillScores]) {
-        return userProfile.skillScores[gameKey as keyof typeof userProfile.skillScores] as unknown as GameSkillScore;
+    const existingSkill = getStoredSkillScore(userProfile, canonicalGameKey);
+    if (existingSkill) {
+        return existingSkill;
     }
 
     // Attempt to calculate from external data
-    const { rating, source } = calculateInitialRating(gameKey, userProfile);
+    const { rating, source } = calculateInitialRating(canonicalGameKey, userProfile);
     const normalizedRating = clampRating(rating);
 
     // If source is 'questionnaire', it means we found no external data.
@@ -266,7 +335,7 @@ export async function initializeSkillIfMissing(
     try {
         await convex.mutation(api.users.updateSkillScores, {
             userId: uid as Id<"users">,
-            game: gameKey as any,
+            game: canonicalGameKey as any,
             skillScore: newScore,
         });
         return newScore;
@@ -332,6 +401,7 @@ export const applyMatchResult = async (
     confidence: number = 1.0
 ) => {
     try {
+        const canonicalGameKey = getCanonicalGameKey(gameKey);
         const { getUserProfile } = await import('./convex/userService');
 
         // Fetch all profiles
@@ -352,7 +422,7 @@ export const applyMatchResult = async (
             if (!p || !p.skillScores) return 45;
 
             const scores = p.skillScores as any;
-            const s = scores[gameKey];
+            const s = canonicalGameKey === 'fc26' ? (scores.fc26 || scores.fc25) : scores[canonicalGameKey];
             if (typeof s?.rating === 'number') {
                 return clampRating(s.rating);
             }
@@ -373,7 +443,7 @@ export const applyMatchResult = async (
             let currentStats = { wins: 0, losses: 0, matchesPlayed: 0 };
             if (p && p.skillScores) {
                 const scores = p.skillScores as any;
-                const rawStats = scores[gameKey];
+                const rawStats = canonicalGameKey === 'fc26' ? (scores.fc26 || scores.fc25) : scores[canonicalGameKey];
                 if (rawStats) {
                     currentStats = {
                         wins: rawStats.wins || 0,
@@ -397,11 +467,14 @@ export const applyMatchResult = async (
             const newLosses = currentStats.losses + (result === 'loss' ? 1 : 0);
 
             // Get existing initial values if present
-            const existingScore = p?.skillScores ? (p.skillScores as any)[gameKey] : null;
+            const existingScores = p?.skillScores as any;
+            const existingScore = existingScores
+                ? (canonicalGameKey === 'fc26' ? (existingScores.fc26 || existingScores.fc25) : existingScores[canonicalGameKey])
+                : null;
 
             return {
                 userId: uid as Id<"users">,
-                game: gameKey,
+                game: canonicalGameKey,
                 skillScore: {
                     rating: newRating,
                     tier: getTierFromRating(newRating),

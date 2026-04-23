@@ -1,5 +1,8 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
+import { recordZoneAuditEvent } from "./zoneAudit";
+import { api, internal } from "./_generated/api";
 
 // ============================================
 // QUERIES
@@ -51,6 +54,49 @@ export const getZoneBranches = query({
 // MUTATIONS
 // ============================================
 
+async function validateBookableResources(
+  ctx: any,
+  input: {
+    zoneId: string;
+    branchId: string;
+    resourceIds: Array<Id<"zoneResources">>;
+    allowReuseForRequestId?: Id<"bookingRequests">;
+  },
+) {
+  const seen = new Set<string>();
+  const resources: any[] = [];
+
+  for (const resourceId of input.resourceIds) {
+    const resource = await ctx.db.get(resourceId);
+    if (!resource) {
+      throw new Error("One or more selected resources no longer exist.");
+    }
+
+    const dedupeKey = String(resourceId);
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    if (String(resource.zoneId) !== input.zoneId) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to this venue.`);
+    }
+    if (String(resource.branchId || "") !== String(input.branchId)) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
+    }
+
+    const inAllowedState = ["available", "held"].includes(String(resource.lifecycleStatus || ""));
+    const belongsToSameRequest =
+      input.allowReuseForRequestId &&
+      String(resource.bookingRequestId || "") === String(input.allowReuseForRequestId);
+    if (!inAllowedState && !belongsToSameRequest) {
+      throw new Error(`${resource.name || "Selected resource"} is no longer available.`);
+    }
+
+    resources.push(resource);
+  }
+
+  return resources;
+}
+
 // Update resource lifecycle status
 export const updateResourceLifecycleStatus = mutation({
   args: {
@@ -67,10 +113,33 @@ export const updateResourceLifecycleStatus = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) {
+      throw new Error("Resource not found.");
+    }
 
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: now,
+    });
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(resource.zoneId),
+      module: "resources",
+      action: "update_resource_status",
+      actorUid: args.adminUid,
+      targetType: "resource",
+      targetId: String(args.resourceId),
+      summary: `Updated ${resource.name} to ${args.lifecycleStatus}.`,
+      details: {
+        branchId: resource.branchId,
+        resourceName: resource.name,
+        previousStatus: resource.lifecycleStatus,
+        nextStatus: args.lifecycleStatus,
+        holdRequestId: args.holdRequestId || null,
+        holdMinutes: args.holdMinutes || null,
+      },
+      createdAt: now,
     });
 
     return true;
@@ -92,11 +161,21 @@ export const allocateResourcesToRequest = mutation({
     }
 
     const now = Date.now();
+    await validateBookableResources(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      resourceIds: args.resourceIds,
+    });
+    const request = await ctx.db.get(args.requestId);
 
     // Update each resource to booked status
     for (const resourceId of args.resourceIds) {
       await ctx.db.patch(resourceId, {
         lifecycleStatus: "booked",
+        bookingRequestId: args.requestId,
+        matchroomId: request?.matchroomId,
+        bookedAt: now,
+        bookedByUid: args.adminUid,
         updatedAt: now,
       });
     }
@@ -104,16 +183,21 @@ export const allocateResourcesToRequest = mutation({
     // Update booking request
     await ctx.db.patch(args.requestId, {
       status: "accepted",
+      allocatedBranchId: args.branchId,
+      allocatedResourceIds: args.resourceIds,
+      allocatedAt: now,
+      allocatedByUid: args.adminUid,
       updatedAt: now,
     });
-
-    // Try to send notification
-    const request = await ctx.db.get(args.requestId);
     if (request?.userId) {
-      await ctx.db.insert("notifications", {
-        type: "booking_request_accepted",
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "resource.allocation_action",
         toUid: request.userId,
         status: "pending",
+        dedupeKey: `resource.allocation_action:${String(args.requestId)}:${String(request.userId)}:${args.resourceIds.map(String).sort().join(",")}`,
+        dedupePolicy: "replace_active",
+        entity: { kind: "booking_request", id: String(args.requestId) },
+        route: "/(player)/inbox",
         title: "Resources allocated",
         body: `Your booking has been allocated ${args.resourceIds.length} resource(s).`,
         data: {
@@ -121,11 +205,135 @@ export const allocateResourcesToRequest = mutation({
           zoneId: String(args.zoneId),
           branchId: args.branchId,
           resourceIds: args.resourceIds.map(String),
+          href: "/(player)/inbox",
         },
-        createdAt: now,
+      });
+    }
+
+    const resourceSummaries = await Promise.all(
+      args.resourceIds.map(async (resourceId) => {
+        const resource = await ctx.db.get(resourceId);
+        return resource
+          ? {
+              id: String(resourceId),
+              name: resource.name,
+              branchId: resource.branchId,
+              assetType: resource.assetType,
+            }
+          : { id: String(resourceId) };
+      }),
+    );
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(args.zoneId),
+      module: "resources",
+      action: "allocate_resources",
+      actorUid: args.adminUid,
+      targetType: "booking_request",
+      targetId: String(args.requestId),
+      summary: `Allocated ${args.resourceIds.length} resource(s) to booking request.`,
+      details: {
+        branchId: args.branchId,
+        resourceIds: args.resourceIds.map(String),
+        resources: resourceSummaries,
+        requestUserId: request?.userId ? String(request.userId) : null,
+      },
+      createdAt: now,
+    });
+
+    return true;
+  },
+});
+
+export const reassignResourcesForRequest = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+    requestId: v.id("bookingRequests"),
+    newResourceIds: v.array(v.id("zoneResources")),
+    adminUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!args.newResourceIds.length) {
+      throw new Error("Select at least one resource.");
+    }
+
+    const now = Date.now();
+    const request = await ctx.db.get(args.requestId);
+    if (!request) {
+      throw new Error("Booking request not found.");
+    }
+    if (String(request.status || "") !== "accepted" || !request.matchroomId) {
+      throw new Error("Only accepted bookings with a matchroom can be reassigned.");
+    }
+
+    await validateBookableResources(ctx, {
+      zoneId: String(args.zoneId),
+      branchId: args.branchId,
+      resourceIds: args.newResourceIds,
+      allowReuseForRequestId: args.requestId,
+    });
+
+    const previousResources = await ctx.db
+      .query("zoneResources")
+      .withIndex("by_bookingRequestId", (q) => q.eq("bookingRequestId", args.requestId))
+      .collect();
+    const nextResourceSet = new Set(args.newResourceIds.map((resourceId) => String(resourceId)));
+
+    for (const resource of previousResources) {
+      if (nextResourceSet.has(String(resource._id))) continue;
+      await ctx.db.patch(resource._id, {
+        lifecycleStatus: "available",
+        bookingRequestId: undefined,
+        matchroomId: undefined,
+        bookedAt: undefined,
+        bookedByUid: undefined,
         updatedAt: now,
       });
     }
+
+    for (const resourceId of args.newResourceIds) {
+      await ctx.db.patch(resourceId, {
+        lifecycleStatus: "booked",
+        bookingRequestId: args.requestId,
+        matchroomId: request.matchroomId,
+        bookedAt: now,
+        bookedByUid: args.adminUid,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.patch(args.requestId, {
+      allocatedBranchId: args.branchId,
+      allocatedResourceIds: args.newResourceIds,
+      allocatedAt: now,
+      allocatedByUid: args.adminUid,
+      updatedAt: now,
+    });
+
+    await ctx.db.patch(request.matchroomId, {
+      branchId: args.branchId,
+      resourceIds: args.newResourceIds,
+      updatedAt: now,
+    });
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(args.zoneId),
+      module: "resources",
+      action: "reassign_allocation",
+      actorUid: args.adminUid,
+      targetType: "booking_request",
+      targetId: String(args.requestId),
+      summary: `Reassigned ${args.newResourceIds.length} resource(s) for booking request.`,
+      details: {
+        branchId: args.branchId,
+        previousResourceIds: previousResources.map((resource) => String(resource._id)),
+        newResourceIds: args.newResourceIds.map(String),
+        matchroomId: String(request.matchroomId),
+        requestUserId: request.userId ? String(request.userId) : null,
+      },
+      createdAt: now,
+    });
 
     return true;
   },

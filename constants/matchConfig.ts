@@ -7,7 +7,8 @@ import {
     INDOOR_CRICKET_ROLES,
     PADEL_ROLES,
     PICKLEBALL_ROLES,
-    TEKKEN_CHARACTERS
+    TEKKEN_CHARACTERS,
+    VALORANT_ROLES
 } from './profileOptions';
 
 // CS2 Maps
@@ -22,6 +23,38 @@ export const CS2_MAPS = [
     'Anubis',
 ] as const;
 
+export const CS16_MAPS = [
+    'de_dust2',
+    'de_inferno',
+    'de_nuke',
+    'de_train',
+    'de_tuscan',
+] as const;
+
+export const VALORANT_MAPS = [
+    'Ascent',
+    'Bind',
+    'Breeze',
+    'Corrode',
+    'Haven',
+    'Icebox',
+    'Lotus',
+] as const;
+
+const FC_TEAM_CONFIG = {
+    maxTeamSize: 2,
+    captainMaxSlots: 2,
+    memberMaxSlots: 2,
+    formats: ['1v1', '2v2'] as const,
+    supportsTeams: true,
+} as const;
+
+const FC_FIELDS = {
+    formats: FC_TEAM_CONFIG.formats,
+    formations: FC_FORMATIONS,
+    playstyles: ['Possession', 'Counter-Attack', 'High Press', 'Defensive'] as const,
+} as const;
+
 // Game Team Configuration
 export const GAME_TEAM_CONFIG = {
     cs2: {
@@ -31,20 +64,22 @@ export const GAME_TEAM_CONFIG = {
         formats: ['5v5', '3v3', '2v2'] as const,
         supportsTeams: true,
     },
-    fc25: {
-        maxTeamSize: 2,
-        captainMaxSlots: 2,
-        memberMaxSlots: 2,
-        formats: ['1v1', '2v2'] as const,
+    cs16: {
+        maxTeamSize: 5,
+        captainMaxSlots: 5,
+        memberMaxSlots: 3,
+        formats: ['5v5', '3v3', '2v2'] as const,
         supportsTeams: true,
     },
-    fc26: {
-        maxTeamSize: 2,
-        captainMaxSlots: 2,
-        memberMaxSlots: 2,
-        formats: ['1v1', '2v2'] as const,
+    valorant: {
+        maxTeamSize: 5,
+        captainMaxSlots: 5,
+        memberMaxSlots: 3,
+        formats: ['5v5'] as const,
         supportsTeams: true,
     },
+    fc25: FC_TEAM_CONFIG,
+    fc26: FC_TEAM_CONFIG,
     tekken8: {
         maxTeamSize: 2,
         captainMaxSlots: 2,
@@ -97,16 +132,33 @@ export const GAME_FIELDS = {
             { label: 'FACEIT 7-10', value: 'faceit_7_10' },
         ] as const,
     },
-    fc25: {
-        formats: GAME_TEAM_CONFIG.fc25.formats,
-        formations: FC_FORMATIONS,
-        playstyles: ['Possession', 'Counter-Attack', 'High Press', 'Defensive'] as const,
+    cs16: {
+        formats: GAME_TEAM_CONFIG.cs16.formats,
+        maps: CS16_MAPS,
+        roles: CS2_ROLES,
+        skillLevels: [
+            { label: 'Any', value: 'any' },
+            { label: 'Beginner', value: 'Beginner' },
+            { label: 'Intermediate', value: 'Intermediate' },
+            { label: 'Advanced', value: 'Advanced' },
+            { label: 'Pro', value: 'Pro' },
+        ] as const,
     },
-    fc26: {
-        formats: GAME_TEAM_CONFIG.fc26.formats,
-        formations: FC_FORMATIONS,
-        playstyles: ['Possession', 'Counter-Attack', 'High Press', 'Defensive'] as const,
+    valorant: {
+        formats: GAME_TEAM_CONFIG.valorant.formats,
+        maps: VALORANT_MAPS,
+        roles: VALORANT_ROLES,
+        skillLevels: [
+            { label: 'Any', value: 'any' },
+            { label: 'Iron-Bronze', value: 'Beginner' },
+            { label: 'Silver', value: 'Casual' },
+            { label: 'Gold-Platinum', value: 'Intermediate' },
+            { label: 'Diamond-Ascendant', value: 'Advanced' },
+            { label: 'Immortal+', value: 'Elite' },
+        ] as const,
     },
+    fc25: FC_FIELDS,
+    fc26: FC_FIELDS,
     tekken8: {
         formats: GAME_TEAM_CONFIG.tekken8.formats,
         characters: TEKKEN_CHARACTERS,
@@ -205,10 +257,14 @@ export const GAME_FIELDS = {
 } as const;
 
 // Helper function
-export function getGameConfig(gameKey: GameKey) {
-    return GAME_TEAM_CONFIG[gameKey];
+function canonicalizeMatchConfigGameKey(gameKey: GameKey | string) {
+    return gameKey === 'fc25' ? 'fc26' : gameKey;
 }
 
-export function getGameFields(gameKey: GameKey) {
-    return GAME_FIELDS[gameKey];
+export function getGameConfig(gameKey: GameKey | string) {
+    return GAME_TEAM_CONFIG[canonicalizeMatchConfigGameKey(gameKey) as GameKey];
+}
+
+export function getGameFields(gameKey: GameKey | string) {
+    return GAME_FIELDS[canonicalizeMatchConfigGameKey(gameKey) as GameKey];
 }

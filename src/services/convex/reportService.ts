@@ -1,44 +1,247 @@
-// src/services/convex/reportService.ts
-// Convex-based report service that wraps Convex queries/mutations
-// Maintains the same interface as the Firebase report service
-
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser } from "./authService";
 import Logger from "../../utils/logger";
 
-export interface ComplainData {
-    matchroomId: string;
-    game: string;
-    title: string;
-    reason: string;
-    description: string;
-    reporterUid: string;
-    reporterUsername: string;
+export type ReportStatus = "pending" | "reviewed" | "resolved";
+export type ReportType = "matchroom_complaint" | "user_report" | "zone_complaint";
+
+export interface AppReport {
+  id: string;
+  _id: string;
+  reporterUid?: string;
+  type: ReportType;
+  status: ReportStatus;
+  matchroomId?: string;
+  matchroomTitle?: string | null;
+  reportedUserId?: string;
+  reportedUserName?: string | null;
+  zoneId?: string;
+  zoneName?: string | null;
+  game?: string;
+  reason: string;
+  description?: string;
+  reviewedByUid?: string;
+  reviewedAt?: number;
+  reviewerNote?: string;
+  resolvedByUid?: string;
+  resolvedAt?: number;
+  resolutionSummary?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
-/**
- * Submit a complaint for a matchroom.
- * Saves report metadata to the 'reports' collection for admin review.
- */
-export const submitMatchroomComplain = async (data: ComplainData): Promise<{ ok: boolean; message?: string }> => {
-    try {
-        const user = await currentUser();
-        if (!user) throw new Error("Not authenticated");
+export interface MatchroomComplaintInput {
+  matchroomId: string;
+  reason: string;
+  description?: string;
+}
 
-        await convex.mutation(api.reports.create, {
-            reporterUid: data.reporterUid as Id<"users">,
-            type: "matchroom_complaint",
-            matchroomId: data.matchroomId as Id<"matchrooms">,
-            game: data.game,
-            reason: data.reason,
-            description: data.description,
-        });
+export interface UserReportInput {
+  reportedUserId: string;
+  reason: string;
+  description?: string;
+}
 
-        return { ok: true, message: "Complaint submitted successfully. Our safety team will review it." };
-    } catch (error: any) {
-        Logger.error("reportService", "submitMatchroomComplain failed", error);
-        return { ok: false, message: error?.message || "Failed to submit complaint." };
+export interface ZoneComplaintInput {
+  zoneId: string;
+  reason: string;
+  description?: string;
+}
+
+type Result<T> = { ok: true; data: T; message?: string } | { ok: false; message: string };
+
+const toAppReport = (value: any): AppReport => ({
+  id: value._id,
+  _id: value._id,
+  reporterUid: value.reporterUid,
+  type: value.type,
+  status: value.status,
+  matchroomId: value.matchroomId,
+  matchroomTitle: value.matchroomTitle,
+  reportedUserId: value.reportedUserId,
+  reportedUserName: value.reportedUserName,
+  zoneId: value.zoneId,
+  zoneName: value.zoneName,
+  game: value.game,
+  reason: value.reason,
+  description: value.description,
+  reviewedByUid: value.reviewedByUid,
+  reviewedAt: value.reviewedAt,
+  reviewerNote: value.reviewerNote,
+  resolvedByUid: value.resolvedByUid,
+  resolvedAt: value.resolvedAt,
+  resolutionSummary: value.resolutionSummary,
+  createdAt: value.createdAt,
+  updatedAt: value.updatedAt,
+});
+
+async function getReporterUid() {
+  const authUser = await currentUser();
+  if (!authUser?.id) {
+    return undefined;
+  }
+
+  const convexUser = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+  return convexUser?._id;
+}
+
+async function getMyReportRows() {
+  const reporterUid = await getReporterUid();
+  if (!reporterUid) {
+    return [];
+  }
+
+  const rows = await convex.query(api.reports.listByReporter, { reporterUid });
+  return rows || [];
+}
+
+export async function submitMatchroomComplaint(
+  input: MatchroomComplaintInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation(api.reports.createMatchroomComplaint, {
+      matchroomId: input.matchroomId as Id<"matchrooms">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return {
+      ok: true,
+      data: {
+        reportId: result.reportId,
+        created: Boolean(result.created),
+      },
+      message: result.message,
+    };
+  } catch (error: any) {
+    Logger.error("reportService", "submitMatchroomComplaint failed", error);
+    return { ok: false, message: error?.message || "Failed to submit report." };
+  }
+}
+
+export async function submitUserReport(
+  input: UserReportInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation(api.reports.createUserReport, {
+      reportedUserId: input.reportedUserId as Id<"users">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return {
+      ok: true,
+      data: {
+        reportId: result.reportId,
+        created: Boolean(result.created),
+      },
+      message: result.message,
+    };
+  } catch (error: any) {
+    Logger.error("reportService", "submitUserReport failed", error);
+    return { ok: false, message: error?.message || "Failed to submit report." };
+  }
+}
+
+export async function submitZoneComplaint(
+  input: ZoneComplaintInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation(api.reports.createZoneComplaint, {
+      zoneId: input.zoneId as Id<"zones">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return {
+      ok: true,
+      data: {
+        reportId: result.reportId,
+        created: Boolean(result.created),
+      },
+      message: result.message,
+    };
+  } catch (error: any) {
+    Logger.error("reportService", "submitZoneComplaint failed", error);
+    return { ok: false, message: error?.message || "Failed to submit report." };
+  }
+}
+
+export async function getMyReports(status?: ReportStatus): Promise<Result<AppReport[]>> {
+  try {
+    const rows = await getMyReportRows();
+    const filtered = status
+      ? rows.filter((row: any) => row?.status === status)
+      : rows;
+
+    return { ok: true, data: filtered.map(toAppReport) };
+  } catch (error: any) {
+    Logger.error("reportService", "getMyReports failed", error);
+    return { ok: false, message: error?.message || "Failed to load reports." };
+  }
+}
+
+export async function getMyReportById(reportId: string): Promise<Result<AppReport>> {
+  try {
+    const rows = await getMyReportRows();
+    const row = rows.find((item: any) => String(item?._id) === String(reportId));
+    if (!row) {
+      return { ok: false, message: "Report not found." };
     }
-};
+
+    return { ok: true, data: toAppReport(row) };
+  } catch (error: any) {
+    Logger.error("reportService", "getMyReportById failed", error);
+    return { ok: false, message: error?.message || "Failed to load report." };
+  }
+}
+
+export async function getZoneReports(status?: ReportStatus): Promise<Result<AppReport[]>> {
+  try {
+    const rows = await convex.query(api.reports.listForMyZone, { status });
+    return { ok: true, data: (rows || []).map(toAppReport) };
+  } catch (error: any) {
+    Logger.error("reportService", "getZoneReports failed", error);
+    return { ok: false, message: error?.message || "Failed to load zone reports." };
+  }
+}
+
+export async function getZoneReportById(reportId: string): Promise<Result<AppReport>> {
+  try {
+    const row = await convex.query(api.reports.getForMyZoneById, {
+      reportId: reportId as Id<"reports">,
+    });
+    return { ok: true, data: toAppReport(row) };
+  } catch (error: any) {
+    Logger.error("reportService", "getZoneReportById failed", error);
+    return { ok: false, message: error?.message || "Failed to load zone report." };
+  }
+}
+
+export async function markZoneReportReviewed(
+  reportId: string,
+  reviewerNote: string
+): Promise<Result<void>> {
+  try {
+    const result: any = await convex.mutation(api.reports.markZoneReportReviewed, {
+      reportId: reportId as Id<"reports">,
+      reviewerNote,
+    });
+    return { ok: true, data: undefined, message: result?.message };
+  } catch (error: any) {
+    Logger.error("reportService", "markZoneReportReviewed failed", error);
+    return { ok: false, message: error?.message || "Failed to update report." };
+  }
+}
+
+export type ComplainData = MatchroomComplaintInput;
+
+export const submitMatchroomComplain = submitMatchroomComplaint;

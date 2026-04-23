@@ -103,5 +103,11 @@ export default StyleSheet.create({
         marginLeft: SPACING.sm,
         flex: 1,
     },
+    pointLabel: {
+        color: COLORS.text,
+    },
+    primaryButtonPressed: {
+        opacity: 0.9,
+    },
 });
 

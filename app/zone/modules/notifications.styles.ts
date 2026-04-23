@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, FONTS, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -11,156 +11,18 @@ export default StyleSheet.create({
     },
     content: {
         paddingBottom: SPACING.xxl + 24,
+        gap: SPACING.md,
     },
-    errorBox: {
-        borderWidth: 1,
-        borderColor: COLORS.error,
-        backgroundColor: "rgba(239, 83, 80, 0.12)",
-        borderRadius: RADII.sm,
-        padding: SPACING.sm,
-        marginBottom: SPACING.md,
+    clearActionRow: {
+        marginBottom: SPACING.xs,
     },
-    errorText: {
-        color: COLORS.error,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    emptyText: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-    },
-    card: {
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.08)",
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 20,
-        padding: SPACING.md + 1,
-        marginBottom: SPACING.md,
-    },
-    cardTop: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
+    infoStack: {
         gap: SPACING.sm,
     },
-    cardIconWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.35)",
-        backgroundColor: "rgba(66, 165, 245, 0.15)",
-    },
-    cardHeaderText: {
-        flex: 1,
-        minWidth: 0,
-    },
-    cardTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption + 2,
-    },
-    cardStatus: {
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xs + 1,
-        textTransform: "uppercase",
-        borderWidth: 1,
-        borderRadius: RADII.pill,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-    },
-    statusPending: {
-        color: "#FBC02D",
-        backgroundColor: "rgba(251, 192, 45, 0.14)",
-        borderColor: "rgba(251, 192, 45, 0.34)",
-    },
-    statusSeen: {
-        color: COLORS.accent,
-        backgroundColor: "rgba(66, 165, 245, 0.15)",
-        borderColor: "rgba(66, 165, 245, 0.35)",
-    },
-    cardType: {
+    messageText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-        marginTop: 2,
-    },
-    cardMessage: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
-        lineHeight: 18,
-        marginTop: 8,
-    },
-    cardTime: {
-        color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-        marginTop: 8,
-    },
-    metaRow: {
-        marginTop: SPACING.sm,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8,
-    },
-    metaChip: {
-        maxWidth: "100%",
-        minHeight: 30,
-        borderRadius: RADII.pill,
-        borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.26)",
-        backgroundColor: "rgba(66, 165, 245, 0.1)",
-        paddingHorizontal: 10,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 5,
-    },
-    metaChipText: {
-        color: COLORS.accent,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs + 1,
-    },
-    actionRow: {
-        marginTop: SPACING.sm,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-    },
-    primaryAction: {
-        flex: 1,
-        minHeight: 40,
-        borderRadius: RADII.md,
-        backgroundColor: COLORS.accent,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 6,
-    },
-    primaryActionText: {
-        color: "#FFFFFF",
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption,
-    },
-    secondaryAction: {
-        minHeight: 40,
-        borderRadius: RADII.md,
-        borderWidth: 1,
-        borderColor: "rgba(66, 165, 245, 0.35)",
-        backgroundColor: "rgba(66, 165, 245, 0.1)",
-        paddingHorizontal: 12,
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 6,
-    },
-    secondaryActionText: {
-        color: COLORS.accent,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xs + 1,
+        fontSize: TEXT_SIZES.caption + 1,
+        lineHeight: 20,
     },
 });

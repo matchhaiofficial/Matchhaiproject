@@ -1,18 +1,18 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
+    Pressable,
     ScrollView,
     Text,
-    TouchableOpacity,
     View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
-import { createBookingIntentDetailed } from "../../../src/services/bookingService";
+import { useToast } from "../../../src/hooks/useToast";
+import { createBookingIntentDetailed } from "../../../src/services/convex/bookingService";
 import { getMatchroom, Matchroom } from "../../../src/services/convex/matchService";
 import { getTeamById, getUserTeamsForGame, Team } from "../../../src/services/convex/teamService";
 import { COLORS } from "../../../src/theme";
@@ -23,9 +23,11 @@ import styles from "./book.styles";
 export default function BookSlotsScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
-    const { user } = useAuth();
     const insets = useSafeAreaInsets();
+    const { user } = useAuth();
+    const { showToast } = useToast();
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
 
     const [room, setRoom] = useState<Matchroom | null>(null);
     const [loading, setLoading] = useState(true);
@@ -43,6 +45,12 @@ export default function BookSlotsScreen() {
     // Friend Picker State
     const [showFriendPicker, setShowFriendPicker] = useState(false);
     const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+
+    const logScreenTouch = (tag: string, e: any) => {
+        if (!touchDebugEnabled) return;
+        const { pageX, pageY } = e.nativeEvent;
+        Logger.debug("TouchDebug", "touch", { tag, pageX, pageY });
+    };
 
     useEffect(() => {
         const fetchRoom = async () => {
@@ -68,7 +76,7 @@ export default function BookSlotsScreen() {
 
                     setRoom(roomData);
                 } else {
-                    Alert.alert("Error", "Matchroom not found");
+                    showToast({ type: "error", title: "Error", message: "Matchroom not found" });
                     router.back();
                 }
             } catch (e) {
@@ -78,7 +86,7 @@ export default function BookSlotsScreen() {
             }
         };
         fetchRoom();
-    }, [id]);
+    }, [id, router, showToast]);
 
     useEffect(() => {
         const fetchTeams = async () => {
@@ -116,7 +124,7 @@ export default function BookSlotsScreen() {
         }
 
         if (!team?.members) {
-            Alert.alert("Error", "Could not load team members.");
+            showToast({ type: "error", title: "Error", message: "Could not load team members." });
             return;
         }
 
@@ -135,7 +143,7 @@ export default function BookSlotsScreen() {
             .map(s => s.slotId);
 
         if (openSlotIds.length === 0) {
-            Alert.alert("No Slots", "There are no open slots on this side.");
+            showToast({ type: "warning", title: "No Slots", message: "There are no open slots on this side." });
             return;
         }
 
@@ -152,10 +160,10 @@ export default function BookSlotsScreen() {
 
         if (Object.keys(newSelections).length > 0) {
             setSelections(newSelections);
-            Alert.alert("Team Selected", `Prefilled ${Object.keys(newSelections).length} members from "${team.name}"`);
+            showToast({ type: "success", title: "Team Selected", message: `Prefilled ${Object.keys(newSelections).length} members from "${team.name}"` });
         } else {
             setSelections({}); // Reset if nothing added
-            Alert.alert("Note", "No team members were added. They might already be in the lobby.");
+            showToast({ type: "warning", title: "Note", message: "No team members were added. They might already be in the lobby." });
         }
     };
 
@@ -185,7 +193,7 @@ export default function BookSlotsScreen() {
         if (!room || !user || !id) return;
         const selectionList = Object.values(selections);
         if (selectionList.length === 0) {
-            Alert.alert("Selection Required", "Please select at least one teammate to book.");
+            showToast({ type: "warning", title: "Selection Required", message: "Please select at least one teammate to book." });
             return;
         }
 
@@ -205,11 +213,11 @@ export default function BookSlotsScreen() {
                     params: { intentId: res.data }
                 } as any);
             } else {
-                Alert.alert("Booking Failed", (res as any).message || "Something went wrong.");
+                showToast({ type: "error", title: "Booking Failed", message: (res as any).message || "Something went wrong." });
             }
         } catch (e) {
             Logger.error("BookSlots", "Submission error", e);
-            Alert.alert("Error", "Failed to create booking request.");
+            showToast({ type: "error", title: "Error", message: "Failed to create booking request." });
         } finally {
             setSubmitting(false);
         }
@@ -231,20 +239,27 @@ export default function BookSlotsScreen() {
     const totalPrice = perPlayerPrice * selectionList.length;
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView
+            style={styles.container}
+            onTouchEndCapture={(e) => logScreenTouch("book_slots_screen", e)}
+        >
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </TouchableOpacity>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
+                </Pressable>
                 <Text style={styles.headerTitle}>Select Teammates</Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.content}>
+            <View style={styles.body}>
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={styles.content}
+            >
                 {/* Side Selection */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Pick Your Side</Text>
                     <View style={styles.sideContainer}>
-                        <TouchableOpacity
+                        <Pressable
                             style={[styles.sideCard, selectedSide === 'A' && styles.sideCardActive]}
                             onPress={() => {
                                 setSelectedSide('A');
@@ -255,9 +270,9 @@ export default function BookSlotsScreen() {
                             <Text style={styles.sideLabel}>Team</Text>
                             <Text style={[styles.sideName, selectedSide === 'A' && styles.sideNameActive]}>Side A</Text>
                             {selectedSide === 'A' && <View style={styles.activeDot} />}
-                        </TouchableOpacity>
+                        </Pressable>
 
-                        <TouchableOpacity
+                        <Pressable
                             style={[styles.sideCard, selectedSide === 'B' && styles.sideCardActive]}
                             onPress={() => {
                                 setSelectedSide('B');
@@ -268,7 +283,7 @@ export default function BookSlotsScreen() {
                             <Text style={styles.sideLabel}>Team</Text>
                             <Text style={[styles.sideName, selectedSide === 'B' && styles.sideNameActive]}>Side B</Text>
                             {selectedSide === 'B' && <View style={styles.activeDot} />}
-                        </TouchableOpacity>
+                        </Pressable>
                     </View>
                 </View>
 
@@ -278,9 +293,8 @@ export default function BookSlotsScreen() {
                         <Text style={styles.sectionTitle}>Book as Team (Optional)</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                             {userTeams.map(team => (
-                                <TouchableOpacity
+                                <Pressable
                                     key={team.id}
-                                    activeOpacity={0.7}
                                     style={[
                                         styles.sideCard,
                                         { width: 160, marginRight: 12, height: 90 },
@@ -290,14 +304,14 @@ export default function BookSlotsScreen() {
                                 >
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: 4 }}>
                                         <Text style={[styles.sideName, { fontSize: 16 }]} numberOfLines={1}>{team.name}</Text>
-                                        <MaterialIcons
+                                        <AppIcon
                                             name={selectedTeamId === team.id ? "check-circle" : "group"}
                                             size={18}
                                             color={selectedTeamId === team.id ? COLORS.accent : COLORS.textSecondary}
                                         />
                                     </View>
                                     <Text style={styles.sideLabel}>{team.memberCount} Members • {team.game.toUpperCase()}</Text>
-                                </TouchableOpacity>
+                                </Pressable>
                             ))}
                         </ScrollView>
                     </View>
@@ -326,7 +340,7 @@ export default function BookSlotsScreen() {
                             const occupant = occupantName ? { username: occupantName, role: slot.role } : (room.players || []).find(p => p.uid === occupantUid);
 
                             return (
-                                <TouchableOpacity
+                                <Pressable
                                     key={slot.slotId}
                                     style={[
                                         styles.slotItem,
@@ -341,7 +355,7 @@ export default function BookSlotsScreen() {
                                         }
                                     }}
                                 >
-                                    <MaterialIcons
+                                    <AppIcon
                                         name={isOccupied ? "person" : isSelected ? "check-circle" : "add-circle-outline"}
                                         size={22}
                                         color={isSelected ? COLORS.accent : isOccupied ? COLORS.disabled : COLORS.textSecondary}
@@ -356,20 +370,19 @@ export default function BookSlotsScreen() {
                                             </Text>
                                         )}
                                     </View>
-                                </TouchableOpacity>
+                                </Pressable>
                             );
                         })}
                     </View>
                 </View>
-            </ScrollView>
-
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + 12, 24) }]}>
+                <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
+                    <View style={styles.footer}>
                 <View style={styles.priceRow}>
                     <Text style={styles.priceLabel}>Total to pay</Text>
                     <Text style={styles.priceValue}>{room.pricing?.currency} {totalPrice}</Text>
                 </View>
 
-                <TouchableOpacity
+                <Pressable
                     style={[styles.primaryButton, selectionList.length === 0 && styles.primaryButtonDisabled]}
                     onPressIn={() => {
                         if (touchDebugEnabled) {
@@ -378,7 +391,6 @@ export default function BookSlotsScreen() {
                     }}
                     onPress={handleSubmitBooking}
                     disabled={submitting || selectionList.length === 0}
-                    activeOpacity={0.85}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                     {submitting ? (
@@ -386,10 +398,13 @@ export default function BookSlotsScreen() {
                     ) : (
                         <>
                             <Text style={styles.primaryButtonText}>Proceed to Approval</Text>
-                            <MaterialIcons name="chevron-right" size={24} color="#FFF" />
+                            <AppIcon name="chevron-right" size={24} color="#FFF" />
                         </>
                     )}
-                </TouchableOpacity>
+                </Pressable>
+                    </View>
+                </View>
+            </ScrollView>
             </View>
 
             <FriendPicker

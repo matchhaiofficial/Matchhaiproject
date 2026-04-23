@@ -5,6 +5,7 @@ export type ZoneAdminModuleId =
   | "support_safety"
   | "insights_security"
   | "venue_settings"
+  | "migration_tools"
   | "notifications_center"
   | "audit_security";
 

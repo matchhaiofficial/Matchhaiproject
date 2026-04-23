@@ -1,14 +1,11 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Image,
     Pressable,
     ScrollView,
     Switch,
     Text,
-    TouchableOpacity,
     View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,6 +15,8 @@ import {
     FC_LEAGUES,
     TEKKEN_CHARACTERS
 } from "../../../constants/profileOptions";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import { AppImage } from "../../../src/components/AppImage";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
 import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
@@ -47,8 +46,9 @@ const faceitLevelIcons: Record<number, any> = {
 
 // type GameKey = keyof typeof GAME_RULES;
 
-const TIER_CONFIG: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; color: string }> = {
+const TIER_CONFIG: Record<string, { icon: AppIconName; color: string }> = {
     Beginner: { icon: 'star-border', color: COLORS.muted },
+    Casual: { icon: 'star-half', color: '#8fb3ff' },
     Intermediate: { icon: 'star-half', color: COLORS.success },
     Advanced: { icon: 'star', color: COLORS.accent },
     Pro: { icon: 'stars', color: '#b968c7' },
@@ -63,9 +63,19 @@ const normalizeSkillScores = (scores: Record<string, GameSkillScore>) => {
     Object.entries(scores || {}).forEach(([key, score]) => {
         if (!score || typeof score.rating !== 'number') return;
         const rating = clampRating(score.rating);
-        normalized[key] = { ...score, rating, tier: getTierFromRating(rating) };
+        normalized[key] = { ...score, rating, tier: score.tier || getTierFromRating(rating) };
     });
     return normalized;
+};
+
+const getLinkedPlatformsForGame = (gameId: GameKey, profileData: any | null) => {
+    if (!profileData) return [] as string[];
+
+    const linked: string[] = [];
+    if ((gameId === 'cs2' || gameId === 'fc26' || gameId === 'tekken8') && profileData.steamId) linked.push('Steam');
+    if (gameId === 'cs2' && profileData.faceitId) linked.push('FACEIT');
+    if ((gameId === 'fc26' || gameId === 'tekken8') && profileData.psnAccountId) linked.push('PSN');
+    return linked;
 };
 
 export default function GameDetails() {
@@ -92,6 +102,7 @@ export default function GameDetails() {
     const [tekkenSkillScore, setTekkenSkillScore] = useState<number | null>(null);
     const [tekkenBracket, setTekkenBracket] = useState<string | null>(null);
     const [skillScores, setSkillScores] = useState<Record<string, GameSkillScore>>({});
+    const [profileData, setProfileData] = useState<any | null>(null);
 
     // -- Game Specific State --
     // We use a generic approach where possible but keep specific vars for complexity
@@ -116,6 +127,7 @@ export default function GameDetails() {
             try {
                 const data = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
                 if (data) {
+                    setProfileData(data);
                     // Common Stats
                     setFaceitLevel((data as any).faceitSkillLevel || null);
                     setFaceitElo((data as any).faceitElo || null);
@@ -133,6 +145,14 @@ export default function GameDetails() {
                         case 'cs2':
                             setActive(!!(data as any).playsCs2);
                             setRole((data as any).cs2Role || null);
+                            break;
+                        case 'cs16':
+                            setActive(!!(data as any).playsCs16);
+                            setRole((data as any).cs16Role || null);
+                            break;
+                        case 'valorant':
+                            setActive(!!(data as any).playsValorant);
+                            setRole((data as any).valorantRole || null);
                             break;
                         case 'fc26':
                             setActive(!!(data as any).playsFc);
@@ -188,6 +208,18 @@ export default function GameDetails() {
 
     const [showAssessment, setShowAssessment] = useState(false);
 
+    const getExternalCalibration = () => {
+        if (!profileData || !gameId) return null;
+        const calibration = calculateInitialRating(gameId as GameKey, profileData);
+        return calibration.source === "questionnaire" ? null : calibration;
+    };
+
+    const linkedPlatforms = getLinkedPlatformsForGame(gameId, profileData);
+    const shouldShowVerificationHint =
+        Boolean(gameRule?.requiresOneOf?.length) &&
+        active &&
+        linkedPlatforms.length === 0;
+
     const persistChanges = async () => {
         if (!user?._id || !gameId) return;
 
@@ -200,6 +232,14 @@ export default function GameDetails() {
                 case 'cs2':
                     updates.playsCs2 = active;
                     updates.cs2Role = active ? role : null;
+                    break;
+                case 'cs16':
+                    updates.playsCs16 = active;
+                    updates.cs16Role = active ? role : null;
+                    break;
+                case 'valorant':
+                    updates.playsValorant = active;
+                    updates.valorantRole = active ? role : null;
                     break;
                 case 'fc26':
                     updates.playsFc = active;
@@ -232,45 +272,29 @@ export default function GameDetails() {
             // Skill Score Calibration
             if (active) {
                 const currentScore = skillScores[gameId];
+                const externalCalibration = getExternalCalibration();
                 // Only calibrate if no score exists OR no match history
                 if (!currentScore || (!currentScore.matchesPlayed && !currentScore.lastMatchDate)) {
+                    if (externalCalibration) {
+                        const rating = clampRating(externalCalibration.rating);
+                        const tier = getTierFromRating(rating);
 
-                    const isPhysical = !gameRule.skillSource;
-
-                    if (!isPhysical) {
-                        // Digital Game Auto-Calibration
-                        const tempProfile: any = {
-                            ...user,
-                            faceitSkillLevel: faceitLevel,
-                            psnStats: psnStats,
-                            steamCs2Hours: steamCs2Hours,
-                            steamFc26Hours: steamFc26Hours,
-                            // Add other necessary fields for calculation
+                        const newScore: GameSkillScore = {
+                            rating,
+                            tier,
+                            matchesPlayed: 0,
+                            wins: 0,
+                            losses: 0,
+                            initialSource: externalCalibration.source,
+                            initialRating: rating,
+                            lastMatchDate: null,
+                            lastUpdated: Date.now()
                         };
 
-                        const initial = calculateInitialRating(gameId as GameKey, tempProfile);
-                        if (initial && initial.source !== 'questionnaire') {
-                            // Valid external source found. Construct FULL Object.
-                            const rating = clampRating(initial.rating);
-                            const tier = getTierFromRating(rating);
-
-                            const newScore: GameSkillScore = {
-                                rating,
-                                tier,
-                                matchesPlayed: 0,
-                                wins: 0,
-                                losses: 0,
-                                initialSource: initial.source,
-                                initialRating: rating,
-                                lastMatchDate: null,
-                                lastUpdated: Date.now()
-                            };
-
-                            // For Convex, we need to update skillScores as a nested object
-                            const userData = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
-                            const existingScores = (userData as any)?.skillScores || {};
-                            updates.skillScores = { ...existingScores, [gameId]: newScore };
-                        }
+                        const userData = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                        const existingScores = (userData as any)?.skillScores || {};
+                        updates.skillScores = { ...existingScores, [gameId]: newScore };
+                        setSkillScores((prev) => ({ ...prev, [gameId]: newScore }));
                     }
                 }
             }
@@ -297,8 +321,8 @@ export default function GameDetails() {
         }
 
         const currentScore = skillScores[gameId];
-        // Check if we need questionnaire: Physical game AND no existing score
-        const needsAssessment = !gameRule.skillSource && !currentScore;
+        const externalCalibration = getExternalCalibration();
+        const needsAssessment = !currentScore && !externalCalibration;
 
         if (needsAssessment) {
             setShowAssessment(true);
@@ -307,12 +331,12 @@ export default function GameDetails() {
         }
     };
 
-    const handleAssessmentSuccess = (rating: number) => {
+    const handleAssessmentSuccess = (rating: number, tier: string) => {
         // Create full object for optimistic and persistent update
         const normalizedRating = clampRating(rating);
         const newScore: GameSkillScore = {
             rating: normalizedRating,
-            tier: getTierFromRating(normalizedRating),
+            tier: tier as any,
             matchesPlayed: 0,
             wins: 0,
             losses: 0,
@@ -471,9 +495,9 @@ export default function GameDetails() {
     return (
         <SafeAreaView style={styles.screen}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </TouchableOpacity>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
+                </Pressable>
                 <Text style={styles.headerTitle}>{gameName}</Text>
                 <Pressable
                     style={({ pressed }) => [
@@ -513,7 +537,7 @@ export default function GameDetails() {
                             <View style={styles.statsCard}>
                                 <View style={styles.statsHeader}>
                                     <Text style={styles.statsLabel}>Official Skill Rating</Text>
-                                    <MaterialIcons name="verified" size={16} color={COLORS.accent} />
+                                    <AppIcon name="verified" size={16} color={COLORS.accent} />
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
@@ -521,7 +545,7 @@ export default function GameDetails() {
                                         backgroundColor: (TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color + '20',
                                         alignItems: 'center', justifyContent: 'center', marginRight: 16
                                     }}>
-                                        <MaterialIcons
+                                        <AppIcon
                                             name={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).icon}
                                             size={28}
                                             color={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color}
@@ -568,6 +592,18 @@ export default function GameDetails() {
                             tekkenBracket={tekkenBracket}
                         />
 
+                        {shouldShowVerificationHint && (
+                            <View style={styles.statsCard}>
+                                <View style={styles.statsHeader}>
+                                    <Text style={styles.statsLabel}>Verification Hint</Text>
+                                    <AppIcon name="info-outline" size={16} color={COLORS.accent} />
+                                </View>
+                                <Text style={styles.helpText}>
+                                    Link {gameRule.requiresOneOf?.map((platform) => platform.toUpperCase()).join(" or ")} in Profile for automatic calibration, or save this game now and use the in-app skill questions.
+                                </Text>
+                            </View>
+                        )}
+
                         {/* Inputs */}
                         {renderInputs()}
                     </>
@@ -598,7 +634,11 @@ const RenderExternalStats = (props: any) => {
                 </View>
                 <View style={styles.statsRow}>
                     <View style={styles.statItem}>
-                        <Image source={faceitLevelIcons[faceitLevel]} style={styles.faceitLevelIcon} resizeMode="contain" />
+                        <AppImage
+                            source={faceitLevelIcons[faceitLevel]}
+                            containerStyle={styles.faceitLevelIcon}
+                            contentFit="contain"
+                        />
                         <Text style={styles.statCaption}>FACEIT Level</Text>
                     </View>
                     {props.faceitElo && (

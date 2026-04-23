@@ -1,5 +1,4 @@
 // app/matchrooms/result.tsx
-import { MaterialIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -7,10 +6,10 @@ import {
     Pressable,
     ScrollView,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppIcon } from '../../src/components/AppIcon';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
@@ -124,7 +123,7 @@ export default function MatchResultSubmission() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.errorContainer}>
-                    <MaterialIcons name="error-outline" size={48} color={COLORS.error} />
+                    <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>{error}</Text>
                 </View>
             </SafeAreaView>
@@ -135,7 +134,7 @@ export default function MatchResultSubmission() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.errorContainer}>
-                    <MaterialIcons name="error-outline" size={48} color={COLORS.error} />
+                    <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>Match not found</Text>
                 </View>
             </SafeAreaView>
@@ -159,7 +158,7 @@ export default function MatchResultSubmission() {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.errorContainer}>
-                    <MaterialIcons name="block" size={48} color={COLORS.warning} />
+                    <AppIcon name="block" size={48} color={COLORS.warning} />
                     <Text style={styles.errorText}>Only team captains can submit match results</Text>
                 </View>
             </SafeAreaView>
@@ -169,7 +168,7 @@ export default function MatchResultSubmission() {
     return (
         <SafeAreaView style={styles.container}>
             <Pressable onPress={() => router.back()} style={styles.backButton}>
-                <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
+                <AppIcon name="arrow-back" size={24} color={COLORS.text} />
             </Pressable>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -182,12 +181,12 @@ export default function MatchResultSubmission() {
 
                 <View style={styles.matchInfoCard}>
                     <View style={styles.matchInfoRow}>
-                        <MaterialIcons name="sports-esports" size={16} color={COLORS.accent} />
+                        <AppIcon name="sports-esports" size={16} color={COLORS.accent} />
                         <Text style={styles.matchInfoLabel}>Match:</Text>
                         <Text style={styles.matchInfoValue}>{matchData.title}</Text>
                     </View>
                     <View style={styles.matchInfoRow}>
-                        <MaterialIcons name="videogame-asset" size={16} color={COLORS.accent} />
+                        <AppIcon name="videogame-asset" size={16} color={COLORS.accent} />
                         <Text style={styles.matchInfoLabel}>Game:</Text>
                         <Text style={styles.matchInfoValue}>{matchData.gameKey.toUpperCase()}</Text>
                     </View>
@@ -208,24 +207,25 @@ export default function MatchResultSubmission() {
                 <Text style={styles.sectionLabel}>Which team won?</Text>
 
                 {/* Team 1 */}
-                <TouchableOpacity
-                    style={[
+                <Pressable
+                    style={({ pressed }) => [
                         styles.teamCard,
                         selectedWinner === 'team1' && styles.teamCardSelected,
                         alreadySubmitted && styles.teamCardDisabled,
+                        pressed && !alreadySubmitted && styles.teamCardPressed,
                     ]}
                     onPress={() => !alreadySubmitted && setSelectedWinner('team1')}
                     disabled={alreadySubmitted}
                 >
                     <View style={styles.teamHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={styles.teamTitleRow}>
                             <Text style={styles.teamName}>Team 1</Text>
                             {isTeam1Captain && (
-                                <MaterialIcons name="star" size={16} color={COLORS.warning} style={{ marginLeft: 8 }} />
+                                <AppIcon name="star" size={16} color={COLORS.warning} style={styles.captainStar} />
                             )}
                         </View>
                         {selectedWinner === 'team1' && (
-                            <MaterialIcons name="check-circle" size={24} color={COLORS.accent} />
+                            <AppIcon name="check-circle" size={24} style={styles.selectedIcon} />
                         )}
                     </View>
                     <View style={styles.teamPlayers}>
@@ -236,27 +236,28 @@ export default function MatchResultSubmission() {
                             </View>
                         ))}
                     </View>
-                </TouchableOpacity>
+                </Pressable>
 
                 {/* Team 2 */}
-                <TouchableOpacity
-                    style={[
+                <Pressable
+                    style={({ pressed }) => [
                         styles.teamCard,
                         selectedWinner === 'team2' && styles.teamCardSelected,
                         alreadySubmitted && styles.teamCardDisabled,
+                        pressed && !alreadySubmitted && styles.teamCardPressed,
                     ]}
                     onPress={() => !alreadySubmitted && setSelectedWinner('team2')}
                     disabled={alreadySubmitted}
                 >
                     <View style={styles.teamHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={styles.teamTitleRow}>
                             <Text style={styles.teamName}>Team 2</Text>
                             {isTeam2Captain && (
-                                <MaterialIcons name="star" size={16} color={COLORS.warning} style={{ marginLeft: 8 }} />
+                                <AppIcon name="star" size={16} color={COLORS.warning} style={styles.captainStar} />
                             )}
                         </View>
                         {selectedWinner === 'team2' && (
-                            <MaterialIcons name="check-circle" size={24} color={COLORS.accent} />
+                            <AppIcon name="check-circle" size={24} style={styles.selectedIcon} />
                         )}
                     </View>
                     <View style={styles.teamPlayers}>
@@ -267,13 +268,14 @@ export default function MatchResultSubmission() {
                             </View>
                         ))}
                     </View>
-                </TouchableOpacity>
+                </Pressable>
 
                 {!alreadySubmitted && (
-                    <TouchableOpacity
-                        style={[
+                    <Pressable
+                        style={({ pressed }) => [
                             styles.submitButton,
                             (!selectedWinner || submitting) && styles.submitButtonDisabled,
+                            pressed && selectedWinner && !submitting && styles.submitButtonPressed,
                         ]}
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -282,15 +284,14 @@ export default function MatchResultSubmission() {
                         }}
                         onPress={handleSubmit}
                         disabled={!selectedWinner || submitting}
-                        activeOpacity={0.85}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                         {submitting ? (
-                            <ActivityIndicator size="small" color={COLORS.background} />
+                            <ActivityIndicator size="small" color={COLORS.backgroundDark} />
                         ) : (
                             <Text style={styles.submitButtonText}>Submit Result</Text>
                         )}
-                    </TouchableOpacity>
+                    </Pressable>
                 )}
 
                 {otherCaptainSubmitted && (
@@ -313,3 +314,4 @@ export default function MatchResultSubmission() {
         </SafeAreaView>
     );
 }
+
