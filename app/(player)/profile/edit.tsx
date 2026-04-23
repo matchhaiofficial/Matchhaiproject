@@ -26,9 +26,14 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
 import { useToast } from "../../../src/hooks/useToast";
-import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
-import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
-import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
+import {
+    FaceitProfileSummary,
+    fetchFaceitProfileFromUrl,
+    PsnVerificationResult,
+    SteamProfileSummary,
+    fetchSteamProfileFromUrl,
+    verifyPsnProfile,
+} from "../../../src/services/convex/externalApiService";
 import Logger from "../../../src/utils/logger";
 import {
     isFaceitIdAvailable,

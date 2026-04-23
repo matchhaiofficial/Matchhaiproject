@@ -29,7 +29,7 @@ import { GAME_RULES } from "../../../src/constants/gameRules";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
-import { PsnVerificationResult } from "../../../src/services/psnApi";
+import type { PsnVerificationResult } from "../../../src/services/convex/externalApiService";
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
