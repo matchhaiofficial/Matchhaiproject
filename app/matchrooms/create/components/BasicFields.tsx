@@ -1,5 +1,13 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import {
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 import { AppPickerSheet } from "../../../../src/components/AppModalPrimitives";
 import styles from "../create.styles";
@@ -168,96 +176,127 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 )}
             </View>
 
-            <AppPickerSheet visible={showDatePicker} onClose={() => setShowDatePicker(false)} sheetStyle={styles.pickerSheet}>
-                <View style={styles.pickerHeader}>
-                    <Pressable onPress={() => setShowDatePicker(false)}>
-                        <Text style={styles.pickerAction}>Cancel</Text>
-                    </Pressable>
-                    <Text style={styles.pickerTitle}>Select Date</Text>
-                    <Pressable
-                        onPress={() => {
-                            if (dateDraft) {
-                                const day = String(dateDraft.getDate()).padStart(2, "0");
-                                const month = String(dateDraft.getMonth() + 1).padStart(2, "0");
-                                const year = dateDraft.getFullYear();
-                                onChange("date", `${year}-${month}-${day}`);
-                            }
-                            setShowDatePicker(false);
-                        }}
-                    >
-                        <Text style={styles.pickerAction}>Done</Text>
-                    </Pressable>
-                </View>
-                <View style={styles.calendarContainer}>
-                    <View style={styles.calendarHeader}>
+            {/*
+             * DATE PICKER — uses a plain Modal instead of AppPickerSheet so we
+             * own the container height entirely. The sheet slides up from the
+             * bottom and the calendar inside scrolls if needed on tiny screens.
+             */}
+            <Modal
+                visible={showDatePicker}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowDatePicker(false)}
+            >
+                {/* Dim backdrop — tap to dismiss */}
+                <Pressable
+                    style={datePickerStyles.backdrop}
+                    onPress={() => setShowDatePicker(false)}
+                />
+
+                {/* Sheet sits at the bottom, grows with content, max 90% screen */}
+                <View style={[styles.pickerSheet, datePickerStyles.sheet]}>
+                    {/* Drag handle */}
+                    <View style={datePickerStyles.handle} />
+
+                    <View style={styles.pickerHeader}>
+                        <Pressable onPress={() => setShowDatePicker(false)}>
+                            <Text style={styles.pickerAction}>Cancel</Text>
+                        </Pressable>
+                        <Text style={styles.pickerTitle}>Select Date</Text>
                         <Pressable
-                            style={styles.calendarNavButton}
                             onPress={() => {
-                                const prev = new Date(monthCursor);
-                                prev.setMonth(prev.getMonth() - 1);
-                                const minMonth = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-                                if (prev.getTime() >= minMonth.getTime()) {
-                                    setMonthCursor(prev);
+                                if (dateDraft) {
+                                    const day = String(dateDraft.getDate()).padStart(2, "0");
+                                    const month = String(dateDraft.getMonth() + 1).padStart(2, "0");
+                                    const year = dateDraft.getFullYear();
+                                    onChange("date", `${year}-${month}-${day}`);
                                 }
+                                setShowDatePicker(false);
                             }}
                         >
-                            <Text style={styles.calendarNavText}>{"<"}</Text>
-                        </Pressable>
-                        <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
-                        <Pressable
-                            style={styles.calendarNavButton}
-                            onPress={() => {
-                                const next = new Date(monthCursor);
-                                next.setMonth(next.getMonth() + 1);
-                                setMonthCursor(next);
-                            }}
-                        >
-                            <Text style={styles.calendarNavText}>{">"}</Text>
+                            <Text style={styles.pickerAction}>Done</Text>
                         </Pressable>
                     </View>
-                    <View style={styles.weekdayRow}>
-                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                            <Text key={label} style={styles.weekdayLabel}>{label}</Text>
-                        ))}
-                    </View>
-                    <View style={styles.calendarGrid}>
-                        {Array.from({ length: firstWeekday }).map((_, idx) => (
-                            <View key={`empty-${idx}`} style={styles.dayCell} />
-                        ))}
-                        {Array.from({ length: daysInMonth }).map((_, idx) => {
-                            const dayNumber = idx + 1;
-                            const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
-                            const disabled = isBeforeMin(date);
-                            const selected = dateDraft ? isSameDay(dateDraft, date) : false;
-                            return (
+
+                    {/* ScrollView is the safety net for very short screens */}
+                    <ScrollView
+                        bounces={false}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ flexGrow: 1 }}
+                    >
+                        <View style={styles.calendarContainer}>
+                            <View style={styles.calendarHeader}>
                                 <Pressable
-                                    key={`day-${dayNumber}`}
-                                    style={[
-                                        styles.dayCell,
-                                        selected && styles.dayCellSelected,
-                                        disabled && styles.dayCellDisabled,
-                                    ]}
+                                    style={styles.calendarNavButton}
                                     onPress={() => {
-                                        if (disabled) return;
-                                        setDateDraft(date);
+                                        const prev = new Date(monthCursor);
+                                        prev.setMonth(prev.getMonth() - 1);
+                                        const minMonth = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+                                        if (prev.getTime() >= minMonth.getTime()) {
+                                            setMonthCursor(prev);
+                                        }
                                     }}
                                 >
-                                    <Text
-                                        style={[
-                                            styles.dayText,
-                                            selected && styles.dayTextSelected,
-                                            disabled && styles.dayTextDisabled,
-                                        ]}
-                                    >
-                                        {dayNumber}
-                                    </Text>
+                                    <Text style={styles.calendarNavText}>{"<"}</Text>
                                 </Pressable>
-                            );
-                        })}
-                    </View>
+                                <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
+                                <Pressable
+                                    style={styles.calendarNavButton}
+                                    onPress={() => {
+                                        const next = new Date(monthCursor);
+                                        next.setMonth(next.getMonth() + 1);
+                                        setMonthCursor(next);
+                                    }}
+                                >
+                                    <Text style={styles.calendarNavText}>{">"}</Text>
+                                </Pressable>
+                            </View>
+                            <View style={styles.weekdayRow}>
+                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                                    <Text key={label} style={styles.weekdayLabel}>{label}</Text>
+                                ))}
+                            </View>
+                            <View style={styles.calendarGrid}>
+                                {Array.from({ length: firstWeekday }).map((_, idx) => (
+                                    <View key={`empty-${idx}`} style={styles.dayCell} />
+                                ))}
+                                {Array.from({ length: daysInMonth }).map((_, idx) => {
+                                    const dayNumber = idx + 1;
+                                    const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
+                                    const disabled = isBeforeMin(date);
+                                    const selected = dateDraft ? isSameDay(dateDraft, date) : false;
+                                    return (
+                                        <Pressable
+                                            key={`day-${dayNumber}`}
+                                            style={[
+                                                styles.dayCell,
+                                                selected && styles.dayCellSelected,
+                                                disabled && styles.dayCellDisabled,
+                                            ]}
+                                            onPress={() => {
+                                                if (disabled) return;
+                                                setDateDraft(date);
+                                            }}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.dayText,
+                                                    selected && styles.dayTextSelected,
+                                                    disabled && styles.dayTextDisabled,
+                                                ]}
+                                            >
+                                                {dayNumber}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                        </View>
+                    </ScrollView>
                 </View>
-            </AppPickerSheet>
+            </Modal>
 
+            {/* TIME PICKER — unchanged, still uses AppPickerSheet */}
             <AppPickerSheet visible={showTimePicker} onClose={() => setShowTimePicker(false)} sheetStyle={styles.pickerSheet}>
                 <View style={styles.pickerHeader}>
                     <Pressable onPress={() => setShowTimePicker(false)}>
@@ -345,3 +384,30 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
         </>
     );
 }
+
+/**
+ * Local styles only for the date-picker Modal shell.
+ * Everything inside still uses the existing `styles` from create.styles.
+ */
+const datePickerStyles = StyleSheet.create({
+    backdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+    },
+    sheet: {
+        // Sits at the bottom, grows naturally with content, capped at 90% screen
+        maxHeight: "90%",
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        paddingBottom: 24,
+    },
+    handle: {
+        alignSelf: "center",
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: "#555",
+        marginTop: 8,
+        marginBottom: 4,
+    },
+});
