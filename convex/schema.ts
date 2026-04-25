@@ -199,26 +199,28 @@ export default defineSchema({
     pickleballRole: v.optional(v.union(v.string(), v.null())),
 
     // Platform URLs (Step 3)
-    steamProfileUrl: v.optional(v.string()),
-    faceitProfileUrl: v.optional(v.string()),
+    steamProfileUrl: v.optional(v.union(v.string(), v.null())),
+    faceitProfileUrl: v.optional(v.union(v.string(),v.null())),
     eaProfileUrl: v.optional(v.string()),
     xboxGamertag: v.optional(v.string()),
 
     // External IDs
-    steamId: v.optional(v.string()),
-    steamPersonaName: v.optional(v.string()),
-    steamCs2Hours: v.optional(v.number()),
+    steamId: v.optional(v.union(v.string(), v.null())),
+    steamPersonaName: v.optional(v.union(v.string(), v.null())),
+    steamCs2Hours: v.optional(v.union(v.number(), v.null())),
     eaId: v.optional(v.string()),
-    faceitId: v.optional(v.string()),
-    faceitNickname: v.optional(v.string()),
-    faceitGame: v.optional(v.string()),
-    faceitElo: v.optional(v.number()),
-    faceitSkillLevel: v.optional(v.number()),
-    psnAccountId: v.optional(v.string()),
-    psnOnlineId: v.optional(v.string()),
+    faceitElo: v.optional(v.union(v.number(), v.null())),
+    faceitSkillLevel: v.optional(v.union(v.number(), v.null())),
+    faceitId: v.optional(v.union(v.string(), v.null())),
+    faceitNickname: v.optional(v.union(v.string(), v.null())),
+    faceitGame: v.optional(v.union(v.string(), v.null())),
+    psnAccountId: v.optional(v.union(v.string(), v.null())),
+    psnOnlineId: v.optional(v.union(v.string(), v.null())),
 
     // External stats (full objects)
-    steamStats: v.optional(v.any()),
+    steamStats: v.optional(v.union(v.any(),v.null())),
+    steamFc26Hours :v.optional(v.union(v.any(),v.null())),
+    steamTekken8Hours :v.optional(v.union(v.any(),v.null())),
     faceitStats: v.optional(v.any()),
     psnStats: v.optional(v.any()),
 

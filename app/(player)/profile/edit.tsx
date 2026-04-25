@@ -703,7 +703,7 @@ export default function EditProfile() {
                 hideAreasPublicly,
                 hidePlatformsPublicly,
                 restrictInvitesToFriends,
-                updatedAt: new Date(),
+                updatedAt: Date.now(),
             };
 
             // Username update
