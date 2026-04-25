@@ -32,7 +32,7 @@ const AuthContext = createContext<AuthContextType>({
   userId: null,
   loading: true,
   session: null,
-  refreshUser: async () => {},
+  refreshUser: async () => { },
   refreshSession: async () => false,
 });
 
@@ -204,11 +204,8 @@ export default function AuthProvider({ children }: { children: any }) {
         void refreshSession();
       }
     });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [refreshSession]);
+    return () => subscription.remove();
+  }, []);
 
   return (
     <AuthContext.Provider value={{ authUser, user, userId, loading, session, refreshUser, refreshSession }}>
