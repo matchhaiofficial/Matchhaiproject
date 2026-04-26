@@ -182,7 +182,7 @@ export default function AdminRegisterStep4() {
       }, 2000);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
-      setCurrentSubStep(failedAt);
+      setCurrentSubStep(failedAt - 1); 
       setPhase("partial-fail");
       setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);

@@ -248,7 +248,7 @@ export default function RegisterStep4() {
       }, 1500);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
-      setCurrentSubStep(failedAt);
+      setCurrentSubStep(failedAt - 1); 
       setPhase("partial-fail");
       setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
