@@ -480,9 +480,17 @@ export async function recoverMissingProfileAfterLogin(
   }
 }
 
+const APP_SCHEME = "matchhai"; // must match your app.json "scheme"
+
 /** Send password reset email */
 export async function sendPasswordReset(email: string): Promise<SimpleResult> {
   try {
+    const payload = {
+      email: email.trim().toLowerCase(),
+      redirectTo: `${APP_SCHEME}://auth/reset-password`,   // ← deep link
+      callbackURL: `${APP_SCHEME}://auth/reset-password`,  // ← deep link
+    };
+
     const candidateMethods = [
       (authClient as any).forgetPassword,
       (authClient as any).forgotPassword,
@@ -490,39 +498,26 @@ export async function sendPasswordReset(email: string): Promise<SimpleResult> {
       (authClient as any).sendResetPassword,
     ].filter(Boolean);
 
-    const payload = {
-      email: email.trim().toLowerCase(),
-      redirectTo: "/auth/reset-password",
-      callbackURL: "/auth/reset-password",
-    };
-
     for (const method of candidateMethods) {
       const response = await method(payload);
-      const error = response?.error;
-      if (!error) {
-        return { ok: true };
-      }
+      if (!response?.error) return { ok: true };
     }
 
     const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
     if (siteUrl) {
-      const response = await fetch(`${siteUrl.replace(/\/$/, "")}/forget-password`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        return { ok: true };
-      }
+      const response = await fetch(
+        `${siteUrl.replace(/\/$/, "")}/api/auth/forget-password`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (response.ok) return { ok: true };
     }
 
-    return {
-      ok: false,
-      message: "Password reset is not available right now. Please contact support if this keeps happening.",
-    };
+    return { ok: false, message: "Password reset is not available right now." };
   } catch (e: any) {
-    console.error("[authService] sendPasswordReset error", e);
     return { ok: false, message: mapAuthError(e), code: e?.code };
   }
 }
