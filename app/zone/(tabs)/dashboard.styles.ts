@@ -7,6 +7,7 @@ const GRID_GAP = 8;
 // No extra paddingHorizontal on the grid — parent container already has it
 // Subtract a small buffer (12px each side) for the parent's padding
 const CARD_W = (SCREEN_W - 24 - GRID_GAP) / 2.2;
+const CARD_H = Math.round(CARD_W * 1.15);
 
 export default StyleSheet.create({
     screen: {
@@ -159,7 +160,8 @@ export default StyleSheet.create({
     },
     moduleCard: {
         width: CARD_W,
-        minHeight: 180,  // ← was height: 180, content can now grow beyond this
+        height: CARD_H,
+        overflow: "hidden",  // clips content neatly if it overflows
     },
     opsGrid: {
         flexDirection: "row",
@@ -168,7 +170,8 @@ export default StyleSheet.create({
     },
     opsTile: {
         width: CARD_W,
-        minHeight: 180,
+        height: Math.round(CARD_W * 1.0), // slightly shorter for ops cards
+        overflow: "hidden",
     },
 });
 
