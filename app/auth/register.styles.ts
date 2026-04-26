@@ -659,9 +659,14 @@ export default StyleSheet.create({
     width: "100%",
     maxWidth: 320,
     alignItems: "center",
+    justifyContent: "center",
   },
   loadingSpinner: {
     marginBottom: SPACING.lg,
+    height: 64,
+    width: 64,
+    alignItems: "center",
+    justifyContent: "center",
   },
   loadingPhaseTitle: {
     color: COLORS.text,

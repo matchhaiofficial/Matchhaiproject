@@ -15,6 +15,7 @@ import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { useToast } from "../../src/hooks/useToast";
 import styles from "./register.styles";
+import { Modal } from "react-native";
 
 export default function AdminRegisterStep4() {
   const { step1, branches, step4, setStep4, setCurrentStep, resetAll } = useZoneOnboardingStore();
@@ -202,94 +203,96 @@ export default function AdminRegisterStep4() {
     ];
 
     return (
-      <View style={styles.loadingOverlay}>
-        <View style={styles.loadingContent}>
-          {phase !== "partial-fail" && phase !== "success" ? (
-            <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
-          ) : null}
-          {phase === "success" ? (
-            <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
-          ) : null}
-          {phase === "partial-fail" ? (
-            <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
-          ) : null}
+      <Modal transparent animationType="fade" visible statusBarTranslucent>
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingContent}>
+            {phase !== "partial-fail" && phase !== "success" ? (
+              <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
+            ) : null}
+            {phase === "success" ? (
+              <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
+            ) : null}
+            {phase === "partial-fail" ? (
+              <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
+            ) : null}
 
-          <Text style={styles.loadingPhaseTitle}>
-            {phase === "submitting"
-              ? "Registering your zone..."
-              : phase === "partial-fail"
-                ? "Registration interrupted"
-                : "Zone submitted"}
-          </Text>
-
-          <View style={{ width: "100%", marginBottom: 20 }}>
-            {steps.map((step, index) => {
-              const isDone = currentSubStep > step.id || phase === "success";
-              const isActive = currentSubStep === step.id && phase === "submitting";
-              const isFailed = currentSubStep === step.id && phase === "partial-fail";
-
-              return (
-                <View key={step.id}>
-                  <View style={styles.progressStep}>
-                    <View style={styles.progressIcon}>
-                      {isDone ? (
-                        <AppIcon name="check-circle" size={20} color={COLORS.success} />
-                      ) : isFailed ? (
-                        <AppIcon name="cancel" size={20} color={COLORS.error} />
-                      ) : isActive ? (
-                        <ActivityIndicator size="small" color={COLORS.accent} />
-                      ) : (
-                        <AppIcon
-                          name="radio-button-unchecked"
-                          size={20}
-                          color="rgba(255,255,255,0.2)"
-                        />
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.progressText,
-                        isActive && styles.progressTextActive,
-                        isDone && styles.progressTextDone,
-                        isFailed && { color: COLORS.error },
-                      ]}
-                    >
-                      {step.label}
-                    </Text>
-                  </View>
-                  {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
-                </View>
-              );
-            })}
-          </View>
-
-          {phase === "partial-fail" ? (
-            <>
-              <Text
-                style={[
-                  styles.helperText,
-                  styles.helperError,
-                  { textAlign: "center", marginBottom: 20 },
-                ]}
-              >
-                {errorDetails}
-              </Text>
-              <AppButton onPress={handleFinish} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
-                Retry submission
-              </AppButton>
-              <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); }} style={{ padding: 10 }}>
-                <Text style={{ color: COLORS.muted }}>Cancel</Text>
-              </Pressable>
-            </>
-          ) : null}
-
-          {phase === "success" ? (
-            <Text style={[styles.progressText, { textAlign: "center" }]}>
-              Redirecting to your zone dashboard...
+            <Text style={styles.loadingPhaseTitle}>
+              {phase === "submitting"
+                ? "Registering your zone..."
+                : phase === "partial-fail"
+                  ? "Registration interrupted"
+                  : "Zone submitted"}
             </Text>
-          ) : null}
+
+            <View style={{ width: "100%", marginBottom: 20 }}>
+              {steps.map((step, index) => {
+                const isDone = currentSubStep > step.id || phase === "success";
+                const isActive = currentSubStep === step.id && phase === "submitting";
+                const isFailed = currentSubStep === step.id && phase === "partial-fail";
+
+                return (
+                  <View key={step.id}>
+                    <View style={styles.progressStep}>
+                      <View style={styles.progressIcon}>
+                        {isDone ? (
+                          <AppIcon name="check-circle" size={20} color={COLORS.success} />
+                        ) : isFailed ? (
+                          <AppIcon name="cancel" size={20} color={COLORS.error} />
+                        ) : isActive ? (
+                          <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : (
+                          <AppIcon
+                            name="radio-button-unchecked"
+                            size={20}
+                            color="rgba(255,255,255,0.2)"
+                          />
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.progressText,
+                          isActive && styles.progressTextActive,
+                          isDone && styles.progressTextDone,
+                          isFailed && { color: COLORS.error },
+                        ]}
+                      >
+                        {step.label}
+                      </Text>
+                    </View>
+                    {index < steps.length - 1 ? <View style={styles.progressStepLine} /> : null}
+                  </View>
+                );
+              })}
+            </View>
+
+            {phase === "partial-fail" ? (
+              <>
+                <Text
+                  style={[
+                    styles.helperText,
+                    styles.helperError,
+                    { textAlign: "center", marginBottom: 20 },
+                  ]}
+                >
+                  {errorDetails}
+                </Text>
+                <AppButton onPress={handleFinish} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
+                  Retry submission
+                </AppButton>
+                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); }} style={{ padding: 10 }}>
+                  <Text style={{ color: COLORS.muted }}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            {phase === "success" ? (
+              <Text style={[styles.progressText, { textAlign: "center" }]}>
+                Redirecting to your zone dashboard...
+              </Text>
+            ) : null}
+          </View>
         </View>
-      </View>
+      </Modal>
     );
   };
 
