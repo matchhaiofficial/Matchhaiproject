@@ -32,6 +32,8 @@ export default function AdminRegisterStep4() {
   }, [setCurrentStep]);
 
   useEffect(() => {
+        // Don't redirect away if we're in success flow
+    if (phase === "success" || phase === "submitting") return;
     if (
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
@@ -45,7 +47,7 @@ export default function AdminRegisterStep4() {
     if (!branches.length) {
       router.replace("/auth/zone-register-step2");
     }
-  }, [branches.length, step1]);
+  }, [branches.length, step1,phase]);
 
   const allAgreementsChecked = step4.agreeTerms && step4.agreeRevenueShare;
 
@@ -171,7 +173,6 @@ export default function AdminRegisterStep4() {
           agreeTerms: true,
           agreeRevenueShare: true,
         });
-        resetAll();
         showToast({
           type: "success",
           title: "Zone account created",
@@ -179,6 +180,7 @@ export default function AdminRegisterStep4() {
             "Your dashboard is ready. The venue stays in review until a super admin approves it.",
         });
         router.replace(APP_ROUTES.zoneHome as any);
+        resetAll();
       }, 2000);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
