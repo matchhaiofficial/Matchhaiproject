@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -8,45 +8,144 @@ import {
     Text,
     View,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useToast } from "../../../src/hooks/useToast";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { type ResourceLifecycleStatus } from "../../../src/features/zoneAdmin/types";
-import { subscribeZoneBookingQueue, type ZoneBookingQueueItem } from "../../../src/services/zoneAdminBookingService";
+import { subscribeZoneBookingQueue, type ZoneBookingQueueItem } from "../../../src/services/convex/zoneAdminBookingService";
 import {
     allocateResourcesToBookingRequest,
+    reassignResourcesForBookingRequest,
     subscribeBranchResources,
     subscribeZoneBranches,
     updateBranchResourceStatus,
     type ZoneBranch,
     type ZoneBranchResource,
-} from "../../../src/services/zoneAdminResourceService";
+} from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../src/theme";
+import { getResourceLifecycleLabel } from "../../../src/utils/statusLabels";
+import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./resources.styles";
 
-type KindFilter = "all" | "seat" | "court";
+type AssetFilter =
+    | "all"
+    | "pc"
+    | "ps5"
+    | "xbox"
+    | "indoor_cricket"
+    | "futsal"
+    | "padel"
+    | "pickleball";
 type StatusFilter = "all" | ResourceLifecycleStatus;
 type ResourcesViewMode = "grid" | "allocation";
+type ResourceSection = {
+    id: string;
+    title: string;
+    assetFilter: AssetFilter;
+    resources: ZoneBranchResource[];
+    rooms?: Array<{
+        id: string;
+        title: string;
+        resources: ZoneBranchResource[];
+    }>;
+};
 
 const STATUS_FILTERS: StatusFilter[] = ["all", "available", "held", "booked", "maintenance"];
-const KIND_FILTERS: KindFilter[] = ["all", "seat", "court"];
-
 const STATUS_OPTIONS: ResourceLifecycleStatus[] = ["available", "held", "booked", "maintenance"];
-const KIND_LABELS: Record<KindFilter, string> = {
+const ASSET_FILTER_LABELS: Record<AssetFilter, string> = {
     all: "All",
-    seat: "Seats",
-    court: "Courts",
+    pc: "PCs",
+    ps5: "PS5s",
+    xbox: "Xbox",
+    indoor_cricket: "Indoor cricket",
+    futsal: "Futsal",
+    padel: "Padel",
+    pickleball: "Pickleball",
 };
 const STATUS_LABELS: Record<StatusFilter, string> = {
     all: "All",
-    available: "Available",
-    held: "Held",
-    booked: "Booked",
-    maintenance: "Maintenance",
+    available: getResourceLifecycleLabel("available"),
+    held: getResourceLifecycleLabel("held"),
+    booked: getResourceLifecycleLabel("booked"),
+    maintenance: getResourceLifecycleLabel("maintenance"),
+};
+
+const PC_TIER_ORDER = ["regular", "premium", "elite"] as const;
+
+const titleCase = (value: string) =>
+    value
+        .split(/[_\s-]+/)
+        .filter(Boolean)
+        .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+        .join(" ");
+
+const assetFilterForResource = (resource: ZoneBranchResource): AssetFilter => {
+    if (resource.assetType === "pc") return "pc";
+    if (resource.assetType === "console") {
+        const tier = String(resource.tier || resource.label || "").toLowerCase();
+        return tier.includes("xbox") ? "xbox" : "ps5";
+    }
+    if (resource.assetType === "indoor_cricket") return "indoor_cricket";
+    if (resource.assetType === "futsal") return "futsal";
+    if (resource.assetType === "padel") return "padel";
+    if (resource.assetType === "pickleball") return "pickleball";
+    return "all";
+};
+
+const inferPcTier = (resource: ZoneBranchResource) => {
+    const source = `${resource.tier || ""} ${resource.label || ""}`.toLowerCase();
+    if (source.includes("elite")) return "elite";
+    if (source.includes("premium")) return "premium";
+    return "regular";
+};
+
+const extractNumericSuffix = (value: string) => {
+    const match = value.match(/(\d+)(?!.*\d)/);
+    return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+};
+
+const sortResources = (resources: ZoneBranchResource[]) =>
+    [...resources].sort((a, b) => {
+        const numberDelta = extractNumericSuffix(a.label) - extractNumericSuffix(b.label);
+        if (numberDelta !== 0) return numberDelta;
+        return a.label.localeCompare(b.label);
+    });
+
+const buildPcRooms = (resources: ZoneBranchResource[], tier: string) => {
+    const sorted = sortResources(resources);
+    const rooms: Array<{ id: string; title: string; resources: ZoneBranchResource[] }> = [];
+    for (let index = 0; index < sorted.length; index += 5) {
+        const roomResources = sorted.slice(index, index + 5);
+        const roomNumber = Math.floor(index / 5) + 1;
+        const roomLabel = roomResources[0]?.roomLabel || `${titleCase(tier)} PCs Room ${roomNumber}`;
+        rooms.push({
+            id: `${tier}_room_${roomNumber}`,
+            title: roomLabel,
+            resources: roomResources,
+        });
+    }
+    return rooms;
+};
+
+const buildCourtRooms = (resources: ZoneBranchResource[]) => {
+    const grouped = new Map<string, ZoneBranchResource[]>();
+    sortResources(resources).forEach((resource) => {
+        const key = String(resource.surface || "default");
+        const current = grouped.get(key) || [];
+        current.push(resource);
+        grouped.set(key, current);
+    });
+    return Array.from(grouped.entries()).map(([surface, entries]) => ({
+        id: `${entries[0]?.assetType || "court"}_${surface}`,
+        title: surface === "default" ? "All Courts" : `${titleCase(surface)} Courts`,
+        resources: entries,
+    }));
 };
 
 export default function ZoneResourcesModule() {
@@ -58,6 +157,11 @@ export default function ZoneResourcesModule() {
     }>();
     const { user } = useAuth();
     const { zone } = useZoneData();
+    const { showToast } = useToast();
+    useRouteLogger("ZoneResourcesModule", {
+        zoneId: zone?.id,
+        userId: user?._id,
+    });
 
     const [branches, setBranches] = useState<ZoneBranch[]>([]);
     const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
@@ -65,10 +169,12 @@ export default function ZoneResourcesModule() {
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
-    const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+    const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
     const [showFilters, setShowFilters] = useState(true);
     const [viewMode, setViewMode] = useState<ResourcesViewMode>("grid");
+    const [expandedSectionIds, setExpandedSectionIds] = useState<string[]>([]);
+    const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
     const [loadingBranches, setLoadingBranches] = useState(true);
     const [loadingResources, setLoadingResources] = useState(true);
     const [processingResourceId, setProcessingResourceId] = useState<string | null>(null);
@@ -76,8 +182,9 @@ export default function ZoneResourcesModule() {
     const [allocating, setAllocating] = useState(false);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [subcollectionsBlocked, setSubcollectionsBlocked] = useState(false);
-    const migrationNotice = !zone?.migration?.perBranchSeatModel
-        ? "Branch migration is required for live seat-level resource grid. Showing legacy branch fallback."
+    const migrationReady = isZoneMigrationReady(zone);
+    const migrationNotice = !migrationReady
+        ? `This venue is not live on the resource model yet. Current state: ${getZoneMigrationLabel(zone)}. Legacy fallback remains visible until migration succeeds. Open Migration Tools if you need to repair the venue setup.`
         : null;
     const deepBranchId = Array.isArray(params.branchId) ? params.branchId[0] : params.branchId;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
@@ -108,7 +215,7 @@ export default function ZoneResourcesModule() {
             setLoadingBranches(false);
             return;
         }
-        if (!zone?.migration?.perBranchSeatModel) {
+        if (!migrationReady) {
             setBranches(legacyBranches);
             setSelectedBranchId((prev) => prev || deepBranchId || legacyBranches[0]?.id || null);
             setLoadingBranches(false);
@@ -149,7 +256,7 @@ export default function ZoneResourcesModule() {
         );
 
         return () => unsub();
-    }, [deepBranchId, legacyBranches, subcollectionsBlocked, zone?.id, zone?.migration?.perBranchSeatModel]);
+    }, [deepBranchId, legacyBranches, migrationReady, subcollectionsBlocked, zone?.id]);
 
     useEffect(() => {
         if (subcollectionsBlocked) {
@@ -220,16 +327,80 @@ export default function ZoneResourcesModule() {
     const filteredResources = useMemo(
         () =>
             resources.filter((item) => {
-                const kindOk = kindFilter === "all" ? true : item.kind === kindFilter;
+                const assetOk = assetFilter === "all" ? true : assetFilterForResource(item) === assetFilter;
                 const statusOk = statusFilter === "all" ? true : item.lifecycleStatus === statusFilter;
-                return kindOk && statusOk;
+                return assetOk && statusOk;
             }),
-        [kindFilter, resources, statusFilter],
+        [assetFilter, resources, statusFilter],
     );
+
+    const availableAssetFilters = useMemo(() => {
+        const present = new Set<AssetFilter>(resources.map(assetFilterForResource));
+        return (["all", "pc", "ps5", "indoor_cricket", "futsal", "padel", "pickleball", "xbox"] as AssetFilter[]).filter(
+            (filter) => filter === "all" || present.has(filter),
+        );
+    }, [resources]);
+
+    const resourceSections = useMemo<ResourceSection[]>(() => {
+        const sections: ResourceSection[] = [];
+        const pushSection = (
+            id: string,
+            title: string,
+            sectionAssetFilter: AssetFilter,
+            sectionResources: ZoneBranchResource[],
+            roomBuilder?: (items: ZoneBranchResource[]) => Array<{ id: string; title: string; resources: ZoneBranchResource[] }>,
+        ) => {
+            if (!sectionResources.length) return;
+            sections.push({
+                id,
+                title,
+                assetFilter: sectionAssetFilter,
+                resources: sectionResources,
+                rooms: roomBuilder ? roomBuilder(sectionResources) : undefined,
+            });
+        };
+
+        const pcResources = filteredResources.filter((item) => assetFilterForResource(item) === "pc");
+        PC_TIER_ORDER.forEach((tier) => {
+            pushSection(
+                `pc_${tier}`,
+                `${titleCase(tier)} PCs`,
+                "pc",
+                pcResources.filter((item) => inferPcTier(item) === tier),
+                (items) => buildPcRooms(items, tier),
+            );
+        });
+
+        const ps5Resources = filteredResources.filter((item) => assetFilterForResource(item) === "ps5");
+        pushSection("ps5", "PS5", "ps5", ps5Resources, (items) => buildCourtRooms(items));
+
+        const xboxResources = filteredResources.filter((item) => assetFilterForResource(item) === "xbox");
+        pushSection("xbox", "Xbox", "xbox", xboxResources, (items) => buildCourtRooms(items));
+
+        (["indoor_cricket", "futsal", "padel", "pickleball"] as AssetFilter[]).forEach((filter) => {
+            const sectionResources = filteredResources.filter((item) => assetFilterForResource(item) === filter);
+            pushSection(filter, ASSET_FILTER_LABELS[filter], filter, sectionResources, buildCourtRooms);
+        });
+
+        return sections;
+    }, [filteredResources]);
+
+    useEffect(() => {
+        const validSectionIds = new Set(resourceSections.map((section) => section.id));
+        const validRoomIds = new Set(
+            resourceSections.flatMap((section) => section.rooms?.map((room) => room.id) || []),
+        );
+        setExpandedSectionIds((prev) => prev.filter((id) => validSectionIds.has(id)));
+        setExpandedRoomIds((prev) => prev.filter((id) => validRoomIds.has(id)));
+    }, [resourceSections]);
 
     const selectedRequest = useMemo(
         () => queue.find((item) => item.id === selectedRequestId) || null,
         [queue, selectedRequestId],
+    );
+    const hasExistingAllocation = useMemo(
+        () => Boolean(selectedRequest?.allocatedResourceIds && selectedRequest.allocatedResourceIds.length > 0),
+        [selectedRequest?.allocatedResourceIds],
     );
     const selectedResources = useMemo(
         () => resources.filter((item) => selectedResourceIds.includes(item.id)),
@@ -261,38 +432,79 @@ export default function ZoneResourcesModule() {
         return summary;
     }, [resources]);
 
-    const toggleResourceSelected = (resourceId: string) => {
+    useEffect(() => {
+        if (!selectedRequest) {
+            setSelectedResourceIds([]);
+            return;
+        }
+
+        if (selectedRequest.allocatedBranchId && selectedRequest.allocatedBranchId !== selectedBranchId) {
+            setSelectedBranchId(selectedRequest.allocatedBranchId);
+        }
+
+        if (selectedRequest.allocatedResourceIds?.length) {
+            setSelectedResourceIds(selectedRequest.allocatedResourceIds);
+            return;
+        }
+
+        setSelectedResourceIds([]);
+    }, [selectedBranchId, selectedRequest]);
+
+    const toggleResourceSelected = useCallback((resourceId: string) => {
         setSelectedResourceIds((prev) =>
             prev.includes(resourceId)
                 ? prev.filter((item) => item !== resourceId)
                 : [...prev, resourceId],
         );
-    };
+    }, []);
 
-    const setResourceStatus = async (
+    const toggleSectionExpanded = useCallback((sectionId: string) => {
+        setExpandedSectionIds((prev) =>
+            prev.includes(sectionId) ? prev.filter((item) => item !== sectionId) : [...prev, sectionId],
+        );
+    }, []);
+
+    const toggleRoomExpanded = useCallback((roomId: string) => {
+        setExpandedRoomIds((prev) =>
+            prev.includes(roomId) ? prev.filter((item) => item !== roomId) : [...prev, roomId],
+        );
+    }, []);
+
+    const toggleRoomSelected = useCallback((roomResources: ZoneBranchResource[]) => {
+        const roomIds = roomResources.map((resource) => resource.id);
+        setSelectedResourceIds((prev) => {
+            const allSelected = roomIds.every((id) => prev.includes(id));
+            if (allSelected) {
+                return prev.filter((id) => !roomIds.includes(id));
+            }
+            return Array.from(new Set([...prev, ...roomIds]));
+        });
+    }, []);
+
+    const setResourceStatus = useCallback(async (
         resourceId: string,
         status: ResourceLifecycleStatus,
     ) => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         setProcessingResourceId(resourceId);
         const result = await updateBranchResourceStatus({
             zoneId: zone.id,
             branchId: selectedBranchId,
             resourceId,
             status,
-            adminUid: user.uid,
+            adminUid: user._id,
             holdRequestId: selectedRequestId || undefined,
         });
         setProcessingResourceId(null);
         if (!result.ok) {
-            Alert.alert("Update failed", result.message);
+            showToast({ type: "error", title: "Update failed", message: result.message });
         }
-    };
+    }, [selectedBranchId, selectedRequestId, showToast, user?._id, zone?.id]);
 
-    const applyBulkStatus = async (status: ResourceLifecycleStatus) => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+    const applyBulkStatus = useCallback(async (status: ResourceLifecycleStatus) => {
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         if (selectedResourceIds.length === 0) {
-            Alert.alert("No selection", "Select resources first.");
+            showToast({ type: "warning", title: "No selection", message: "Select resources first." });
             return;
         }
         setProcessingBulkStatus(status);
@@ -303,7 +515,7 @@ export default function ZoneResourcesModule() {
                     branchId: selectedBranchId,
                     resourceId,
                     status,
-                    adminUid: user.uid,
+                    adminUid: user._id,
                     holdRequestId: selectedRequestId || undefined,
                 }),
             ),
@@ -312,46 +524,82 @@ export default function ZoneResourcesModule() {
 
         const failed = results.filter((result) => !result.ok).length;
         if (failed > 0) {
-            Alert.alert("Partial update", `${selectedResourceIds.length - failed} updated, ${failed} failed.`);
+            showToast({
+                type: "warning",
+                title: "Partial update",
+                message: `${selectedResourceIds.length - failed} updated, ${failed} failed.`,
+            });
             return;
         }
-        Alert.alert("Updated", `${selectedResourceIds.length} resource(s) set to ${status}.`);
-    };
+        showToast({
+            type: "success",
+            title: "Updated",
+            message: `${selectedResourceIds.length} resource(s) set to ${status}.`,
+        });
+    }, [selectedBranchId, selectedRequestId, selectedResourceIds, showToast, user?._id, zone?.id]);
 
-    const handleAllocate = async () => {
-        if (!zone?.id || !selectedBranchId || !user?.uid) return;
+    const handleAllocate = useCallback(async () => {
+        if (!zone?.id || !selectedBranchId || !user?._id) return;
         if (!selectedRequestId || selectedResourceIds.length === 0) {
-            Alert.alert("Missing selection", "Pick a booking request and resources.");
+            showToast({ type: "warning", title: "Missing selection", message: "Pick a booking request and resources." });
             return;
         }
-        const invalidResources = selectedResources.filter(
-            (item) => !["available", "held"].includes(item.lifecycleStatus),
-        );
+        const invalidResources = selectedResources.filter((item) => {
+            if (["available", "held"].includes(item.lifecycleStatus)) return false;
+            return !(item.lifecycleStatus === "booked" && item.bookingRequestId === selectedRequestId);
+        });
         if (invalidResources.length > 0) {
-            Alert.alert(
-                "Invalid selection",
-                "Only available or held resources can be allocated. Update status first.",
-            );
+            showToast({
+                type: "warning",
+                title: "Invalid selection",
+                message: "Only available, held, or already-linked booked resources can be used here.",
+            });
             return;
         }
 
         setAllocating(true);
-        const result = await allocateResourcesToBookingRequest({
-            zoneId: zone.id,
-            branchId: selectedBranchId,
-            requestId: selectedRequestId,
-            resourceIds: selectedResourceIds,
-            adminUid: user.uid,
-        });
+        const result = hasExistingAllocation
+            ? await reassignResourcesForBookingRequest({
+                zoneId: zone.id,
+                branchId: selectedBranchId,
+                requestId: selectedRequestId,
+                newResourceIds: selectedResourceIds,
+                adminUid: user._id,
+            })
+            : await allocateResourcesToBookingRequest({
+                zoneId: zone.id,
+                branchId: selectedBranchId,
+                requestId: selectedRequestId,
+                resourceIds: selectedResourceIds,
+                adminUid: user._id,
+            });
         setAllocating(false);
 
         if (!result.ok) {
-            Alert.alert("Allocation failed", result.message);
+            showToast({
+                type: "error",
+                title: hasExistingAllocation ? "Reassignment failed" : "Allocation failed",
+                message: result.message,
+            });
             return;
         }
-        setSelectedResourceIds([]);
-        Alert.alert("Allocated", "Resources moved to booked and linked to request.");
-    };
+        showToast({
+            type: "success",
+            title: hasExistingAllocation ? "Reassigned" : "Allocated",
+            message: hasExistingAllocation
+                ? "Resources were reassigned and the previous allocation was released."
+                : "Resources moved to booked and linked to request.",
+        });
+    }, [
+        hasExistingAllocation,
+        selectedBranchId,
+        selectedRequestId,
+        selectedResourceIds,
+        selectedResources,
+        showToast,
+        user?._id,
+        zone?.id,
+    ]);
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -388,13 +636,13 @@ export default function ZoneResourcesModule() {
                 onPress={() => setShowFilters((prev) => !prev)}
             >
                 <View style={styles.filtersToggleLeft}>
-                    <MaterialIcons name="tune" size={16} color={COLORS.accent} />
+                    <AppIcon name="tune" size="sm" tone="accent" />
                     <Text style={styles.filtersToggleText}>Filters</Text>
                 </View>
-                <MaterialIcons
+                <AppIcon
                     name={showFilters ? "expand-less" : "expand-more"}
                     size={18}
-                    color={COLORS.textSecondary}
+                    tone="muted"
                 />
             </Pressable>
 
@@ -454,16 +702,16 @@ export default function ZoneResourcesModule() {
 
                             {showFilters ? (
                                 <>
-                                    <Text style={styles.fieldLabel}>Resource type</Text>
+                                    <Text style={styles.fieldLabel}>Resource category</Text>
                                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                        {KIND_FILTERS.map((filter) => (
+                                        {availableAssetFilters.map((filter) => (
                                             <Pressable
                                                 key={filter}
-                                                onPress={() => setKindFilter(filter)}
-                                                style={[styles.filterChip, kindFilter === filter && styles.filterChipActive]}
+                                                onPress={() => setAssetFilter(filter)}
+                                                style={[styles.filterChip, assetFilter === filter && styles.filterChipActive]}
                                             >
-                                                <Text style={[styles.filterChipText, kindFilter === filter && styles.filterChipTextActive]}>
-                                                    {KIND_LABELS[filter]}
+                                                <Text style={[styles.filterChipText, assetFilter === filter && styles.filterChipTextActive]}>
+                                                    {ASSET_FILTER_LABELS[filter]}
                                                 </Text>
                                             </Pressable>
                                         ))}
@@ -575,6 +823,11 @@ export default function ZoneResourcesModule() {
                             <Text style={styles.allocateMeta}>
                                 Selected request: {selectedRequest?.title || "None"}
                             </Text>
+                            {hasExistingAllocation ? (
+                                <Text style={styles.allocateMeta}>
+                                    Current allocation: {selectedRequest?.allocatedResourceIds?.length || 0} resource(s) linked
+                                </Text>
+                            ) : null}
                             <Text style={styles.allocateMeta}>
                                 Requested slots: {requestedCount || "-"}
                             </Text>
@@ -662,7 +915,9 @@ export default function ZoneResourcesModule() {
                                 {allocating ? (
                                     <ActivityIndicator size="small" color="#FFF" />
                                 ) : (
-                                    <Text style={styles.allocateButtonText}>Allocate Selected</Text>
+                                    <Text style={styles.allocateButtonText}>
+                                        {hasExistingAllocation ? "Reassign Selected" : "Allocate Selected"}
+                                    </Text>
                                 )}
                             </Pressable>
                         </View>
@@ -671,53 +926,184 @@ export default function ZoneResourcesModule() {
                     {filteredResources.length === 0 ? (
                         <Text style={styles.emptyText}>No resources found for current filters.</Text>
                     ) : (
-                        <View style={styles.grid}>
-                            {filteredResources.map((resource) => {
-                                const selected = selectedResourceIds.includes(resource.id);
-                                const busy = processingResourceId === resource.id || processingBulkStatus !== null;
+                        <View style={styles.sectionStack}>
+                            {resourceSections.map((section) => {
+                                const sectionExpanded = expandedSectionIds.includes(section.id);
+                                const sectionSelectedCount = section.resources.filter((resource) => selectedResourceIds.includes(resource.id)).length;
                                 return (
-                                    <Pressable
-                                        key={resource.id}
-                                        style={[styles.resourceCard, selected && styles.resourceCardSelected]}
-                                        onPress={() => toggleResourceSelected(resource.id)}
-                                    >
-                                        <Text style={styles.resourceLabel} numberOfLines={1}>
-                                            {resource.label}
-                                        </Text>
-                                        <Text style={styles.resourceMeta}>
-                                            {resource.kind} | {resource.assetType}
-                                        </Text>
-                                        <Text style={styles.resourceMeta}>
-                                            Status: {resource.lifecycleStatus}
-                                        </Text>
-                                        {resource.holdRequestId ? (
-                                            <Text style={styles.resourceMeta} numberOfLines={1}>
-                                                Hold request: {resource.holdRequestId}
-                                            </Text>
+                                    <View key={section.id} style={styles.accordionCard}>
+                                        <Pressable
+                                            style={styles.accordionHeader}
+                                            onPress={() => toggleSectionExpanded(section.id)}
+                                        >
+                                            <View style={styles.accordionHeaderTextWrap}>
+                                                <Text style={styles.accordionTitle}>{section.title}</Text>
+                                                <Text style={styles.accordionMeta}>
+                                                    {section.resources.length} resources • {sectionSelectedCount} selected
+                                                </Text>
+                                            </View>
+                                            <AppIcon
+                                                name={sectionExpanded ? "expand-less" : "expand-more"}
+                                                size="md"
+                                                tone="muted"
+                                            />
+                                        </Pressable>
+
+                                        {sectionExpanded ? (
+                                            <View style={styles.sectionBody}>
+                                            {section.rooms?.length ? (
+                                                <View style={styles.roomStack}>
+                                                    {section.rooms.map((room) => {
+                                                        const roomExpanded = expandedRoomIds.includes(room.id);
+                                                        const roomSelected = room.resources.every((resource) => selectedResourceIds.includes(resource.id));
+                                                        const roomBusy = room.resources.some((resource) => processingResourceId === resource.id) || processingBulkStatus !== null;
+                                                        return (
+                                                            <View key={room.id} style={styles.roomCard}>
+                                                                <Pressable
+                                                                    style={styles.roomHeader}
+                                                                    onPress={() => toggleRoomExpanded(room.id)}
+                                                                >
+                                                                    <View style={styles.roomHeaderTextWrap}>
+                                                                        <Text style={styles.roomTitle}>{room.title}</Text>
+                                                                        <Text style={styles.roomMeta}>
+                                                                            {room.resources.length} resources
+                                                                        </Text>
+                                                                    </View>
+                                                                    <View style={styles.roomHeaderActions}>
+                                                                        <Pressable
+                                                                            style={[
+                                                                                styles.roomSelectButton,
+                                                                                roomSelected && styles.roomSelectButtonActive,
+                                                                            ]}
+                                                                            onPress={() => toggleRoomSelected(room.resources)}
+                                                                            disabled={roomBusy}
+                                                                        >
+                                                                            <Text
+                                                                                style={[
+                                                                                    styles.roomSelectButtonText,
+                                                                                    roomSelected && styles.roomSelectButtonTextActive,
+                                                                                ]}
+                                                                            >
+                                                                                {roomSelected ? "Deselect room" : "Select room"}
+                                                                            </Text>
+                                                                        </Pressable>
+                                                                        <AppIcon
+                                                                            name={roomExpanded ? "expand-less" : "expand-more"}
+                                                                            size="md"
+                                                                            tone="muted"
+                                                                        />
+                                                                    </View>
+                                                                </Pressable>
+
+                                                                {roomExpanded ? (
+                                                                    <View style={styles.grid}>
+                                                                        {room.resources.map((resource) => {
+                                                                            const selected = selectedResourceIds.includes(resource.id);
+                                                                            const busy = processingResourceId === resource.id || processingBulkStatus !== null;
+                                                                            return (
+                                                                                <Pressable
+                                                                                    key={resource.id}
+                                                                                    style={[styles.resourceCard, selected && styles.resourceCardSelected]}
+                                                                                    onPress={() => toggleResourceSelected(resource.id)}
+                                                                                >
+                                                                                    <Text style={styles.resourceLabel} numberOfLines={1}>
+                                                                                        {resource.label}
+                                                                                    </Text>
+                                                                                    <Text style={styles.resourceMeta}>
+                                                                                        {resource.kind} | {resource.assetType}
+                                                                                        {resource.tier ? ` | ${resource.tier}` : ""}
+                                                                                        {resource.surface ? ` | ${resource.surface}` : ""}
+                                                                                    </Text>
+                                                                                    <Text style={styles.resourceMeta}>
+                                                                                        Status: {getResourceLifecycleLabel(resource.lifecycleStatus)}
+                                                                                    </Text>
+                                                                                    {resource.holdRequestId ? (
+                                                                                        <Text style={styles.resourceMeta} numberOfLines={1}>
+                                                                                            Hold request: {resource.holdRequestId}
+                                                                                        </Text>
+                                                                                    ) : null}
+                                                                                    <View style={styles.statusRow}>
+                                                                                        {STATUS_OPTIONS.map((status) => (
+                                                                                            <Pressable
+                                                                                                key={`${resource.id}_${status}`}
+                                                                                                onPress={() => setResourceStatus(resource.id, status)}
+                                                                                                style={[
+                                                                                                    styles.statusAction,
+                                                                                                    resource.lifecycleStatus === status && styles.statusActionActive,
+                                                                                                ]}
+                                                                                                disabled={busy}
+                                                                                            >
+                                                                                                <Text
+                                                                                                    style={[
+                                                                                                        styles.statusActionText,
+                                                                                                        resource.lifecycleStatus === status && styles.statusActionTextActive,
+                                                                                                    ]}
+                                                                                                >
+                                                                                                    {getResourceLifecycleLabel(status)}
+                                                                                                </Text>
+                                                                                            </Pressable>
+                                                                                        ))}
+                                                                                    </View>
+                                                                                </Pressable>
+                                                                            );
+                                                                        })}
+                                                                    </View>
+                                                                ) : null}
+                                                            </View>
+                                                        );
+                                                    })}
+                                                </View>
+                                            ) : (
+                                                <View style={styles.grid}>
+                                                    {section.resources.map((resource) => {
+                                                        const selected = selectedResourceIds.includes(resource.id);
+                                                        const busy = processingResourceId === resource.id || processingBulkStatus !== null;
+                                                        return (
+                                                            <Pressable
+                                                                key={resource.id}
+                                                                style={[styles.resourceCard, selected && styles.resourceCardSelected]}
+                                                                onPress={() => toggleResourceSelected(resource.id)}
+                                                            >
+                                                                <Text style={styles.resourceLabel} numberOfLines={1}>
+                                                                    {resource.label}
+                                                                </Text>
+                                                                <Text style={styles.resourceMeta}>
+                                                                    {resource.kind} | {resource.assetType}
+                                                                    {resource.surface ? ` | ${resource.surface}` : ""}
+                                                                </Text>
+                                                                <Text style={styles.resourceMeta}>
+                                                                    Status: {getResourceLifecycleLabel(resource.lifecycleStatus)}
+                                                                </Text>
+                                                                <View style={styles.statusRow}>
+                                                                    {STATUS_OPTIONS.map((status) => (
+                                                                        <Pressable
+                                                                            key={`${resource.id}_${status}`}
+                                                                            onPress={() => setResourceStatus(resource.id, status)}
+                                                                            style={[
+                                                                                styles.statusAction,
+                                                                                resource.lifecycleStatus === status && styles.statusActionActive,
+                                                                            ]}
+                                                                            disabled={busy}
+                                                                        >
+                                                                            <Text
+                                                                                style={[
+                                                                                    styles.statusActionText,
+                                                                                    resource.lifecycleStatus === status && styles.statusActionTextActive,
+                                                                                ]}
+                                                                            >
+                                                                                {getResourceLifecycleLabel(status)}
+                                                                            </Text>
+                                                                        </Pressable>
+                                                                    ))}
+                                                                </View>
+                                                            </Pressable>
+                                                        );
+                                                    })}
+                                                </View>
+                                            )
+                                            }</View>
                                         ) : null}
-                                        <View style={styles.statusRow}>
-                                            {STATUS_OPTIONS.map((status) => (
-                                                <Pressable
-                                                    key={`${resource.id}_${status}`}
-                                                    onPress={() => setResourceStatus(resource.id, status)}
-                                                    style={[
-                                                        styles.statusAction,
-                                                        resource.lifecycleStatus === status && styles.statusActionActive,
-                                                    ]}
-                                                    disabled={busy}
-                                                >
-                                                    <Text
-                                                        style={[
-                                                            styles.statusActionText,
-                                                            resource.lifecycleStatus === status && styles.statusActionTextActive,
-                                                        ]}
-                                                    >
-                                                        {STATUS_LABELS[status]}
-                                                    </Text>
-                                                </Pressable>
-                                            ))}
-                                        </View>
-                                    </Pressable>
+                                    </View>
                                 );
                             })}
                         </View>

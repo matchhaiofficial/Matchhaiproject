@@ -1,21 +1,20 @@
 // app/auth/forgot-password.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
 
+import { AppIcon } from "../../src/components/AppIcon";
 import LogoHalo from "../../src/components/LogoHalo";
+import { AppButton } from "../../src/components/AppPrimitives";
 import { useToast } from "../../src/hooks/useToast";
-import { sendPasswordReset } from "../../src/services/authService";
+import { sendPasswordReset } from "../../src/services/convex/authService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 
@@ -114,7 +113,7 @@ export default function ForgotPassword() {
             ]}
           >
             <View style={styles.inputRow}>
-              <MaterialIcons
+              <AppIcon
                 name="email"
                 size={22}
                 style={styles.prefixIcon}
@@ -141,7 +140,7 @@ export default function ForgotPassword() {
               />
 
               {email.trim().length > 0 && (
-                <MaterialIcons
+                <AppIcon
                   name={isEmailValid ? "check-circle" : "error-outline"}
                   size={20}
                   style={styles.suffixIcon}
@@ -171,22 +170,13 @@ export default function ForgotPassword() {
             isFormValid && !submitting && styles.buttonShadowWrapperActive,
           ]}
         >
-          <Pressable
+          <AppButton
             onPress={handleSubmit}
             disabled={submitting || !isFormValid}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              !isFormValid || submitting ? styles.primaryBtnDisabled : null,
-              pressed && !submitting && isFormValid && { opacity: 0.92 },
-            ]}
-            android_ripple={{ color: "rgba(255,255,255,0.08)" }}
+            loading={submitting}
           >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Send reset link</Text>
-            )}
-          </Pressable>
+            Send reset link
+          </AppButton>
         </View>
 
         {/* Back to login */}

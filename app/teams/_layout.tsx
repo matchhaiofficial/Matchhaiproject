@@ -7,7 +7,7 @@ export default function TeamsLayout() {
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.background }
+                contentStyle: { backgroundColor: COLORS.backgroundDark }
             }}
         >
             <Stack.Screen name="create" />
@@ -19,3 +19,4 @@ export default function TeamsLayout() {
         </Stack>
     );
 }
+

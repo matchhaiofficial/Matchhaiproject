@@ -1,19 +1,20 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
-    Modal,
+    Pressable,
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
     View
 } from "react-native";
+
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from "../../../src/components/AppModalPrimitives";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import { useAuth } from "../../../src/context/AuthContext";
 import { getUserFriends, getUserProfile } from "../../../src/services/userService";
-import { COLORS, SHADOWS } from "../../../src/theme";
+import { COLORS } from "../../../src/theme";
 
 interface FriendPickerProps {
     visible: boolean;
@@ -23,6 +24,32 @@ interface FriendPickerProps {
     matchroomRoles?: Array<{ role: string; count: number; filled: number }>;
 }
 
+const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+
+const FriendRow = React.memo(function FriendRow({
+    friend,
+    onSelectFriend,
+}: {
+    friend: { uid: string; username: string; skillScore?: number };
+    onSelectFriend: (friend: { uid: string; username: string; skillScore?: number }) => void;
+}) {
+    const handleSelect = useCallback(() => {
+        onSelectFriend(friend);
+    }, [friend, onSelectFriend]);
+
+    return (
+        <Pressable style={styles.friendItem} onPress={handleSelect}>
+            <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                    {friend.username ? friend.username.charAt(0).toUpperCase() : "?"}
+                </Text>
+            </View>
+            <Text style={styles.friendName}>{friend.username}</Text>
+            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+        </Pressable>
+    );
+});
+
 export default function FriendPicker({ visible, onClose, onSelect, game, matchroomRoles }: FriendPickerProps) {
     const { user } = useAuth();
     const [friends, setFriends] = useState<Array<{ uid: string; username: string; skillScore?: number }>>([]);
@@ -30,34 +57,33 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedFriend, setSelectedFriend] = useState<{ uid: string; username: string; skillScore?: number } | null>(null);
     const [selectedRole, setSelectedRole] = useState<string | null>(null);
-    const clampRating = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
     useEffect(() => {
         if (visible && user) {
-            loadFriends();
+            void loadFriends();
         } else {
-            // Reset state when closing
             setSelectedFriend(null);
             setSelectedRole(null);
             setSearchQuery("");
         }
     }, [visible, user]);
 
-    const loadFriends = async () => {
+    const loadFriends = useCallback(async () => {
+        if (!user?._id) return;
         setLoading(true);
         try {
-            const res = await getUserFriends(user!.uid);
+            const res = await getUserFriends(user._id);
             if (res.ok) {
-                // Fetch skill scores for the selected game for each friend
                 const friendsWithScores = await Promise.all(res.data.map(async (f) => {
-                    const profileRes = await getUserProfile(f.uid);
-                    let score = 50; // Default
+                    const username = f.fullName || f.username || "Unknown";
+                    const profileRes = await getUserProfile(f._id);
+                    let score = 50;
                     if (profileRes.ok) {
                         const skillScores = profileRes.data.skillScores as any;
                         const skillData = skillScores?.[game];
-                        if (skillData && typeof skillData.rating === 'number') score = clampRating(skillData.rating);
+                        if (skillData && typeof skillData.rating === "number") score = clampRating(skillData.rating);
                     }
-                    return { ...f, skillScore: score };
+                    return { uid: f.uid, username, skillScore: score };
                 }));
                 setFriends(friendsWithScores);
             }
@@ -66,145 +92,120 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
         } finally {
             setLoading(false);
         }
-    };
+    }, [game, user?._id]);
 
-    const filteredFriends = friends.filter(f =>
-        f.username.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const filteredFriends = useMemo(() => {
+        if (!normalizedSearch) return friends;
+        return friends.filter((f) => f.username.toLowerCase().includes(normalizedSearch));
+    }, [friends, normalizedSearch]);
 
-    const handleConfirm = () => {
+    const keyExtractor = useCallback((item: { uid: string }) => item.uid, []);
+
+    const handleSelectFriend = useCallback((friend: { uid: string; username: string; skillScore?: number }) => {
+        setSelectedFriend(friend);
+    }, []);
+
+    const renderFriendItem = useCallback(({ item }: { item: { uid: string; username: string; skillScore?: number } }) => {
+        return <FriendRow friend={item} onSelectFriend={handleSelectFriend} />;
+    }, [handleSelectFriend]);
+
+    const handleConfirm = useCallback(() => {
         if (selectedFriend && (selectedRole || !matchroomRoles?.length)) {
-            onSelect(selectedFriend, selectedRole || 'Flex');
+            onSelect(selectedFriend, selectedRole || "Flex");
         }
-    };
+    }, [matchroomRoles?.length, onSelect, selectedFriend, selectedRole]);
+
+    const canConfirm = Boolean(selectedFriend && (selectedRole || !matchroomRoles?.length));
+    const confirmDisabled = !canConfirm;
+
+    const handleChooseDifferent = useCallback(() => {
+        setSelectedFriend(null);
+    }, []);
 
     return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={onClose}
-        >
-            <TouchableWithoutFeedback onPress={onClose}>
-                <View style={styles.overlay}>
-                    <TouchableWithoutFeedback>
-                        <View style={styles.sheet}>
-                            <View style={styles.header}>
-                                <Text style={styles.title}>
-                                    {selectedFriend ? "Confirm Teammate" : "Invite Teammate"}
-                                </Text>
-                                <TouchableOpacity onPress={onClose}>
-                                    <MaterialIcons name="close" size={24} color={COLORS.muted} />
-                                </TouchableOpacity>
-                            </View>
+        <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
+            <AppModalHeader
+                title={selectedFriend ? "Confirm Teammate" : "Invite Teammate"}
+                onClose={onClose}
+            />
 
-                            {!selectedFriend ? (
-                                <>
-                                    <View style={styles.searchBar}>
-                                        <MaterialIcons name="search" size={20} color={COLORS.muted} />
-                                        <TextInput
-                                            style={styles.searchInput}
-                                            placeholder="Search friends..."
-                                            placeholderTextColor={COLORS.muted}
-                                            value={searchQuery}
-                                            onChangeText={setSearchQuery}
-                                        />
-                                    </View>
+            {!selectedFriend ? (
+                <AppModalBody scroll contentContainerStyle={styles.bodyContent}>
+                    <View style={styles.searchBar}>
+                        <AppIcon name="search" size={20} color={COLORS.muted} />
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder="Search friends..."
+                            placeholderTextColor={COLORS.muted}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                        />
+                    </View>
 
-                                    {loading ? (
-                                        <ActivityIndicator style={{ margin: 40 }} color={COLORS.accent} />
-                                    ) : (
-                                        <FlatList
-                                            data={filteredFriends}
-                                            keyExtractor={(item) => item.uid}
-                                            renderItem={({ item }) => (
-                                                <TouchableOpacity
-                                                    style={styles.friendItem}
-                                                    onPress={() => setSelectedFriend(item)}
-                                                >
-                                                    <View style={styles.avatar}>
-                                                        <Text style={styles.avatarText}>{item.username ? item.username.charAt(0).toUpperCase() : '?'}</Text>
-                                                    </View>
-                                                    <Text style={styles.friendName}>{item.username}</Text>
-                                                    <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
-                                                </TouchableOpacity>
-                                            )}
-                                            ListEmptyComponent={
-                                                <Text style={styles.emptyText}>No friends found</Text>
-                                            }
-                                            style={{ maxHeight: 400 }}
-                                        />
-                                    )}
-                                </>
-                            ) : (
-                                <View style={styles.roleSelection}>
-                                    <View style={styles.confirmationCard}>
-                                        <View style={styles.avatarLarge}>
-                                            <Text style={styles.avatarTextLarge}>{selectedFriend.username ? selectedFriend.username.charAt(0).toUpperCase() : '?'}</Text>
-                                        </View>
-                                        <Text style={styles.confirmName}>{selectedFriend.username}</Text>
-                                        <Text style={styles.confirmSub}>Will be added to your squad booking.</Text>
-                                    </View>
-
-                                    <View style={styles.actions}>
-                                        <TouchableOpacity
-                                            style={styles.backLink}
-                                            onPress={() => setSelectedFriend(null)}
-                                        >
-                                            <View style={styles.secondaryBtnInner}>
-                                                <Text style={styles.backLinkText}>Choose Different</Text>
-                                            </View>
-                                        </TouchableOpacity>
-
-                                        <TouchableOpacity
-                                            style={styles.confirmBtn}
-                                            onPress={handleConfirm}
-                                        >
-                                            <Text style={styles.confirmBtnText}>Add to Booking</Text>
-                                        </TouchableOpacity>
-                                    </View>
+                    {loading ? (
+                        <ActivityIndicator style={styles.loadingIndicator} color={COLORS.accent} />
+                    ) : (
+                        <FlatList
+                            data={filteredFriends}
+                            keyExtractor={keyExtractor}
+                            renderItem={renderFriendItem}
+                            ListEmptyComponent={
+                                <Text style={styles.emptyText}>No friends found</Text>
+                            }
+                            style={styles.list}
+                        />
+                    )}
+                </AppModalBody>
+            ) : (
+                <>
+                    <AppModalBody contentContainerStyle={styles.bodyContent}>
+                        <View style={styles.roleSelection}>
+                            <View style={styles.confirmationCard}>
+                                <View style={styles.avatarLarge}>
+                                    <Text style={styles.avatarTextLarge}>{selectedFriend.username ? selectedFriend.username.charAt(0).toUpperCase() : "?"}</Text>
                                 </View>
-                            )}
+                                <Text style={styles.confirmName}>{selectedFriend.username}</Text>
+                                <Text style={styles.confirmSub}>Will be added to your squad booking.</Text>
+                            </View>
                         </View>
-                    </TouchableWithoutFeedback>
-                </View>
-            </TouchableWithoutFeedback>
-        </Modal>
+                    </AppModalBody>
+                    <AppModalFooter style={styles.footer}>
+                        <View style={styles.actions}>
+                            <AppButton variant="secondary" style={styles.actionButton} onPress={handleChooseDifferent}>
+                                Choose Different
+                            </AppButton>
+                            <AppButton style={styles.actionButton} onPress={handleConfirm} disabled={confirmDisabled}>
+                                Add to Booking
+                            </AppButton>
+                        </View>
+                    </AppModalFooter>
+                </>
+            )}
+        </AppBottomSheet>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        justifyContent: 'flex-end',
-    },
     sheet: {
-        backgroundColor: COLORS.surface,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 20,
-        paddingBottom: 40,
+        minHeight: "62%",
+        maxHeight: "88%",
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: COLORS.text,
+    bodyContent: {
+        paddingHorizontal: 24,
+        paddingTop: 24,
+        paddingBottom: 16,
     },
     searchBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.background,
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: COLORS.cardBackground,
         borderRadius: 12,
         paddingHorizontal: 12,
         height: 48,
         marginBottom: 15,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
     },
     searchInput: {
         flex: 1,
@@ -213,8 +214,8 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     friendItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: "row",
+        alignItems: "center",
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.divider,
@@ -223,14 +224,14 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: COLORS.accent + '30',
-        alignItems: 'center',
-        justifyContent: 'center',
+        backgroundColor: COLORS.accent + "30",
+        alignItems: "center",
+        justifyContent: "center",
         marginRight: 12,
     },
     avatarText: {
         color: COLORS.accent,
-        fontWeight: 'bold',
+        fontWeight: "bold",
         fontSize: 16,
     },
     friendName: {
@@ -238,20 +239,25 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: COLORS.text,
     },
+    list: {
+        maxHeight: 400,
+    },
     emptyText: {
         color: COLORS.muted,
-        textAlign: 'center',
+        textAlign: "center",
         marginVertical: 40,
+    },
+    loadingIndicator: {
+        margin: 40,
     },
     roleSelection: {
         marginTop: 10,
     },
     confirmationCard: {
-        alignItems: 'center',
+        alignItems: "center",
         padding: 30,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.cardBackground,
         borderRadius: 20,
-        marginBottom: 30,
         borderWidth: 1,
         borderColor: COLORS.overlayLight,
     },
@@ -259,19 +265,19 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: COLORS.accent + '20',
-        alignItems: 'center',
-        justifyContent: 'center',
+        backgroundColor: COLORS.accent + "20",
+        alignItems: "center",
+        justifyContent: "center",
         marginBottom: 15,
     },
     avatarTextLarge: {
         fontSize: 32,
-        fontWeight: 'bold',
+        fontWeight: "bold",
         color: COLORS.accent,
     },
     confirmName: {
         fontSize: 22,
-        fontWeight: 'bold',
+        fontWeight: "bold",
         color: COLORS.text,
         marginBottom: 5,
     },
@@ -280,44 +286,13 @@ const styles = StyleSheet.create({
         color: COLORS.muted,
     },
     actions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        flexDirection: "row",
         gap: 12,
     },
-    backLink: {
+    footer: {
+        paddingHorizontal: 24,
+    },
+    actionButton: {
         flex: 1,
-    },
-    secondaryBtnInner: {
-        height: 52,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: COLORS.inputBorder,
-        backgroundColor: 'transparent',
-    },
-    backLinkText: {
-        color: COLORS.muted,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    confirmBtn: {
-        flex: 1,
-        height: 52,
-        backgroundColor: COLORS.accent,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.cardSoft,
-    },
-    confirmBtnDisabled: {
-        backgroundColor: COLORS.disabled,
-        opacity: 0.6,
-    },
-    confirmBtnText: {
-        color: '#FFF',
-        fontWeight: 'bold',
-        fontSize: 14,
     }
 });

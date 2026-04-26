@@ -1,239 +1,274 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
-import {
-    ActivityIndicator,
-    Platform,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+
 import AppHeader from "../../../src/components/AppHeader";
+import { AppButton, AppCard } from "../../../src/components/AppPrimitives";
+import { AppIcon } from "../../../src/components/AppIcon";
+import ReportIssueModal from "../../../src/components/ReportIssueModal";
 import Screen from "../../../src/components/Screen";
-
-import { db } from "../../../src/config/firebaseConfig";
-import { Zone } from "../../../src/services/zoneService";
+import VenueBranchCard from "../../../src/features/venues/components/VenueBranchCard";
+import VenueGamesResourcesSection from "../../../src/features/venues/components/VenueGamesResourcesSection";
+import VenueHeroCard from "../../../src/features/venues/components/VenueHeroCard";
+import VenueInfoSection from "../../../src/features/venues/components/VenueInfoSection";
+import VenuePricingSection from "../../../src/features/venues/components/VenuePricingSection";
+import VenuePrimaryActionBar from "../../../src/features/venues/components/VenuePrimaryActionBar";
+import styles from "../../../src/features/venues/components/VenueDetails.styles";
+import {
+  handleCallVenue,
+  handleCopyAddress,
+  handleOpenGoogleMaps,
+} from "../../../src/features/venues/venueDetails.helpers";
+import { useToast } from "../../../src/hooks/useToast";
+import { submitZoneComplaint } from "../../../src/services/convex/reportService";
+import {
+  PlayerVenueViewModel,
+  getPlayerVenueDetails,
+} from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
-import Logger from "../../../src/utils/logger";
-import styles from "./zones.styles";
 
-export default function PlayerZoneDetails() {
-    const { id } = useLocalSearchParams();
-    const router = useRouter();
-    const [zone, setZone] = useState<Zone | null>(null);
-    const [loading, setLoading] = useState(true);
+const REPORT_REASONS = [
+  "Staff Behavior",
+  "Booking/Payment Issue",
+  "Unsafe Environment",
+  "Equipment/Facility Issue",
+  "Misleading Information",
+  "Other",
+];
 
-    useEffect(() => {
-        if (id) {
-            fetchZoneDetails();
-        }
-    }, [id]);
+export default function PlayerVenueDetailsScreen() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const router = useRouter();
+  const { showToast } = useToast();
 
-    const fetchZoneDetails = async () => {
-        try {
-            const docRef = doc(db, "zones", id as string);
-            const docSnap = await getDoc(docRef);
+  const [venue, setVenue] = useState<PlayerVenueViewModel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reporting, setReporting] = useState(false);
 
-            if (docSnap.exists()) {
-                setZone({ id: docSnap.id, ...docSnap.data() } as Zone);
-            } else {
-                Logger.error("ZoneDetails", "Zone not found", { id });
-            }
-        } catch (error) {
-            Logger.error("ZoneDetails", "Failed to fetch zone details", error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (loading) {
-        return (
-            <Screen style={styles.screen} scroll={false}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={COLORS.accent} />
-                </View>
-            </Screen>
-        );
+  const loadVenue = useCallback(async () => {
+    if (!id) {
+      setVenue(null);
+      setErrorMessage("Venue details are unavailable because the route is missing a venue id.");
+      setLoading(false);
+      return;
     }
 
-    if (!zone) {
-        return (
-            <Screen style={styles.screen} scroll={false}>
-                <AppHeader title="Zone Not Found" onBack={() => router.back()} />
-                <View style={styles.errorContainer}>
-                    <MaterialIcons name="error-outline" size={64} color={COLORS.muted} />
-                    <Text style={styles.errorText}>We couldn't find the details for this zone.</Text>
-                </View>
-            </Screen>
-        );
+    setLoading(true);
+    setErrorMessage(null);
+    const result = await getPlayerVenueDetails(id);
+
+    if (!result.ok || !result.data) {
+      setVenue(null);
+      setErrorMessage(result.message || "We couldn't load this venue right now.");
+      setLoading(false);
+      return;
     }
 
-    const { primaryBranch, games } = zone;
-    const address = [primaryBranch?.addressLine1, primaryBranch?.areaLabel, primaryBranch?.city]
-        .filter(Boolean)
-        .join(", ");
+    setVenue(result.data);
+    setLoading(false);
+  }, [id]);
 
-    // Extract supported games
-    const supportedGamesList = Object.entries(games || {})
-        .filter(([key, value]) => value === true)
-        .map(([key]) => key.replace('supports', '').toUpperCase());
+  useEffect(() => {
+    void loadVenue();
+  }, [loadVenue]);
 
-    return (
-        <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
-            <StatusBar barStyle="light-content" />
-            <AppHeader title="Zone Details" onBack={() => router.back()} inlineTitle />
+  const withToastFeedback = useCallback(async (
+    action: () => Promise<{ ok: true } | { ok: false; message: string }>,
+    successMessage: string,
+    successTitle: string,
+  ) => {
+    const result = await action();
+    if (!result.ok) {
+      showToast({
+        type: "warning",
+        title: "Action unavailable",
+        message: result.message,
+      });
+      return;
+    }
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                {/* Visual Banner */}
-                <View style={styles.banner}>
-                    <MaterialIcons name="store" size={80} color="rgba(255,255,255,0.2)" />
-                    <View style={styles.bannerOverlay}>
-                        <Text style={styles.venueName} numberOfLines={1} ellipsizeMode="tail">
-                            {zone.venueBrandName}
-                        </Text>
-                    </View>
-                </View>
+    showToast({
+      type: "success",
+      title: successTitle,
+      message: successMessage,
+    });
+  }, [showToast]);
 
-                {/* Location Card */}
-                <View style={styles.infoCard}>
-                    <View style={styles.locationRow}>
-                        <MaterialIcons name="location-on" size={24} color={COLORS.accent} />
-                        <Text style={styles.locationText}>{address || "Location unavailable"}</Text>
-                    </View>
-                    {primaryBranch?.googleMapsUrl && (
-                        <Pressable
-                            style={({ pressed }) => [
-                                { marginTop: 8 },
-                                pressed && { opacity: 0.7 }
-                            ]}
-                            android_ripple={{ color: COLORS.overlayLight }}
-                        >
-                            <Text style={{ color: COLORS.accent, fontSize: 13, fontWeight: '600' }}>
-                                View on Google Maps
-                            </Text>
-                        </Pressable>
-                    )}
-                </View>
+  const onOpenMaps = useCallback(async () => {
+    if (!venue) return;
+    const result = await handleOpenGoogleMaps({
+      mapUrl: venue.selectedBranch.googleMapsUrl,
+      address: venue.selectedBranch.formattedAddress,
+    });
+    if (!result.ok) {
+      showToast({
+        type: "warning",
+        title: "Map unavailable",
+        message: result.message,
+      });
+    }
+  }, [showToast, venue]);
 
-                {/* Supported Games */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Supported Games</Text>
-                    <View style={styles.tagsRow}>
-                        {supportedGamesList.map((game) => (
-                            <View key={game} style={styles.tag}>
-                                <Text style={styles.tagText}>{game}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </View>
-
-                {/* Pricing Section */}
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Pricing</Text>
-
-                    {/* PC Gaming Pricing */}
-                    {zone.pricing?.pc && (
-                        <View style={styles.infoCard}>
-                            <Text style={styles.pricingCategory}>PC GAMING</Text>
-                            {zone.pricing.pc.elite && zone.pricing.pc.elite.price > 0 && (
-                                <View style={styles.priceRow}>
-                                    <Text style={styles.priceLabel}>Elite PCs</Text>
-                                    <Text style={styles.priceValue}>₨ {zone.pricing.pc.elite.price}/hr</Text>
-                                </View>
-                            )}
-                            {zone.pricing.pc.premium && zone.pricing.pc.premium.price > 0 && (
-                                <View style={styles.priceRow}>
-                                    <Text style={styles.priceLabel}>Premium PCs</Text>
-                                    <Text style={styles.priceValue}>₨ {zone.pricing.pc.premium.price}/hr</Text>
-                                </View>
-                            )}
-                            {zone.pricing.pc.regular && zone.pricing.pc.regular.price > 0 && (
-                                <View style={[styles.priceRow, { borderBottomWidth: 0 }]}>
-                                    <Text style={styles.priceLabel}>Regular PCs</Text>
-                                    <Text style={styles.priceValue}>₨ {zone.pricing.pc.regular.price}/hr</Text>
-                                </View>
-                            )}
-                        </View>
-                    )}
-
-                    {/* Console Gaming Pricing */}
-                    {zone.pricing?.console?.ps5 && (
-                        <View style={styles.infoCard}>
-                            <Text style={styles.pricingCategory}>PLAYSTATION 5</Text>
-                            {zone.pricing.console.ps5.price1v1 > 0 && (
-                                <View style={styles.priceRow}>
-                                    <Text style={styles.priceLabel}>1v1 (2 Controllers)</Text>
-                                    <Text style={styles.priceValue}>₨ {zone.pricing.console.ps5.price1v1}/hr</Text>
-                                </View>
-                            )}
-                            {zone.pricing.console.ps5.price2v2 > 0 && (
-                                <View style={[styles.priceRow, { borderBottomWidth: 0 }]}>
-                                    <Text style={styles.priceLabel}>2v2 (4 Controllers)</Text>
-                                    <Text style={styles.priceValue}>₨ {zone.pricing.console.ps5.price2v2}/hr</Text>
-                                </View>
-                            )}
-                        </View>
-                    )}
-
-                    {/* Sports Court Pricing */}
-                    {[
-                        { key: 'futsal', label: 'FUTSAL' },
-                        { key: 'padel', label: 'PADEL' },
-                        { key: 'pickleball', label: 'PICKLEBALL' },
-                        { key: 'indoor_cricket', label: 'INDOOR CRICKET' }
-                    ].map((sport) => {
-                        const pricing = (zone.pricing as any)?.[sport.key];
-                        if (!pricing || Object.keys(pricing).length === 0) return null;
-
-                        return (
-                            <View key={sport.key} style={styles.infoCard}>
-                                <Text style={styles.pricingCategory}>{sport.label}</Text>
-                                {Object.entries(pricing).map(([tier, data]: [string, any], index, array) => (
-                                    <View key={tier} style={[styles.priceRow, index === array.length - 1 && { borderBottomWidth: 0 }]}>
-                                        <Text style={styles.priceLabel}>{tier.toUpperCase()}</Text>
-                                        <Text style={styles.priceValue}>₨ {data.price}/hr</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        );
-                    })}
-                </View>
-
-                {/* Create Matchroom CTA */}
-                <Pressable
-                    style={({ pressed }) => [
-                        styles.actionButton,
-                        pressed && { opacity: 0.9 }
-                    ]}
-                    onPress={() => {
-                        // Build supported games list
-                        const supportedGames: string[] = [];
-                        if (zone.games?.supportsCs2) supportedGames.push('cs2');
-                        if (zone.games?.supportsFc25) supportedGames.push('fc26');
-                        if (zone.games?.supportsTekken8) supportedGames.push('tekken8');
-                        if (zone.games?.supportsFutsal) supportedGames.push('futsal');
-                        if (zone.games?.supportsIndoorCricket) supportedGames.push('indoor_cricket');
-                        if (zone.games?.supportsPadel) supportedGames.push('padel');
-                        if (zone.games?.supportsPickleball) supportedGames.push('pickleball');
-
-                        router.push({
-                            pathname: "/matchrooms/create",
-                            params: {
-                                zoneId: zone.id,
-                                zoneName: zone.venueBrandName,
-                                zoneSupportedGames: JSON.stringify(supportedGames)
-                            }
-                        });
-                    }}
-                    android_ripple={{ color: 'rgba(255,255,255,0.15)' }}
-                >
-                    <Text style={styles.actionButtonText}>Book Now</Text>
-                </Pressable>
-            </ScrollView>
-        </Screen>
+  const onCopyAddress = useCallback(async () => {
+    if (!venue) return;
+    await withToastFeedback(
+      () => handleCopyAddress(venue.selectedBranch.formattedAddress),
+      "The venue address is now on your clipboard.",
+      "Address copied",
     );
+  }, [venue, withToastFeedback]);
+
+  const onCallVenue = useCallback(async () => {
+    if (!venue) return;
+    const result = await handleCallVenue(venue.selectedBranch.phone);
+    if (!result.ok) {
+      showToast({
+        type: "warning",
+        title: "Call unavailable",
+        message: result.message,
+      });
+    }
+  }, [showToast, venue]);
+
+  const onCreateMatchroom = useCallback(() => {
+    if (!venue) return;
+    router.push({
+      pathname: "/matchrooms/create",
+      params: venue.createMatchroomParams,
+    });
+  }, [router, venue]);
+
+  const onSubmitReport = useCallback(async () => {
+    if (!venue?.id || !reportReason) return;
+    setReporting(true);
+
+    const result = await submitZoneComplaint({
+      zoneId: venue.id,
+      reason: reportReason,
+      description: reportDescription,
+    });
+
+    setReporting(false);
+
+    if (!result.ok) {
+      showToast({
+        type: "error",
+        title: "Report failed",
+        message: result.message,
+      });
+      return;
+    }
+
+    showToast({
+      type: result.data.created ? "success" : "warning",
+      title: result.data.created ? "Report submitted" : "Already reported",
+      message: result.message || "Our moderation team will review this report.",
+    });
+    setShowReportModal(false);
+    setReportReason("");
+    setReportDescription("");
+  }, [reportDescription, reportReason, showToast, venue?.id]);
+
+  return (
+    <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent} edges={["top", "bottom"]}>
+      <AppHeader
+        title="Venue Details"
+        onBack={() => router.back()}
+        inlineTitle
+        style={styles.header}
+      />
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.loadingText}>Loading venue details...</Text>
+        </View>
+      ) : errorMessage || !venue ? (
+        <View style={styles.errorWrap}>
+          <AppCard style={styles.errorCard}>
+            <AppIcon name="error-outline" size="xl" tone="warning" />
+            <Text style={styles.stateTitle}>Venue details unavailable</Text>
+            <Text style={styles.stateText}>
+              {errorMessage || "We couldn't find this venue."}
+            </Text>
+            <AppButton variant="secondary" onPress={() => void loadVenue()}>
+              Try Again
+            </AppButton>
+          </AppCard>
+        </View>
+      ) : (
+        <>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: 28 },
+            ]}
+          >
+            <VenueHeroCard
+              title={venue.venueBrandName}
+              subtitle={venue.subtitle}
+              subtitleFallbackLabel={venue.subtitleFallbackLabel}
+              typeLabel={venue.typeLabel}
+              branchCountLabel={venue.branchCountLabel}
+              statusLabel={venue.statusLabel}
+              statusTone={venue.statusTone}
+              showStatus={venue.showStatus}
+            />
+
+            <VenueBranchCard
+              branchName={venue.selectedBranch.displayName}
+              address={venue.selectedBranch.formattedAddress}
+              areaCityLabel={venue.selectedBranch.areaCityLabel}
+              branchCountLabel={venue.branchCountLabel}
+              hasMap={venue.selectedBranch.hasMap}
+              hasPhone={venue.selectedBranch.hasPhone}
+              onOpenMaps={() => void onOpenMaps()}
+              onCopyAddress={() => void onCopyAddress()}
+              onCallVenue={() => void onCallVenue()}
+            />
+
+            <VenueGamesResourcesSection
+              gameLabels={venue.supportedGameLabels}
+              resources={venue.resources}
+            />
+
+            <VenuePricingSection
+              startingPriceLabel={venue.startingPriceLabel}
+              pricingGroups={venue.pricingGroups}
+            />
+
+            <VenueInfoSection
+              infoItems={venue.infoItems}
+              hasContactInfo={venue.hasContactInfo}
+              onReportVenue={() => setShowReportModal(true)}
+            />
+
+            <VenuePrimaryActionBar
+              onCreateMatchroom={onCreateMatchroom}
+            />
+          </ScrollView>
+        </>
+      )}
+
+      <ReportIssueModal
+        visible={showReportModal}
+        title="Report Venue"
+        subtitle="Share issues related to this venue or branch."
+        reasons={REPORT_REASONS}
+        reason={reportReason}
+        description={reportDescription}
+        onChangeReason={setReportReason}
+        onChangeDescription={setReportDescription}
+        onSubmit={() => void onSubmitReport()}
+        onClose={() => setShowReportModal(false)}
+        loading={reporting}
+        submitLabel="Submit Report"
+      />
+    </Screen>
+  );
 }

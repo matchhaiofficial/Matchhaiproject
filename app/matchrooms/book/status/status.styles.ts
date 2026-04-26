@@ -30,14 +30,24 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
     },
+    body: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
     content: {
         padding: SPACING.screenPadding,
         alignItems: 'center',
     },
     statusDisplay: {
+        width: '100%',
         alignItems: 'center',
         marginBottom: SPACING.xl,
         marginTop: SPACING.md,
+    },
+    statusPill: {
+        marginTop: SPACING.sm,
     },
     statusIconBg: {
         width: 100,
@@ -185,8 +195,6 @@ export default StyleSheet.create({
 
     // Footer Actions
     footer: {
-        padding: SPACING.screenPadding,
-        paddingTop: 0,
         gap: SPACING.md,
         width: '100%',
     },
@@ -195,6 +203,9 @@ export default StyleSheet.create({
         alignItems: 'center',
         gap: SPACING.md,
         width: '100%',
+    },
+    secondaryAction: {
+        flex: 1,
     },
     primaryBtn: {
         height: 56,
@@ -227,5 +238,10 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
-    }
+    },
+    secondaryDangerText: {
+        color: COLORS.error,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+    },
 });

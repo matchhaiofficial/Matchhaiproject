@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { COLORS } from "../../src/theme";
+import { isSuperAdminProfile, isZoneAccount } from "../../src/utils/accountRouting";
 
 export default function ZoneLayout() {
     const { user, loading } = useAuth();
@@ -22,6 +23,10 @@ export default function ZoneLayout() {
         return <Redirect href="/auth/login" />;
     }
 
+    if (!isZoneAccount(user) && !isSuperAdminProfile(user)) {
+        return <Redirect href="/(player)/(tabs)" />;
+    }
+
     return (
         <Stack
             screenOptions={{
@@ -31,6 +36,7 @@ export default function ZoneLayout() {
         >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="modules" options={{ headerShown: false }} />
+            <Stack.Screen name="report/[id]" options={{ presentation: "modal", headerShown: false }} />
             <Stack.Screen name="branch/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="branch/new" options={{ presentation: "modal", headerShown: false }} />
         </Stack>

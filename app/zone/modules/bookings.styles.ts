@@ -181,7 +181,7 @@ export default StyleSheet.create({
     },
     actionsRow: {
         flexDirection: "row",
-        gap: SPACING.sm,
+        gap: SPACING.xs,
         marginTop: SPACING.sm,
         marginBottom: SPACING.sm,
     },
@@ -191,6 +191,9 @@ export default StyleSheet.create({
         borderRadius: 14,
         alignItems: "center",
         justifyContent: "center",
+        flexDirection: "row",
+        gap: 4,
+        paddingHorizontal: SPACING.xs,
     },
     acceptButton: {
         backgroundColor: COLORS.success,
@@ -200,9 +203,7 @@ export default StyleSheet.create({
     },
     counterButton: {
         backgroundColor: COLORS.accent,
-        flex: 0,
-        minWidth: 120,
-        paddingHorizontal: SPACING.sm,
+        paddingHorizontal: SPACING.xs,
     },
     walkinCreateButton: {
         ...CTA.primaryButton,
@@ -212,7 +213,9 @@ export default StyleSheet.create({
     actionText: {
         color: "#FFF",
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.caption,
+        fontSize: TEXT_SIZES.xs + 1,
+        textAlign: "center",
+        flexShrink: 1,
     },
     walkinCreateText: {
         ...CTA.primaryButtonText,
@@ -259,6 +262,47 @@ export default StyleSheet.create({
         gap: SPACING.sm,
         marginBottom: SPACING.sm,
     },
+    scheduleOptionCard: {
+        backgroundColor: COLORS.cardDark,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: RADII.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.sm,
+    },
+    scheduleOptionHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: SPACING.xs,
+    },
+    removeOptionButton: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+    },
+    addOptionButton: {
+        minHeight: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.accent,
+        backgroundColor: "rgba(66, 165, 245, 0.08)",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        gap: SPACING.xs,
+        marginBottom: SPACING.sm,
+    },
+    addOptionText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+    },
     dateField: {
         flex: 1,
         height: 48,
@@ -297,6 +341,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.sm,
         backgroundColor: "rgba(66, 165, 245, 0.05)",
         overflow: "hidden",
+    },
+    matchroomCardCollapsed: {
+        marginBottom: 0,
     },
     resultsCount: {
         paddingHorizontal: SPACING.md,
@@ -501,7 +548,6 @@ export default StyleSheet.create({
         borderTopRightRadius: 32,
         minHeight: "50%",
         maxHeight: "90%",
-        paddingBottom: 40,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
     },
@@ -526,7 +572,182 @@ export default StyleSheet.create({
         marginTop: 2,
     },
     counterForm: {
-        padding: 24,
+        maxHeight: 520,
+    },
+    counterFormContent: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+        gap: SPACING.md,
+    },
+    counterFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    modalActionsRow: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    modalActionButton: {
+        flex: 1,
+    },
+    allocateSheetBody: {
+        paddingTop: SPACING.md,
+        gap: SPACING.md,
+    },
+    allocateSummaryCard: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 18,
+        backgroundColor: COLORS.cardDark,
+        padding: SPACING.md,
+        gap: 4,
+    },
+    allocateSheetTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+    },
+    allocateSheetMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    allocateBranchWrap: {
+        gap: SPACING.sm,
+    },
+    allocateSectionLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+        textTransform: "uppercase",
+    },
+    allocateBranchChip: {
+        minWidth: 96,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm - 1,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        marginRight: SPACING.sm,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    allocateBranchChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.cardDark,
+    },
+    allocateBranchChipText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    allocateBranchChipTextActive: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontWeight: "700",
+    },
+    allocateResourcesWrap: {
+        minHeight: 240,
+        gap: SPACING.sm,
+    },
+    allocateResourcesHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    allocateSelectionCount: {
+        color: COLORS.accent,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+    },
+    allocateLoadingWrap: {
+        minHeight: 180,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    allocateResourceList: {
+        paddingBottom: SPACING.sm,
+    },
+    allocateEmptyText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    allocateResourceCard: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: 18,
+        backgroundColor: COLORS.cardDark,
+        padding: SPACING.md,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    allocateResourceCardActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: "rgba(66, 165, 245, 0.08)",
+    },
+    allocateResourceInfo: {
+        flex: 1,
+        gap: 4,
+    },
+    allocateResourceLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+    },
+    allocateResourceMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        textTransform: "capitalize",
+    },
+    allocateResourceTick: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.cardBackground,
+    },
+    allocateResourceTickActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent,
+    },
+    allocateWarningCard: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: SPACING.xs,
+        padding: SPACING.sm,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.warning,
+        backgroundColor: "rgba(255, 193, 7, 0.12)",
+    },
+    allocateWarningText: {
+        flex: 1,
+        color: COLORS.warning,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    allocateFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    allocateSubmitButton: {
+        ...CTA.primaryButton,
+        minHeight: 52,
+    },
+    allocateSubmitButtonDisabled: {
+        opacity: 0.45,
+    },
+    allocateSubmitText: {
+        ...CTA.primaryButtonText,
+        fontSize: TEXT_SIZES.label,
     },
 });
 

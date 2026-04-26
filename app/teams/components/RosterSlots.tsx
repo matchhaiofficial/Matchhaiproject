@@ -1,6 +1,6 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
+import { AppIcon } from '../../../src/components/AppIcon';
 import { COLORS } from '../../../src/theme';
 import styles from './RosterSlots.styles';
 
@@ -61,7 +61,7 @@ export default function RosterSlots({
                     </Text>
                     {isCaptainSlot && (
                         <View style={styles.captainBadge}>
-                            <MaterialIcons name="star" size={12} color={COLORS.background} />
+                            <AppIcon name="star" size={12} color={COLORS.backgroundDark} />
                         </View>
                     )}
                 </View>
@@ -103,7 +103,7 @@ export default function RosterSlots({
                 android_ripple={{ color: COLORS.overlayMedium }}
             >
                 <View style={styles.emptyIcon}>
-                    <MaterialIcons name="person-add-alt" size={20} color={COLORS.muted} />
+                    <AppIcon name="person-add-alt" size={20} color={COLORS.muted} />
                 </View>
                 <Text style={styles.emptyText}>Open</Text>
             </Pressable>
@@ -121,4 +121,5 @@ export default function RosterSlots({
         </View>
     );
 }
+
 

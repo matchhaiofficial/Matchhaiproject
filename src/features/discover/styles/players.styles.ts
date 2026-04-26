@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../theme';
+import { COLORS, FONTS, SPACING, TEXT_SIZES } from '../../../theme';
 
 export default StyleSheet.create({
     // Filters
@@ -89,16 +89,11 @@ export default StyleSheet.create({
     // Player Card
     playerCard: {
         width: '100%',
-        backgroundColor: COLORS.cardDark,
-        borderRadius: 20,
-        padding: SPACING.md,
-        marginBottom: SPACING.md,
+        minHeight: 90,
+    },
+    playerCardBody: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        ...SHADOWS.cardElevated,
-        minHeight: 90,
     },
     playerAvatar: {
         width: 50,
@@ -131,6 +126,12 @@ export default StyleSheet.create({
     playerInfo: {
         flex: 1,
     },
+    playerMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+        gap: 6,
+    },
     playerName: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
@@ -142,94 +143,9 @@ export default StyleSheet.create({
         flexWrap: 'wrap',
         gap: 6,
     },
-    gameTag: {
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(66, 165, 245, 0.3)',
-    },
-    gameTagText: {
-        color: COLORS.accent,
-        fontFamily: FONTS.heading,
-        fontSize: 10,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-    skillTag: {
-        backgroundColor: 'rgba(0, 230, 118, 0.05)',
-        borderColor: 'rgba(0, 230, 118, 0.2)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 6,
-        borderWidth: 1,
-    },
-    skillTagText: {
-        color: COLORS.successBright,
-        fontSize: 10,
-        fontFamily: FONTS.heading,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
     faceitIcon: {
         width: 25,
         height: 25,
         marginLeft: 4,
-    },
-    actionBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: COLORS.accent,
-        backgroundColor: 'rgba(66, 165, 245, 0.1)',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-    },
-    actionBtnText: {
-        color: COLORS.accent,
-        fontSize: 11,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-    pendingBtn: {
-        borderColor: COLORS.warning,
-        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-    },
-    pendingBtnText: {
-        color: COLORS.warning,
-    },
-    friendBtn: {
-        borderColor: COLORS.success,
-        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-    },
-    friendBtnText: {
-        color: COLORS.success,
-    },
-
-    // Empty State
-    emptyState: {
-        alignItems: 'center',
-        marginTop: 60,
-    },
-    emptyIcon: {
-        opacity: 0.5,
-        marginBottom: SPACING.lg,
-    },
-    emptyTitle: {
-        color: COLORS.text,
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.subheading,
-        marginBottom: SPACING.sm,
-    },
-    emptyText: {
-        color: COLORS.muted,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.body,
-        textAlign: 'center',
-        maxWidth: 300,
-        lineHeight: 20,
     },
 });

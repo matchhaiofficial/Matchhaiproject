@@ -1,26 +1,89 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
     Pressable,
     RefreshControl,
     Text,
-    TouchableOpacity,
     View
 } from "react-native";
+import { AppIcon } from "../../src/components/AppIcon";
 import AppHeader from "../../src/components/AppHeader";
 import Screen from "../../src/components/Screen";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserMatchrooms, Matchroom } from "../../src/services/matchService";
+import { getUserMatchrooms, Matchroom } from "../../src/services/convex/matchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { getRoomDisplayStatus } from "../../src/utils/matchroomLifecycle";
 import styles from "./my.styles";
 
 type Tab = 'hosted' | 'joined';
+
+type MatchroomCardProps = {
+    item: Matchroom;
+    userId?: string;
+    onPress: (id: string) => void;
+};
+
+function getStatusBadgeStyle(status: string) {
+    switch (status) {
+        case 'open':
+            return styles.statusBadgeOpen;
+        case 'locked':
+            return styles.statusBadgeLocked;
+        case 'expired':
+            return styles.statusBadgeExpired;
+        default:
+            return styles.statusBadgeDefault;
+    }
+}
+
+const MatchroomCard = memo(function MatchroomCard({ item, userId, onPress }: MatchroomCardProps) {
+    const isHost = item.hostUid === userId;
+    const myPlayer = item.players.find(p => p.uid === userId);
+    const status = getRoomDisplayStatus(item);
+    const startLabel = item.startTime ? new Date(item.startTime.seconds * 1000).toLocaleDateString() : 'Flexible';
+
+    return (
+        <Pressable
+            style={({ pressed }) => [styles.matchCard, pressed && styles.matchCardPressed]}
+            onPress={() => onPress(item.id!)}
+        >
+            <View style={styles.cardHeader}>
+                <View style={styles.gameBadge}>
+                    <Text style={styles.gameText}>{item.game}</Text>
+                </View>
+                <View style={[styles.statusBadge, getStatusBadgeStyle(status)]}>
+                    <Text style={styles.statusText}>{status.toUpperCase()}</Text>
+                </View>
+            </View>
+
+            <Text style={styles.cardTitle}>{item.title}</Text>
+
+            <View style={styles.cardDetails}>
+                <AppIcon name="schedule" size={14} color={COLORS.textSecondary} />
+                <Text style={styles.detailText}>{startLabel}</Text>
+
+                <AppIcon name="people" size={14} color={COLORS.textSecondary} />
+                <Text style={styles.detailText}>
+                    {item.players.length}/{item.maxPlayers}
+                </Text>
+            </View>
+
+            <View style={styles.cardFooter}>
+                <Text style={styles.roleText}>
+                    {isHost ? 'You are Host' : `Role: ${myPlayer?.role || 'Member'}`}
+                </Text>
+                <View style={styles.viewButton}>
+                    <Text style={styles.viewButtonText}>View Lobby</Text>
+                    <AppIcon name="arrow-forward" size={14} color={COLORS.textSecondary} />
+                </View>
+            </View>
+        </Pressable>
+    );
+});
 
 export default function MyMatchrooms() {
     const router = useRouter();
@@ -35,7 +98,7 @@ export default function MyMatchrooms() {
     const fetchData = async () => {
         if (!user) return;
         try {
-            const res = await getUserMatchrooms(user.uid);
+            const res = await getUserMatchrooms(user._id);
             if (res.ok && res.data) {
                 setHostedRooms(res.data.hosted);
                 setJoinedRooms(res.data.joined);
@@ -52,64 +115,26 @@ export default function MyMatchrooms() {
         fetchData();
     }, [user]);
 
-    const onRefresh = () => {
+    const onRefresh = useCallback(() => {
         setRefreshing(true);
         fetchData();
-    };
+    }, []);
 
-    const renderMatchCard = ({ item }: { item: Matchroom }) => {
-        const isHost = item.hostUid === user?.uid;
-        const myPlayer = item.players.find(p => p.uid === user?.uid);
+    const openRoom = useCallback((id: string) => {
+        router.push(`/matchrooms/${id}`);
+    }, [router]);
 
-        return (
-            <TouchableOpacity
-                style={styles.matchCard}
-                onPress={() => router.push(`/matchrooms/${item.id}`)}
-            >
-                <View style={styles.cardHeader}>
-                    <View style={styles.gameBadge}>
-                        <Text style={styles.gameText}>{item.game}</Text>
-                    </View>
-                    <View style={[
-                        styles.statusBadge,
-                        {
-                            backgroundColor:
-                                getRoomDisplayStatus(item) === 'open' ? COLORS.success :
-                                    getRoomDisplayStatus(item) === 'locked' ? COLORS.warning :
-                                        getRoomDisplayStatus(item) === 'expired' ? '#FF5722' :
-                                            COLORS.muted
-                        }
-                    ]}>
-                        <Text style={styles.statusText}>{getRoomDisplayStatus(item).toUpperCase()}</Text>
-                    </View>
-                </View>
+    const renderMatchCard = useCallback(
+        ({ item }: { item: Matchroom }) => (
+            <MatchroomCard item={item} userId={user?._id} onPress={openRoom} />
+        ),
+        [openRoom, user?._id],
+    );
 
-                <Text style={styles.cardTitle}>{item.title}</Text>
-
-                <View style={styles.cardDetails}>
-                    <MaterialIcons name="schedule" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.detailText}>
-                        {item.startTime ? new Date(item.startTime.seconds * 1000).toLocaleDateString() : 'Flexible'}
-                    </Text>
-
-                    <MaterialIcons name="people" size={14} color={COLORS.textSecondary} />
-                    <Text style={styles.detailText}>
-                        {item.players.length}/{item.maxPlayers}
-                    </Text>
-                </View>
-
-                <View style={styles.cardFooter}>
-                    <Text style={styles.roleText}>
-                        {isHost ? 'You are Host' : `Role: ${myPlayer?.role || 'Member'}`}
-                    </Text>
-                    <View style={styles.viewButton}>
-                        <Text style={styles.viewButtonText}>View Lobby</Text>
-                        <MaterialIcons name="arrow-forward" size={14} color={COLORS.textSecondary} />
-                    </View>
-                </View>
-            </TouchableOpacity>
-        );
-    };
+    const activeRooms = useMemo(
+        () => (activeTab === 'hosted' ? hostedRooms : joinedRooms),
+        [activeTab, hostedRooms, joinedRooms],
+    );
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -117,22 +142,22 @@ export default function MyMatchrooms() {
 
             {/* Tabs */}
             <View style={styles.tabContainer}>
-                <TouchableOpacity
-                    style={[styles.tab, activeTab === 'hosted' && styles.activeTab]}
+                <Pressable
+                    style={({ pressed }) => [styles.tab, activeTab === 'hosted' && styles.activeTab, pressed && styles.tabPressed]}
                     onPress={() => setActiveTab('hosted')}
                 >
                     <Text style={[styles.tabText, activeTab === 'hosted' && styles.activeTabText]}>
                         Hosted ({hostedRooms.length})
                     </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.tab, activeTab === 'joined' && styles.activeTab]}
+                </Pressable>
+                <Pressable
+                    style={({ pressed }) => [styles.tab, activeTab === 'joined' && styles.activeTab, pressed && styles.tabPressed]}
                     onPress={() => setActiveTab('joined')}
                 >
                     <Text style={[styles.tabText, activeTab === 'joined' && styles.activeTabText]}>
                         Joined ({joinedRooms.length})
                     </Text>
-                </TouchableOpacity>
+                </Pressable>
             </View>
 
             {/* Content */}
@@ -142,7 +167,7 @@ export default function MyMatchrooms() {
                 </View>
             ) : (
                 <FlatList
-                    data={activeTab === 'hosted' ? hostedRooms : joinedRooms}
+                    data={activeRooms}
                     renderItem={renderMatchCard}
                     keyExtractor={(item) => item.id!}
                     contentContainerStyle={styles.listContent}
@@ -152,7 +177,7 @@ export default function MyMatchrooms() {
                     }
                     ListEmptyComponent={
                         <View style={styles.emptyState}>
-                            <MaterialIcons name="sports-esports" size={48} color={COLORS.overlayLight} />
+                            <AppIcon name="sports-esports" size={48} style={styles.emptyIcon} />
                             <Text style={styles.emptyText}>
                                 {activeTab === 'hosted'
                                     ? "You haven't hosted any matchrooms yet."

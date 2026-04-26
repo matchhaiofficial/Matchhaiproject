@@ -40,10 +40,26 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
   {
     id: "venue_settings",
     title: "Venue Settings",
-    description: "Venue profile, operating hours, policies, and payouts",
+    description: "Venue profile, contacts, branches, hours, and policies",
     route: "/zone/modules/settings",
     icon: "settings",
     tag: "Setup",
+  },
+  {
+    id: "migration_tools",
+    title: "Migration Tools",
+    description: "Migration status, repair jobs, and retry controls",
+    route: "/zone/modules/migration-tools",
+    icon: "sync-problem",
+    tag: "System",
+  },
+  {
+    id: "audit_security",
+    title: "Audit & Security",
+    description: "Change history for bookings, pricing, resources, and migrations",
+    route: "/zone/modules/audit",
+    icon: "history",
+    tag: "System",
   },
   {
     id: "notifications_center",
@@ -51,13 +67,6 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     description: "Realtime alerts, reminders, and targeted updates",
     route: "/zone/modules/notifications",
     icon: "notifications-active",
-  },
-  {
-    id: "audit_security",
-    title: "Audit & Security",
-    description: "Action logs and suspicious activity flags",
-    route: "/zone/modules/audit",
-    icon: "fact-check",
   },
 ];
 

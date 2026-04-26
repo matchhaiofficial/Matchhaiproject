@@ -59,6 +59,8 @@ export const PLAY_TIME_OPTIONS = [
 // --- Game options ---
 export const GAME_OPTIONS = [
   { key: "cs2", label: "Counter-Strike 2" },
+  { key: "cs16", label: "CS 1.6" },
+  { key: "valorant", label: "Valorant" },
   { key: "fc26", label: "FC 26" },
   { key: "tekken8", label: "Tekken 8" },
 ] as const;
@@ -70,6 +72,14 @@ export const CS2_ROLES = [
   "AW Per",
   "In-Game Leader (IGL)",
   "Lurker",
+] as const;
+
+export const VALORANT_ROLES = [
+  "Entry Fragger",
+  "Secondary Entry / Trader",
+  "Initiator / Support",
+  "Controller / Smoker",
+  "Sentinel / Anchor",
 ] as const;
 
 // --- FC 26 formations (codes only, UI stays clean) ---

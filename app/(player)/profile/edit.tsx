@@ -1,40 +1,46 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { EmailAuthProvider, reauthenticateWithCredential, reload, updatePassword, verifyBeforeUpdateEmail } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+// Auth operations handled via Better Auth
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Image,
     KeyboardAvoidingView,
+    LayoutChangeEvent,
     Platform,
     Pressable,
     ScrollView,
     Switch,
     Text,
     TextInput,
-    TouchableOpacity,
     View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppImage } from "../../../src/components/AppImage";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
-import { auth, db } from "../../../src/config/firebaseConfig";
+import { authClient } from "../../../src/lib/auth-client";
+import { convex } from "../../../src/lib/convex";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
 import { useToast } from "../../../src/hooks/useToast";
-import { FaceitProfileSummary, fetchFaceitProfileFromUrl } from "../../../src/services/faceitApi";
-import { PsnVerificationResult, verifyPsnProfile } from "../../../src/services/psnApi";
-import { fetchSteamProfileFromUrl, SteamProfileSummary } from "../../../src/services/steamApi";
+import {
+    FaceitProfileSummary,
+    fetchFaceitProfileFromUrl,
+    PsnVerificationResult,
+    SteamProfileSummary,
+    fetchSteamProfileFromUrl,
+    verifyPsnProfile,
+} from "../../../src/services/convex/externalApiService";
 import Logger from "../../../src/utils/logger";
 import {
-    isEaIdAvailable,
     isFaceitIdAvailable,
     isPhoneAvailable,
     isPsnIdAvailable,
     isSteamIdAvailable,
     isUsernameAvailable,
-    isXboxIdAvailable,
 } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import styles from "./edit.styles";
@@ -84,10 +90,27 @@ const formatPakistaniPhone = (value: string) => {
     return formatted.trim();
 };
 
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+};
+
 export default function EditProfile() {
-    const { user } = useAuth();
+    const { user, authUser, refreshSession, refreshUser } = useAuth();
+    const params = useLocalSearchParams<{ focus?: string }>();
     const { showToast } = useToast();
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
+    const scrollRef = useRef<ScrollView | null>(null);
+    const [preferredAreasSectionY, setPreferredAreasSectionY] = useState(0);
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -119,8 +142,6 @@ export default function EditProfile() {
     const [steamProfileUrl, setSteamProfileUrl] = useState("");
     const [faceitProfileUrl, setFaceitProfileUrl] = useState("");
     const [psnOnlineId, setPsnOnlineId] = useState("");
-    const [eaProfileUrl, setEaProfileUrl] = useState("");
-    const [xboxGamertag, setXboxGamertag] = useState("");
 
     // Privacy Settings
     const [hideAreasPublicly, setHideAreasPublicly] = useState(false);
@@ -134,15 +155,12 @@ export default function EditProfile() {
     const [steamLoading, setSteamLoading] = useState(false);
     const [faceitLoading, setFaceitLoading] = useState(false);
     const [psnLoading, setPsnLoading] = useState(false);
-    const [eaLoading, setEaLoading] = useState(false);
-    const [xboxLoading, setXboxLoading] = useState(false);
 
     // availability status
     const [steamStatus, setSteamStatus] = useState<"idle" | "available" | "taken">("idle");
     const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
     const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
-    const [eaStatus, setEaStatus] = useState<"idle" | "available" | "taken">("idle");
-    const [xboxStatus, setXboxStatus] = useState<"idle" | "available" | "taken">("idle");
+    const [phoneVerified, setPhoneVerified] = useState(false);
 
     // Validation
     const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -213,72 +231,65 @@ export default function EditProfile() {
         return emailRegex.test(trimmedNew) && trimmedNew !== email;
     }, [newEmail, email]);
 
+    const isEmailVerified = Boolean(authUser?.emailVerified) && !pendingEmail;
+
     useEffect(() => {
         const fetchProfile = async () => {
-            if (!user?.uid) return;
+            if (!user?._id) return;
             try {
-                const docRef = doc(db, "users", user.uid);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
+                const data = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+                if (data) {
                     console.log("EditProfile loaded data:", JSON.stringify(data, null, 2));
-                    setFullName(data.fullName || "");
-                    setUsername(data.username || "");
-                    setOriginalUsername(data.username || "");
-                    setCity(data.city || "Karachi");
-                    setAgeRange(data.ageRange || "");
+                    setFullName((data as any).fullName || "");
+                    setUsername((data as any).username || "");
+                    setOriginalUsername((data as any).username || "");
+                    setCity((data as any).city || "Karachi");
+                    setAgeRange((data as any).ageRange || "");
                     // Store full email as-is
-                    const userEmail = auth.currentUser?.email || "";
+                    const session = await authClient.getSession();
+                    const userEmail = session?.data?.user?.email || (data as any).email || "";
                     setEmail(userEmail);
                     setOriginalEmail(userEmail);
-                    setPhone(data.phone || "");
-                    setOriginalPhone(data.phone || "");
-                    setSelectedAreas(data.areasPreferred || []);
+                    setPhone((data as any).phone || "");
+                    setOriginalPhone((data as any).phone || "");
+                    setPhoneVerified(Boolean((data as any).phoneValidated));
+                    setSelectedAreas((data as any).areasPreferred || []);
 
                     // Load pending email if exists
-                    setPendingEmail(data.pendingEmail || "");
+                    setPendingEmail((data as any).pendingEmail || "");
 
-                    setSteamProfileUrl(data.steamProfileUrl || "");
-                    setFaceitProfileUrl(data.faceitProfileUrl || "");
-                    setPsnOnlineId(data.psnOnlineId || "");
-                    setEaProfileUrl(data.eaProfileUrl || "");
-                    setXboxGamertag(data.xboxGamertag || "");
+                    setSteamProfileUrl((data as any).steamProfileUrl || "");
+                    setFaceitProfileUrl((data as any).faceitProfileUrl || "");
+                    setPsnOnlineId((data as any).psnOnlineId || "");
 
-                    setHideAreasPublicly(data.hideAreasPublicly || false);
-                    setHidePlatformsPublicly(data.hidePlatformsPublicly || false);
-                    setRestrictInvitesToFriends(data.restrictInvitesToFriends || false);
+                    setHideAreasPublicly((data as any).hideAreasPublicly || false);
+                    setHidePlatformsPublicly((data as any).hidePlatformsPublicly || false);
+                    setRestrictInvitesToFriends((data as any).restrictInvitesToFriends || false);
 
                     // Hydrate verified profiles if available
-                    if (data.steamId) {
+                    if ((data as any).steamId) {
                         setSteamProfile({
-                            steamId: data.steamId,
-                            personaName: data.steamPersonaName,
-                            cs2Hours: data.steamCs2Hours,
+                            steamId: (data as any).steamId,
+                            personaName: (data as any).steamPersonaName,
+                            cs2Hours: (data as any).steamCs2Hours,
                         } as SteamProfileSummary);
                         setSteamStatus("available");
                     }
 
-                    if (data.faceitId) {
+                    if ((data as any).faceitId) {
                         setFaceitProfile({
-                            faceitId: data.faceitId,
-                            nickname: data.faceitNickname,
-                            game: data.faceitGame,
-                            elo: data.faceitElo,
-                            skillLevel: data.faceitSkillLevel,
+                            faceitId: (data as any).faceitId,
+                            nickname: (data as any).faceitNickname,
+                            game: (data as any).faceitGame,
+                            elo: (data as any).faceitElo,
+                            skillLevel: (data as any).faceitSkillLevel,
                         } as FaceitProfileSummary);
                         setFaceitStatus("available");
                     }
 
-                    if (data.psnStats) {
-                        setPsnStats(data.psnStats);
+                    if ((data as any).psnStats) {
+                        setPsnStats((data as any).psnStats);
                         setPsnStatus("available");
-                    }
-
-                    if (data.eaId) {
-                        setEaStatus("available");
-                    }
-                    if (data.xboxId) {
-                        setXboxStatus("available");
                     }
                 }
             } catch (e) {
@@ -289,36 +300,46 @@ export default function EditProfile() {
             }
         };
         fetchProfile();
-    }, [user?.uid]);
+    }, [user?._id]);
+
+    useEffect(() => {
+        if (loading || params.focus !== "areas" || preferredAreasSectionY <= 0) return;
+
+        const frame = requestAnimationFrame(() => {
+            scrollRef.current?.scrollTo({
+                y: Math.max(0, preferredAreasSectionY - 80),
+                animated: true,
+            });
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [loading, params.focus, preferredAreasSectionY]);
+
+    useSessionRefreshPolling({
+        enabled: Boolean(user?._id && pendingEmail),
+        refreshSession,
+    });
 
     // Auto-refresh auth state to check for email verification
     useEffect(() => {
-        if (!user?.uid || !pendingEmail) return;
+        if (!user?._id || !pendingEmail) return;
 
         const checkEmailUpdate = async () => {
             try {
-                if (!auth.currentUser) return;
+                const session = await authClient.getSession();
+                if (!session?.data?.user) return;
 
-                // Reload auth state
-                await reload(auth.currentUser);
-
-                // Check if email has been updated
-                const currentEmail = auth.currentUser.email || "";
+                const currentEmail = session.data.user.email || "";
                 if (currentEmail === pendingEmail) {
-                    // Email verified and updated!
-                    console.log("Email verified! Updating Firestore...");
-
-                    // Clear pending email from Firestore
-                    const userRef = doc(db, "users", user.uid);
-                    await updateDoc(userRef, {
-                        pendingEmail: null,
-                        updatedAt: new Date()
+                    await convex.mutation(api.users.updateFullProfile, {
+                        userId: user._id as Id<"users">,
+                        updates: { pendingEmail: null },
                     });
 
-                    // Update local state
                     setEmail(currentEmail);
                     setOriginalEmail(currentEmail);
                     setPendingEmail("");
+                    await refreshUser();
 
                     showToast({
                         type: "success",
@@ -327,34 +348,21 @@ export default function EditProfile() {
                     });
                 }
             } catch (e: any) {
-                // Handle token expiration - common when email is verified
                 if (e?.code === 'auth/user-token-expired' || e?.code === 'auth/requires-recent-login') {
-                    // Clear the pending email state
                     setPendingEmail("");
-
-                    // Show helpful message
                     showToast({
                         type: "info",
                         title: "Email Verified",
                         message: "Your email was updated. Please log out and log back in to continue."
                     });
-
-                    // Stop checking
                     return;
                 }
-                // Log other unexpected errors
                 console.error("Error checking email update:", e);
             }
         };
 
-        // Check immediately
-        checkEmailUpdate();
-
-        // Then check every 5 seconds
-        const interval = setInterval(checkEmailUpdate, 5000);
-
-        return () => clearInterval(interval);
-    }, [user?.uid, pendingEmail]);
+        void checkEmailUpdate();
+    }, [pendingEmail, refreshUser, showToast, user?._id]);
 
 
     // Username check (unchanged)
@@ -425,32 +433,39 @@ export default function EditProfile() {
             return;
         }
         setSteamLoading(true);
-        const res = await fetchSteamProfileFromUrl(url);
-        setSteamLoading(false);
+        try {
+            const res = await fetchSteamProfileFromUrl(url);
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "Steam lookup failed", message: res.message || "Verification failed." });
+            if (!res.ok) {
+                showToast({ type: "error", title: "Steam lookup failed", message: res.message || "Verification failed." });
+                setSteamProfile(null);
+                setSteamStatus("idle");
+                return;
+            }
+
+            const available = await isSteamIdAvailable(res.data.steamId, user?._id);
+            if (!available) {
+                setSteamStatus("taken");
+                setSteamProfile(null);
+                showToast({
+                    type: "error",
+                    title: "Link in use",
+                    message: "This link is already in use.",
+                });
+                return;
+            }
+
+            setSteamStatus("available");
+            setSteamProfile(res.data);
+            showToast({ type: "success", title: "Verified", message: `Steam profile found: ${res.data.personaName}` });
+        } catch (e: any) {
+            console.error("Steam lookup failed", e);
             setSteamProfile(null);
             setSteamStatus("idle");
-            return;
+            showToast({ type: "error", title: "Steam lookup failed", message: e?.message || "Verification failed." });
+        } finally {
+            setSteamLoading(false);
         }
-
-        // Check uniqueness
-        const available = await isSteamIdAvailable(res.data.steamId, user?.uid);
-        if (!available) {
-            setSteamStatus("taken");
-            setSteamProfile(null);
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-            return;
-        }
-
-        setSteamStatus("available");
-        setSteamProfile(res.data);
-        showToast({ type: "success", title: "Verified", message: `Steam profile found: ${res.data.personaName}` });
     };
 
     const handleFaceitLookup = async () => {
@@ -460,32 +475,43 @@ export default function EditProfile() {
             return;
         }
         setFaceitLoading(true);
-        const res = await fetchFaceitProfileFromUrl(value);
-        setFaceitLoading(false);
+        try {
+            const res = await fetchFaceitProfileFromUrl(value);
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "FACEIT lookup failed", message: res.message || "Verification failed." });
+            if (!res.ok) {
+                showToast({ type: "error", title: "FACEIT lookup failed", message: res.message || "Verification failed." });
+                setFaceitProfile(null);
+                setFaceitStatus("idle");
+                return;
+            }
+
+            const available = await withTimeout(
+                isFaceitIdAvailable(res.data.faceitId, user?._id),
+                10000,
+                "FACEIT uniqueness check timed out."
+            );
+            if (!available) {
+                setFaceitStatus("taken");
+                setFaceitProfile(null);
+                showToast({
+                    type: "error",
+                    title: "Link in use",
+                    message: "This link is already in use.",
+                });
+                return;
+            }
+
+            setFaceitStatus("available");
+            setFaceitProfile(res.data);
+            showToast({ type: "success", title: "Verified", message: `FACEIT profile found: ${res.data.nickname}` });
+        } catch (e: any) {
+            console.error("FACEIT lookup failed", e);
             setFaceitProfile(null);
             setFaceitStatus("idle");
-            return;
+            showToast({ type: "error", title: "FACEIT lookup failed", message: e?.message || "Verification failed." });
+        } finally {
+            setFaceitLoading(false);
         }
-
-        // Check uniqueness
-        const available = await isFaceitIdAvailable(res.data.faceitId, user?.uid);
-        if (!available) {
-            setFaceitStatus("taken");
-            setFaceitProfile(null);
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-            return;
-        }
-
-        setFaceitStatus("available");
-        setFaceitProfile(res.data);
-        showToast({ type: "success", title: "Verified", message: `FACEIT profile found: ${res.data.nickname}` });
     };
 
     const handlePsnLookup = async () => {
@@ -495,78 +521,38 @@ export default function EditProfile() {
             return;
         }
         setPsnLoading(true);
-        // Request stats for both games as we are in profile setup
-        const res = await verifyPsnProfile(id, true, true);
-        setPsnLoading(false);
+        try {
+            const res = await verifyPsnProfile(id, true, true);
 
-        if (!res.ok) {
-            showToast({ type: "error", title: "PSN lookup failed", message: res.message || "Verification failed." });
+            if (!res.ok) {
+                showToast({ type: "error", title: "PSN lookup failed", message: res.message || "Verification failed." });
+                setPsnStats(null);
+                setPsnStatus("idle");
+                return;
+            }
+
+            const available = await isPsnIdAvailable(res.data.psnAccountId, user?._id);
+            if (!available) {
+                setPsnStatus("taken");
+                setPsnStats(null);
+                showToast({
+                    type: "error",
+                    title: "Link in use",
+                    message: "This link is already in use.",
+                });
+                return;
+            }
+
+            setPsnStatus("available");
+            setPsnStats(res.data);
+            showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
+        } catch (e: any) {
+            console.error("PSN lookup failed", e);
             setPsnStats(null);
             setPsnStatus("idle");
-            return;
-        }
-
-        // Check uniqueness
-        const available = await isPsnIdAvailable(res.data.psnAccountId, user?.uid);
-        if (!available) {
-            setPsnStatus("taken");
-            setPsnStats(null);
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-            return;
-        }
-
-        setPsnStatus("available");
-        setPsnStats(res.data);
-        showToast({ type: "success", title: "Verified", message: `PSN Found: ${res.data.psnOnlineId}` });
-    };
-
-    const handleEaLookup = async () => {
-        const value = eaProfileUrl.trim();
-        if (!value) {
-            showToast({ type: "info", title: "EA ID", message: "Enter your EA ID first." });
-            return;
-        }
-        setEaLoading(true);
-        const available = await isEaIdAvailable(value, user?.uid);
-        setEaLoading(false);
-
-        if (!available) {
-            setEaStatus("taken");
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-        } else {
-            setEaStatus("available");
-            showToast({ type: "success", title: "Verified", message: "EA ID is available and linked." });
-        }
-    };
-
-    const handleXboxLookup = async () => {
-        const value = xboxGamertag.trim();
-        if (!value) {
-            showToast({ type: "info", title: "Xbox Gamertag", message: "Enter your Xbox Gamertag first." });
-            return;
-        }
-        setXboxLoading(true);
-        const available = await isXboxIdAvailable(value, user?.uid);
-        setXboxLoading(false);
-
-        if (!available) {
-            setXboxStatus("taken");
-            showToast({
-                type: "error",
-                title: "Link in use",
-                message: "This link is already in use.",
-            });
-        } else {
-            setXboxStatus("available");
-            showToast({ type: "success", title: "Verified", message: "Xbox Gamertag is available and linked." });
+            showToast({ type: "error", title: "PSN lookup failed", message: e?.message || "Verification failed." });
+        } finally {
+            setPsnLoading(false);
         }
     };
 
@@ -586,14 +572,15 @@ export default function EditProfile() {
 
         setPasswordUpdating(true);
         try {
-            if (!auth.currentUser || !auth.currentUser.email) return;
+            // Use Better Auth to change password
+            const result = await (authClient as any).changePassword({
+                currentPassword,
+                newPassword: password,
+            });
 
-            // Re-authenticate
-            const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
-            await reauthenticateWithCredential(auth.currentUser, cred);
-
-            // Update
-            await updatePassword(auth.currentUser, password);
+            if (result?.error) {
+                throw result.error;
+            }
 
             showToast({ type: "success", title: "Success", message: "Password updated successfully." });
 
@@ -604,8 +591,8 @@ export default function EditProfile() {
         } catch (e: any) {
             console.error("Password update failed", e);
             let msg = "Failed to update password.";
-            if (e.code === 'auth/wrong-password') msg = "Current password is incorrect.";
-            if (e.code === 'auth/requires-recent-login') msg = "Session too old. Please re-login.";
+            if (e.message?.includes("incorrect") || e.message?.includes("wrong")) msg = "Current password is incorrect.";
+            if (e.message?.includes("recent") || e.message?.includes("session")) msg = "Session too old. Please re-login.";
             showToast({ type: "error", title: "Error", message: msg });
         } finally {
             setPasswordUpdating(false);
@@ -614,17 +601,20 @@ export default function EditProfile() {
 
     // Email update handler
     const handleUpdateEmail = async () => {
-        if (!auth.currentUser || !isNewEmailValid || !user?.uid) return;
+        if (!isNewEmailValid || !user?._id) return;
 
         try {
             setEmailUpdating(true);
-            await verifyBeforeUpdateEmail(auth.currentUser, newEmail.trim());
+            // Use Better Auth to change email
+            const result = await (authClient as any).changeEmail({
+                newEmail: newEmail.trim(),
+            });
+            if (result?.error) throw result.error;
 
-            // Store pending email in Firestore
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, {
-                pendingEmail: newEmail.trim(),
-                updatedAt: new Date()
+            // Store pending email in Convex
+            await convex.mutation(api.users.updateFullProfile, {
+                userId: user._id as Id<"users">,
+                updates: { pendingEmail: newEmail.trim() },
             });
 
             // Update local state
@@ -651,7 +641,7 @@ export default function EditProfile() {
     };
 
     const handleSave = async () => {
-        if (!user?.uid) return;
+        if (!user?._id) return;
 
         if (!fullName.trim()) {
             showToast({ type: "info", title: "Required", message: "Full Name is required" });
@@ -672,9 +662,7 @@ export default function EditProfile() {
         if (
             steamStatus === "taken" ||
             faceitStatus === "taken" ||
-            psnStatus === "taken" ||
-            eaStatus === "taken" ||
-            xboxStatus === "taken"
+            psnStatus === "taken"
         ) {
             showToast({
                 type: "error",
@@ -712,12 +700,10 @@ export default function EditProfile() {
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
                 psnOnlineId: psnOnlineId.trim() || null,
-                eaProfileUrl: eaProfileUrl.trim() || null,
-                xboxGamertag: xboxGamertag.trim() || null,
                 hideAreasPublicly,
                 hidePlatformsPublicly,
                 restrictInvitesToFriends,
-                updatedAt: new Date(),
+                updatedAt: Date.now(),
             };
 
             // Username update
@@ -731,6 +717,7 @@ export default function EditProfile() {
                 updates.steamId = steamProfile.steamId ?? null;
                 updates.steamPersonaName = steamProfile.personaName ?? null;
                 updates.steamCs2Hours = steamProfile.cs2Hours ?? null;
+                updates.steamStats = steamProfile;
                 // Note: steamTekken8Hours and steamFc26Hours come from Steam API separately
             } else if (!steamProfileUrl.trim()) {
                 // Clear ALL Steam data if URL is cleared
@@ -749,6 +736,7 @@ export default function EditProfile() {
                 updates.faceitGame = faceitProfile.game ?? null;
                 updates.faceitElo = faceitProfile.elo ?? null;
                 updates.faceitSkillLevel = faceitProfile.skillLevel ?? null;
+                updates.faceitStats = faceitProfile;
             } else if (!faceitProfileUrl.trim()) {
                 // Clear ALL FACEIT data if URL is cleared
                 updates.faceitId = null;
@@ -756,33 +744,26 @@ export default function EditProfile() {
                 updates.faceitGame = null;
                 updates.faceitElo = null;
                 updates.faceitSkillLevel = null;
+                updates.faceitStats = null;
             }
 
             // Persist Verified PSN Stats
             if (psnStats && psnOnlineId.trim()) {
+                updates.psnAccountId = psnStats.psnAccountId ?? null;
                 updates.psnStats = psnStats;
             } else if (!psnOnlineId.trim()) {
                 // Clear ALL PSN data if ID is cleared
+                updates.psnAccountId = null;
                 updates.psnStats = null;
-            }
-
-            // EA / Xbox IDs
-            if (eaStatus === "available" && eaProfileUrl.trim()) {
-                updates.eaId = eaProfileUrl.trim();
-            } else if (!eaProfileUrl.trim()) {
-                updates.eaId = null;
-            }
-
-            if (xboxStatus === "available" && xboxGamertag.trim()) {
-                updates.xboxId = xboxGamertag.trim();
-            } else if (!xboxGamertag.trim()) {
-                updates.xboxId = null;
             }
 
             // Auth Updates - Email is read-only, no updates needed
 
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, updates);
+            await convex.mutation(api.users.updateFullProfile, {
+                userId: user._id as Id<"users">,
+                updates,
+            });
+            await refreshUser();
 
             showToast({ type: "success", title: "Saved", message: "Profile updated successfully" });
             router.back();
@@ -820,9 +801,9 @@ export default function EditProfile() {
         <SafeAreaView style={styles.screen}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialIcons name="arrow-back" size={24} color={COLORS.text} />
-                </TouchableOpacity>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
+                </Pressable>
                 <Text style={styles.headerTitle}>Edit Profile</Text>
 
                 <Pressable
@@ -849,6 +830,7 @@ export default function EditProfile() {
                 style={styles.flex1}
             >
                 <ScrollView
+                    ref={scrollRef}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
@@ -911,7 +893,7 @@ export default function EditProfile() {
                         <Text style={styles.label}>Email Address</Text>
                         <View style={[styles.inputBox, styles.disabledInput]}>
                             <View style={styles.flexRowCentered}>
-                                <MaterialIcons
+                                <AppIcon
                                     name="email"
                                     size={20}
                                     style={styles.iconMarginRight}
@@ -927,6 +909,14 @@ export default function EditProfile() {
                                     value={email}
                                     editable={false}
                                 />
+                                {isEmailVerified && (
+                                    <AppIcon
+                                        name="check-circle"
+                                        size={18}
+                                        style={styles.marginLeftSm}
+                                        color={COLORS.success}
+                                    />
+                                )}
                             </View>
                         </View>
 
@@ -934,7 +924,7 @@ export default function EditProfile() {
                         {pendingEmail && (
                             <View style={styles.pendingEmailContainer}>
                                 <View style={styles.pendingEmailHeader}>
-                                    <MaterialIcons name="pending" size={18} color={COLORS.warning} />
+                                    <AppIcon name="pending" size={18} color={COLORS.warning} />
                                     <Text style={styles.pendingEmailTitle}>
                                         Pending Verification
                                     </Text>
@@ -959,7 +949,7 @@ export default function EditProfile() {
                                 {/* New Email Input */}
                                 <View style={styles.inputBox}>
                                     <View style={styles.flexRowCentered}>
-                                        <MaterialIcons
+                                        <AppIcon
                                             name="email"
                                             size={20}
                                             style={styles.iconMarginRight}
@@ -1015,7 +1005,7 @@ export default function EditProfile() {
                         <Text style={styles.label}>Phone Number</Text>
                         <View style={styles.inputBox}>
                             <View style={styles.flexRowCentered}>
-                                <MaterialIcons
+                                <AppIcon
                                     name="phone-android"
                                     size={20}
                                     style={styles.iconMarginRight}
@@ -1042,7 +1032,7 @@ export default function EditProfile() {
                                     keyboardType="phone-pad"
                                 />
                                 {phone.trim().length > 0 && (
-                                    <MaterialIcons
+                                    <AppIcon
                                         name={
                                             phoneStatus === "checking"
                                                 ? "hourglass-top"
@@ -1050,14 +1040,16 @@ export default function EditProfile() {
                                                     ? "check-circle"
                                                     : phoneStatus === "taken"
                                                         ? "error-outline"
-                                                        : "check-circle"
+                                                        : phoneVerified
+                                                            ? "check-circle"
+                                                            : "radio-button-unchecked"
                                         }
                                         size={18}
                                         style={styles.marginLeftSm}
                                         color={
                                             phoneStatus === "taken"
                                                 ? COLORS.error
-                                                : phoneStatus === "available"
+                                                : phoneStatus === "available" || phoneVerified
                                                     ? COLORS.success
                                                     : COLORS.muted
                                         }
@@ -1102,7 +1094,7 @@ export default function EditProfile() {
                                         secureTextEntry={!currentPasswordVisible}
                                     />
                                     <Pressable onPress={() => setCurrentPasswordVisible(!currentPasswordVisible)} style={styles.togglePosition}>
-                                        <MaterialIcons name={currentPasswordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
+                                        <AppIcon name={currentPasswordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
                                     </Pressable>
                                 </View>
 
@@ -1117,7 +1109,7 @@ export default function EditProfile() {
                                         secureTextEntry={!passwordVisible}
                                     />
                                     <Pressable onPress={() => setPasswordVisible(!passwordVisible)} style={styles.togglePosition}>
-                                        <MaterialIcons name={passwordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
+                                        <AppIcon name={passwordVisible ? "visibility" : "visibility-off"} size={20} color={COLORS.muted} />
                                     </Pressable>
                                 </View>
 
@@ -1180,7 +1172,12 @@ export default function EditProfile() {
                     </View>
 
                     {/* Preferred Areas */}
-                    <View style={styles.fieldGroup}>
+                    <View
+                        style={styles.fieldGroup}
+                        onLayout={(event: LayoutChangeEvent) => {
+                            setPreferredAreasSectionY(event.nativeEvent.layout.y);
+                        }}
+                    >
                         <View style={styles.preferredAreasHeader}>
                             <Text style={styles.labelNoMargin}>Preferred Areas</Text>
                             <Text style={[
@@ -1264,7 +1261,7 @@ export default function EditProfile() {
                         <Text style={styles.label}>Steam Profile URL</Text>
                         <View style={styles.platformInputRow}>
                             <View style={[styles.platformIcon, styles.steamIcon]}>
-                                <MaterialIcons name="sports-esports" size={24} color={COLORS.steamBorder} />
+                                <AppIcon name="sports-esports" size={24} color={COLORS.steamBorder} />
                             </View>
                             <View style={styles.platformField}>
                                 <View style={styles.inputBox}>
@@ -1319,7 +1316,7 @@ export default function EditProfile() {
                         <Text style={styles.label}>FACEIT Profile URL</Text>
                         <View style={styles.platformInputRow}>
                             <View style={[styles.platformIcon, styles.faceitIcon]}>
-                                <MaterialIcons name="verified" size={24} color={COLORS.faceitBorder} />
+                                <AppIcon name="verified" size={24} color={COLORS.faceitBorder} />
                             </View>
                             <View style={styles.platformField}>
                                 <View style={styles.inputBox}>
@@ -1368,7 +1365,11 @@ export default function EditProfile() {
                                     {faceitProfile.skillLevel != null && (
                                         <View style={{ marginLeft: 8, flexDirection: "row", alignItems: "center" }}>
                                             {faceitLevelIcon ? (
-                                                <Image source={faceitLevelIcon} style={{ width: 20, height: 20 }} resizeMode="contain" />
+                                                <AppImage
+                                                    source={faceitLevelIcon}
+                                                    containerStyle={{ width: 20, height: 20 }}
+                                                    contentFit="contain"
+                                                />
                                             ) : (
                                                 <Text style={styles.summaryValue}>Lvl {faceitProfile.skillLevel}</Text>
                                             )}
@@ -1387,7 +1388,7 @@ export default function EditProfile() {
                         <Text style={styles.label}>PSN Online ID</Text>
                         <View style={styles.platformInputRow}>
                             <View style={[styles.platformIcon, styles.faceitIcon, { borderColor: '#003087', backgroundColor: '#eef2ff' }]}>
-                                <MaterialIcons name="sports-esports" size={24} color="#003791" />
+                                <AppIcon name="sports-esports" size={24} color="#003791" />
                             </View>
                             <View style={styles.platformField}>
                                 <View style={styles.inputBox}>
@@ -1436,92 +1437,6 @@ export default function EditProfile() {
                             </View>
                         )}
                         {psnStatus === "taken" && (
-                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
-                        )}
-                    </View>
-
-                    {/* EA */}
-                    <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>EA Account / Club</Text>
-                        <View style={styles.platformInputRow}>
-                            <View style={[styles.platformIcon, { borderColor: COLORS.accent, backgroundColor: COLORS.accent + '10' }]}>
-                                <MaterialIcons name="sports-soccer" size={24} color={COLORS.accent} />
-                            </View>
-                            <View style={styles.platformField}>
-                                <View style={styles.inputBox}>
-                                    <TextInput
-                                        value={eaProfileUrl}
-                                        onChangeText={(t) => {
-                                            setEaProfileUrl(t);
-                                            setEaStatus("idle");
-                                        }}
-                                        style={[styles.input, { fontSize: 13 }]}
-                                        placeholder="Club link or EA ID"
-                                        placeholderTextColor={COLORS.muted}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-
-                        <Pressable
-                            onPress={handleEaLookup}
-                            disabled={eaLoading || !eaProfileUrl.trim()}
-                            style={({ pressed }) => [
-                                styles.platformButton,
-                                eaStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
-                                pressed && !eaLoading && { opacity: 0.9 },
-                            ]}
-                        >
-                            <Text style={styles.platformButtonText}>
-                                {eaLoading ? "Checking..." : eaStatus === "available" ? "EA Linked" : "Verify EA Account"}
-                            </Text>
-                        </Pressable>
-                        {eaStatus === "taken" && (
-                            <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
-                        )}
-                    </View>
-
-                    {/* Xbox */}
-                    <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>Xbox Gamertag</Text>
-                        <View style={styles.platformInputRow}>
-                            <View style={[styles.platformIcon, { borderColor: '#107C10', backgroundColor: '#e6f2e6' }]}>
-                                <MaterialIcons name="sports-esports" size={24} color="#107C10" />
-                            </View>
-                            <View style={styles.platformField}>
-                                <View style={styles.inputBox}>
-                                    <TextInput
-                                        value={xboxGamertag}
-                                        onChangeText={(t) => {
-                                            setXboxGamertag(t);
-                                            setXboxStatus("idle");
-                                        }}
-                                        style={[styles.input, { fontSize: 13 }]}
-                                        placeholder="Your Xbox gamertag"
-                                        placeholderTextColor={COLORS.muted}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                    />
-                                </View>
-                            </View>
-                        </View>
-
-                        <Pressable
-                            onPress={handleXboxLookup}
-                            disabled={xboxLoading || !xboxGamertag.trim()}
-                            style={({ pressed }) => [
-                                styles.platformButton,
-                                xboxStatus === "available" && { backgroundColor: "#1DB954", borderColor: "#1DB954" },
-                                pressed && !xboxLoading && { opacity: 0.9 },
-                            ]}
-                        >
-                            <Text style={styles.platformButtonText}>
-                                {xboxLoading ? "Checking..." : xboxStatus === "available" ? "Xbox Linked" : "Verify Xbox Gamertag"}
-                            </Text>
-                        </Pressable>
-                        {xboxStatus === "taken" && (
                             <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
                         )}
                     </View>

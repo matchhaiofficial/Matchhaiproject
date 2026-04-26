@@ -1,16 +1,17 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
+import { AppIcon } from "../../src/components/AppIcon";
 import Screen from "../../src/components/Screen";
-import { db } from "../../src/config/firebaseConfig";
 import { useAuth } from "../../src/context/AuthContext";
+import { useToast } from "../../src/hooks/useToast";
 import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
-import type { Team } from "../../src/services/teamService";
-import { deriveZoneRate, type Zone } from "../../src/services/zoneService";
+import { Team, getTeamById } from "../../src/services/convex/teamService";
+import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
+import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
+import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
@@ -19,6 +20,8 @@ import styles from "../matchrooms/create/create.styles";
 const SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
 const GAME_ICONS: Record<string, string> = {
     cs2: "sports-esports",
+    cs16: "sports-esports",
+    valorant: "sports-esports",
     fc26: "sports-soccer",
     fc25: "sports-soccer",
     tekken8: "sports-kabaddi",
@@ -30,7 +33,7 @@ const GAME_ICONS: Record<string, string> = {
 
 const getSeriesHours = (gameKey: string, seriesType: "BO1" | "BO3" | "BO5") => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2") return seriesType === "BO3" ? 3 : seriesType === "BO5" ? 5 : 1;
+    if (game === "cs2" || game === "cs16" || game === "valorant") return seriesType === "BO3" ? 3 : seriesType === "BO5" ? 5 : 1;
     if (game === "fc26" || game === "fc25") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 0.5;
     if (game === "tekken8") return seriesType === "BO3" ? 2 : seriesType === "BO5" ? 3 : 1;
     if (game === "padel" || game === "pickleball") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 1;
@@ -39,7 +42,7 @@ const getSeriesHours = (gameKey: string, seriesType: "BO1" | "BO3" | "BO5") => {
 
 const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent?: Team | null) => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2") return 10;
+    if (game === "cs2" || game === "cs16" || game === "valorant") return 10;
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
         const teamSize = Math.max(Number(challenger?.maxMembers || 0), Number(opponent?.maxMembers || 0), 1);
         return teamSize <= 1 ? 2 : 4;
@@ -58,7 +61,7 @@ const getBaseZoneRate = (zone: Zone | null, gameKey: string) => {
     const pricing: any = zone.pricing || zone.branches?.[0]?.pricing || {};
     const game = String(gameKey || "").toLowerCase();
 
-    if (game === "cs2") {
+    if (game === "cs2" || game === "cs16" || game === "valorant") {
         const rates = [
             pricing?.pc?.regular?.price,
             pricing?.pc?.premium?.price,
@@ -85,7 +88,8 @@ export default function TeamChallengeCreateScreen() {
     const params = useLocalSearchParams<{ opponentTeamId?: string | string[] }>();
     const opponentTeamId = Array.isArray(params.opponentTeamId) ? params.opponentTeamId[0] : params.opponentTeamId;
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, authUser } = useAuth();
+    const { showToast } = useToast();
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -105,23 +109,23 @@ export default function TeamChallengeCreateScreen() {
 
     useEffect(() => {
         const load = async () => {
-            if (!opponentTeamId || !user?.uid) {
+            if (!opponentTeamId || !user?._id) {
                 setLoading(false);
                 return;
             }
 
-            const [opponentSnap, captained] = await Promise.all([
-                getDoc(doc(db, "teams", opponentTeamId)),
-                getCaptainedTeams(user.uid),
+            const [opponentResult, captained] = await Promise.all([
+                getTeamById(opponentTeamId),
+                getCaptainedTeams(user._id),
             ]);
 
-            if (!opponentSnap.exists()) {
-                Alert.alert("Not found", "Opponent team not found.");
+            if (!opponentResult.ok || !opponentResult.data) {
+                showToast({ type: "error", title: "Not found", message: "Opponent team not found." });
                 router.back();
                 return;
             }
 
-            const opponent = { id: opponentSnap.id, ...opponentSnap.data() } as Team;
+            const opponent = opponentResult.data;
             setOpponentTeam(opponent);
             setFormData((prev) => ({
                 ...prev,
@@ -139,7 +143,7 @@ export default function TeamChallengeCreateScreen() {
         };
 
         load();
-    }, [opponentTeamId, router, user?.uid]);
+    }, [opponentTeamId, router, showToast, user?._id]);
 
     const challengerTeam = useMemo(
         () => captainedTeams.find((item) => item.id === challengerTeamId) || null,
@@ -205,24 +209,30 @@ export default function TeamChallengeCreateScreen() {
     const handleCreateChallenge = async () => {
         if (submitting) return;
         if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time || pricePerPlayer <= 0) {
-            Alert.alert("Missing details", "Select captain team, date/time, preferred zone, and valid pricing before sending challenge.");
+            showToast({ type: "warning", title: "Missing details", message: "Select captain team, date/time, preferred zone, and valid pricing before sending challenge." });
             return;
         }
         if (!areBothTeamsFilled) {
-            Alert.alert(
-                "Teams not filled",
-                `${challengerTeam.name}: ${getTeamCountLabel(challengerTeam)}\n${opponentTeam.name}: ${getTeamCountLabel(opponentTeam)}\n\nBoth teams must be full to send a challenge.`,
-            );
+            showToast({
+                type: "warning",
+                title: "Teams not filled",
+                message: `${challengerTeam.name}: ${getTeamCountLabel(challengerTeam)} | ${opponentTeam.name}: ${getTeamCountLabel(opponentTeam)}. Both teams must be full to send a challenge.`,
+            });
             return;
         }
 
         const scheduledAt = parseScheduledDateTime(formData.date, formData.time);
         if (!scheduledAt) {
-            Alert.alert("Invalid date/time", "Select valid date and time.");
+            showToast({ type: "warning", title: "Invalid date/time", message: "Select valid date and time." });
             return;
         }
         if (scheduledAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
-            Alert.alert("Invalid schedule", "Challenge match must be at least 24 hours from now.");
+            showToast({ type: "warning", title: "Invalid schedule", message: "Challenge match must be at least 24 hours from now." });
+            return;
+        }
+
+        if (!hasVerifiedEmail(authUser)) {
+            showEmailVerificationRequiredAlert();
             return;
         }
 
@@ -245,7 +255,7 @@ export default function TeamChallengeCreateScreen() {
         setSubmitting(false);
 
         if (!result.ok) {
-            Alert.alert("Challenge failed", result.message || "Unable to send challenge.");
+            showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
             return;
         }
 
@@ -277,7 +287,7 @@ export default function TeamChallengeCreateScreen() {
     }
 
     const gameKey = String(opponentTeam.game || "").toLowerCase();
-    const gameLabel = String(opponentTeam.game || "").toUpperCase();
+    const gameLabel = getCanonicalGameLabel(opponentTeam.game);
 
     return (
         <Screen style={styles.screen}>
@@ -297,7 +307,7 @@ export default function TeamChallengeCreateScreen() {
                         <Text style={styles.sectionLabel}>Selected Game / Sport</Text>
                         <View style={styles.gameGrid}>
                             <View style={[styles.gameCard, styles.gameCardActive]}>
-                                <MaterialIcons
+                                <AppIcon
                                     name={(GAME_ICONS[gameKey] as any) || "sports-esports"}
                                     size={32}
                                     color={styles.accentText.color as string}
@@ -312,7 +322,7 @@ export default function TeamChallengeCreateScreen() {
                         <Text style={styles.sectionLabel}>Match Setup</Text>
                         <View style={styles.infoBox}>
                             <Text style={styles.infoBoxText}>
-                                {challengerTeam?.name || "Your Team"} vs {opponentTeam.name} - {String(opponentTeam.game || "").toUpperCase()}
+                                {challengerTeam?.name || "Your Team"} vs {opponentTeam.name} - {gameLabel}
                             </Text>
                             <Text style={styles.infoBoxSmall}>Team B will review your date, time, series, zone and pricing context.</Text>
                             <Text style={styles.infoBoxSmall}>
@@ -341,7 +351,7 @@ export default function TeamChallengeCreateScreen() {
                         </View>
                         {captainedTeams.length === 0 ? (
                             <Text style={styles.submitHintText}>
-                                You must captain another {String(opponentTeam.game || "").toUpperCase()} team to challenge.
+                                You must captain another {gameLabel} team to challenge.
                             </Text>
                         ) : null}
                     </View>
@@ -395,7 +405,7 @@ export default function TeamChallengeCreateScreen() {
                                 placeholderTextColor="#757575"
                                 editable={false}
                             />
-                            <MaterialIcons name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
+                            <AppIcon name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
                         </View>
                         <Text style={styles.helperTextTiny}>
                             Computed using selected zone hourly rate, series duration, and expected players ({estimatedPlayers}).
@@ -409,10 +419,21 @@ export default function TeamChallengeCreateScreen() {
                         <Pressable
                             style={({ pressed }) => [
                                 styles.primaryButton,
-                                submitting && styles.primaryButtonDisabled,
-                                pressed && canSubmit && !submitting && styles.primaryButtonPressed,
+                                (submitting || !hasVerifiedEmail(authUser)) &&
+                                    styles.primaryButtonDisabled,
+                                pressed &&
+                                    canSubmit &&
+                                    !submitting &&
+                                    hasVerifiedEmail(authUser) &&
+                                    styles.primaryButtonPressed,
                             ]}
-                            onPress={handleCreateChallenge}
+                            onPress={() => {
+                                if (!hasVerifiedEmail(authUser)) {
+                                    showEmailVerificationRequiredAlert();
+                                    return;
+                                }
+                                handleCreateChallenge();
+                            }}
                             disabled={submitting}
                         >
                             {submitting ? (

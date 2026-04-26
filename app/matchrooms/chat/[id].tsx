@@ -1,605 +1,692 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  Pressable,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AppHeader from "../../../src/components/AppHeader";
-import Screen from "../../../src/components/Screen";
-import { useScreenPadding } from "../../../src/hooks/useScreenPadding";
-import { useAuth } from "../../../src/context/AuthContext";
-import { db } from "../../../src/config/firebaseConfig";
-import { arrayUnion, collection, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, addDoc, setDoc, updateDoc, where } from "firebase/firestore";
-import { COLORS, SPACING } from "../../../src/theme";
-import styles from "./chat.styles";
-import Logger from "../../../src/utils/logger";
+import { useMutation, useQuery } from "convex/react";
+import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo-audio";
 import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, View, Text } from "react-native";
 
-type ChatMessage = {
-  id: string;
-  text: string;
-  senderUid: string;
-  senderName: string;
-  createdAt?: any;
-  replyTo?: {
-    messageId: string;
-    senderName: string;
-    snippet: string;
-  };
-  deletedFor?: string[];
-};
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
+import ChatThread from "../../../src/features/chat/ChatThread";
+import type { ChatThreadMessage } from "../../../src/features/chat/types";
+import { formatVoiceDuration } from "../../../src/features/chat/utils";
+import { useAuth } from "../../../src/context/AuthContext";
+import { useChatTyping } from "../../../src/hooks/useChatTyping";
+import { usePresenceHeartbeat } from "../../../src/hooks/usePresenceHeartbeat";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useToast } from "../../../src/hooks/useToast";
+import { uploadFileToConvex } from "../../../src/services/convex/storageService";
+import { COLORS } from "../../../src/theme";
+import Logger from "../../../src/utils/logger";
 
 const GAME_LABELS: Record<string, string> = {
-  cs2: "CS2",
-  fc26: "FC 26",
-  tekken8: "Tekken 8",
-  futsal: "Futsal",
-  indoor_cricket: "Indoor Cricket",
-  padel: "Padel",
-  pickleball: "Pickleball",
+    cs2: "CS2",
+    cs16: "CS 1.6",
+    valorant: "Valorant",
+    fc26: "FC26",
+    tekken8: "Tekken 8",
+    futsal: "Futsal",
+    indoor_cricket: "Indoor Cricket",
+    padel: "Padel",
+    pickleball: "Pickleball",
 };
 
-const QUICK_MESSAGES = [
-  "On my way",
-  "Running late 10m",
-  "Start match",
-];
-
-export default function MatchroomChat() {
-  const { id } = useLocalSearchParams();
-  const router = useRouter();
-  const { user } = useAuth();
-  const insets = useSafeAreaInsets();
-  const screenPadding = useScreenPadding();
-
-  const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
-  const [roomTitle, setRoomTitle] = useState<string>("Matchroom Chat");
-  const [roomMeta, setRoomMeta] = useState<any>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [roomDocId, setRoomDocId] = useState<string>("");
-  const [chatMeta, setChatMeta] = useState<any>(null);
-  const [participantNames, setParticipantNames] = useState<Record<string, string>>({});
-  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
-  const lastReadMessageId = useRef<string | null>(null);
-  const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
-
-  const chatroomId = typeof id === "string" ? id : "";
-  const activeRoomId = roomDocId || chatroomId;
-
-  const checkAuthorization = useCallback(async () => {
-    if (!chatroomId || !user?.uid) return;
-    setLoading(true);
-    try {
-      Logger.info("MatchroomChat", "Access check start", { chatroomId, uid: user.uid });
-      let resolvedId = chatroomId;
-      let roomSnap = await getDoc(doc(db, "matchrooms", resolvedId));
-      if (!roomSnap.exists()) {
-        const q = query(
-          collection(db, "matchrooms"),
-          where("matchCode", "==", chatroomId),
-          limit(1)
-        );
-        const qs = await getDocs(q);
-        if (!qs.empty) {
-          resolvedId = qs.docs[0].id;
-          roomSnap = qs.docs[0];
-          setRoomDocId(resolvedId);
-          Logger.info("MatchroomChat", "Resolved matchCode to docId", { chatroomId, resolvedId });
-        } else {
-          Logger.warn("MatchroomChat", "No matchroom found for code", { chatroomId });
-        }
-      }
-      if (!roomSnap.exists()) {
-        setAuthorized(false);
-        setLoading(false);
-        Logger.warn("MatchroomChat", "Room not found", { chatroomId, resolvedId });
-        return;
-      }
-      const roomData: any = roomSnap.data();
-      setRoomTitle(roomData.title || "Matchroom Chat");
-      setRoomMeta(roomData);
-
-      const tryGetChatroom = async () => {
-        try {
-          return await getDoc(doc(db, "chatrooms", resolvedId));
-        } catch (err) {
-          Logger.warn("MatchroomChat", "Chatroom read failed", { resolvedId, err });
-          return null;
-        }
-      };
-
-      let chatSnap = await tryGetChatroom();
-      if ((!chatSnap || !chatSnap.exists()) && (roomData.hostUid === user.uid || roomData.zoneOwnerUid === user.uid)) {
-        try {
-          const participantUids = Array.from(new Set([
-            roomData.hostUid,
-            ...(roomData.playerUids || []),
-            ...(roomData.zoneOwnerUid ? [roomData.zoneOwnerUid] : []),
-          ].filter(Boolean)));
-          await setDoc(doc(db, "chatrooms", resolvedId), {
-            matchroomId: resolvedId,
-            zoneId: roomData.zoneId || null,
-            participantUids,
-            lastMessage: null,
-            lastReadBy: {},
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
-          Logger.info("MatchroomChat", "Chatroom created by host/venue owner", { resolvedId });
-        } catch (err) {
-          Logger.warn("MatchroomChat", "Chatroom create failed", { resolvedId, err });
-        }
-        chatSnap = await tryGetChatroom();
-      }
-
-      if (!chatSnap || !chatSnap.exists()) {
-        setAuthorized(false);
-        Logger.warn("MatchroomChat", "Chatroom missing after sync", { resolvedId });
-        return;
-      }
-
-      let participantUids: string[] = chatSnap.data()?.participantUids || [];
-      let isParticipant = participantUids.includes(user.uid);
-      setAuthorized(isParticipant);
-      Logger.info("MatchroomChat", "Access check result", {
-        resolvedId,
-        isParticipant,
-        participantUidsCount: participantUids.length,
-        hostUid: roomData.hostUid,
-        zoneOwnerUid: roomData.zoneOwnerUid,
-      });
-    } catch (error) {
-      setAuthorized(false);
-      Logger.error("MatchroomChat", "Access check failed", error);
-    } finally {
-      setLoading(false);
+function formatTimeToken(value?: string | null) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (/[ap]\.?m\.?/i.test(text)) {
+        return text
+            .replace(/\s+/g, " ")
+            .replace(/a\.?m\.?/i, "AM")
+            .replace(/p\.?m\.?/i, "PM");
     }
-  }, [chatroomId, user?.uid]);
 
-  useEffect(() => {
-    checkAuthorization();
-  }, [checkAuthorization]);
+    const match = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return text;
 
-  useEffect(() => {
-    if (!activeRoomId || !authorized) return;
-    const messagesRef = collection(db, "chatrooms", activeRoomId, "messages");
-    const q = query(messagesRef, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        const data: any = docSnap.data();
-        list.push({
-          id: docSnap.id,
-          text: data.text || "",
-          senderUid: data.senderUid,
-          senderName: data.senderName || "Player",
-          createdAt: data.createdAt,
-          replyTo: data.replyTo,
-          deletedFor: data.deletedFor,
-        });
-      });
-      setMessages(list);
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return text;
+
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+    return date.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
     });
-    return () => unsubscribe();
-  }, [activeRoomId, authorized]);
-
-  useEffect(() => {
-    if (!activeRoomId || !authorized) return;
-    const chatRef = doc(db, "chatrooms", activeRoomId);
-    const unsubscribe = onSnapshot(chatRef, (snap) => {
-      setChatMeta(snap.exists() ? snap.data() : null);
-    });
-    return () => unsubscribe();
-  }, [activeRoomId, authorized]);
-
-  useEffect(() => {
-    const participantUids = Array.isArray(chatMeta?.participantUids) ? chatMeta.participantUids.filter(Boolean) : [];
-    if (!participantUids.length) {
-      setParticipantNames({});
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadParticipantNames = async () => {
-      try {
-        const uniqueUids = Array.from(new Set(participantUids));
-        const names: Record<string, string> = {};
-
-        for (let index = 0; index < uniqueUids.length; index += 10) {
-          const batch = uniqueUids.slice(index, index + 10);
-          const usersSnap = await getDocs(
-            query(collection(db, "users"), where(documentId(), "in", batch))
-          );
-          usersSnap.forEach((userDoc) => {
-            const data: any = userDoc.data();
-            names[userDoc.id] =
-              data?.username ||
-              data?.displayName ||
-              data?.fullName ||
-              "Player";
-          });
-        }
-
-        if (!cancelled) {
-          if (user?.uid && !names[user.uid]) {
-            names[user.uid] = user.displayName || "You";
-          }
-          setParticipantNames(names);
-        }
-      } catch (error) {
-        Logger.warn("MatchroomChat", "Failed to load participant names", error);
-      }
-    };
-
-    loadParticipantNames();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [chatMeta?.participantUids, user?.uid, user?.displayName]);
-
-  const markRead = useCallback(async () => {
-    if (!activeRoomId || !user?.uid) return;
-    try {
-      await setDoc(
-        doc(db, "chatrooms", activeRoomId),
-        {
-          lastReadBy: {
-            [user.uid]: serverTimestamp(),
-          },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    } catch (error) {
-      Logger.warn("MatchroomChat", "Failed to update lastReadBy", error);
-    }
-  }, [activeRoomId, user?.uid]);
-
-  useEffect(() => {
-    if (!authorized || !messages.length || !user?.uid) return;
-    const latest = messages[0];
-    if (!latest) return;
-    if (latest.id !== lastReadMessageId.current) {
-      lastReadMessageId.current = latest.id;
-      markRead();
-    }
-  }, [messages, authorized, markRead, user?.uid]);
-
-  useEffect(() => {
-    if (!authorized || !activeRoomId) return;
-    markRead();
-  }, [authorized, activeRoomId, markRead]);
-
-  const sendMessage = async (overrideText?: string) => {
-    if (!activeRoomId || !user?.uid) {
-      Logger.warn("MatchroomChat", "Send skipped due to missing context", {
-        activeRoomId,
-        uid: user?.uid,
-      });
-      return;
-    }
-    const trimmed = (overrideText ?? input).trim();
-    if (!trimmed) return;
-    setSending(true);
-    try {
-      Logger.debug("MatchroomChat", "Send start", {
-        roomId: activeRoomId,
-        uid: user.uid,
-        viaQuickChip: Boolean(overrideText),
-        length: trimmed.length,
-      });
-      const payload: any = {
-        type: "text",
-        text: trimmed,
-        senderUid: user.uid,
-        senderName: user.displayName || "Player",
-        createdAt: serverTimestamp(),
-        clientMessageId: `${user.uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      };
-      if (replyTo) {
-        payload.replyTo = {
-          messageId: replyTo.id,
-          senderName: replyTo.senderName || "Player",
-          snippet: (replyTo.text || "").slice(0, 80),
-        };
-      }
-      await addDoc(collection(db, "chatrooms", activeRoomId, "messages"), payload);
-      try {
-        await updateDoc(doc(db, "chatrooms", activeRoomId), {
-          lastMessage: {
-            type: "text",
-            text: trimmed,
-            senderUid: user.uid,
-            createdAt: serverTimestamp(),
-          },
-          updatedAt: serverTimestamp(),
-        });
-      } catch (e) {
-        Logger.warn("MatchroomChat", "Failed to update lastMessage", e);
-      }
-      if (!overrideText) {
-        setInput("");
-      }
-      setReplyTo(null);
-    } catch (error) {
-      Logger.error("MatchroomChat", "Send failed", error);
-      Alert.alert("Send failed", "Unable to send message. Please try again.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const deleteForMe = async (messageId: string) => {
-    if (!activeRoomId || !user?.uid) return;
-    try {
-      await updateDoc(doc(db, "chatrooms", activeRoomId, "messages", messageId), {
-        deletedFor: arrayUnion(user.uid),
-        updatedAt: serverTimestamp(),
-      });
-    } catch (error) {
-      Logger.warn("MatchroomChat", "deleteForMe failed", error);
-    }
-  };
-
-  const handleMessageActions = (item: ChatMessage) => {
-    Alert.alert(
-      "Message options",
-      "",
-      [
-        {
-          text: "Reply",
-          onPress: () => setReplyTo(item),
-        },
-        {
-          text: "Copy",
-          onPress: async () => {
-            try {
-              await Clipboard.setStringAsync(item.text || "");
-            } catch (error) {
-              Logger.warn("MatchroomChat", "Copy failed", error);
-            }
-          },
-        },
-        {
-          text: "Delete for me",
-          style: "destructive",
-          onPress: () => deleteForMe(item.id),
-        },
-        { text: "Cancel", style: "cancel" },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const lastOutgoingId = useMemo(() => {
-    if (!user?.uid) return null;
-    return messages.find((m) => m.senderUid === user.uid)?.id || null;
-  }, [messages, user?.uid]);
-
-  const contextCard = useMemo(() => {
-    if (!roomMeta) return null;
-    const gameLabel = GAME_LABELS[roomMeta.game] || (roomMeta.game ? String(roomMeta.game).toUpperCase() : "Matchroom");
-    const dateText = roomMeta.scheduledDate ? String(roomMeta.scheduledDate) : "Date TBD";
-    const timeText = roomMeta.scheduledTime ? String(roomMeta.scheduledTime) : "Time TBD";
-    const status = roomMeta.status ? String(roomMeta.status).replace('-', ' ') : 'open';
-    return (
-      <View style={styles.contextCard}>
-        <View style={styles.contextTopRow}>
-          <Text style={styles.contextGame}>{gameLabel}</Text>
-          <View style={styles.contextStatusPill}>
-            <Text style={styles.contextStatusText}>{status}</Text>
-          </View>
-        </View>
-        <Text style={styles.contextVenue}>{roomMeta.location || "Venue TBD"}</Text>
-        <Text style={styles.contextTime}>{dateText} · {timeText}</Text>
-      </View>
-    );
-  }, [roomMeta]);
-
-  const renderItem = ({ item }: { item: ChatMessage }) => {
-    const isMine = item.senderUid === user?.uid;
-    const bubbleStyle = isMine ? styles.bubbleOutgoing : styles.bubbleIncoming;
-    const isLastOutgoing = isMine && item.id === lastOutgoingId;
-    let seen = false;
-    let seenByNames: string[] = [];
-    if (isLastOutgoing && chatMeta?.lastReadBy && item.createdAt?.toDate) {
-      const sentAt = item.createdAt.toDate();
-      const seenEntries = Object.entries(chatMeta.lastReadBy).filter(([uid, ts]: any) => {
-        if (uid === user?.uid) return false;
-        if (!ts?.toDate) return false;
-        return ts.toDate() >= sentAt;
-      });
-      seen = seenEntries.length > 0;
-      seenByNames = seenEntries.map(([uid]) => participantNames[uid] || "Player");
-    }
-    const seenLabel = seenByNames.length > 0
-      ? (seenByNames.length <= 2
-        ? `Seen by ${seenByNames.join(", ")}`
-        : `Seen by ${seenByNames.slice(0, 2).join(", ")} +${seenByNames.length - 2}`)
-      : "";
-    const isDeletedForMe = Array.isArray(item.deletedFor) && !!user?.uid && item.deletedFor.includes(user.uid);
-    const avatarLetter = (item.senderName || "P").trim().charAt(0).toUpperCase();
-    return (
-      <View style={[styles.bubbleRow, isMine ? styles.bubbleRowOutgoing : styles.bubbleRowIncoming]}>
-        {!isMine && (
-          <View style={styles.avatarWrap}>
-            <Text style={styles.avatarText}>{avatarLetter}</Text>
-          </View>
-        )}
-        <View style={[styles.bubbleContainer, isMine ? styles.bubbleContainerOutgoing : styles.bubbleContainerIncoming]}>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onLongPress={() => handleMessageActions(item)}
-            style={styles.bubbleTouchable}
-          >
-            <View style={bubbleStyle}>
-            {item.replyTo && (
-              <View style={styles.replyChip}>
-                <Text style={styles.replyLabel}>Replying to {item.replyTo.senderName}</Text>
-                <Text style={styles.replySnippet} numberOfLines={1}>{item.replyTo.snippet}</Text>
-              </View>
-            )}
-            {isDeletedForMe ? (
-              <Text style={styles.deletedText}>Message deleted</Text>
-            ) : (
-              <Text style={styles.bubbleText}>{item.text}</Text>
-            )}
-            <Text style={isLastOutgoing && seen ? styles.bubbleStatus : styles.bubbleTime}>
-              {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : ""}
-              {isLastOutgoing && seen ? " · Seen" : ""}
-            </Text>
-            {isLastOutgoing && seen && seenLabel ? (
-              <Text style={styles.seenByText}>{seenLabel}</Text>
-            ) : null}
-            </View>
-          </TouchableOpacity>
-        </View>
-        {isMine && (
-          <View style={[styles.avatarWrap, styles.avatarWrapRight]}>
-            <Text style={styles.avatarText}>{avatarLetter}</Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  return (
-    <Screen
-      style={styles.screen}
-      scroll={false}
-      debugTag="MatchroomChat"
-      contentStyle={styles.screenContent}
-    >
-      <View style={[styles.headerWrap, { paddingHorizontal: screenPadding }]}>
-        <AppHeader title={roomTitle} onBack={() => router.back()} inlineTitle />
-      </View>
-
-      {loading ? (
-        <View style={styles.content}>
-          <ActivityIndicator color={COLORS.accent} />
-        </View>
-      ) : !authorized ? (
-        <View style={styles.content}>
-          <View style={styles.infoBanner}>
-            <Text style={styles.infoTitle}>Access restricted</Text>
-            <Text style={styles.infoSubtitle}>Only matchroom participants and the venue owner can view this chat.</Text>
-          </View>
-        </View>
-      ) : (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-        >
-          <FlatList
-            contentContainerStyle={[
-              styles.messageList,
-              {
-                paddingTop: SPACING.xs,
-                paddingBottom: SPACING.sm,
-                paddingHorizontal: screenPadding,
-              },
-            ]}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            inverted
-            keyboardShouldPersistTaps="always"
-            ListFooterComponent={contextCard ? <View style={styles.contextWrapper}>{contextCard}</View> : null}
-          />
-
-          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, SPACING.sm) }]}>
-            <View style={styles.inputInner}>
-              {replyTo && (
-              <View style={styles.replyBar}>
-                <View style={styles.replyContent}>
-                  <Text style={styles.replyTitle}>Replying to {replyTo.senderName || "Player"}</Text>
-                  <Text style={styles.replyText} numberOfLines={1}>{replyTo.text}</Text>
-                </View>
-                <TouchableOpacity onPress={() => setReplyTo(null)} style={styles.replyClose}>
-                  <MaterialIcons name="close" size={16} color={COLORS.muted} />
-                </TouchableOpacity>
-              </View>
-              )}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.quickChips}
-                keyboardShouldPersistTaps="handled"
-              >
-              {QUICK_MESSAGES.map((msg) => (
-                <TouchableOpacity
-                  key={msg}
-                  style={styles.quickChip}
-                  onPressIn={() => {
-                    if (touchDebugEnabled) {
-                      Logger.debug("TouchDebug", "pressIn", { tag: "chat_quick_chip", text: msg });
-                    }
-                  }}
-                  onPress={() => {
-                    if (touchDebugEnabled) {
-                      Logger.debug("TouchDebug", "press", { tag: "chat_quick_chip", text: msg });
-                    }
-                    sendMessage(msg);
-                  }}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Text style={styles.quickChipText}>{msg}</Text>
-                </TouchableOpacity>
-              ))}
-              </ScrollView>
-              <View style={styles.inputRow}>
-              <TextInput
-                style={styles.input}
-                placeholder="Message"
-                placeholderTextColor={COLORS.muted}
-                value={input}
-                onChangeText={setInput}
-                multiline
-              />
-              <Pressable
-                style={({ pressed }) => [
-                  styles.sendButton,
-                  pressed && !sending && styles.sendButtonPressed,
-                  sending && styles.sendButtonDisabled,
-                ]}
-                onPressIn={() => {
-                  if (touchDebugEnabled) {
-                    Logger.debug("TouchDebug", "pressIn", { tag: "chat_send_button" });
-                  }
-                }}
-                onPress={() => {
-                  if (touchDebugEnabled) {
-                    Logger.debug("TouchDebug", "press", { tag: "chat_send_button" });
-                  }
-                  sendMessage();
-                }}
-                disabled={sending}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <MaterialIcons name="send" size={18} color={COLORS.backgroundDark} />
-              </Pressable>
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      )}
-    </Screen>
-  );
 }
+
+function formatScheduleTime(value?: string | null) {
+    const text = String(value || "").trim();
+    if (!text) return "Time TBD";
+    return text
+        .split(/\s*-\s*/)
+        .map((token) => formatTimeToken(token))
+        .join(" - ");
+}
+
+export default function MatchroomChatScreen() {
+    const { id } = useLocalSearchParams();
+    const router = useRouter();
+    const { user } = useAuth();
+    const { showToast } = useToast();
+
+    const [input, setInput] = useState("");
+    const [sending, setSending] = useState(false);
+    const [replyTo, setReplyTo] = useState<ChatThreadMessage | null>(null);
+    const [editingMessage, setEditingMessage] = useState<ChatThreadMessage | null>(null);
+    const [uploadingVoice, setUploadingVoice] = useState(false);
+    const [uploadingAttachment, setUploadingAttachment] = useState(false);
+    useRouteLogger("MatchroomChatScreen", { matchroomKey: id, userId: user?._id });
+
+    const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+    const recorderState = useAudioRecorderState(recorder, 250);
+
+    const rawId = typeof id === "string" ? id : "";
+
+    const matchroomById = useQuery(
+        api.matchrooms.getById,
+        rawId ? { matchroomId: rawId } : "skip"
+    );
+    const matchroomByCode = useQuery(
+        api.matchrooms.getByMatchCode,
+        rawId && matchroomById === null ? { matchCode: rawId } : "skip"
+    );
+    const roomMeta = matchroomById || matchroomByCode;
+    const matchroomId = roomMeta?._id;
+    const matchroomLookupComplete = matchroomById !== undefined && (matchroomById !== null || matchroomByCode !== undefined);
+    const accessState = useQuery(
+        api.chat.getMatchroomAccess,
+        matchroomId
+            ? { matchroomId: matchroomId as Id<"matchrooms"> }
+            : "skip"
+    );
+
+    const chatroom = useQuery(
+        api.chat.getByMatchroom,
+        matchroomId && accessState?.status === "ok"
+            ? { matchroomId: matchroomId as Id<"matchrooms"> }
+            : "skip"
+    );
+    const rawMessages = useQuery(
+        api.chat.listMessagesForMatchroom,
+        matchroomId && accessState?.status === "ok"
+            ? { matchroomId: matchroomId as Id<"matchrooms">, limit: 200 }
+            : "skip"
+    );
+
+    const participantUserIds = useMemo(
+        () => (chatroom?.participantUids || []).filter(Boolean).map((uid) => uid as Id<"users">),
+        [chatroom?.participantUids]
+    );
+    const participantUsers = useQuery(
+        api.users.getMany,
+        participantUserIds.length > 0 ? { userIds: participantUserIds } : "skip"
+    );
+
+    const getOrCreateChatroom = useMutation(api.chat.getOrCreateForMatchroom);
+    const sendMessageToMatchroomMutation = useMutation(api.chat.sendMessageToMatchroom);
+    const deleteForMeMutation = useMutation(api.chat.deleteForMe);
+    const markReadMutation = useMutation(api.chat.markRead);
+    const toggleReactionMutation = useMutation(api.chat.toggleReaction);
+    const editMessageMutation = useMutation(api.chat.editMessage);
+    const pinMessageMutation = useMutation(api.chat.pinMessage);
+    const unpinMessageMutation = useMutation(api.chat.unpinMessage);
+
+    // Typing indicator
+    const chatKeyForTyping = chatroom?._id ? String(chatroom._id) : null;
+    const { typingNames, onInputActivity } = useChatTyping(chatKeyForTyping);
+
+    // Presence heartbeat
+    usePresenceHeartbeat(Boolean(user?._id));
+
+    const authorized = accessState?.status === "ok";
+
+    useEffect(() => {
+        if (!matchroomId) return;
+        Logger.info("MatchroomChat", "Chat auth state snapshot", {
+            matchroomId,
+            localUserId: user?._id ?? null,
+            accessStatus: accessState?.status ?? null,
+            hasChatroom: Boolean(chatroom?._id),
+            hasMessages: Array.isArray(rawMessages) ? rawMessages.length : null,
+        });
+    }, [accessState?.status, chatroom?._id, matchroomId, rawMessages, user?._id]);
+
+    useEffect(() => {
+        if (!matchroomId || !user?._id || !roomMeta) return;
+        if (accessState?.status !== "ok" || chatroom !== null) return;
+
+        const participantUids = Array.from(
+            new Set([
+                roomMeta.hostUid,
+                ...(((roomMeta as any).playerUids || []) as string[]),
+                ...((roomMeta as any).zoneOwnerUid ? [(roomMeta as any).zoneOwnerUid] : []),
+            ].filter(Boolean))
+        );
+
+        void getOrCreateChatroom({
+            matchroomId: matchroomId as Id<"matchrooms">,
+            participantUids,
+            zoneId: (roomMeta as any).zoneId,
+        }).catch((error: any) => {
+            Logger.warn("MatchroomChat", "Failed to create chatroom", error);
+        });
+    }, [accessState?.status, chatroom, getOrCreateChatroom, matchroomId, roomMeta, user?._id]);
+
+    const participantNameMap = useMemo(() => {
+        const map: Record<string, string> = {};
+        (participantUsers || []).forEach((entry: any) => {
+            if (!entry) return;
+            map[entry._id] = entry.username || entry.fullName || "Player";
+        });
+        return map;
+    }, [participantUsers]);
+
+    const participants = useMemo(
+        () => (participantUsers || [])
+            .filter(Boolean)
+            .map((entry: any) => ({
+                uid: String(entry._id),
+                label: entry.username || entry.fullName || "Player",
+                photoURL: entry.photoURL || null,
+            })),
+        [participantUsers]
+    );
+
+    const messages = useMemo<ChatThreadMessage[]>(() => {
+        const mapped = [...(rawMessages || [])]
+            .sort((a: any, b: any) => a.createdAt - b.createdAt)
+            .map((message: any) => ({
+                id: message._id,
+                text: message.content || "",
+                senderUid: String(message.senderUid),
+                senderName: message.senderUsername || participantNameMap[String(message.senderUid)] || "Player",
+                createdAt: message.createdAt || 0,
+                type: message.type || (message.audioStorageId ? "voice" : "text"),
+                audioUrl: message.audioUrl || null,
+                audioDurationMs: message.audioDurationMs || null,
+                attachment: message.attachment || null,
+                reactions: message.reactions || [],
+                editedAt: message.editedAt || null,
+                replyTo: message.replyTo
+                    ? {
+                        messageId: message.replyTo.messageId,
+                        senderName: message.replyTo.senderName,
+                        snippet: message.replyTo.text,
+                    }
+                    : undefined,
+                deletedFor: message.deletedFor,
+            }));
+        return mapped;
+    }, [participantNameMap, rawMessages]);
+
+    const handleToggleReaction = useCallback(async (messageId: string, emoji: string) => {
+        try {
+            await toggleReactionMutation({
+                messageId: messageId as Id<"chatMessages">,
+                emoji,
+            });
+        } catch (error) {
+            Logger.warn("MatchroomChat", "Failed to toggle reaction", error);
+        }
+    }, [toggleReactionMutation]);
+
+    const handleEditMessage = useCallback(async (messageId: string, newContent: string) => {
+        try {
+            await editMessageMutation({
+                messageId: messageId as Id<"chatMessages">,
+                newContent,
+            });
+            setEditingMessage(null);
+        } catch (error: any) {
+            Logger.warn("MatchroomChat", "Failed to edit message", error);
+            showToast({ type: "error", title: "Edit failed", message: error?.message || "Unable to edit message." });
+        }
+    }, [editMessageMutation, showToast]);
+
+    const handlePinMessage = useCallback(async (messageId: string) => {
+        if (!chatroom?._id) return;
+        try {
+            await pinMessageMutation({ chatroomId: chatroom._id, messageId });
+        } catch (error: any) {
+            Logger.warn("MatchroomChat", "Failed to pin message", error);
+            showToast({ type: "error", title: "Pin failed", message: error?.message || "Unable to pin message." });
+        }
+    }, [chatroom?._id, pinMessageMutation, showToast]);
+
+    const handleUnpinMessage = useCallback(async (messageId: string) => {
+        if (!chatroom?._id) return;
+        try {
+            await unpinMessageMutation({ chatroomId: chatroom._id, messageId });
+        } catch (error: any) {
+            Logger.warn("MatchroomChat", "Failed to unpin message", error);
+        }
+    }, [chatroom?._id, unpinMessageMutation]);
+
+    const handleSwipeReply = useCallback((message: ChatThreadMessage) => {
+        setEditingMessage(null);
+        setReplyTo(message);
+    }, []);
+
+    const pinnedMessageIds: string[] = (chatroom?.pinnedMessageIds as string[]) || [];
+    const pinnedMessages = useMemo(
+        () => messages.filter((m) => pinnedMessageIds.includes(m.id)),
+        [messages, pinnedMessageIds]
+    );
+
+    const handleInputChange = useCallback((value: string) => {
+        setInput(value);
+        onInputActivity();
+    }, [onInputActivity]);
+
+    const seenNamesByMessageId = useMemo(() => {
+        const result: Record<string, string[]> = {};
+        const lastReadBy = (chatroom?.lastReadBy || {}) as Record<string, number>;
+        messages.forEach((message) => {
+            if (message.senderUid !== user?._id) return;
+            result[message.id] = Object.entries(lastReadBy)
+                .filter(([uid, timestamp]) => uid !== user?._id && Number(timestamp) >= message.createdAt)
+                .map(([uid]) => participantNameMap[uid] || "Player");
+        });
+        return result;
+    }, [chatroom?.lastReadBy, messages, participantNameMap, user?._id]);
+
+    const markRead = useCallback(async () => {
+        if (!chatroom?._id || !user?._id) return;
+        try {
+            await markReadMutation({
+                chatroomId: chatroom._id,
+            });
+        } catch (error) {
+            Logger.warn("MatchroomChat", "Failed to mark chat as read", error);
+        }
+    }, [chatroom?._id, markReadMutation, user?._id]);
+
+    useEffect(() => {
+        if (!authorized || messages.length === 0) return;
+        void markRead();
+    }, [authorized, markRead, messages.length]);
+
+    const sendTextMessage = async () => {
+        if (!matchroomId || !user?._id || !input.trim()) return;
+
+        // Handle editing mode
+        if (editingMessage) {
+            await handleEditMessage(editingMessage.id, input.trim());
+            setInput("");
+            return;
+        }
+
+        setSending(true);
+        try {
+            await sendMessageToMatchroomMutation({
+                matchroomId: matchroomId as Id<"matchrooms">,
+                content: input.trim(),
+                type: "text",
+                clientMessageId: `${user._id}_${Date.now()}_text`,
+                replyTo: replyTo
+                    ? {
+                        messageId: replyTo.id,
+                        senderName: replyTo.senderName,
+                        text: replyTo.text.slice(0, 80),
+                    }
+                    : undefined,
+            });
+            setInput("");
+            setReplyTo(null);
+            void markRead();
+        } catch (error) {
+            Logger.error("MatchroomChat", "Failed to send text message", error);
+            showToast({ type: "error", title: "Send failed", message: "Unable to send message right now." });
+        } finally {
+            setSending(false);
+        }
+    };
+
+    const toggleRecording = async () => {
+        if (!user?._id || !matchroomId) return;
+
+        if (recorderState.isRecording) {
+            try {
+                setUploadingVoice(true);
+                await recorder.stop();
+                const recorderStatus = recorder.getStatus();
+                const uri = recorder.uri || recorderStatus.url;
+                if (!uri) {
+                    throw new Error("Recording file was not created.");
+                }
+
+                const durationMs = recorderStatus.durationMillis || recorderState.durationMillis || 0;
+                const uploaded = await uploadFileToConvex({
+                    uri,
+                    mimeType: "audio/m4a",
+                    fileName: `voice_${user._id}_${Date.now()}.m4a`,
+                });
+
+                await sendMessageToMatchroomMutation({
+                    matchroomId: matchroomId as Id<"matchrooms">,
+                    content: "",
+                    type: "voice",
+                    audioStorageId: uploaded.storageId,
+                    audioDurationMs: durationMs,
+                    clientMessageId: `${user._id}_${Date.now()}_voice`,
+                    replyTo: replyTo
+                        ? {
+                            messageId: replyTo.id,
+                            senderName: replyTo.senderName,
+                            text: replyTo.type === "voice" ? "Voice message" : replyTo.text.slice(0, 80),
+                        }
+                        : undefined,
+                });
+
+                setReplyTo(null);
+                await setAudioModeAsync({
+                    allowsRecording: false,
+                    playsInSilentMode: true,
+                });
+                void markRead();
+            } catch (error) {
+                Logger.error("MatchroomChat", "Failed to send voice message", error);
+                showToast({ type: "error", title: "Voice message failed", message: "Unable to record or upload the voice message." });
+            } finally {
+                setUploadingVoice(false);
+            }
+            return;
+        }
+
+        try {
+            const permission = await requestRecordingPermissionsAsync();
+            if (!permission.granted) {
+                showToast({ type: "warning", title: "Microphone access required", message: "Enable microphone permission to send voice messages." });
+                return;
+            }
+
+            await setAudioModeAsync({
+                allowsRecording: true,
+                playsInSilentMode: true,
+            });
+            await recorder.prepareToRecordAsync();
+            recorder.record();
+        } catch (error) {
+            Logger.error("MatchroomChat", "Failed to start recording", error);
+            showToast({ type: "error", title: "Recording unavailable", message: "Unable to start recording right now." });
+        }
+    };
+
+    const handlePickImage = useCallback(async () => {
+        if (!matchroomId || !user?._id) return;
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ["images"],
+                quality: 0.8,
+            });
+            if (result.canceled || !result.assets?.[0]) return;
+            const asset = result.assets[0];
+
+            setUploadingAttachment(true);
+            const uploaded = await uploadFileToConvex({
+                uri: asset.uri,
+                mimeType: asset.mimeType || "image/jpeg",
+                fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+            });
+
+            await sendMessageToMatchroomMutation({
+                matchroomId: matchroomId as Id<"matchrooms">,
+                content: "",
+                type: "image",
+                attachment: {
+                    storageId: uploaded.storageId,
+                    fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+                    mimeType: asset.mimeType || "image/jpeg",
+                    width: asset.width,
+                    height: asset.height,
+                },
+                clientMessageId: `${user._id}_${Date.now()}_image`,
+                replyTo: replyTo
+                    ? { messageId: replyTo.id, senderName: replyTo.senderName, text: replyTo.text.slice(0, 80) }
+                    : undefined,
+            });
+            setReplyTo(null);
+            void markRead();
+        } catch (error) {
+            Logger.error("MatchroomChat", "Failed to send image", error);
+            showToast({ type: "error", title: "Image failed", message: "Unable to send image." });
+        } finally {
+            setUploadingAttachment(false);
+        }
+    }, [markRead, matchroomId, replyTo, sendMessageToMatchroomMutation, showToast, user?._id]);
+
+    const handlePickFile = useCallback(async () => {
+        if (!matchroomId || !user?._id) return;
+        try {
+            const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+            if (result.canceled || !result.assets?.[0]) return;
+            const asset = result.assets[0];
+
+            setUploadingAttachment(true);
+            const uploaded = await uploadFileToConvex({
+                uri: asset.uri,
+                mimeType: asset.mimeType || "application/octet-stream",
+                fileName: asset.name || `file_${Date.now()}`,
+            });
+
+            await sendMessageToMatchroomMutation({
+                matchroomId: matchroomId as Id<"matchrooms">,
+                content: "",
+                type: "file",
+                attachment: {
+                    storageId: uploaded.storageId,
+                    fileName: asset.name || `file_${Date.now()}`,
+                    mimeType: asset.mimeType || "application/octet-stream",
+                    sizeBytes: asset.size,
+                },
+                clientMessageId: `${user._id}_${Date.now()}_file`,
+                replyTo: replyTo
+                    ? { messageId: replyTo.id, senderName: replyTo.senderName, text: replyTo.text.slice(0, 80) }
+                    : undefined,
+            });
+            setReplyTo(null);
+            void markRead();
+        } catch (error) {
+            Logger.error("MatchroomChat", "Failed to send file", error);
+            showToast({ type: "error", title: "File failed", message: "Unable to send file." });
+        } finally {
+            setUploadingAttachment(false);
+        }
+    }, [markRead, matchroomId, replyTo, sendMessageToMatchroomMutation, showToast, user?._id]);
+
+    const handleMessageLongPress = (message: ChatThreadMessage) => {
+        const isMine = message.senderUid === user?._id;
+        const canEdit = isMine && message.type !== "voice" && (Date.now() - message.createdAt < 15 * 60 * 1000);
+        const isPinned = pinnedMessageIds.includes(message.id);
+
+        Alert.alert(
+            "Message options",
+            "",
+            [
+                {
+                    text: "Reply",
+                    onPress: () => {
+                        setEditingMessage(null);
+                        setReplyTo(message);
+                    },
+                },
+                message.type === "text"
+                    ? {
+                        text: "Copy",
+                        onPress: async () => {
+                            await Clipboard.setStringAsync(message.text || "");
+                        },
+                    }
+                    : undefined,
+                canEdit
+                    ? {
+                        text: "Edit",
+                        onPress: () => {
+                            setReplyTo(null);
+                            setEditingMessage(message);
+                            setInput(message.text);
+                        },
+                    }
+                    : undefined,
+                isPinned
+                    ? {
+                        text: "Unpin",
+                        onPress: () => void handleUnpinMessage(message.id),
+                    }
+                    : {
+                        text: "Pin",
+                        onPress: () => void handlePinMessage(message.id),
+                    },
+                {
+                    text: "Delete for me",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await deleteForMeMutation({
+                                messageId: message.id as Id<"chatMessages">,
+                            });
+                        } catch (error) {
+                            Logger.warn("MatchroomChat", "Delete for me failed", error);
+                        }
+                    },
+                },
+                { text: "Cancel", style: "cancel" },
+            ].filter(Boolean) as any
+        );
+    };
+
+    const title = roomMeta?.title || "Matchroom Chat";
+    const subtitle = roomMeta
+        ? `${GAME_LABELS[(roomMeta as any).game] || String((roomMeta as any).game || "Chat").toUpperCase()} chat`
+        : "Match chat";
+    const canComposeInMatchroom = accessState?.status === "ok";
+
+    const contextCard = roomMeta ? (
+        <>
+            <Text style={{ color: COLORS.accent, fontFamily: "Montserrat_700Bold", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                Match chat
+            </Text>
+            <Text style={{ color: COLORS.text, fontFamily: "Montserrat_700Bold", fontSize: 18, marginTop: 4 }}>
+                {(roomMeta as any).location || "Venue TBD"}
+            </Text>
+            <Text style={{ color: COLORS.textSecondary, marginTop: 4 }}>
+                {String((roomMeta as any).scheduledDate || "Date TBD")} · {formatScheduleTime((roomMeta as any).scheduledTime)}
+            </Text>
+        </>
+    ) : undefined;
+
+    if (matchroomLookupComplete && !roomMeta) {
+        return (
+            <ChatThread
+                title="Matchroom chat"
+                subtitle="Unavailable"
+                currentUserId={user?._id}
+                messages={[]}
+                loading={false}
+                input=""
+                onInputChange={() => undefined}
+                onBack={() => router.back()}
+                onSendText={() => undefined}
+                onToggleRecording={() => undefined}
+                showComposer={false}
+                emptyTitle="Chat unavailable"
+                emptySubtitle="This matchroom could not be found or is no longer available."
+            />
+        );
+    }
+
+    if (roomMeta && accessState?.status === "forbidden") {
+        return (
+            <ChatThread
+                title={title}
+                subtitle={subtitle}
+                currentUserId={user?._id}
+                messages={[]}
+                loading={false}
+                input=""
+                onInputChange={() => undefined}
+                onBack={() => router.back()}
+                onSendText={() => undefined}
+                onToggleRecording={() => undefined}
+                showComposer={false}
+                emptyTitle="Access restricted"
+                emptySubtitle="Only matchroom participants and the venue owner can view this chat."
+            />
+        );
+    }
+
+    if (roomMeta && accessState?.status === "unauthenticated") {
+        Logger.warn("MatchroomChat", "Received unauthenticated access state while local user exists", {
+            matchroomId,
+            localUserId: user?._id ?? null,
+            roomMetaId: roomMeta?._id ?? null,
+        });
+        return (
+            <ChatThread
+                title={title}
+                subtitle={subtitle}
+                currentUserId={user?._id}
+                messages={[]}
+                loading={false}
+                input=""
+                onInputChange={() => undefined}
+                onBack={() => router.back()}
+                onSendText={() => undefined}
+                onToggleRecording={() => undefined}
+                showComposer={false}
+                emptyTitle="Sign in required"
+                emptySubtitle="Refresh your session and reopen this chat."
+            />
+        );
+    }
+
+    return (
+        <ChatThread
+            title={title}
+            subtitle={subtitle}
+            currentUserId={user?._id}
+            messages={messages}
+            participants={participants}
+            loading={
+                (matchroomById === undefined && matchroomByCode === undefined) ||
+                (Boolean(matchroomId) && accessState === undefined)
+            }
+            input={input}
+            onInputChange={handleInputChange}
+            onBack={() => router.back()}
+            onSendText={sendTextMessage}
+            onToggleRecording={toggleRecording}
+            sending={sending || uploadingVoice || uploadingAttachment}
+            recording={recorderState.isRecording}
+            recordingDurationLabel={formatVoiceDuration(recorderState.durationMillis)}
+            onMessageLongPress={handleMessageLongPress}
+            onToggleReaction={handleToggleReaction}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
+            seenNamesByMessageId={seenNamesByMessageId}
+            contextCard={contextCard}
+            emptyTitle="No messages yet"
+            emptySubtitle="Use the chat to coordinate arrivals, setup, and updates."
+            showComposer={Boolean(matchroomId) && (Boolean(chatroom?._id) || canComposeInMatchroom)}
+            onPickImage={handlePickImage}
+            onPickFile={handlePickFile}
+            typingNames={typingNames}
+            onSwipeReply={handleSwipeReply}
+            editingMessage={editingMessage}
+            onClearEdit={() => { setEditingMessage(null); setInput(""); }}
+            pinnedMessages={pinnedMessages}
+            onPinMessage={handlePinMessage}
+            onUnpinMessage={handleUnpinMessage}
+            canUnpin
+        />
+    );
+}
+
+
+
+

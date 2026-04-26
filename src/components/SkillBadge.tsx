@@ -1,7 +1,7 @@
 // src/components/SkillBadge.tsx
-import { MaterialIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Text, View, ViewStyle } from 'react-native';
+import { AppIcon, type AppIconName } from './AppIcon';
 import type { SkillTier } from '../services/skillRatingService';
 import { COLORS, FONTS } from '../theme';
 import styles from './SkillBadge.styles';
@@ -14,8 +14,9 @@ interface SkillBadgeProps {
     style?: ViewStyle;
 }
 
-const TIER_CONFIG: Record<SkillTier, { icon: keyof typeof MaterialIcons.glyphMap; color: string }> = {
+const TIER_CONFIG: Record<SkillTier, { icon: AppIconName; color: string }> = {
     Beginner: { icon: 'star-border', color: COLORS.muted },
+    Casual: { icon: 'star-half', color: '#8fb3ff' },
     Intermediate: { icon: 'star-half', color: COLORS.success },
     Advanced: { icon: 'star', color: COLORS.accent },
     Pro: { icon: 'stars', color: '#b968c7' },
@@ -55,6 +56,8 @@ export default function SkillBadge({
     const tierStyle =
         tier === 'Beginner'
             ? styles.containerBeginner
+            : tier === 'Casual'
+                ? styles.containerIntermediate
             : tier === 'Intermediate'
                 ? styles.containerIntermediate
                 : tier === 'Advanced'
@@ -66,6 +69,8 @@ export default function SkillBadge({
     const textTierStyle =
         tier === 'Beginner'
             ? styles.textBeginner
+            : tier === 'Casual'
+                ? styles.textIntermediate
             : tier === 'Intermediate'
                 ? styles.textIntermediate
                 : tier === 'Advanced'
@@ -81,7 +86,7 @@ export default function SkillBadge({
 
     return (
         <View style={[styles.container, tierStyle, containerSizeStyle, style]}>
-            <MaterialIcons
+            <AppIcon
                 name={config.icon}
                 size={iconSize}
                 color={config.color}

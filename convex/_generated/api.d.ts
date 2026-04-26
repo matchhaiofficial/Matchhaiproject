@@ -8,13 +8,87 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
+import type * as auth from "../auth.js";
+import type * as bookings from "../bookings.js";
+import type * as chat from "../chat.js";
+import type * as chatAuth from "../chatAuth.js";
+import type * as chatIdentity from "../chatIdentity.js";
+import type * as dashboard from "../dashboard.js";
+import type * as demoSeed from "../demoSeed.js";
+import type * as devReset from "../devReset.js";
+import type * as discover from "../discover.js";
+import type * as easypaisa from "../easypaisa.js";
+import type * as easypaisaNode from "../easypaisaNode.js";
+import type * as easypaisaRest from "../easypaisaRest.js";
+import type * as externalApis from "../externalApis.js";
+import type * as friendChat from "../friendChat.js";
+import type * as http from "../http.js";
+import type * as matchroomBroadcast from "../matchroomBroadcast.js";
+import type * as matchrooms from "../matchrooms.js";
+import type * as notifications from "../notifications.js";
+import type * as psnTokenCache from "../psnTokenCache.js";
+import type * as pushNotifications from "../pushNotifications.js";
+import type * as pushNotificationsActions from "../pushNotificationsActions.js";
+import type * as reports from "../reports.js";
+import type * as social from "../social.js";
+import type * as storage from "../storage.js";
+import type * as teamChallengeChat from "../teamChallengeChat.js";
+import type * as teamChallenges from "../teamChallenges.js";
+import type * as teams from "../teams.js";
+import type * as userVisibility from "../userVisibility.js";
+import type * as users from "../users.js";
+import type * as wallet from "../wallet.js";
+import type * as zoneAdminBooking from "../zoneAdminBooking.js";
+import type * as zoneAdminResources from "../zoneAdminResources.js";
+import type * as zoneAudit from "../zoneAudit.js";
+import type * as zoneBranchMigration from "../zoneBranchMigration.js";
+import type * as zones from "../zones.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
+  auth: typeof auth;
+  bookings: typeof bookings;
+  chat: typeof chat;
+  chatAuth: typeof chatAuth;
+  chatIdentity: typeof chatIdentity;
+  dashboard: typeof dashboard;
+  demoSeed: typeof demoSeed;
+  devReset: typeof devReset;
+  discover: typeof discover;
+  easypaisa: typeof easypaisa;
+  easypaisaNode: typeof easypaisaNode;
+  easypaisaRest: typeof easypaisaRest;
+  externalApis: typeof externalApis;
+  friendChat: typeof friendChat;
+  http: typeof http;
+  matchroomBroadcast: typeof matchroomBroadcast;
+  matchrooms: typeof matchrooms;
+  notifications: typeof notifications;
+  psnTokenCache: typeof psnTokenCache;
+  pushNotifications: typeof pushNotifications;
+  pushNotificationsActions: typeof pushNotificationsActions;
+  reports: typeof reports;
+  social: typeof social;
+  storage: typeof storage;
+  teamChallengeChat: typeof teamChallengeChat;
+  teamChallenges: typeof teamChallenges;
+  teams: typeof teams;
+  userVisibility: typeof userVisibility;
+  users: typeof users;
+  wallet: typeof wallet;
+  zoneAdminBooking: typeof zoneAdminBooking;
+  zoneAdminResources: typeof zoneAdminResources;
+  zoneAudit: typeof zoneAudit;
+  zoneBranchMigration: typeof zoneBranchMigration;
+  zones: typeof zones;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.

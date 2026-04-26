@@ -4,7 +4,7 @@ import { COLORS, FONTS } from '../src/theme';
 export default StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
@@ -28,3 +28,4 @@ export default StyleSheet.create({
         fontSize: 16,
     },
 });
+

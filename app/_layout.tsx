@@ -6,11 +6,6 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { LogBox, View } from "react-native";
-import { router } from "expo-router";
-import {
-  addNotificationResponseReceivedListener,
-  getLastNotificationResponseAsync,
-} from "expo-notifications/build/NotificationsEmitter";
 
 // Suppress the keep-awake error in development (Expo internal issue)
 LogBox.ignoreLogs([
@@ -50,12 +45,11 @@ import {
 // Theme + Auth provider + Toast
 import Toast from "react-native-toast-message";
 import AuthProvider from "../src/context/AuthContext";
-import InAppNotificationBridge from "../src/components/InAppNotificationBridge";
+import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBridge";
+import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
+import AuthenticatedConvexProvider from "../src/providers/AuthenticatedConvexProvider";
+import InAppAlertProvider from "../src/providers/InAppAlertProvider";
 import { useToast } from "../src/hooks/useToast";
-import {
-  ensureLocalNotificationsConfigured,
-  requestLocalNotificationPermissions,
-} from "../src/services/localNotifications";
 import { COLORS } from "../src/theme";
 import { toastConfig } from "../src/ui/toastConfig";
 
@@ -169,50 +163,27 @@ export default function RootLayout() {
     };
   }, [showToast]);
 
-  useEffect(() => {
-    ensureLocalNotificationsConfigured()
-      .then(() => requestLocalNotificationPermissions())
-      .catch(() => {
-        // Ignore notification setup failures in development/simulator environments.
-      });
-
-    const sub = addNotificationResponseReceivedListener((response) => {
-      const data: any = response?.notification?.request?.content?.data || {};
-      const href = data?.href;
-      if (typeof href === "string" && href.length) {
-        router.push(href as any);
-      }
-    });
-
-    getLastNotificationResponseAsync()
-      .then((response) => {
-        const data: any = response?.notification?.request?.content?.data || {};
-        const href = data?.href;
-        if (typeof href === "string" && href.length) {
-          router.push(href as any);
-        }
-      })
-      .catch(() => null);
-
-    return () => sub.remove();
-  }, []);
-
   if (!ready) return null;
 
   return (
-    <AuthProvider>
-      <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-        <StatusBar style="light" translucent backgroundColor="transparent" />
-        <InAppNotificationBridge />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: COLORS.background },
-          }}
-        />
-        {/* Global toast host */}
-        <Toast config={toastConfig} />
-      </View>
-    </AuthProvider>
+    <AuthenticatedConvexProvider>
+      <AuthProvider>
+        <InAppAlertProvider>
+          <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
+            <StatusBar style="light" translucent backgroundColor="transparent" />
+            <NotificationRuntimeBridge />
+            <PushRegistrationBridge />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: COLORS.backgroundDark },
+              }}
+            />
+            <Toast config={toastConfig} />
+          </View>
+        </InAppAlertProvider>
+      </AuthProvider>
+    </AuthenticatedConvexProvider>
   );
 }
+

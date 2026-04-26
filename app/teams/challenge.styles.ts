@@ -4,7 +4,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from "../../src/th
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     content: {
         paddingHorizontal: 0,
@@ -115,6 +115,9 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.body,
         fontWeight: "700",
     },
+    challengeActionButton: {
+        marginTop: SPACING.sm,
+    },
     rejectButton: {
         marginTop: SPACING.sm,
         minHeight: 46,
@@ -185,3 +188,4 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption + 1,
     },
 });
+

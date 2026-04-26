@@ -1,5 +1,4 @@
 // app/auth/login.tsx
-import { MaterialIcons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -13,11 +12,20 @@ import {
   View,
 } from "react-native";
 
+import { AppIcon } from "../../src/components/AppIcon";
 import LogoHalo from "../../src/components/LogoHalo";
+import { useAuth } from "../../src/context/AuthContext";
+import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
-import { signInWithEmail, signOutUser } from "../../src/services/authService";
-import { getUserProfile } from "../../src/services/userService";
+import {
+  recoverMissingProfileAfterLogin,
+  signInWithEmail,
+  signOutUser,
+} from "../../src/services/convex/authService";
+import { getUserProfile } from "../../src/services/convex/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
+import Logger from "../../src/utils/logger";
+import { APP_ROUTES } from "../../src/navigation/routes";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -91,6 +99,7 @@ const MAX_ATTEMPTS = 5; // (7)
 const LOCKOUT_SECONDS = 30; // (7)
 
 export default function Login() {
+  useRouteLogger("LoginScreen");
   const [emailOrPhone, setEmailOrPhone] = useState("");
   const [password, setPassword] = useState("");
 
@@ -104,6 +113,12 @@ export default function Login() {
 
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [modeHelper, setModeHelper] = useState<null | {
+    message: string;
+    targetMode: "player" | "zone";
+    cta: string;
+  }>(null);
+  const [recoveryHelper, setRecoveryHelper] = useState<string | null>(null);
 
   // brute-force UI state (7)
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -113,28 +128,29 @@ export default function Login() {
   const passwordRef = useRef<TextInput | null>(null);
 
   const { showToast } = useToast();
+  const { refreshSession } = useAuth();
 
   // NEW: user type (player vs zone admin)
   const [userType, setUserType] = useState<"player" | "zone">("player");
 
   // DEBUG: log mount and userType changes
   useEffect(() => {
-    console.log("[Login] screen mounted");
+    Logger.info("Login", "Screen mounted");
   }, []);
 
   useEffect(() => {
-    console.log("[Login] userType changed →", userType);
+    Logger.info("Login", "User type changed", { userType });
   }, [userType]);
 
   // Lockout countdown (7)
   useEffect(() => {
     if (lockoutSecondsLeft <= 0) return;
-    console.log("[Login] lockout started, seconds left:", lockoutSecondsLeft);
+    Logger.info("Login", "Lockout countdown started", { lockoutSecondsLeft });
     const timer = setInterval(() => {
       setLockoutSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          console.log("[Login] lockout finished");
+          Logger.info("Login", "Lockout countdown finished");
           return 0;
         }
         return prev - 1;
@@ -298,10 +314,13 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
-    console.log("[Login] handleLogin called, userType=", userType);
+    logFlowEvent("Login", "Login attempt started", {
+      userType,
+      identifierType: emailOrPhone.includes("@") ? "email" : "phone",
+    });
 
     if (isLockedOut) {
-      console.log("[Login] blocked by lockout");
+      Logger.warn("Login", "Blocked by lockout", { lockoutSecondsLeft });
       showToast({
         type: "warning",
         title: "Too many attempts",
@@ -311,7 +330,7 @@ export default function Login() {
     }
 
     if (!isEmailValid || !password) {
-      console.log("[Login] invalid form", {
+      Logger.info("Login", "Blocked by invalid form", {
         isEmailValid,
         hasPassword: !!password,
       });
@@ -329,13 +348,20 @@ export default function Login() {
     try {
       setLoading(true);
       setEmailServerError("");
-      console.log("[Login] calling signInWithEmail", { emailOrPhone });
+      setModeHelper(null);
+      setRecoveryHelper(null);
+      Logger.info("Login", "Calling signInWithEmail", {
+        identifierType: emailOrPhone.includes("@") ? "email" : "phone",
+      });
 
       const res = await signInWithEmail(emailOrPhone, password /*, userType */);
 
       if (!res.ok) {
         setLoading(false);
-        console.log("[Login] signInWithEmail FAILED", res);
+        Logger.warn("Login", "signInWithEmail failed", {
+          code: res.code,
+          message: res.message,
+        });
         const nextAttempts = failedAttempts + 1;
         if (nextAttempts >= MAX_ATTEMPTS) {
           setLockoutSecondsLeft(LOCKOUT_SECONDS);
@@ -381,89 +407,147 @@ export default function Login() {
       }
 
       // ✅ Role Validation
-      console.log("[Login] Validating role for user:", res.user.uid);
-      const profileRes = await getUserProfile(res.user.uid);
+      Logger.info("Login", "Validating account role", {
+        userId: res.userId,
+        userType,
+      });
+      const profileRes = await getUserProfile(res.userId);
 
       if (!profileRes.ok) {
-        console.error("[Login] Failed to fetch user profile for role check:", profileRes.message);
+        Logger.error("Login", "Failed to fetch user profile for role check", {
+          message: profileRes.message,
+        });
+        const isMissing = profileRes.message === "User profile not found.";
+        if (isMissing) {
+          const recovered = await recoverMissingProfileAfterLogin(
+            res.user,
+            userType === "zone" ? "zone" : "player",
+          );
+
+          if (recovered.ok) {
+            await refreshSession();
+            setLoading(false);
+            showToast({
+              type: "success",
+              title: "Profile restored",
+              message: "We rebuilt your MatchHai profile and signed you in.",
+            });
+            router.replace(userType === "zone" ? APP_ROUTES.zoneHome as any : APP_ROUTES.playerHome as any);
+            return;
+          }
+
+          setRecoveryHelper("We authenticated your account, but your MatchHai profile is missing. Please retry once or contact support.");
+        } else {
+          setRecoveryHelper("We signed you in, but could not verify your MatchHai profile yet. Please try again.");
+        }
+
         await signOutUser();
         setLoading(false);
-
-        const isMissing = profileRes.message === "User profile not found.";
         showToast({
           type: "error",
           title: isMissing ? "Profile Missing" : "Login Error",
           message: isMissing
-            ? "Your account profile was not found. Please contact support."
+            ? "Your account authenticated but the app profile could not be loaded."
             : "Could not verify your account type. Please try again.",
         });
         return;
       }
 
-      const accountType = profileRes.data.role;
+      const accountType = profileRes.data.accountType;
       const inputEmail = emailOrPhone.trim().toLowerCase();
       const userEmail = (res.user.email || inputEmail).toLowerCase();
-      const SUPER_ADMIN_UID = "jM2JZrPNNNahPb844rHmr0MQKYo1";
       const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
 
       // ✅ Robust Super Admin Check
-      const isSuperAdmin = accountType === "super-admin" ||
-        userEmail === SUPER_ADMIN_EMAIL ||
-        res.user.uid === SUPER_ADMIN_UID;
+      const isSuperAdmin = userEmail === SUPER_ADMIN_EMAIL || profileRes.data.role === "super-admin";
 
-      console.log("[Login] accountType:", accountType, "isSuperAdmin:", isSuperAdmin, "uid:", res.user.uid);
+      Logger.info("Login", "Resolved account role", {
+        accountType,
+        isSuperAdmin,
+        userId: res.userId,
+      });
 
       if (!isSuperAdmin) {
-        if (userType === "zone" && accountType !== "zone-admin") {
-          console.log("[Login] Role mismatch: Player trying to login as Zone Admin");
+        if (userType === "zone" && accountType !== "zone") {
+          Logger.warn("Login", "Zone login blocked by account type mismatch", {
+            accountType,
+            userId: res.userId,
+          });
           await signOutUser();
           setLoading(false);
-          setEmailServerError("Please sign in as user.");
+          setEmailServerError("This account is registered as a player account.");
+          setModeHelper({
+            message: "This email belongs to a player account. Switch to Player mode and sign in again.",
+            targetMode: "player",
+            cta: "Switch to Player mode",
+          });
           showToast({
             type: "error",
-            title: "Access Denied",
-            message: "Please sign in as user.",
+            title: "Player Account Detected",
+            message: "Switch to Player mode and try again.",
           });
           return;
         }
 
-        if (userType === "player" && accountType === "zone-admin") {
-          console.log("[Login] Role mismatch: Zone Admin trying to login as Player");
+        if (userType === "player" && accountType === "zone") {
+          Logger.warn("Login", "Player login blocked by account type mismatch", {
+            accountType,
+            userId: res.userId,
+          });
           await signOutUser();
           setLoading(false);
-          setEmailServerError("Please sign in as zone admin.");
+          setEmailServerError("This account is registered as a zone account.");
+          setModeHelper({
+            message: "This email belongs to a zone account. Switch to Zone Admin mode and sign in again.",
+            targetMode: "zone",
+            cta: "Switch to Zone mode",
+          });
           showToast({
             type: "error",
-            title: "Access Denied",
-            message: "Please sign in as zone admin.",
+            title: "Zone Account Detected",
+            message: "Switch to Zone Admin mode and try again.",
           });
           return;
         }
       }
 
-      setLoading(false);
-      console.log("[Login] signInWithEmail OK, navigations target logic start");
+      Logger.info("Login", "Sign in succeeded, refreshing session", {
+        userId: res.userId,
+      });
 
       setFailedAttempts(0);
       setLockoutSecondsLeft(0);
 
+      // Refresh the auth session to ensure AuthContext is updated
+      await refreshSession();
+
+      setLoading(false);
+
       showToast({
         type: "success",
         title: "Welcome back",
-        message: isSuperAdmin ? "Signed in as Super Admin" : "You’re now signed in.",
+        message: isSuperAdmin ? "Signed in as Super Admin" : "You're now signed in.",
       });
 
       // ✅ Redirect based on user type or role
       if (isSuperAdmin) {
-        console.log("[Login] Redirecting to Super Admin Dashboard");
-        router.replace("/super-admin" as any);
-      } else if (userType === "zone") {
-        router.replace("/zone");
+        Logger.info("Login", "Redirecting to super admin dashboard", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.superAdminHome as any);
+      } else if (accountType === "zone") {
+        Logger.info("Login", "Redirecting to zone dashboard", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.zoneHome as any);
       } else {
-        router.replace("/home");
+        Logger.info("Login", "Redirecting to player home", {
+          userId: res.userId,
+        });
+        router.replace(APP_ROUTES.playerHome as any);
       }
     } catch (e) {
-      console.error("[Login] signInWithEmail threw error", e);
+      Logger.error("Login", "signInWithEmail threw error", e);
       setLoading(false);
       showToast({
         type: "error",
@@ -474,7 +558,7 @@ export default function Login() {
   };
 
   const handleForgotPassword = () => {
-    console.log("[Login] Forgot Password pressed");
+    Logger.info("Login", "Forgot password pressed");
     router.push("/auth/forgot-password");
   };
 
@@ -518,7 +602,7 @@ export default function Login() {
     userType === "zone" ? "/auth/zone-register" : "/auth/register";
 
   useEffect(() => {
-    console.log("[Login] bottomHref changed →", bottomHref);
+    Logger.info("Login", "Footer CTA updated", { bottomHref });
   }, [bottomHref]);
 
   return (
@@ -572,13 +656,33 @@ export default function Login() {
           </Pressable>
         </View>
 
+        {modeHelper ? (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>{modeHelper.message}</Text>
+            <Pressable
+              onPress={() => {
+                setUserType(modeHelper.targetMode);
+                setModeHelper(null);
+              }}
+            >
+              <Text style={[styles.helperText, { color: COLORS.accent }]}>{modeHelper.cta}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {recoveryHelper ? (
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, styles.helperWarning]}>{recoveryHelper}</Text>
+          </View>
+        ) : null}
+
         {/* Email / Phone */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email or Phone</Text>
 
           <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
-              <MaterialIcons
+              <AppIcon
                 name="email"
                 size={22}
                 style={styles.prefixIcon}
@@ -619,7 +723,7 @@ export default function Login() {
               />
 
               {emailOrPhone.trim().length > 0 && (
-                <MaterialIcons
+                <AppIcon
                   name={isEmailValid ? "check-circle" : "error-outline"}
                   size={20}
                   style={styles.suffixIcon}
@@ -655,7 +759,7 @@ export default function Login() {
 
           <View style={[styles.inputBox]}>
             <View style={styles.inputRow}>
-              <MaterialIcons
+              <AppIcon
                 name="lock"
                 size={22}
                 style={styles.prefixIcon}
@@ -697,7 +801,7 @@ export default function Login() {
                 }}
                 hitSlop={10}
               >
-                <MaterialIcons
+                <AppIcon
                   name={passwordVisible ? "visibility" : "visibility-off"}
                   size={20}
                   style={styles.suffixIcon}

@@ -40,6 +40,14 @@ export const COLORS = {
   psBorder: '#00439c',
 };
 
+export const SURFACES = {
+  page: COLORS.backgroundDark,
+  card: COLORS.cardDark,
+  cardAlt: COLORS.cardBackground,
+  muted: COLORS.overlayLight,
+  strong: COLORS.surface,
+};
+
 // 🔤 Fonts
 export const FONTS = {
   // Semantic
@@ -91,6 +99,17 @@ export const RADII = {
   pill: 999,
 };
 
+export const CONTROL_SIZES = {
+  buttonSm: 40,
+  buttonMd: 48,
+  buttonLg: 56,
+  inputMd: 48,
+  chipSm: 28,
+  chipMd: 32,
+  cardRadius: 16,
+  sheetRadius: 24,
+};
+
 // 🔠 Text sizes
 export const TEXT_SIZES = {
   heading: 28,
@@ -136,6 +155,34 @@ export const SHADOWS = {
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3, // Increased for Android
+  },
+};
+
+export const STATUS_TONES = {
+  neutral: {
+    text: COLORS.text,
+    border: COLORS.cardBorder,
+    background: COLORS.overlayLight,
+  },
+  info: {
+    text: COLORS.accent,
+    border: `${COLORS.accent}55`,
+    background: `${COLORS.accent}14`,
+  },
+  success: {
+    text: COLORS.successBright,
+    border: `${COLORS.successBright}55`,
+    background: `${COLORS.successBright}14`,
+  },
+  warning: {
+    text: COLORS.warning,
+    border: `${COLORS.warning}55`,
+    background: `${COLORS.warning}14`,
+  },
+  danger: {
+    text: COLORS.error,
+    border: `${COLORS.error}55`,
+    background: `${COLORS.error}14`,
   },
 };
 

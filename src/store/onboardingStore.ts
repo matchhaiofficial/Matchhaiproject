@@ -3,8 +3,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { FaceitProfileSummary } from "../services/faceitApi";
-import type { SteamProfileSummary } from "../services/steamApi";
+// Import types from Convex service (migrated from Firebase)
+import type {
+  FaceitProfileSummary,
+  SteamProfileSummary,
+} from "../services/convex/externalApiService";
 
 type Step1Data = {
   fullName: string;
@@ -22,9 +25,13 @@ type Step2Data = {
 
   // esports
   playsCs2: boolean;
+  playsCs16: boolean;
+  playsValorant: boolean;
   playsFc: boolean;
   playsTekken: boolean;
   cs2Role: string | null;
+  cs16Role: string | null;
+  valorantRole: string | null;
   fcTeam: string;
   fcFormation: string | null;
   tekkenFavorites: string[];
@@ -52,7 +59,7 @@ type Step2Data = {
   tekkenSkillBracket?: "A" | "B" | "C" | "D";
 };
 
-// Step 3 data
+// Step 3 data is optional and can be skipped during onboarding.
 type Step3Data = {
   steamProfileUrl: string;
   faceitProfileUrl: string;
@@ -128,9 +135,13 @@ const initialState: Omit<
 
     // esports
     playsCs2: false,
+    playsCs16: false,
+    playsValorant: false,
     playsFc: false,
     playsTekken: false,
     cs2Role: null,
+    cs16Role: null,
+    valorantRole: null,
     fcTeam: "",
     fcFormation: null,
     tekkenFavorites: [],

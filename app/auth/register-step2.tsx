@@ -1,58 +1,69 @@
-// app/auth/register-step2.tsx
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Pressable, Text, View } from "react-native";
 
 import {
   GAME_OPTIONS,
   KARACHI_AREAS,
   PLAY_TIME_OPTIONS,
-  SPORT_OPTIONS
+  SPORT_OPTIONS,
 } from "../../constants/profileOptions";
-import LogoHalo from "../../src/components/LogoHalo";
+import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
+import RegistrationStepHeader from "./components/RegistrationStepHeader";
+import { AppButton } from "../../src/components/AppPrimitives";
+import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
+import { Perf } from "../../src/utils/perfInstrumentation";
 import styles from "./register.styles";
 
 export default function RegisterStep2() {
-  console.log("[Step2] mounted (Simplified)");
-  const { step2, setStep2 } = useOnboardingStore();
+  const { step1, step2, setStep2, setCurrentStep } = useOnboardingStore();
   const { showToast } = useToast();
 
-  // ---- State ----
-  const [selectedAreas, setSelectedAreas] = useState<string[]>(
-    step2.selectedAreas || []
-  );
+  const [selectedAreas, setSelectedAreas] = useState<string[]>(step2.selectedAreas || []);
   const [playTimes, setPlayTimes] = useState<string[]>(step2.playTimes || []);
-
-  // Game Toggles
   const [playsCs2, setPlaysCs2] = useState<boolean>(step2.playsCs2);
+  const [playsCs16, setPlaysCs16] = useState<boolean>((step2 as any).playsCs16 ?? false);
+  const [playsValorant, setPlaysValorant] = useState<boolean>((step2 as any).playsValorant ?? false);
   const [playsFc, setPlaysFc] = useState<boolean>(step2.playsFc);
   const [playsTekken, setPlaysTekken] = useState<boolean>(step2.playsTekken);
-
-  // Sport Toggles
   const [playsFutsal, setPlaysFutsal] = useState<boolean>((step2 as any).playsFutsal ?? false);
   const [playsIndoorCricket, setPlaysIndoorCricket] = useState<boolean>((step2 as any).playsIndoorCricket ?? false);
   const [playsPadel, setPlaysPadel] = useState<boolean>((step2 as any).playsPadel ?? false);
   const [playsPickleball, setPlaysPickleball] = useState<boolean>((step2 as any).playsPickleball ?? false);
 
-  // ---- Validation ----
-  const {
-    isLocationValid,
-    hasAnyActivity,
-    isFormValid,
-  } = useMemo(() => {
-    const locationValid = selectedAreas.length > 0 && selectedAreas.length <= 5;
+  useEffect(() => {
+    setCurrentStep(2);
+    Perf.mark("Screen.Mount", {
+      routeKey: "/auth/register-step2",
+      meta: { routeKeyConfidence: "explicit" },
+    });
+    const navMark = Perf.consumeNavMark("/auth/register-step2");
+    if (navMark) {
+      Perf.mark("Nav.ToMounted", {
+        cid: navMark.cid,
+        routeKey: "/auth/register-step2",
+        meta: {
+          durationMs: Date.now() - navMark.startedAt,
+          ...(navMark.meta || {}),
+        },
+      });
+    }
+  }, [setCurrentStep]);
 
+  useEffect(() => {
+    if (!step1.fullName.trim() || !step1.username.trim() || !step1.email.trim() || !step1.password) {
+      router.replace("/auth/register");
+    }
+  }, [step1]);
+
+  const { isLocationValid, hasAnyActivity, isFormValid } = useMemo(() => {
+    const locationValid = selectedAreas.length > 0 && selectedAreas.length <= 5;
     const anyActivity =
       playsCs2 ||
+      playsCs16 ||
+      playsValorant ||
       playsFc ||
       playsTekken ||
       playsFutsal ||
@@ -68,6 +79,8 @@ export default function RegisterStep2() {
   }, [
     selectedAreas,
     playsCs2,
+    playsCs16,
+    playsValorant,
     playsFc,
     playsTekken,
     playsFutsal,
@@ -76,20 +89,10 @@ export default function RegisterStep2() {
     playsPickleball,
   ]);
 
-  // Keyboard handling
-  const Container = KeyboardAvoidingView;
-  const containerProps = {
-    style: styles.screen,
-    behavior: Platform.OS === "ios" ? ("padding" as const) : ("height" as const),
-    keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 20,
-  };
-
-  // ---- Helpers ----
   const toggleArea = (area: string) => {
     setSelectedAreas((prev) => {
-      const isSelected = prev.includes(area);
-      if (isSelected) {
-        return prev.filter((a) => a !== area);
+      if (prev.includes(area)) {
+        return prev.filter((item) => item !== area);
       }
       if (prev.length >= 5) {
         showToast({
@@ -104,263 +107,219 @@ export default function RegisterStep2() {
   };
 
   const togglePlayTime = (time: string) => {
-    setPlayTimes((prev) => {
-      if (prev.includes(time)) {
-        return prev.filter((t) => t !== time);
-      }
-      return [...prev, time];
-    });
+    setPlayTimes((prev) =>
+      prev.includes(time) ? prev.filter((item) => item !== time) : [...prev, time],
+    );
   };
 
   const toggleGame = (key: string) => {
-    if (key === "cs2") setPlaysCs2(p => !p);
-    if (key === "fc26") setPlaysFc(p => !p);
-    if (key === "tekken8") setPlaysTekken(p => !p);
+    if (key === "cs2") setPlaysCs2((prev) => !prev);
+    if (key === "cs16") setPlaysCs16((prev) => !prev);
+    if (key === "valorant") setPlaysValorant((prev) => !prev);
+    if (key === "fc26") setPlaysFc((prev) => !prev);
+    if (key === "tekken8") setPlaysTekken((prev) => !prev);
   };
 
   const toggleSport = (key: string) => {
-    if (key === "futsal") setPlaysFutsal(p => !p);
-    if (key === "indoor_cricket") setPlaysIndoorCricket(p => !p);
-    if (key === "padel") setPlaysPadel(p => !p);
-    if (key === "pickleball") setPlaysPickleball(p => !p);
+    if (key === "futsal") setPlaysFutsal((prev) => !prev);
+    if (key === "indoor_cricket") setPlaysIndoorCricket((prev) => !prev);
+    if (key === "padel") setPlaysPadel((prev) => !prev);
+    if (key === "pickleball") setPlaysPickleball((prev) => !prev);
   };
 
-  // ---- Submit ----
   const handleContinue = () => {
     if (!isFormValid) {
       showToast({
         type: "info",
         title: "Check details",
-        message: "Please select your area and at least one game/sport.",
+        message: "Select your areas and at least one game or sport before continuing.",
       });
       return;
     }
 
-    console.log("[Step2] saving (simplified) and going to step 3");
-
-    // Only save minimal data. Any detailed questions happen Just-in-Time now.
     setStep2({
       selectedAreas,
       playTimes,
       playsCs2,
+      playsCs16,
+      playsValorant,
       playsFc,
       playsTekken,
-
-      // Explicitly nullify removed fields to clear old state if any
       cs2Role: null,
-      fcTeam: '',
+      cs16Role: null,
+      valorantRole: null,
+      fcTeam: "",
       fcFormation: null,
       tekkenFavorites: [],
-
-      // Sports
       playsFutsal,
       playsIndoorCricket,
       playsPadel,
       playsPickleball,
-
       futsalPositions: [],
       indoorCricketRole: null,
       padelRole: null,
       pickleballRole: null,
     } as any);
 
-    router.push("/auth/register-step3");
+    router.replace("/auth/register-step3");
   };
 
   return (
-    <Container {...containerProps}>
-      <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: 32 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <LogoHalo />
+    <Screen
+      scroll
+      keyboardAvoiding
+      style={styles.screen}
+      contentStyle={styles.container}
+      routeKey="/auth/register-step2"
+      scrollProps={{
+        showsVerticalScrollIndicator: false,
+        keyboardShouldPersistTaps: "handled",
+      }}
+    >
+      <RegistrationStepHeader
+        title="Play Preferences"
+        subtitle="Set the places and formats you want to see first."
+        stepTitle="Step 2 of 4"
+        stepSubtitle="Location and interests"
+        progress="50%"
+        onBack={() => router.replace("/auth/register")}
+      />
 
-        <View style={styles.stepperWrapper}>
-          <View style={styles.stepperTopRow}>
-            <View>
-              <Text style={styles.stepperTitle}>Location & games</Text>
-              <Text style={styles.stepperSubtitle}>
-                Step 2 of 4 · Quick Setup
-              </Text>
-            </View>
-          </View>
-          <View style={styles.stepperBar}>
-            <View style={[styles.stepperBarFill, { width: "50%" }]} />
-          </View>
-          <View style={styles.stepperDotsRow}>
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={[styles.stepperDot, styles.stepperDotActive]} />
-            <View style={styles.stepperDot} />
-            <View style={styles.stepperDot} />
-          </View>
+      <Text style={styles.heading}>Choose where and what you play</Text>
+      <Text style={styles.sub}>
+        These choices shape discovery and onboarding defaults. You can refine the details later.
+      </Text>
+
+      <View style={styles.fieldGroup}>
+        <RegistrationFieldLabel label="Your areas in Karachi (up to 5)" required />
+        <View style={styles.chipRow}>
+          {KARACHI_AREAS.map((area) => {
+            const active = selectedAreas.includes(area);
+            return (
+              <Pressable
+                key={area}
+                onPress={() => toggleArea(area)}
+                style={({ pressed }) => [
+                  styles.optionChip,
+                  active && styles.optionChipActive,
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                  {area}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
+        {!isLocationValid && selectedAreas.length === 0 ? (
+          <Text style={[styles.helperText, styles.helperWarning, { marginTop: 6 }]}>Required</Text>
+        ) : null}
+      </View>
 
-        <Text style={styles.heading}>Where do you queue?</Text>
-        <Text style={styles.sub}>
-          Karachi only (beta). Select up to 5 preferred areas and the activities you're interested in.
-          We'll ask for skill levels later when you create a match.
+      <View style={styles.fieldGroup}>
+        <RegistrationFieldLabel label="Esports interests" required />
+        <View style={styles.chipRow}>
+          {GAME_OPTIONS.map((game) => {
+            const active =
+              (game.key === "cs2" && playsCs2) ||
+              (game.key === "cs16" && playsCs16) ||
+              (game.key === "valorant" && playsValorant) ||
+              (game.key === "fc26" && playsFc) ||
+              (game.key === "tekken8" && playsTekken);
+
+            return (
+              <Pressable
+                key={game.key}
+                onPress={() => toggleGame(game.key)}
+                style={({ pressed }) => [
+                  styles.optionChip,
+                  active && styles.optionChipActive,
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                  {game.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.fieldGroup}>
+        <RegistrationFieldLabel label="Physical sports interests" />
+        <View style={styles.chipRow}>
+          {SPORT_OPTIONS.map((sport) => {
+            let active = false;
+            if (sport.key === "futsal") active = playsFutsal;
+            if (sport.key === "indoor_cricket") active = playsIndoorCricket;
+            if (sport.key === "padel") active = playsPadel;
+            if (sport.key === "pickleball") active = playsPickleball;
+
+            return (
+              <Pressable
+                key={sport.key}
+                onPress={() => toggleSport(sport.key)}
+                style={({ pressed }) => [
+                  styles.optionChip,
+                  active && styles.optionChipActive,
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                  {sport.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {!hasAnyActivity ? (
+        <Text style={[styles.helperText, styles.helperWarning, { marginBottom: 16 }]}>
+          Select at least one game or sport.
         </Text>
+      ) : null}
 
-        {/* Location */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Your areas in Karachi (up to 5)</Text>
-          <View style={styles.chipRow}>
-            {KARACHI_AREAS.map((area) => {
-              const active = selectedAreas.includes(area);
-              return (
-                <Pressable
-                  key={area}
-                  onPress={() => toggleArea(area)}
-                  style={({ pressed }) => [
-                    styles.optionChip,
-                    active && styles.optionChipActive,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                >
-                  <Text style={[
-                    styles.optionChipText,
-                    active && styles.optionChipTextActive,
-                  ]}>
-                    {area}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {(!isLocationValid && selectedAreas.length === 0) && (
-            <Text style={[styles.helperText, styles.helperWarning, { marginTop: 6 }]}>
-              Required
-            </Text>
-          )}
+      <View style={styles.fieldGroup}>
+        <RegistrationFieldLabel label="Usual play times" optional />
+        <View style={styles.chipRow}>
+          {PLAY_TIME_OPTIONS.map((time) => {
+            const active = playTimes.includes(time);
+            return (
+              <Pressable
+                key={time}
+                onPress={() => togglePlayTime(time)}
+                style={({ pressed }) => [
+                  styles.optionChip,
+                  active && styles.optionChipActive,
+                  pressed && { opacity: 0.9 },
+                ]}
+              >
+                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                  {time}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
+      </View>
 
-        {/* Games */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Esports (PC/Console)</Text>
-          <View style={styles.chipRow}>
-            {GAME_OPTIONS.map((game) => {
-              const active =
-                (game.key === "cs2" && playsCs2) ||
-                (game.key === "fc26" && playsFc) ||
-                (game.key === "tekken8" && playsTekken);
+      <Pressable onPress={() => router.replace("/auth/register")} style={styles.backLinkWrapper}>
+        <Text style={styles.backLinkText}>Back to account details</Text>
+      </Pressable>
 
-              return (
-                <Pressable
-                  key={game.key}
-                  onPress={() => toggleGame(game.key)}
-                  style={({ pressed }) => [
-                    styles.optionChip,
-                    active && styles.optionChipActive,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                >
-                  <Text style={[
-                    styles.optionChipText,
-                    active && styles.optionChipTextActive,
-                  ]}>
-                    {game.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Sports */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Physical Sports</Text>
-          <View style={styles.chipRow}>
-            {SPORT_OPTIONS.map((sport) => {
-              // Map sport key to state
-              let active = false;
-              if (sport.key === "futsal") active = playsFutsal;
-              if (sport.key === "indoor_cricket") active = playsIndoorCricket;
-              if (sport.key === "padel") active = playsPadel;
-              if (sport.key === "pickleball") active = playsPickleball;
-
-              return (
-                <Pressable
-                  key={sport.key}
-                  onPress={() => toggleSport(sport.key)}
-                  style={({ pressed }) => [
-                    styles.optionChip,
-                    active && styles.optionChipActive,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                >
-                  <Text style={[
-                    styles.optionChipText,
-                    active && styles.optionChipTextActive,
-                  ]}>
-                    {sport.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {!hasAnyActivity && (
-          <Text style={[styles.helperText, styles.helperWarning, { marginBottom: 16 }]}>
-            Select at least one game or sport.
-          </Text>
-        )}
-
-        {/* Play Times */}
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Usual play times (Optional)</Text>
-          <View style={styles.chipRow}>
-            {PLAY_TIME_OPTIONS.map((time) => {
-              const active = playTimes.includes(time);
-              return (
-                <Pressable
-                  key={time}
-                  onPress={() => togglePlayTime(time)}
-                  style={({ pressed }) => [
-                    styles.optionChip,
-                    active && styles.optionChipActive,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                >
-                  <Text style={[
-                    styles.optionChipText,
-                    active && styles.optionChipTextActive,
-                  ]}>
-                    {time}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <Pressable
-          onPress={() => router.push("/auth/register")}
-          style={styles.backLinkWrapper}
+      <View style={[styles.buttonShadowWrapper, isFormValid && styles.buttonShadowWrapperActive]}>
+        <AppButton
+          onPress={handleContinue}
+          disabled={!isFormValid}
+          size="lg"
+          style={[styles.primaryBtn, !isFormValid ? styles.primaryBtnDisabled : null]}
         >
-          <Text style={styles.backLinkText}>← Back to account details</Text>
-        </Pressable>
-
-        <View
-          style={[
-            styles.buttonShadowWrapper,
-            isFormValid && styles.buttonShadowWrapperActive,
-          ]}
-        >
-          <Pressable
-            onPress={handleContinue}
-            disabled={!isFormValid}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              !isFormValid ? styles.primaryBtnDisabled : null,
-              pressed && isFormValid && { opacity: 0.92 },
-            ]}
-          >
-            <Text style={styles.primaryBtnText}>Continue</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </Container>
+          Continue
+        </AppButton>
+      </View>
+    </Screen>
   );
 }

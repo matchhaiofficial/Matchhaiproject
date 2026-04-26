@@ -144,8 +144,12 @@ export default StyleSheet.create({
         backgroundColor: COLORS.surface,
         borderTopLeftRadius: 25,
         borderTopRightRadius: 25,
-        padding: 20,
         maxHeight: '80%',
+    },
+    modalBodyContent: {
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -161,11 +165,13 @@ export default StyleSheet.create({
     modalSearchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.cardBackground,
         borderRadius: 12,
         paddingHorizontal: 12,
         height: 48,
         marginBottom: 15,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
     },
     modalSearchInput: {
         flex: 1,

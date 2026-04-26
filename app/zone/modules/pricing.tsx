@@ -1,23 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import {
     ActivityIndicator,
     Alert,
-    Modal,
     Pressable,
     ScrollView,
     Switch,
     Text,
     TextInput,
-    TouchableWithoutFeedback,
     View,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppPickerSheet } from "../../../src/components/AppModalPrimitives";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useToast } from "../../../src/hooks/useToast";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import {
     createZonePricingRule,
@@ -28,8 +29,9 @@ import {
     type PricingRuleAssetType,
     type PricingRuleType,
 } from "../../../src/services/pricingRuleService";
-import { subscribeZoneBranches, type ZoneBranch } from "../../../src/services/zoneAdminResourceService";
+import { subscribeZoneBranches, type ZoneBranch } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../src/theme";
+import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./pricing.styles";
 
 const ASSET_TYPES: PricingRuleAssetType[] = [
@@ -81,10 +83,58 @@ const draftToTimeString = (draft: { hour: number; minute: number; period: "AM" |
     return `${hours}:${minutes}`;
 };
 
+const RULE_SWITCH_TRACK_COLOR = {
+    false: COLORS.cardBorder,
+    true: "rgba(66, 165, 245, 0.4)",
+};
+
+const PricingRuleRow = memo(function PricingRuleRow({
+    rule,
+    onToggle,
+    onDelete,
+}: {
+    rule: PricingRule;
+    onToggle: (rule: PricingRule, enabled: boolean) => void | Promise<void>;
+    onDelete: (rule: PricingRule) => void | Promise<void>;
+}) {
+    return (
+        <View style={styles.ruleRow}>
+            <View style={styles.ruleBody}>
+                <Text style={styles.ruleName}>{rule.name}</Text>
+                <Text style={styles.ruleMeta}>
+                    {rule.assetType} | {rule.ruleType} | value {rule.value}
+                </Text>
+                <Text style={styles.ruleMeta}>
+                    {rule.timeStart}-{rule.timeEnd} | priority {rule.priority}
+                </Text>
+                <Text style={styles.ruleMeta}>
+                    branch: {rule.branchId || "all"}
+                </Text>
+            </View>
+            <View style={styles.ruleActions}>
+                <Switch
+                    value={rule.isEnabled}
+                    onValueChange={(enabled) => onToggle(rule, enabled)}
+                    thumbColor={rule.isEnabled ? COLORS.accent : COLORS.muted}
+                    trackColor={RULE_SWITCH_TRACK_COLOR}
+                />
+                <Pressable onPress={() => onDelete(rule)} style={styles.deleteButton}>
+                    <Text style={styles.deleteText}>Delete</Text>
+                </Pressable>
+            </View>
+        </View>
+    );
+});
+
 export default function ZonePricingModule() {
     const router = useRouter();
     const { user } = useAuth();
     const { zone } = useZoneData();
+    const { showToast } = useToast();
+    useRouteLogger("ZonePricingModule", {
+        zoneId: zone?.id,
+        userId: user?._id,
+    });
 
     const [branches, setBranches] = useState<ZoneBranch[]>([]);
     const [rules, setRules] = useState<PricingRule[]>([]);
@@ -132,7 +182,7 @@ export default function ZonePricingModule() {
         minute: 0,
         period: "AM",
     });
-    const pricingEngineReady = Boolean(zone?.migration?.perBranchSeatModel);
+    const pricingEngineReady = isZoneMigrationReady(zone);
 
     useEffect(() => {
         if (!zone?.id) return;
@@ -183,24 +233,28 @@ export default function ZonePricingModule() {
     }, [pricingEngineReady, rulesBlocked, zone?.id]);
 
     const createRule = async () => {
-        if (!zone?.id || !user?.uid) return;
+        if (!zone?.id || !user?._id) return;
         if (!pricingEngineReady) {
-            Alert.alert("Migration required", "Run branch migration before creating pricing rules.");
+            showToast({
+                type: "warning",
+                title: "Migration required",
+                message: "Venue pricing stays locked until migration succeeds and the venue becomes active.",
+            });
             return;
         }
         if (!name.trim()) {
-            Alert.alert("Missing name", "Enter a pricing rule name.");
+            showToast({ type: "warning", title: "Missing name", message: "Enter a pricing rule name." });
             return;
         }
 
         const parsedValue = Number.parseFloat(value);
         const parsedPriority = Number.parseInt(priority, 10);
         if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-            Alert.alert("Invalid value", "Enter a valid numeric rule value.");
+            showToast({ type: "warning", title: "Invalid value", message: "Enter a valid numeric rule value." });
             return;
         }
         if (validFromAt && validToAt && validFromAt.getTime() > validToAt.getTime()) {
-            Alert.alert("Invalid dates", "From date must be before or equal to To date.");
+            showToast({ type: "warning", title: "Invalid dates", message: "From date must be before or equal to To date." });
             return;
         }
 
@@ -222,12 +276,12 @@ export default function ZonePricingModule() {
                 validTo: validToAt ? toDateValue(validToAt) : null,
                 priority: Number.isFinite(parsedPriority) ? parsedPriority : 0,
             },
-            user.uid,
+            user._id,
         );
         setSaving(false);
 
         if (!result.ok) {
-            Alert.alert("Create failed", result.message);
+            showToast({ type: "error", title: "Create failed", message: result.message });
             return;
         }
 
@@ -238,40 +292,40 @@ export default function ZonePricingModule() {
         setValidFromAt(null);
         setValidToAt(null);
         setPriority("0");
-        Alert.alert("Rule created", "Pricing rule is now active.");
+        showToast({ type: "success", title: "Rule created", message: "Pricing rule is now active." });
     };
 
-    const toggleRule = async (rule: PricingRule, enabled: boolean) => {
-        if (!zone?.id) return;
-        const result = await setZonePricingRuleEnabled(zone.id, rule.id, enabled);
+    const toggleRule = useCallback(async (rule: PricingRule, enabled: boolean) => {
+        if (!zone?.id || !user?._id) return;
+        const result = await setZonePricingRuleEnabled(zone.id, rule.id, enabled, user._id);
         if (!result.ok) {
-            Alert.alert("Update failed", result.message);
+            showToast({ type: "error", title: "Update failed", message: result.message });
         }
-    };
+    }, [showToast, user?._id, zone?.id]);
 
-    const removeRule = async (rule: PricingRule) => {
-        if (!zone?.id) return;
+    const removeRule = useCallback(async (rule: PricingRule) => {
+        if (!zone?.id || !user?._id) return;
         Alert.alert("Delete rule", `Delete "${rule.name}"?`, [
             { text: "Cancel", style: "cancel" },
             {
                 text: "Delete",
                 style: "destructive",
                 onPress: async () => {
-                    const result = await deleteZonePricingRule(zone.id, rule.id);
+                    const result = await deleteZonePricingRule(zone.id, rule.id, user._id);
                     if (!result.ok) {
-                        Alert.alert("Delete failed", result.message);
+                        showToast({ type: "error", title: "Delete failed", message: result.message });
                     }
                 },
             },
         ]);
-    };
+    }, [showToast, user?._id, zone?.id]);
 
     const summary = useMemo(() => {
         const enabled = rules.filter((item) => item.isEnabled).length;
         return { total: rules.length, enabled };
     }, [rules]);
     const migrationNotice = !pricingEngineReady
-        ? "Run branch migration in Venue Settings to enable live pricing rules."
+        ? `Pricing stays locked until migration succeeds. Current state: ${getZoneMigrationLabel(zone)}. Open Migration Tools if you need to repair the venue setup.`
         : null;
     const hours12 = useMemo(() => Array.from({ length: 12 }).map((_, index) => index + 1), []);
     const minutes = useMemo(() => [0, 30], []);
@@ -337,13 +391,13 @@ export default function ZonePricingModule() {
                             onPress={() => setShowFilters((prev) => !prev)}
                         >
                             <View style={styles.filtersToggleLeft}>
-                                <MaterialIcons name="tune" size={16} color={COLORS.accent} />
+                                <AppIcon name="tune" size="sm" tone="accent" />
                                 <Text style={styles.filtersToggleText}>Rule Scope & Schedule</Text>
                             </View>
-                            <MaterialIcons
+                            <AppIcon
                                 name={showFilters ? "expand-less" : "expand-more"}
                                 size={18}
-                                color={COLORS.textSecondary}
+                                tone="muted"
                             />
                         </Pressable>
 
@@ -450,7 +504,7 @@ export default function ZonePricingModule() {
                                         setShowTimePicker(true);
                                     }}
                                 >
-                                    <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
+                                    <AppIcon name="schedule" size="sm" tone="accent" />
                                     <Text style={styles.dateFieldText}>{toTimeDisplay(timeStartAt)}</Text>
                                 </Pressable>
                             </View>
@@ -464,7 +518,7 @@ export default function ZonePricingModule() {
                                         setShowTimePicker(true);
                                     }}
                                 >
-                                    <MaterialIcons name="schedule" size={16} color={COLORS.accent} />
+                                    <AppIcon name="schedule" size="sm" tone="accent" />
                                     <Text style={styles.dateFieldText}>{toTimeDisplay(timeEndAt)}</Text>
                                 </Pressable>
                             </View>
@@ -485,7 +539,7 @@ export default function ZonePricingModule() {
                                         setShowDatePicker(true);
                                     }}
                                 >
-                                    <MaterialIcons name="event" size={16} color={COLORS.accent} />
+                                    <AppIcon name="event" size="sm" tone="accent" />
                                     <Text style={styles.dateFieldText}>
                                         {validFromAt ? toDateDisplay(validFromAt) : "Valid from"}
                                     </Text>
@@ -506,7 +560,7 @@ export default function ZonePricingModule() {
                                         setShowDatePicker(true);
                                     }}
                                 >
-                                    <MaterialIcons name="event" size={16} color={COLORS.accent} />
+                                    <AppIcon name="event" size="sm" tone="accent" />
                                     <Text style={styles.dateFieldText}>
                                         {validToAt ? toDateDisplay(validToAt) : "Valid to"}
                                     </Text>
@@ -521,7 +575,7 @@ export default function ZonePricingModule() {
                                 ]}
                                 onPress={() => setValidFromAt(null)}
                             >
-                                <MaterialIcons name="close" size={14} color={COLORS.accent} />
+                                <AppIcon name="close" size={14} tone="accent" />
                                 <Text style={styles.clearDateText}>Clear from</Text>
                             </Pressable>
                             <Pressable
@@ -531,7 +585,7 @@ export default function ZonePricingModule() {
                                 ]}
                                 onPress={() => setValidToAt(null)}
                             >
-                                <MaterialIcons name="close" size={14} color={COLORS.accent} />
+                                <AppIcon name="close" size={14} tone="accent" />
                                 <Text style={styles.clearDateText}>Clear to</Text>
                             </Pressable>
                         </View>
@@ -592,86 +646,58 @@ export default function ZonePricingModule() {
                             <Text style={styles.emptyText}>No pricing rules yet.</Text>
                         ) : (
                             rules.map((rule) => (
-                                <View key={rule.id} style={styles.ruleRow}>
-                                    <View style={styles.ruleBody}>
-                                        <Text style={styles.ruleName}>{rule.name}</Text>
-                                        <Text style={styles.ruleMeta}>
-                                            {rule.assetType} | {rule.ruleType} | value {rule.value}
-                                        </Text>
-                                        <Text style={styles.ruleMeta}>
-                                            {rule.timeStart}-{rule.timeEnd} | priority {rule.priority}
-                                        </Text>
-                                        {rule.branchId ? (
-                                            <Text style={styles.ruleMeta}>branch: {rule.branchId}</Text>
-                                        ) : (
-                                            <Text style={styles.ruleMeta}>branch: all</Text>
-                                        )}
-                                    </View>
-                                    <View style={styles.ruleActions}>
-                                        <Switch
-                                            value={rule.isEnabled}
-                                            onValueChange={(enabled) => toggleRule(rule, enabled)}
-                                            thumbColor={rule.isEnabled ? COLORS.accent : COLORS.muted}
-                                            trackColor={{ false: COLORS.cardBorder, true: "rgba(66, 165, 245, 0.4)" }}
-                                        />
-                                        <Pressable onPress={() => removeRule(rule)} style={styles.deleteButton}>
-                                            <Text style={styles.deleteText}>Delete</Text>
-                                        </Pressable>
-                                    </View>
-                                </View>
+                                <PricingRuleRow
+                                    key={rule.id}
+                                    rule={rule}
+                                    onToggle={toggleRule}
+                                    onDelete={removeRule}
+                                />
                             ))
                         )}
                     </View>
                 ) : null}
             </ScrollView>
 
-            <Modal
+            <AppPickerSheet
                 visible={showDatePicker}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowDatePicker(false)}
+                onClose={() => setShowDatePicker(false)}
+                sheetStyle={styles.pickerSheet}
             >
-                <View style={styles.pickerOverlay}>
-                    <TouchableWithoutFeedback onPress={() => setShowDatePicker(false)}>
-                        <View style={styles.pickerBackdrop} />
-                    </TouchableWithoutFeedback>
-                    <View style={styles.pickerSheet}>
-                        <View style={styles.pickerHandle} />
-                        <View style={styles.pickerHeader}>
-                            <Pressable onPress={() => setShowDatePicker(false)}>
-                                <Text style={styles.pickerAction}>Cancel</Text>
-                            </Pressable>
-                            <Text style={styles.pickerTitle}>Select Date</Text>
-                            <Pressable
-                                onPress={() => {
-                                    if (dateDraft && dateTarget === "valid_from") {
-                                        const nextFrom = new Date(dateDraft);
-                                        nextFrom.setHours(0, 0, 0, 0);
-                                        setValidFromAt(nextFrom);
-                                        setValidToAt((prev) => {
-                                            if (!prev) return prev;
-                                            const normalizedPrev = new Date(prev);
-                                            normalizedPrev.setHours(0, 0, 0, 0);
-                                            return normalizedPrev.getTime() < nextFrom.getTime() ? nextFrom : normalizedPrev;
-                                        });
-                                    }
-                                    if (dateDraft && dateTarget === "valid_to") {
-                                        const nextTo = new Date(dateDraft);
-                                        nextTo.setHours(0, 0, 0, 0);
-                                        const normalizedFrom = validFromAt ? new Date(validFromAt) : null;
-                                        if (normalizedFrom) normalizedFrom.setHours(0, 0, 0, 0);
-                                        setValidToAt(
-                                            normalizedFrom && nextTo.getTime() < normalizedFrom.getTime()
-                                                ? normalizedFrom
-                                                : nextTo,
-                                        );
-                                    }
-                                    setShowDatePicker(false);
-                                }}
-                            >
-                                <Text style={styles.pickerAction}>Done</Text>
-                            </Pressable>
-                        </View>
+                <View style={styles.pickerHeader}>
+                    <Pressable onPress={() => setShowDatePicker(false)}>
+                        <Text style={styles.pickerAction}>Cancel</Text>
+                    </Pressable>
+                    <Text style={styles.pickerTitle}>Select Date</Text>
+                    <Pressable
+                        onPress={() => {
+                            if (dateDraft && dateTarget === "valid_from") {
+                                const nextFrom = new Date(dateDraft);
+                                nextFrom.setHours(0, 0, 0, 0);
+                                setValidFromAt(nextFrom);
+                                setValidToAt((prev) => {
+                                    if (!prev) return prev;
+                                    const normalizedPrev = new Date(prev);
+                                    normalizedPrev.setHours(0, 0, 0, 0);
+                                    return normalizedPrev.getTime() < nextFrom.getTime() ? nextFrom : normalizedPrev;
+                                });
+                            }
+                            if (dateDraft && dateTarget === "valid_to") {
+                                const nextTo = new Date(dateDraft);
+                                nextTo.setHours(0, 0, 0, 0);
+                                const normalizedFrom = validFromAt ? new Date(validFromAt) : null;
+                                if (normalizedFrom) normalizedFrom.setHours(0, 0, 0, 0);
+                                setValidToAt(
+                                    normalizedFrom && nextTo.getTime() < normalizedFrom.getTime()
+                                        ? normalizedFrom
+                                        : nextTo,
+                                );
+                            }
+                            setShowDatePicker(false);
+                        }}
+                    >
+                        <Text style={styles.pickerAction}>Done</Text>
+                    </Pressable>
+                </View>
 
                         <View style={styles.calendarContainer}>
                             <View style={styles.calendarHeader}>
@@ -724,52 +750,43 @@ export default function ZonePricingModule() {
                                 })}
                             </View>
                         </View>
-                    </View>
-                </View>
-            </Modal>
+            </AppPickerSheet>
 
-            <Modal
+            <AppPickerSheet
                 visible={showTimePicker}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowTimePicker(false)}
+                onClose={() => setShowTimePicker(false)}
+                sheetStyle={styles.pickerSheet}
             >
-                <View style={styles.pickerOverlay}>
-                    <TouchableWithoutFeedback onPress={() => setShowTimePicker(false)}>
-                        <View style={styles.pickerBackdrop} />
-                    </TouchableWithoutFeedback>
-                    <View style={styles.pickerSheet}>
-                        <View style={styles.pickerHandle} />
-                        <View style={styles.pickerHeader}>
-                            <Pressable onPress={() => setShowTimePicker(false)}>
-                                <Text style={styles.pickerAction}>Cancel</Text>
-                            </Pressable>
-                            <Text style={styles.pickerTitle}>Select Time</Text>
-                            <Pressable
-                                onPress={() => {
-                                    const selectedTime = draftToTimeString(timeDraft);
-                                    const [hours, minutesValue] = selectedTime.split(":").map(Number);
-                                    if (timeTarget === "start_time") {
-                                        setTimeStartAt((prev) => {
-                                            const next = new Date(prev);
-                                            next.setHours(hours, minutesValue, 0, 0);
-                                            return next;
-                                        });
-                                    }
-                                    if (timeTarget === "end_time") {
-                                        setTimeEndAt((prev) => {
-                                            const next = new Date(prev);
-                                            next.setHours(hours, minutesValue, 0, 0);
-                                            return next;
-                                        });
-                                    }
-                                    setShowTimePicker(false);
-                                }}
-                            >
-                                <Text style={styles.pickerAction}>Done</Text>
-                            </Pressable>
-                        </View>
-                        <View style={styles.timePickerRow}>
+                <View style={styles.pickerHeader}>
+                    <Pressable onPress={() => setShowTimePicker(false)}>
+                        <Text style={styles.pickerAction}>Cancel</Text>
+                    </Pressable>
+                    <Text style={styles.pickerTitle}>Select Time</Text>
+                    <Pressable
+                        onPress={() => {
+                            const selectedTime = draftToTimeString(timeDraft);
+                            const [hours, minutesValue] = selectedTime.split(":").map(Number);
+                            if (timeTarget === "start_time") {
+                                setTimeStartAt((prev) => {
+                                    const next = new Date(prev);
+                                    next.setHours(hours, minutesValue, 0, 0);
+                                    return next;
+                                });
+                            }
+                            if (timeTarget === "end_time") {
+                                setTimeEndAt((prev) => {
+                                    const next = new Date(prev);
+                                    next.setHours(hours, minutesValue, 0, 0);
+                                    return next;
+                                });
+                            }
+                            setShowTimePicker(false);
+                        }}
+                    >
+                        <Text style={styles.pickerAction}>Done</Text>
+                    </Pressable>
+                </View>
+                <View style={styles.timePickerRow}>
                             <View style={styles.timeColumn}>
                                 {hours12.map((hour) => {
                                     const selected = timeDraft.hour === hour;
@@ -819,9 +836,7 @@ export default function ZonePricingModule() {
                                 })}
                             </View>
                         </View>
-                    </View>
-                </View>
-            </Modal>
+            </AppPickerSheet>
         </Screen>
     );
 }

@@ -1,7 +1,6 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import { useQuery } from "convex/react";
+import React, { useMemo } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -11,75 +10,37 @@ import {
 } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import Screen from "../../../src/components/Screen";
-import { db } from "../../../src/config/firebaseConfig";
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { COLORS } from "../../../src/theme";
-import Logger from "../../../src/utils/logger";
+import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./branches.styles";
 
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
     const router = useRouter();
-    const [branches, setBranches] = useState<any[]>([]);
-    const [usingLegacyFallback, setUsingLegacyFallback] = useState(false);
-    const [loadingBranches, setLoadingBranches] = useState(true);
 
-    const legacyBranches = useMemo(
-        () =>
-            Array.isArray(zone?.branches)
-                ? zone.branches.map((branch: any, index: number) => ({
-                    id: branch?.id || `legacy_${index + 1}`,
-                    ...branch,
-                    _legacy: true,
-                }))
-                : [],
-        [zone?.branches],
-    );
+    // Branches are stored as an array on the zone document in Convex.
+    // The zone data from useZoneData already includes branches.
+    // For the legacy/migrated model, we just use zone.branches directly.
+    const branches = useMemo(() => {
+        if (!zone?.branches || !Array.isArray(zone.branches)) return [];
+        return zone.branches.map((branch: any, index: number) => ({
+            id: branch?.id || `branch_${index + 1}`,
+            ...branch,
+        }));
+    }, [zone?.branches]);
 
-    useEffect(() => {
-        if (!zone?.id) {
-            setLoadingBranches(false);
-            return;
-        }
-        if (!zone?.migration?.perBranchSeatModel) {
-            setBranches(legacyBranches);
-            setUsingLegacyFallback(legacyBranches.length > 0);
-            setLoadingBranches(false);
-            return;
-        }
+    // Legacy detection: zones without migration flag use the old branch model
+    const usingLegacyFallback = useMemo(() => {
+        if (!zone) return false;
+        return !isZoneMigrationReady(zone) && branches.length > 0;
+    }, [zone, branches.length]);
 
-        const q = query(collection(db, "zones", zone.id, "branches"));
-        const unsub = onSnapshot(
-            q,
-            (snapshot: any) => {
-                const list = snapshot.docs.map((doc: any) => ({
-                    id: doc.id,
-                    ...doc.data(),
-                }));
-                if (list.length > 0) {
-                    setBranches(list);
-                    setUsingLegacyFallback(false);
-                } else {
-                    setBranches(legacyBranches);
-                    setUsingLegacyFallback(legacyBranches.length > 0);
-                }
-                setLoadingBranches(false);
-            },
-            (error: any) => {
-                setBranches(legacyBranches);
-                setUsingLegacyFallback(legacyBranches.length > 0);
-                setLoadingBranches(false);
-                if (error?.code !== "permission-denied") {
-                    Logger.error("ZoneBranches", "branches listener failed", error);
-                }
-            },
-        );
-
-        return () => unsub();
-    }, [legacyBranches, zone?.id, zone?.migration?.perBranchSeatModel]);
-
-    if (loading || loadingBranches) {
+    if (loading) {
         return (
             <View style={styles.loadingWrap}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
@@ -108,7 +69,7 @@ export default function ZoneBranches() {
                             Legacy branch model detected
                         </Text>
                         <Text style={styles.noticeText}>
-                            Run migration from Venue Settings to enable per-branch seat-level resources.
+                            This venue is still using the legacy branch model. Current migration state: {getZoneMigrationLabel(zone)}. Use Migration Tools if you need to inspect or retry migration.
                         </Text>
                     </View>
                 )}
@@ -120,7 +81,7 @@ export default function ZoneBranches() {
                             router.push("/zone/branch/new");
                         }}
                     >
-                        <MaterialIcons name="add" size={18} color="#fff" />
+                        <AppIcon name="add" size={18} color="#fff" />
                         <Text style={styles.addButtonText}>Add New Branch</Text>
                     </Pressable>
                 </View>
@@ -130,7 +91,7 @@ export default function ZoneBranches() {
                         <Text style={styles.emptyText}>No branches found.</Text>
                     </View>
                 ) : (
-                    branches.map((branch) => (
+                    branches.map((branch: any) => (
                         <Pressable
                             key={branch.id}
                             style={({ pressed }) => [styles.branchCard, pressed && styles.branchCardPressed]}
@@ -142,7 +103,7 @@ export default function ZoneBranches() {
                                 <View>
                                     <View style={styles.branchTitleRow}>
                                         <Text style={styles.branchTitle}>
-                                            {branch.branchDisplayName || "Main Branch"}
+                                            {branch.branchDisplayName || branch.name || "Main Branch"}
                                         </Text>
                                         {branch.isPrimary && (
                                             <View style={styles.primaryPill}>
@@ -151,22 +112,15 @@ export default function ZoneBranches() {
                                                 </Text>
                                             </View>
                                         )}
-                                        {branch._legacy && (
-                                            <View style={styles.legacyPill}>
-                                                <Text style={styles.legacyPillText}>
-                                                    Legacy
-                                                </Text>
-                                            </View>
-                                        )}
                                     </View>
                                     <Text style={styles.branchLocation}>
                                         {branch.areaLabel}, {branch.city}
                                     </Text>
                                     <Text style={styles.branchAddress}>
-                                        {branch.addressLine1}
+                                        {branch.addressLine1 || branch.address}
                                     </Text>
                                 </View>
-                                <MaterialIcons name="chevron-right" size={24} color={COLORS.muted} />
+                                <AppIcon name="chevron-right" size="lg" tone="muted" />
                             </View>
                         </Pressable>
                     ))

@@ -4,32 +4,17 @@ import React from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserProfile, UserProfile } from "../../src/services/userService";
 import { COLORS } from "../../src/theme";
+import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import Logger from "../../src/utils/logger";
 
 export default function SuperAdminLayout() {
     const { user, loading: authLoading } = useAuth();
-    const [profile, setProfile] = React.useState<UserProfile | null>(null);
-    const [profileLoading, setProfileLoading] = React.useState(true);
-
-    React.useEffect(() => {
-        async function loadProfile() {
-            if (user) {
-                const res = await getUserProfile(user.uid);
-                if (res.ok) {
-                    setProfile(res.data);
-                }
-            }
-            setProfileLoading(false);
-        }
-        loadProfile();
-    }, [user]);
 
     // Show loading while checking auth state or profile
-    if (authLoading || (!!user && profileLoading)) {
+    if (authLoading) {
         return (
-            <View style={{ flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator color={COLORS.accent} />
             </View>
         );
@@ -41,12 +26,10 @@ export default function SuperAdminLayout() {
     }
 
     // Redirect if not super-admin
-    const isSuperAdmin = profile?.role === "super-admin" ||
-        (user?.email && user.email.toLowerCase() === "superadmin@matchhai.com") ||
-        user?.uid === "jM2JZrPNNNahPb844rHmr0MQKYo1";
+    const isSuperAdmin = isSuperAdminProfile(user);
 
     if (!isSuperAdmin) {
-        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: profile?.role });
+        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: user?.role });
         return <Redirect href="/auth/login" />;
     }
 
@@ -54,11 +37,14 @@ export default function SuperAdminLayout() {
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: COLORS.background },
+                contentStyle: { backgroundColor: COLORS.backgroundDark },
             }}
         >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)/index" options={{ headerShown: false }} />
+            <Stack.Screen name="easypaisa" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="request/[id]" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="report/[id]" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
     );
 }
+

@@ -5,7 +5,7 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/th
 export default StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
 
     scrollContent: {
@@ -73,6 +73,9 @@ export default StyleSheet.create({
         borderWidth: 2,
         borderColor: COLORS.cardBorder,
     },
+    teamCardPressed: {
+        opacity: 0.92,
+    },
 
     teamCardSelected: {
         borderColor: COLORS.accent,
@@ -94,6 +97,16 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         color: COLORS.text,
+    },
+    teamTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    captainStar: {
+        marginLeft: 8,
+    },
+    selectedIcon: {
+        color: COLORS.accent,
     },
 
     teamPlayers: {
@@ -128,6 +141,9 @@ export default StyleSheet.create({
         marginTop: SPACING.xl,
         ...SHADOWS.accentSoft,
     },
+    submitButtonPressed: {
+        opacity: 0.9,
+    },
 
     submitButtonDisabled: {
         backgroundColor: COLORS.muted,
@@ -137,7 +153,7 @@ export default StyleSheet.create({
     submitButtonText: {
         fontFamily: FONTS.interSemiBold,
         fontSize: TEXT_SIZES.subheading,
-        color: COLORS.background,
+        color: COLORS.backgroundDark,
     },
 
     alreadySubmittedCard: {
@@ -236,3 +252,4 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
     },
 });
+

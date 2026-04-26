@@ -1,14 +1,17 @@
 // src/components/LogoHalo.tsx
 import React from "react";
-import { Image, View } from "react-native";
+import { View } from "react-native";
+
+import { AppImage } from "./AppImage";
 import styles from "./LogoHalo.styles";
 
 export default function LogoHalo() {
   return (
     <View style={styles.wrapper}>
-      <Image
+      <AppImage
         source={require("../../assets/logo.png")}
-        style={styles.logo}
+        containerStyle={styles.logo}
+        contentFit="contain"
       />
     </View>
   );

@@ -1,0 +1,31 @@
+{
+  "cli": {
+    "version": ">= 18.4.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+        "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://ardent-lynx-28.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://ardent-lynx-28.convex.site",
+        "EXPO_PUBLIC_APP_SCHEME": "matchhai",
+        "EXPO_PUBLIC_SUPER_ADMIN_EMAIL": "superadmin@matchhai.com",
+        "EXPO_PUBLIC_TOUCH_DEBUG": "0"
+      }
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

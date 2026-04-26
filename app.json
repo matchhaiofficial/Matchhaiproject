@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MatchHai",
-    "slug": "MatchHai",
+    "name": "matchhai",
+    "slug": "matchhai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -14,9 +14,18 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "MatchHai uses your microphone to record voice messages in chat."
+      }
     },
     "android": {
+      "package": "com.ovaisto.matchhai",
+      "permissions": [
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -34,10 +43,21 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-secure-store",
+      "expo-audio",
+      "expo-notifications",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "162a78ae-e223-4fe8-93d3-31665f16a590"
+      }
+    },
+    "owner": "matchhai"
   }
 }

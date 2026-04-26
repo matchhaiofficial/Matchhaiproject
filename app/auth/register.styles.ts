@@ -1,7 +1,8 @@
-// app/auth/register.styles.ts
 import { StyleSheet } from "react-native";
+
 import {
   COLORS,
+  CONTROL_SIZES,
   FONTS,
   RADII,
   SHADOWS,
@@ -12,38 +13,37 @@ import {
 export default StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundDark,
   },
   container: {
     flexGrow: 1,
-    padding: SPACING.screenPadding,
-    justifyContent: "center",
+    gap: SPACING.sm,
   },
 
-  // ---- Stepper ----
   stepperWrapper: {
-    marginBottom: SPACING.lg + 4, // ~20
+    marginBottom: SPACING.md,
   },
   stepperTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: SPACING.sm, // 8
+    marginBottom: SPACING.sm,
   },
   stepperTitle: {
     color: COLORS.text,
-    fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.subheading + 2, // ~18
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.label,
   },
   stepperSubtitle: {
-    color: COLORS.muted,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    marginTop: 2,
   },
   stepperBar: {
     height: 4,
-    borderRadius: 999,
-    backgroundColor: "#3a3a3a",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.inputBorder,
     overflow: "hidden",
   },
   stepperBarFill: {
@@ -53,34 +53,34 @@ export default StyleSheet.create({
   stepperDotsRow: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: SPACING.sm, // 8
+    gap: SPACING.xs,
+    marginTop: SPACING.sm,
   },
   stepperDot: {
     width: 8,
     height: 8,
-    borderRadius: 999,
-    backgroundColor: "#414141",
-    marginHorizontal: 3,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.inputBorder,
   },
   stepperDotActive: {
     backgroundColor: COLORS.accent,
   },
 
-  // ---- Headings ----
   heading: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.heading - 2,
+    fontSize: TEXT_SIZES.xxl,
+    lineHeight: 32,
     marginBottom: SPACING.xs,
   },
   sub: {
-    color: COLORS.muted,
-    fontFamily: FONTS.subheading,
-    fontSize: TEXT_SIZES.subheading - 2,
-    marginBottom: SPACING.lg + 2,
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.body,
+    lineHeight: 22,
+    marginBottom: SPACING.lg,
   },
 
-  // ---- Fields ----
   fieldGroup: {
     marginBottom: SPACING.md,
   },
@@ -90,14 +90,24 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.label - 1,
     marginBottom: SPACING.xs,
   },
-
+  twoColumnRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.md,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.md,
+  },
   inputBox: {
     backgroundColor: COLORS.inputBackground,
-    borderRadius: RADII.md,
+    borderRadius: CONTROL_SIZES.cardRadius,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
+    minHeight: CONTROL_SIZES.inputMd,
   },
   inputRow: {
     flexDirection: "row",
@@ -105,7 +115,7 @@ export default StyleSheet.create({
   },
   prefixIcon: {
     marginRight: SPACING.sm,
-    opacity: 0.9,
+    opacity: 0.95,
   },
   suffixIcon: {
     marginLeft: SPACING.sm,
@@ -117,11 +127,14 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.input,
     paddingVertical: SPACING.sm + 1,
   },
-
-  inputBoxValidShadow: {
-    ...SHADOWS.accentSoft,
+  inputPlaceholderOverlay: {
+    position: "absolute",
+    left: 44,
+    right: 108,
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.body,
   },
-
   focusBar: {
     position: "absolute",
     left: SPACING.md - 2,
@@ -141,12 +154,13 @@ export default StyleSheet.create({
   helperText: {
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
   },
   helperOk: {
     color: COLORS.success,
   },
   helperWarning: {
-    color: "#ffb74d",
+    color: COLORS.warning,
   },
   helperError: {
     color: COLORS.error,
@@ -155,10 +169,9 @@ export default StyleSheet.create({
     color: COLORS.error,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
     marginTop: SPACING.xs,
   },
-
-  // ---- Email suffix ----
   emailSuffix: {
     color: COLORS.muted,
     fontFamily: FONTS.body,
@@ -166,29 +179,30 @@ export default StyleSheet.create({
     marginLeft: SPACING.xs,
   },
 
-  // ---- Password strength + requirements ----
   passwordStrengthWrapper: {
     marginTop: SPACING.sm,
     marginBottom: SPACING.xs,
   },
   strengthMeterTrack: {
     height: 4,
-    borderRadius: 999,
-    backgroundColor: "#3a3a3a",
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.inputBorder,
     overflow: "hidden",
   },
   strengthMeterFill: {
     height: "100%",
-    borderRadius: 999,
+    borderRadius: RADII.pill,
   },
   strengthLabel: {
     marginTop: SPACING.xs,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
   },
   passwordRequirementsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    gap: SPACING.lg,
     marginTop: SPACING.xs,
   },
   requirementColumn: {
@@ -197,6 +211,7 @@ export default StyleSheet.create({
   passwordRequirementText: {
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
     color: COLORS.muted,
     marginBottom: 2,
   },
@@ -204,30 +219,28 @@ export default StyleSheet.create({
     color: COLORS.success,
   },
 
-  // ---- Chips / options (Step 2) ----
   chipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: SPACING.sm,
     marginTop: SPACING.sm,
   },
   optionChip: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: RADII.pill,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
     backgroundColor: COLORS.cardBackground,
-    paddingHorizontal: SPACING.md, // 12
-    paddingVertical: SPACING.sm,   // 8
-    marginRight: SPACING.sm,       // 8
-    marginBottom: SPACING.xs,      // 4 (small margin to prevent clipping in wrap views, safe for horizontal)
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm + 1,
   },
   optionChipActive: {
-    backgroundColor: "#1e2a38",
-    borderColor: COLORS.accent,
+    backgroundColor: `${COLORS.accent}1F`,
+    borderColor: `${COLORS.accent}AA`,
   },
   optionChipText: {
-    color: COLORS.muted,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.label - 1,
   },
@@ -235,7 +248,6 @@ export default StyleSheet.create({
     color: COLORS.text,
   },
 
-  // ---- Button ----
   buttonShadowWrapper: {
     width: "100%",
     marginTop: SPACING.lg,
@@ -243,30 +255,52 @@ export default StyleSheet.create({
   buttonShadowWrapperActive: {
     ...SHADOWS.accentStrong,
   },
-
   primaryBtn: {
+    minHeight: CONTROL_SIZES.buttonLg,
+    borderRadius: RADII.xl,
     backgroundColor: COLORS.accent,
-    borderRadius: RADII.lg,
-    paddingVertical: SPACING.lg - 2,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: SPACING.lg,
   },
   primaryBtnDisabled: {
-    backgroundColor: COLORS.inputBorder,
+    backgroundColor: COLORS.disabled,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   primaryBtnText: {
     color: COLORS.text,
-    fontFamily: FONTS.heading,
+    fontFamily: FONTS.interSemiBold,
     fontSize: TEXT_SIZES.body,
   },
-
+  secondaryBtn: {
+    minHeight: CONTROL_SIZES.buttonMd,
+    borderRadius: RADII.lg,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    backgroundColor: "transparent",
+  },
+  secondaryBtnText: {
+    color: COLORS.accent,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: TEXT_SIZES.label,
+  },
+  buttonStack: {
+    gap: SPACING.sm,
+    marginTop: SPACING.lg,
+  },
   bottomText: {
     color: COLORS.muted,
     textAlign: "center",
-    marginTop: SPACING.sm,
+    marginTop: SPACING.md,
     fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.label - 1,
   },
-
-  // ---- Back links between steps ----
   backLinkWrapper: {
     alignSelf: "center",
     marginTop: SPACING.md,
@@ -278,13 +312,12 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.label - 1,
   },
 
-  // ---- Step 3 summary card ----
   summaryCard: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: RADII.md,
+    borderRadius: CONTROL_SIZES.cardRadius,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: COLORS.cardBorder,
     marginBottom: SPACING.lg,
   },
   summaryHeaderRow: {
@@ -294,15 +327,15 @@ export default StyleSheet.create({
   },
   summaryTitle: {
     color: COLORS.text,
-    fontFamily: FONTS.subheading,
-    fontSize: TEXT_SIZES.label - 1,
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.label,
   },
   summaryRow: {
     flexDirection: "row",
     marginTop: SPACING.xs,
   },
   summaryLabel: {
-    color: COLORS.muted,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
     marginBottom: 2,
@@ -311,78 +344,96 @@ export default StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.label - 1,
+    lineHeight: 18,
+  },
+  faceitSummaryRow: {
+    marginTop: SPACING.sm,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  faceitLevelIcon: {
+    width: 24,
+    height: 24,
+    marginLeft: SPACING.sm,
   },
   summaryChip: {
     paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: 999,
-    backgroundColor: "#243447",
-    marginRight: SPACING.xs,
-    marginTop: 2,
+    paddingVertical: SPACING.xs + 1,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.overlayMedium,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
   },
   summaryChipText: {
     color: COLORS.text,
-    fontFamily: FONTS.body,
+    fontFamily: FONTS.interMedium,
     fontSize: TEXT_SIZES.caption,
   },
 
-  // ---- Step 3 platform cards ----
   platformCard: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: RADII.md,
-    padding: SPACING.md,
+    backgroundColor: COLORS.cardDark,
+    borderRadius: CONTROL_SIZES.cardRadius,
+    padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: COLORS.cardBorder,
     marginBottom: SPACING.md,
   },
   platformHeaderRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    gap: SPACING.sm,
   },
   platformIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 999,
-    backgroundColor: COLORS.inputBackground,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.overlayLight,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: SPACING.sm + 2,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
   },
   platformTitle: {
     color: COLORS.text,
-    fontFamily: FONTS.heading,
+    fontFamily: FONTS.montserratSemiBold,
     fontSize: TEXT_SIZES.body,
   },
   platformSubtitle: {
-    color: COLORS.muted,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
     marginTop: 2,
   },
   platformConnectedBadge: {
     paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: RADII.pill,
     backgroundColor: "#1e3a2f",
     color: "#9be7c4",
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption - 1,
   },
-
   platformButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: RADII.md,
+    borderRadius: RADII.lg,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
-    backgroundColor: COLORS.cardBackground,
+    backgroundColor: COLORS.overlayLight,
     paddingVertical: SPACING.md,
     marginTop: SPACING.sm,
   },
+  platformButtonInline: {
+    marginTop: 0,
+    paddingVertical: SPACING.sm + 1,
+    paddingHorizontal: SPACING.md,
+    minWidth: 96,
+  },
   platformButtonActive: {
     borderColor: COLORS.accent,
-    backgroundColor: "#1e2a38",
+    backgroundColor: `${COLORS.accent}22`,
   },
   platformButtonActiveSteam: {
     borderColor: COLORS.steamBorder,
@@ -394,63 +445,62 @@ export default StyleSheet.create({
   },
   platformButtonText: {
     color: COLORS.text,
-    fontFamily: FONTS.body,
-    fontSize: TEXT_SIZES.body,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: TEXT_SIZES.label,
   },
 
-  // ---- Step 4 review sections ----
   reviewSectionCard: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: RADII.md,
-    padding: SPACING.md,
+    backgroundColor: COLORS.cardDark,
+    borderRadius: CONTROL_SIZES.cardRadius,
+    padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: COLORS.cardBorder,
     marginBottom: SPACING.md,
   },
   reviewSectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.md,
   },
   reviewSectionTitle: {
     color: COLORS.text,
-    fontFamily: FONTS.subheading,
-    fontSize: TEXT_SIZES.label,
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.body,
   },
   reviewEditLink: {
     color: COLORS.accent,
-    fontFamily: FONTS.body,
+    fontFamily: FONTS.interSemiBold,
     fontSize: TEXT_SIZES.caption,
   },
   reviewRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: SPACING.xs,
+    paddingVertical: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.overlayLight,
   },
   reviewLabel: {
-    color: COLORS.muted,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
+    marginBottom: 4,
   },
   reviewValue: {
     color: COLORS.text,
     fontFamily: FONTS.body,
-    fontSize: TEXT_SIZES.label - 1,
-    maxWidth: "60%",
-    textAlign: "right",
+    fontSize: TEXT_SIZES.body,
+    lineHeight: 21,
   },
   reviewValueOk: {
     color: COLORS.success,
   },
   reviewValueMuted: {
-    color: "#757575",
+    color: COLORS.muted,
   },
   reviewGameBlock: {
     marginTop: SPACING.sm,
-    paddingTop: SPACING.xs,
+    paddingTop: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: "#333",
+    borderTopColor: COLORS.overlayLight,
   },
   reviewGameHeader: {
     flexDirection: "row",
@@ -459,11 +509,46 @@ export default StyleSheet.create({
   },
   reviewGameTitle: {
     color: COLORS.text,
-    fontFamily: FONTS.heading,
+    fontFamily: FONTS.montserratSemiBold,
     fontSize: TEXT_SIZES.body,
   },
+  summaryCardList: {
+    gap: SPACING.sm,
+  },
+  reviewCard: {
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: RADII.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+  },
+  reviewGroupTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: TEXT_SIZES.label,
+    marginBottom: SPACING.xs,
+  },
+  emptyStateCard: {
+    backgroundColor: COLORS.overlayLight,
+    borderRadius: CONTROL_SIZES.cardRadius,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+    padding: SPACING.lg,
+    alignItems: "flex-start",
+  },
+  emptyStateTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.body,
+    marginBottom: SPACING.xs,
+  },
+  emptyStateText: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.label,
+    lineHeight: 20,
+  },
 
-  // ---- Terms & consent ----
   termsWrapper: {
     marginTop: SPACING.lg,
     marginBottom: SPACING.md,
@@ -477,7 +562,7 @@ export default StyleSheet.create({
   termRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.md,
   },
   termBox: {
     width: 18,
@@ -505,84 +590,63 @@ export default StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.body - 1,
+    lineHeight: 21,
   },
   termLink: {
     color: COLORS.accent,
     textDecorationLine: "underline",
   },
-  // ... existing styles ...
 
-  // Card Style for Branches/Inventory
   card: {
-    backgroundColor: COLORS.cardBackground,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: COLORS.cardDark,
+    borderRadius: CONTROL_SIZES.cardRadius,
+    padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.divider,
-    marginBottom: 12,
+    borderColor: COLORS.cardBorder,
+    marginBottom: SPACING.md,
   },
   cardTitle: {
     color: COLORS.text,
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.body,
+    marginBottom: SPACING.md,
   },
 
-  // Secondary Button (Outline)
-  secondaryBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryBtnText: {
-    color: COLORS.accent,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  // ---- Requirement Banner (Step 3) ----
   requirementBanner: {
-    backgroundColor: 'rgba(255, 183, 77, 0.1)',
-    borderRadius: RADII.md,
+    backgroundColor: COLORS.overlayLight,
+    borderRadius: CONTROL_SIZES.cardRadius,
     padding: SPACING.md,
     marginBottom: SPACING.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 183, 77, 0.3)',
+    borderColor: COLORS.inputBorder,
   },
   requirementTitle: {
-    color: '#ffb74d',
-    fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.label - 1,
+    color: COLORS.text,
+    fontFamily: FONTS.montserratSemiBold,
+    fontSize: TEXT_SIZES.label,
     marginBottom: 4,
   },
   requirementText: {
-    color: COLORS.text,
+    color: COLORS.textSecondary,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
-    lineHeight: 16,
+    lineHeight: 18,
   },
   requirementMet: {
-    borderColor: 'rgba(76, 175, 80, 0.3)',
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    borderColor: `${COLORS.success}44`,
+    backgroundColor: `${COLORS.success}14`,
   },
   requirementMetTitle: {
     color: COLORS.success,
   },
-
   cooldownText: {
     color: COLORS.error,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.caption,
-    textAlign: 'center',
-    marginTop: 8,
+    textAlign: "center",
+    marginTop: SPACING.sm,
   },
 
-  // ---- Loading Overlay ----
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(10, 10, 10, 0.95)",
@@ -595,9 +659,14 @@ export default StyleSheet.create({
     width: "100%",
     maxWidth: 320,
     alignItems: "center",
+    justifyContent: "center",
   },
   loadingSpinner: {
     marginBottom: SPACING.lg,
+    height: 64,
+    width: 64,
+    alignItems: "center",
+    justifyContent: "center",
   },
   loadingPhaseTitle: {
     color: COLORS.text,

@@ -1,10 +1,28 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
+import { COLORS, CTA, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
+    },
+    screenContent: {
+        paddingBottom: 0,
+        paddingHorizontal: 0,
+    },
+    pageHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+    },
+    headerActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.md,
+    },
+    body: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
     },
     header: {
         flexDirection: 'row',
@@ -28,7 +46,7 @@ export default StyleSheet.create({
     },
     loadingContainer: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: "center",
         justifyContent: "center",
     },
@@ -61,7 +79,7 @@ export default StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: SPACING.lg,
@@ -71,6 +89,9 @@ export default StyleSheet.create({
     },
     teamLogoLargeCaptain: {
         borderColor: COLORS.accent,
+    },
+    logoPressed: {
+        opacity: 0.88,
     },
     logoEditBadge: {
         position: 'absolute',
@@ -83,7 +104,7 @@ export default StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        borderColor: COLORS.background,
+        borderColor: COLORS.backgroundDark,
     },
     teamLogoImage: {
         width: 80,
@@ -226,7 +247,7 @@ export default StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: SPACING.md,
@@ -273,14 +294,13 @@ export default StyleSheet.create({
     },
     leaveButton: {
         backgroundColor: COLORS.error,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
+        minHeight: CTA.primaryButton.minHeight,
+        borderRadius: CTA.primaryButton.borderRadius,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     leaveButtonText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+        ...CTA.primaryButtonText,
     },
 
     // Modal
@@ -304,10 +324,13 @@ export default StyleSheet.create({
 
     // New Requests Section
     requestSection: {
+        marginTop: SPACING.lg,
         padding: SPACING.lg,
-        backgroundColor: 'rgba(74, 158, 255, 0.05)',
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.divider,
+        backgroundColor: COLORS.cardDark,
+        borderRadius: RADII.lg,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        ...SHADOWS.cardSoft,
     },
     requestTitle: {
         color: COLORS.text,
@@ -417,25 +440,18 @@ export default StyleSheet.create({
         marginLeft: SPACING.sm,
     },
 
-    // Modern Action Bar (Bottom Sticky)
+    // Bottom Action Bar
     actionBar: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        backgroundColor: COLORS.surface,
-        padding: SPACING.lg,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.divider,
-        ...SHADOWS.cardElevated,
+        width: '100%',
+    },
+    actionBarSpacing: {
+        marginTop: SPACING.lg,
+    },
+    actionBarContent: {
+        width: '100%',
     },
     actionButton: {
-        backgroundColor: COLORS.accent,
-        paddingVertical: SPACING.lg,
-        borderRadius: RADII.md,
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...SHADOWS.accentSoft,
+        ...CTA.primaryButton,
     },
     actionButtonDisabled: {
         backgroundColor: COLORS.surfaceHighlight,
@@ -448,16 +464,14 @@ export default StyleSheet.create({
         borderColor: COLORS.divider,
     },
     actionButtonText: {
-        color: '#FFF',
-        fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.subheading,
+        ...CTA.primaryButtonText,
     },
     challengeButton: {
         backgroundColor: "rgba(0, 230, 118, 0.18)",
         borderWidth: 1,
         borderColor: COLORS.successBright,
-        paddingVertical: SPACING.md,
-        borderRadius: RADII.md,
+        minHeight: CTA.primaryButton.minHeight,
+        borderRadius: CTA.primaryButton.borderRadius,
         alignItems: "center",
         justifyContent: "center",
         marginBottom: SPACING.sm,
@@ -481,10 +495,16 @@ export default StyleSheet.create({
     },
     // Inline style replacements
     headerIcon: {
-        marginRight: 16,
+        padding: 0,
     },
-    footerSpacer: {
-        height: 120,
+    headerIconPressed: {
+        opacity: 0.7,
+    },
+    gamePill: {
+        marginBottom: SPACING.md,
+    },
+    memberPill: {
+        marginTop: SPACING.md,
     },
     statPrimary: {
         color: COLORS.accent,
@@ -496,7 +516,61 @@ export default StyleSheet.create({
         color: COLORS.error,
     },
     scrollContent: {
-        paddingBottom: SPACING.xxl,
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.xl,
+    },
+    renameDialogCard: {
+        width: "85%",
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    renameDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    renameInput: {
+        backgroundColor: COLORS.backgroundDark,
+        color: COLORS.text,
+        padding: 14,
+        borderRadius: RADII.md,
+        marginBottom: SPACING.xl,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        fontSize: 16,
+    },
+    renameActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    memberDialogCard: {
+        width: "88%",
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    memberDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+        gap: SPACING.sm,
+    },
+    confirmationDialogCard: {
+        width: "88%",
+        backgroundColor: COLORS.surfaceHighlight,
+    },
+    confirmationDialogContent: {
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    confirmationMessage: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 22,
+    },
+    confirmationActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    dialogFooter: {
+        paddingHorizontal: SPACING.xl,
     },
 });
+
 

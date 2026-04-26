@@ -1,25 +1,26 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
     type ZoneBookingQueueItem,
     type ZoneMatchroomListItem,
-} from "../../../src/services/zoneAdminBookingService";
+} from "../../../src/services/convex/zoneAdminBookingService";
 import {
     subscribeBranchResources,
     subscribeZoneBranches,
     type ZoneBranch,
     type ZoneBranchResource,
-} from "../../../src/services/zoneAdminResourceService";
+} from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../src/theme";
 import styles from "./insights.styles";
 
@@ -43,6 +44,8 @@ const toPercent = (value: number, total: number) => {
 
 const GAME_BUCKET_LABEL: Record<string, string> = {
     cs2: "PC",
+    cs16: "PC",
+    valorant: "PC",
     fc26: "Console",
     tekken8: "Console",
     futsal: "Court",
@@ -105,6 +108,10 @@ export default function ZoneInsightsModule() {
     const router = useRouter();
     const { zone } = useZoneData();
     const { user } = useAuth();
+    useRouteLogger("ZoneInsightsModule", {
+        zoneId: zone?.id,
+        userId: user?._id,
+    });
 
     const [segment, setSegment] = useState<Segment>("overview");
     const [branches, setBranches] = useState<ZoneBranch[]>([]);
@@ -199,7 +206,7 @@ export default function ZoneInsightsModule() {
         if (!zone?.id) return;
         const unsub = subscribeZoneMatchrooms(
             zone.id,
-            user?.uid,
+            user?._id,
             (rows) => {
                 setMatchrooms(rows);
                 setLastUpdatedAt(Date.now());
@@ -217,7 +224,7 @@ export default function ZoneInsightsModule() {
             },
         );
         return () => unsub();
-    }, [branchAreas, user?.uid, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
+    }, [branchAreas, user?._id, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
 
     const allResources = useMemo(
         () => Object.values(resourcesByBranch).flat(),
@@ -531,7 +538,7 @@ export default function ZoneInsightsModule() {
             />
 
             <View style={styles.liveBanner}>
-                <MaterialIcons name="sensors" size={16} color={COLORS.successBright} />
+                <AppIcon name="sensors" size="sm" color={COLORS.successBright} />
                 <Text style={styles.liveBannerText}>
                     Live updated {new Date(lastUpdatedAt).toLocaleTimeString()}
                 </Text>

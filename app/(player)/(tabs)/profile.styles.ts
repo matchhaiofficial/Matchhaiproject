@@ -1,17 +1,17 @@
 import { StyleSheet } from 'react-native';
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from '../../../src/theme';
+import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../../../src/theme';
 
 export default StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingBottom: SPACING.md,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     headerTitle: {
         color: COLORS.text,
@@ -34,18 +34,9 @@ export default StyleSheet.create({
 
     // Profile Card
     profileCard: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.lg,
-        padding: SPACING.lg,
         marginTop: 0,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 4,
+        ...SHADOWS.cardSoft,
     },
     avatar: {
         width: 80,
@@ -114,18 +105,17 @@ export default StyleSheet.create({
 
     // Inactive Game Card (grayed out)
     gameCardInactive: {
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: RADII.md,
-        padding: SPACING.md,
         marginRight: SPACING.md,
         width: 280,
         height: 80,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        borderStyle: 'dashed',
+        opacity: 0.7,
+    },
+    gameCardInactiveInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        opacity: 0.7,
+        height: '100%',
+        backgroundColor: COLORS.cardBackground,
+        borderStyle: 'dashed',
     },
     gameIconInactive: {
         width: 40,
@@ -159,48 +149,34 @@ export default StyleSheet.create({
     gamesScrollContainer: {
         paddingBottom: SPACING.sm,
     },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.md,
-    },
-    sectionTitle: {
-        color: COLORS.text,
-        fontSize: TEXT_SIZES.subheading,
-        fontFamily: FONTS.heading,
-    },
-    sectionLink: {
-        color: COLORS.accent,
-        fontSize: TEXT_SIZES.caption,
-        fontWeight: '600',
-    },
     sectionAddButton: {
-        flexDirection: 'row',
+        minHeight: 42,
+        paddingHorizontal: SPACING.lg,
+        borderRadius: RADII.xl,
         alignItems: 'center',
-        backgroundColor: COLORS.overlayMedium,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.xs,
-        borderRadius: RADII.md,
+        justifyContent: 'center',
+        backgroundColor: COLORS.accent,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        ...SHADOWS.accentSoft,
     },
     sectionAddText: {
-        color: COLORS.accent,
-        fontSize: TEXT_SIZES.caption,
-        marginLeft: SPACING.xs,
+        color: '#FFFFFF',
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.interSemiBold,
+        letterSpacing: 0.2,
     },
 
     // Game Card
     gameCard: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.md,
-        padding: SPACING.md,
         marginRight: SPACING.md,
         width: 280,
         height: 80,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
+    },
+    gameCardInner: {
         flexDirection: 'row',
         alignItems: 'center',
+        height: '100%',
     },
     gameIcon: {
         width: 44,
@@ -284,14 +260,12 @@ export default StyleSheet.create({
 
     // Platform Links
     platformCard: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.md,
-        padding: SPACING.md,
         marginBottom: SPACING.sm,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
+    },
+    platformCardInner: {
         flexDirection: 'row',
         alignItems: 'center',
+        padding: SPACING.md,
     },
     platformIcon: {
         width: 36,
@@ -343,14 +317,12 @@ export default StyleSheet.create({
 
     // Team Card
     teamCard: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.md,
-        padding: SPACING.md,
         marginBottom: SPACING.sm,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
+    },
+    teamCardInner: {
         flexDirection: 'row',
         alignItems: 'center',
+        padding: SPACING.md,
     },
     teamIcon: {
         width: 40,
@@ -424,26 +396,17 @@ export default StyleSheet.create({
         gap: SPACING.sm,
     },
     areaChip: {
-        backgroundColor: COLORS.cardDark,
-        borderRadius: RADII.pill,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm - 2,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
     },
     areaChipText: {
-        color: COLORS.textSecondary,
-        fontSize: TEXT_SIZES.caption,
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.label - 1,
+        fontFamily: FONTS.body,
+        fontWeight: '500',
+        textTransform: 'none',
     },
 
     // Empty State
     emptyState: {
-        alignItems: 'center',
-        backgroundColor: COLORS.cardBackground,
-        borderRadius: RADII.md,
-        padding: SPACING.lg,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
         borderStyle: 'dashed',
     },
     emptyText: {
@@ -452,21 +415,6 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         textAlign: 'center',
         marginBottom: SPACING.md,
-    },
-    emptyButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.overlayMedium,
-        paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm,
-        borderRadius: RADII.md,
-        borderWidth: 1,
-        borderColor: COLORS.accent,
-    },
-    emptyButtonText: {
-        color: COLORS.accent,
-        fontSize: TEXT_SIZES.label,
-        fontWeight: '600',
     },
 
     // Settings Section
@@ -501,16 +449,9 @@ export default StyleSheet.create({
 
     // Logout Button
     logoutButton: {
-        backgroundColor: 'rgba(239, 83, 80, 0.1)',
-        borderRadius: RADII.md,
-        padding: SPACING.md,
         marginTop: SPACING.xl,
         marginBottom: SPACING.lg,
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: 'rgba(239, 83, 80, 0.3)',
     },
     logoutButtonText: {
         color: COLORS.error,
@@ -525,7 +466,7 @@ export default StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     flex1: {
         flex: 1,
@@ -537,3 +478,4 @@ export default StyleSheet.create({
         marginRight: 4,
     },
 });
+

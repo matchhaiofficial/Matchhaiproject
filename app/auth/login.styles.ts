@@ -12,13 +12,13 @@ import {
 export default StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundDark,
   },
 
   container: {
     flexGrow: 1,
     padding: SPACING.screenPadding,
-    // justifyContent intentionally removed to avoid keyboard/focus jumping
+    justifyContent: 'center',
   },
 
   heading: {
@@ -310,3 +310,4 @@ export default StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+

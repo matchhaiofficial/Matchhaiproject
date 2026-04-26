@@ -30,9 +30,14 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
     },
+    body: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
     content: {
         padding: SPACING.screenPadding,
-        paddingBottom: 120,
     },
     section: {
         marginBottom: SPACING.xl,
@@ -117,17 +122,7 @@ export default StyleSheet.create({
 
     // Footer
     footer: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        backgroundColor: COLORS.cardDark,
-        padding: SPACING.screenPadding,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.overlayLight,
-        paddingBottom: SPACING.lg + 20,
-        zIndex: 10000,
-        elevation: 10000,
+        paddingBottom: SPACING.md,
     },
     priceRow: {
         flexDirection: 'row',
