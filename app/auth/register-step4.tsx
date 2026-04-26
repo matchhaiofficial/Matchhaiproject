@@ -23,7 +23,7 @@ import { Modal } from "react-native";
 export default function RegisterStep4() {
   const { step1, step2, step3, step4, setStep4, resetAll, setCurrentStep } =
     useOnboardingStore();
-  const { showToast } = useToast();
+  const { showToast, hideToast } = useToast();
   const { refreshSession } = useAuth();
 
   const [submitting, setSubmitting] = useState(false);
@@ -37,6 +37,8 @@ export default function RegisterStep4() {
   }, [setCurrentStep]);
 
   useEffect(() => {
+    // Don't redirect away if we're in success flow
+    if (phase === "success" || phase === "submitting") return;
     if (!step1.fullName.trim() || !step1.username.trim() || !step1.email.trim() || !step1.password) {
       router.replace("/auth/register");
       return;
@@ -54,7 +56,7 @@ export default function RegisterStep4() {
     if (!step2.selectedAreas.length || !hasActivity) {
       router.replace("/auth/register-step2");
     }
-  }, [step1, step2]);
+  }, [step1, step2, phase]);
 
   const { selectedActivities, sportsSummary } = useMemo(() => {
     const items: string[] = [];
@@ -232,23 +234,22 @@ export default function RegisterStep4() {
           throw { step: 4, message: completeResult.message };
         }
       }
-
       setCurrentSubStep(5);
       setPhase("success");
       await refreshSession();
 
       setTimeout(() => {
-        resetAll();
         showToast({
           type: "success",
           title: "Welcome to MatchHai",
           message: "Account created. Verify your email to unlock matchrooms and team actions.",
         });
-        router.replace("/auth/verification-required" as any);
+        router.replace("/(player)/(tabs)" as any);  // ← navigate FIRST
+        resetAll();                                   // ← reset AFTER
       }, 1500);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
-      setCurrentSubStep(failedAt - 1); 
+      setCurrentSubStep(failedAt - 1);
       setPhase("partial-fail");
       setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
@@ -347,7 +348,7 @@ export default function RegisterStep4() {
                 <AppButton onPress={handleFinalSignUp} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
                   Retry failed steps
                 </AppButton>
-                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); }} style={{ padding: 10 }}>
+                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); hideToast(); }} style={{ padding: 10 }}>
                   <Text style={{ color: COLORS.muted }}>Cancel</Text>
                 </Pressable>
               </>
