@@ -19,7 +19,7 @@ function normalizePhone(raw: string) {
   if (digits.startsWith("00")) return `+${digits.slice(2)}`;
   if (digits.startsWith("92")) return `+${digits}`;
   if (digits.startsWith("0")) return `+92${digits.slice(1)}`;
-  return `+${digits}`;
+  return `+92${digits}`;
 }
 
 export function normalizePhoneForSave(phone: string) {
