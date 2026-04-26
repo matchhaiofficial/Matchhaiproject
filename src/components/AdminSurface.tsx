@@ -101,7 +101,7 @@ export function AdminQuickActionCard({
 }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.quickActionPressable, pressed && styles.pressedCard]}>
-      <AppCard variant="elevated" style={[styles.quickActionCard, cardStyle]}>
+      <AppCard variant="elevated" style={[styles.adminQuickActionCard, cardStyle]}>
         <View style={styles.quickActionTop}>
           <View style={[styles.quickActionIconWrap, iconStyle]}>
             <AppIcon name={icon} size={20} color={iconColor} />

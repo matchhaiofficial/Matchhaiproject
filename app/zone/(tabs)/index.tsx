@@ -32,6 +32,7 @@ import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -51,7 +52,6 @@ import { getZoneStatusTone } from "../../../src/utils/statusLabels";
 import styles from "./dashboard.styles";
 
 const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
-
 const MODULE_COLORS = [
     {
         cardStyle: { backgroundColor: "rgba(66,165,245,0.14)", borderColor: "rgba(66,165,245,0.45)" },
@@ -143,6 +143,8 @@ export default function ZoneDashboardHome() {
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
     const { showToast } = useToast();
+
+    const tabBarHeight = useBottomTabBarHeight(); // ← add this
     useRouteLogger("ZoneDashboardHome", {
         zoneId: zone?.id,
         userId: user?._id,
@@ -461,8 +463,12 @@ export default function ZoneDashboardHome() {
             <Animated.View style={[styles.screenContent, entranceStyle]}>
                 <ScrollView
                     contentContainerStyle={[
-                        styles.container,
-                        { paddingBottom: HIDE_ZONE_TAB_BAR ? insets.bottom + 16 : 0 },
+                        styles.zoneAdmincontainer,
+                        {
+                            paddingBottom: HIDE_ZONE_TAB_BAR
+                                ? insets.bottom + 16
+                                : tabBarHeight + 20,  // ← replaces the hardcoded 0
+                        },
                     ]}
                     showsVerticalScrollIndicator={false}
                 >

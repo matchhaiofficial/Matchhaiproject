@@ -91,6 +91,10 @@ export default StyleSheet.create({
     minHeight: 152,
     justifyContent: "space-between",
   },
+  adminQuickActionCard: {
+    justifyContent: "flex-start",  // ← don't stretch, stack from top
+    gap: 8,
+  },
   quickActionTop: {
     flexDirection: "row",
     alignItems: "center",

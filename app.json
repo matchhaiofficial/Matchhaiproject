@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MatchHai",
-    "slug": "MatchHai",
+    "name": "matchhai",
+    "slug": "matchhai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -54,9 +54,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "8c99086e-f4b0-4b6f-93bf-1c9ade183fbe"
+        "projectId": "162a78ae-e223-4fe8-93d3-31665f16a590"
       }
     },
-    "owner": "ovaisto"
+    "owner": "matchhai"
   }
 }

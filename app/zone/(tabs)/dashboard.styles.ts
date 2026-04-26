@@ -1,5 +1,12 @@
 import { StyleSheet } from "react-native";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { Dimensions } from "react-native";
+
+const SCREEN_W = Dimensions.get("window").width;
+const GRID_GAP = 8;
+// No extra paddingHorizontal on the grid — parent container already has it
+// Subtract a small buffer (12px each side) for the parent's padding
+const CARD_W = (SCREEN_W - 24 - GRID_GAP) / 2.2;
 
 export default StyleSheet.create({
     screen: {
@@ -7,11 +14,15 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     screenContent: {
+        flex: 1,        // ← add this
         paddingTop: 0,
         paddingBottom: 0,
     },
     container: {
         paddingBottom: 0,
+    },
+    zoneAdmincontainer: {
+        paddingBottom: 300,
     },
     loadingContainer: {
         flex: 1,
@@ -144,20 +155,20 @@ export default StyleSheet.create({
     moduleGrid: {
         flexDirection: "row",
         flexWrap: "wrap",
-        justifyContent: "space-between",
-        gap: SPACING.md,
+        gap: GRID_GAP,
     },
     moduleCard: {
-        width: "48%",
+        width: CARD_W,
+        minHeight: 180,  // ← was height: 180, content can now grow beyond this
     },
     opsGrid: {
         flexDirection: "row",
         flexWrap: "wrap",
-        justifyContent: "space-between",
-        gap: SPACING.md,
+        gap: GRID_GAP,
     },
     opsTile: {
-        width: "48%",
+        width: CARD_W,
+        minHeight: 180,
     },
 });
 
