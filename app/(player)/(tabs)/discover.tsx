@@ -121,7 +121,7 @@ export default function DiscoverScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const bottomPadding = HIDE_PLAYER_TAB_BAR ? insets.bottom + 16 : 16;
+  const bottomPadding = HIDE_PLAYER_TAB_BAR ? insets.bottom + 16 : tabBarHeight + 16;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -495,10 +495,9 @@ export default function DiscoverScreen() {
           style={[
             styles.fabWrapper,
             {
-              bottom: Math.max(
-                insets.bottom + 16,
-                HIDE_PLAYER_TAB_BAR ? 0 : tabBarHeight - 50,
-              ),
+              bottom: HIDE_PLAYER_TAB_BAR
+                ? insets.bottom + 16
+                : tabBarHeight + 16,
             },
           ]}
         >

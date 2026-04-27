@@ -124,19 +124,18 @@ export default function AuthProvider({ children }: { children: any }) {
         return true;
       }
 
+      // Don't clear if we already have a session — network may just be slow
       if (existingSession?.user) {
         return true;
       }
 
+      // Only clear if we're certain there's no session at all
       clearAuthState();
       return false;
     } catch (error) {
       console.error("[AuthContext] refreshSession failed:", error);
-      if (existingSession?.user) {
-        return true;
-      }
-      clearAuthState(false);
-      return false;
+      // Never clear on error — a network hiccup should never log the user out
+      return existingSession?.user ? true : false;
     }
   }, [applySessionState, clearAuthState, fetchUserProfile, session]);
 
@@ -177,7 +176,6 @@ export default function AuthProvider({ children }: { children: any }) {
     void bootstrap();
 
     // Subscribe to session changes
-    // Note: The $store API may vary by Better Auth version, using type assertion for compatibility
     const store = authClient.$store as any;
     let unsubscribe: (() => void) | undefined;
 
@@ -186,9 +184,8 @@ export default function AuthProvider({ children }: { children: any }) {
         if (newSession?.user) {
           void applySessionState(newSession as AuthSession);
           void fetchUserProfile(newSession.user.id);
-        } else {
-          clearAuthState();
         }
+        // Do nothing if no user — don't clear, it may just be mid-refresh
       });
     }
 
@@ -200,12 +197,23 @@ export default function AuthProvider({ children }: { children: any }) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        void refreshSession();
-      }
+      if (state !== "active") return;
+
+      // Silently try to refresh — never clear session on failure
+      authClient.getSession()
+        .then(({ data }) => {
+          if (data?.user) {
+            void applySessionState(data as AuthSession);
+            void fetchUserProfile(data.user.id);
+          }
+          // No session returned? Do nothing — keep existing state
+        })
+        .catch(() => {
+          // Network error? Do nothing — keep existing state
+        });
     });
     return () => subscription.remove();
-  }, []);
+  }, [applySessionState, fetchUserProfile]);
 
   return (
     <AuthContext.Provider value={{ authUser, user, userId, loading, session, refreshUser, refreshSession }}>

@@ -344,6 +344,10 @@ export default function Login() {
       });
       return;
     }
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      showToast({ type: "error", title: "Timed out", message: "Request took too long. Please try again." });
+    }, 20000); // 15s max
 
     try {
       setLoading(true);
@@ -554,6 +558,9 @@ export default function Login() {
         title: "Sign In Failed",
         message: "Something went wrong. Please try again.",
       });
+    } finally {
+      clearTimeout(timeout);
+      setLoading(false);
     }
   };
 

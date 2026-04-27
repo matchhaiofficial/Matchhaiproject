@@ -19,18 +19,17 @@ interface GameSelectorProps {
     allowedGameKeys?: string[];
 }
 
-const GAME_ICONS: Record<string, React.ComponentProps<typeof AppIcon>["name"]> = {
-    cs2: "sports-esports",
-    cs16: "sports-esports",
-    valorant: "sports-esports",
-    fc26: "sports-soccer",
-    tekken8: "sports-kabaddi",
-    futsal: "sports-soccer",
-    indoor_cricket: "sports-cricket",
-    padel: "sports-tennis",
-    pickleball: "sports-tennis",
+const GAME_ICONS: Record<string, string> = {
+    cs2: "🎯",
+    cs16: "💣",
+    valorant: "⚡",
+    fc26: "⚽",
+    tekken8: "🥊",
+    futsal: "🏟️",
+    indoor_cricket: "🏏",
+    padel: "🎾",
+    pickleball: "🏓",
 };
-
 // Check if user has added this game to their profile
 const isGameActive = (gameKey: string, profile: any): boolean => {
     return isProfileGameEnabled(profile, gameKey);
@@ -99,12 +98,12 @@ export default function GameSelector({
                         ]}
                         onPress={() => onSelectGame(game.key)}
                     >
-                        <AppIcon
-                            name={GAME_ICONS[game.key] || "sports-esports"}
-                            size={32}
-                            color={selectedGame === game.key ? COLORS.accent : COLORS.muted}
-                            style={styles.gameIcon}
-                        />
+                        <Text style={[
+                            styles.gameIcon,
+                            { fontSize: 32, textAlign: "center" }
+                        ]}>
+                            {GAME_ICONS[game.key] || "🎮"}
+                        </Text>
                         <Text
                             style={[
                                 styles.gameName,
