@@ -43,6 +43,10 @@ export interface BookingRequest {
   paymentStatus?: "paid" | "unpaid";
   paymentAmount?: number;
   paymentReservedSlots?: number;
+  requestedResourceAssetType?: string;
+  requestedResourceSurface?: string;
+  requestedResourceTier?: string;
+  selectedZoneRateKey?: string;
   lifecycleStatus?: string;
   createdAt: number;
   expiresAt?: number;
@@ -235,6 +239,10 @@ export async function createBookingRequest(
       paymentStatus: data.paymentStatus,
       paymentAmount: data.paymentAmount,
       paymentReservedSlots: (data as any).paymentReservedSlots,
+      requestedResourceAssetType: (data as any).requestedResourceAssetType,
+      requestedResourceSurface: (data as any).requestedResourceSurface,
+      requestedResourceTier: (data as any).requestedResourceTier,
+      selectedZoneRateKey: (data as any).selectedZoneRateKey,
       matchroomId: data.matchroomId as Id<"matchrooms"> | undefined,
       lifecycleStatus: (data as any).lifecycleStatus,
       notes: data.notes || data.description,

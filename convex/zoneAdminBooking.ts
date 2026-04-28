@@ -13,6 +13,78 @@ function normalizeGameKey(value?: string | null) {
   return gameKey === "fc25" ? "fc26" : gameKey;
 }
 
+function normalizeResourceToken(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getTierFromRateKey(value?: string | null) {
+  const [, tier] = normalizeResourceToken(value).split(":");
+  return tier || "";
+}
+
+function getRequiredResourceProfile(request: any) {
+  const gameKey = normalizeGameKey(request?.gameKey);
+  const requestedTier =
+    normalizeResourceToken(request?.requestedResourceTier) ||
+    getTierFromRateKey(request?.selectedZoneRateKey);
+  const requestedSurface = normalizeResourceToken(request?.requestedResourceSurface);
+
+  if (["cs2", "cs16", "valorant"].includes(gameKey)) {
+    return {
+      assetType: "pc",
+      requiredResourceIds: 10,
+      tier: ["regular", "premium", "elite"].includes(requestedTier) ? requestedTier : "",
+    };
+  }
+
+  if (["fc26", "tekken8"].includes(gameKey)) {
+    return {
+      assetType: "console",
+      requiredResourceIds: 1,
+      tier: ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
+    };
+  }
+
+  const courtAssetTypeByGame: Record<string, string> = {
+    futsal: "futsal",
+    indoor_cricket: "indoor_cricket",
+    cricket: "indoor_cricket",
+    padel: "padel",
+    pickleball: "pickleball",
+  };
+
+  return {
+    assetType: courtAssetTypeByGame[gameKey] || normalizeResourceToken(request?.requestedResourceAssetType),
+    requiredResourceIds: 1,
+    surface: requestedSurface,
+  };
+}
+
+function validateSelectedResourceFit(request: any, selectedResources: any[]) {
+  const profile = getRequiredResourceProfile(request);
+  if (!profile.assetType) return;
+
+  if (selectedResources.length !== profile.requiredResourceIds) {
+    throw new Error(
+      profile.assetType === "pc"
+        ? "CS and Valorant bookings require exactly 2 complete PC rooms."
+        : `This booking requires exactly ${profile.requiredResourceIds} matching resource.`,
+    );
+  }
+
+  selectedResources.forEach((resource) => {
+    if (normalizeResourceToken(resource.assetType) !== profile.assetType) {
+      throw new Error(`${resource.name || "Selected resource"} does not support this matchroom game.`);
+    }
+    if ("tier" in profile && profile.tier && normalizeResourceToken(resource.tier) !== profile.tier) {
+      throw new Error(`${resource.name || "Selected resource"} does not match the requested resource type.`);
+    }
+    if ("surface" in profile && profile.surface && normalizeResourceToken(resource.surface) !== profile.surface) {
+      throw new Error(`${resource.name || "Selected resource"} does not match the requested surface.`);
+    }
+  });
+}
+
 async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
 
@@ -641,6 +713,7 @@ export const acceptBookingRequest = mutation({
     const selectedResources = await Promise.all(
       args.resourceIds.map((resourceId) => ctx.db.get(resourceId)),
     );
+    validateSelectedResourceFit(bookingRequest, selectedResources.filter(Boolean));
     selectedResources.forEach((resource, index) => {
       if (!resource) {
         throw new Error("One or more selected resources no longer exist.");

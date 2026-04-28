@@ -86,6 +86,12 @@ type Params = {
   selectedTeamId: string | null;
   selectedTeamMemberUids: string[];
   selectedZoneId: string | null;
+  selectedZoneRateKey: string | null;
+  selectedZoneRateResourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  } | null;
   selectedZoneName: string | null;
   selectableTeamMembers: Array<{ uid: string; username?: string }>;
   seriesType: string;
@@ -141,6 +147,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     selectedTeamId,
     selectedTeamMemberUids,
     selectedZoneId,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     selectedZoneName,
     selectableTeamMembers,
     seriesType,
@@ -462,6 +470,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           seatsPaid,
           selectedTeamId,
           selectedZoneId,
+          selectedZoneRateKey,
+          selectedZoneRateResourceContext,
           seriesType,
           teamMode,
           userId: user._id,
@@ -616,6 +626,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     selectedTeamId,
     selectedTeamMemberUids,
     selectedZoneId,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     selectedZoneName,
     seriesType,
     setFormData,

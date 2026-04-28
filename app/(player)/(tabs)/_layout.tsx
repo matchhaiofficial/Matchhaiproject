@@ -22,7 +22,7 @@ import { hasVerifiedEmail } from "../../../src/utils/emailVerificationGate";
 
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
-// ─── Responsive helpers ────────────────────────────────────────────────────────
+// Responsive helpers
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const isSmall = SCREEN_WIDTH < 360;
 const isLarge = SCREEN_WIDTH >= 428;
@@ -33,7 +33,7 @@ const LABEL_SIZE = isSmall ? 9 : 10;
 const H_PADDING = isSmall ? 10 : isLarge ? 28 : 16;
 const PILL_R = 22;
 
-// ─── Tab definitions ───────────────────────────────────────────────────────────
+// Tab definitions
 type TabDef = { name: string; label: string; icon: string };
 
 const TABS: TabDef[] = [
@@ -42,7 +42,7 @@ const TABS: TabDef[] = [
     { name: "profile", label: "Profile", icon: "person" },
 ];
 
-// ─── Custom Tab Bar ────────────────────────────────────────────────────────────
+// Custom Tab Bar
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const insets = useSafeAreaInsets();
 
@@ -144,7 +144,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     );
 }
 
-// ─── Layout ────────────────────────────────────────────────────────────────────
+// Layout
 export default function PlayerTabsLayout() {
     const { user, authUser, loading } = useAuth();
 
@@ -184,7 +184,7 @@ export default function PlayerTabsLayout() {
     );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
+// Styles
 const styles = StyleSheet.create({
     outerWrap: {
         position: "absolute",

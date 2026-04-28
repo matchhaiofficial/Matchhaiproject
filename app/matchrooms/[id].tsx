@@ -571,7 +571,7 @@ export default function MatchroomDetails() {
             />
           )}
 
-          {/* ── Pending Join Requests (Host / Admin only) ── */}
+          {/* Pending Join Requests (Host / Admin only) */}
           {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
             <DetailSectionCard
               title={`Pending Join Requests (${incomingRequests.length})`}
@@ -934,5 +934,4 @@ export default function MatchroomDetails() {
     </Screen>
   );
 }
-
 
