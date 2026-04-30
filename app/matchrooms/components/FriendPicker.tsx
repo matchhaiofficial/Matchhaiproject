@@ -131,7 +131,7 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
             />
 
             {!selectedFriend ? (
-                <AppModalBody scroll contentContainerStyle={styles.bodyContent}>
+                <AppModalBody contentContainerStyle={styles.bodyContent}>
                     <View style={styles.searchBar}>
                         <AppIcon name="search" size={20} color={COLORS.muted} />
                         <TextInput
@@ -150,6 +150,7 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
                             data={filteredFriends}
                             keyExtractor={keyExtractor}
                             renderItem={renderFriendItem}
+                            keyboardShouldPersistTaps="handled"
                             ListEmptyComponent={
                                 <Text style={styles.emptyText}>No friends found</Text>
                             }
@@ -192,6 +193,8 @@ const styles = StyleSheet.create({
         maxHeight: "88%",
     },
     bodyContent: {
+        flexShrink: 1,
+        minHeight: 0,
         paddingHorizontal: 24,
         paddingTop: 24,
         paddingBottom: 16,

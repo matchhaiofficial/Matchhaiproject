@@ -10,11 +10,20 @@ import styles from "../create.styles";
 interface ZonePickerProps {
     gameKey: string | null;
     selectedZoneId?: string | null;
+    lockedZone?: Zone | null;
+    lockToSelectedZone?: boolean;
     onZoneSelect: (zone: Zone) => void;
     userPreferredAreas?: string[];
 }
 
-export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, userPreferredAreas = [] }: ZonePickerProps) {
+export default function ZonePicker({
+    gameKey,
+    selectedZoneId,
+    lockedZone,
+    lockToSelectedZone = false,
+    onZoneSelect,
+    userPreferredAreas = [],
+}: ZonePickerProps) {
     const [zones, setZones] = useState<Zone[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
@@ -50,7 +59,11 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
         setLoading(false);
     };
 
-    const filteredZones = zones.filter(zone => {
+    const availableZones = lockToSelectedZone
+        ? (lockedZone ? [lockedZone] : zones.filter((zone) => zone.id === selectedZoneId))
+        : zones;
+
+    const filteredZones = availableZones.filter(zone => {
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             const matchesName = zone.venueBrandName.toLowerCase().includes(query);
@@ -137,19 +150,19 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                 Select Zone<Text style={styles.requiredAsterisk}>*</Text>
             </Text>
 
-            {/* Search Input */}
-            <View style={[styles.inputBox, { marginBottom: 12, flexDirection: 'row', alignItems: 'center' }]}>
-                <AppIcon name="search" size={20} color={COLORS.muted} style={{ marginRight: 8 }} />
-                <TextInput
-                    style={[styles.input, { flex: 1 }]}
-                    placeholder="Search zones..."
-                    placeholderTextColor="#757575"
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                />
-            </View>
+            {!lockToSelectedZone ? (
+                <View style={[styles.inputBox, { marginBottom: 12, flexDirection: 'row', alignItems: 'center' }]}>
+                    <AppIcon name="search" size={20} color={COLORS.muted} style={{ marginRight: 8 }} />
+                    <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="Search zones..."
+                        placeholderTextColor="#757575"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                    />
+                </View>
+            ) : null}
 
-            {/* Zone List - Card Style */}
             {filteredZones.length === 0 ? (
                 <Text style={styles.noResultsText}>
                     {searchQuery ? 'No zones found' : 'No zones available'}
@@ -167,29 +180,26 @@ export default function ZonePicker({ gameKey, selectedZoneId, onZoneSelect, user
                                 ]}
                                 onPress={() => onZoneSelect(zone)}
                             >
-                                <View style={styles.zoneInfoWrapper}>
-                                    <Text style={styles.zoneName} numberOfLines={1} ellipsizeMode="tail">
-                                        {zone.venueBrandName}
-                                    </Text>
-                                    <Text style={styles.zoneDetail} numberOfLines={1} ellipsizeMode="tail">
-                                        {zone.primaryBranch?.areaLabel}
-                                    </Text>
+                                <View style={styles.zoneCardTopRow}>
+                                    <View style={styles.zoneInfoWrapper}>
+                                        <Text style={styles.zoneName} numberOfLines={1} ellipsizeMode="tail">
+                                            {zone.venueBrandName}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.zonePriceWrapper}>
+                                        {(() => {
+                                            const startPrice = getStartingPrice(zone);
+                                            return startPrice ? (
+                                                <Text style={styles.zonePrice} numberOfLines={1}>{`From Rs ${startPrice}/hr`}</Text>
+                                            ) : (
+                                                <Text style={styles.zonePriceMuted} numberOfLines={1}>Rate TBD</Text>
+                                            );
+                                        })()}
+                                    </View>
                                 </View>
-                                <View style={styles.zonePriceWrapper}>
-                                    {(() => {
-                                        const startPrice = getStartingPrice(zone);
-                                        return startPrice ? (
-                                            <Text style={styles.zonePrice}>
-                                                {`From ₨ ${startPrice}/hr`}
-                                            </Text>
-                                        ) : (
-                                            <Text style={styles.zoneDetail}>Rate TBD</Text>
-                                        );
-                                    })()}
-                                    {isSelected && (
-                                        <AppIcon name="check-circle" size={16} color={COLORS.accent} style={styles.marginTop4} />
-                                    )}
-                                </View>
+                                <Text style={styles.zoneDetail} numberOfLines={1} ellipsizeMode="tail">
+                                    {zone.primaryBranch?.areaLabel || "Area not listed"}
+                                </Text>
                             </MotionPressable>
                         );
                     })}

@@ -256,6 +256,7 @@ export const respond = mutation({
   args: {
     challengeId: v.id("teamChallenges"),
     accept: v.boolean(),
+    lineupB: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId);
@@ -273,6 +274,7 @@ export const respond = mutation({
     await ctx.db.patch(args.challengeId, {
       status: nextStatus,
       chatId,
+      lineupB: args.accept ? args.lineupB || challenge.lineupB : challenge.lineupB,
       updatedAt: Date.now(),
     });
 
@@ -456,6 +458,8 @@ export const createFull = mutation({
     adminReviewStatus: v.optional(
       v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.null())
     ),
+    lineupA: v.optional(v.array(v.string())),
+    lineupB: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const actorId = await getAuthenticatedUserId(ctx);
@@ -496,6 +500,8 @@ export const createFull = mutation({
         : undefined,
       commonAreas: args.commonAreas || [],
       adminReviewStatus: args.adminReviewStatus ?? null,
+      lineupA: args.lineupA,
+      lineupB: args.lineupB,
       createdAt: now,
       updatedAt: now,
     });

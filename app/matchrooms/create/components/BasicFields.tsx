@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import {
+    Dimensions,
     Modal,
     Pressable,
     ScrollView,
@@ -9,7 +10,8 @@ import {
     View,
 } from "react-native";
 
-import { AppPickerSheet } from "../../../../src/components/AppModalPrimitives";
+const SCREEN_H = Dimensions.get("window").height;
+
 import styles from "../create.styles";
 
 interface BasicFieldsProps {
@@ -176,28 +178,19 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 )}
             </View>
 
-            {/*
-             * DATE PICKER — uses a plain Modal instead of AppPickerSheet so we
-             * own the container height entirely. The sheet slides up from the
-             * bottom and the calendar inside scrolls if needed on tiny screens.
-             */}
+            {/* ── DATE PICKER ── */}
             <Modal
                 visible={showDatePicker}
                 transparent
                 animationType="slide"
                 onRequestClose={() => setShowDatePicker(false)}
             >
-                {/* Dim backdrop — tap to dismiss */}
                 <Pressable
-                    style={datePickerStyles.backdrop}
+                    style={pickerSharedStyles.backdrop}
                     onPress={() => setShowDatePicker(false)}
                 />
-
-                {/* Sheet sits at the bottom, grows with content, max 90% screen */}
-                <View style={[styles.pickerSheet, datePickerStyles.sheet]}>
-                    {/* Drag handle */}
-                    <View style={datePickerStyles.handle} />
-
+                <View style={[styles.pickerSheet, pickerSharedStyles.sheet]}>
+                    <View style={pickerSharedStyles.handle} />
                     <View style={styles.pickerHeader}>
                         <Pressable onPress={() => setShowDatePicker(false)}>
                             <Text style={styles.pickerAction}>Cancel</Text>
@@ -217,8 +210,6 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                             <Text style={styles.pickerAction}>Done</Text>
                         </Pressable>
                     </View>
-
-                    {/* ScrollView is the safety net for very short screens */}
                     <ScrollView
                         bounces={false}
                         showsVerticalScrollIndicator={false}
@@ -296,73 +287,111 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 </View>
             </Modal>
 
-            {/* TIME PICKER — unchanged, still uses AppPickerSheet */}
-            <AppPickerSheet visible={showTimePicker} onClose={() => setShowTimePicker(false)} sheetStyle={styles.pickerSheet}>
-                <View style={styles.pickerHeader}>
-                    <Pressable onPress={() => setShowTimePicker(false)}>
-                        <Text style={styles.pickerAction}>Cancel</Text>
-                    </Pressable>
-                    <Text style={styles.pickerTitle}>Select Time</Text>
-                    <Pressable
-                        onPress={() => {
-                            onChange("time", draftToTimeString(timeDraft));
-                            setShowTimePicker(false);
-                        }}
-                    >
-                        <Text style={styles.pickerAction}>Done</Text>
-                    </Pressable>
+            {/* ── TIME PICKER — same Modal shell as date picker ── */}
+            <Modal
+                visible={showTimePicker}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowTimePicker(false)}
+            >
+                <Pressable
+                    style={pickerSharedStyles.backdrop}
+                    onPress={() => setShowTimePicker(false)}
+                />
+                <View style={[styles.pickerSheet, pickerSharedStyles.sheet]}>
+                    <View style={pickerSharedStyles.handle} />
+                    <View style={styles.pickerHeader}>
+                        <Pressable onPress={() => setShowTimePicker(false)}>
+                            <Text style={styles.pickerAction}>Cancel</Text>
+                        </Pressable>
+                        <Text style={styles.pickerTitle}>Select Time</Text>
+                        <Pressable
+                            onPress={() => {
+                                onChange("time", draftToTimeString(timeDraft));
+                                setShowTimePicker(false);
+                            }}
+                        >
+                            <Text style={styles.pickerAction}>Done</Text>
+                        </Pressable>
+                    </View>
+
+                    {/*
+                     * Each column gets its own ScrollView so long lists (hours = 12 rows)
+                     * never overflow the sheet. The sheet is capped at 90% screen height
+                     * just like the date picker, so both feel identical.
+                     */}
+                    <View style={styles.timePickerRow}>
+                        {/* Hours */}
+                        <ScrollView
+                            style={pickerSharedStyles.timeColumnScroll}
+                            showsVerticalScrollIndicator={false}
+                            bounces={false}
+                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                        >
+                            {hours12.map((h) => {
+                                const selected = timeDraft.hour === h;
+                                return (
+                                    <Pressable
+                                        key={`h-${h}`}
+                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                        onPress={() => setTimeDraft((prev) => ({ ...prev, hour: h }))}
+                                    >
+                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                            {String(h).padStart(2, "0")}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+
+                        {/* Minutes */}
+                        <ScrollView
+                            style={pickerSharedStyles.timeColumnScroll}
+                            showsVerticalScrollIndicator={false}
+                            bounces={false}
+                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                        >
+                            {minutes.map((m) => {
+                                const selected = timeDraft.minute === m;
+                                return (
+                                    <Pressable
+                                        key={`m-${m}`}
+                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                        onPress={() => setTimeDraft((prev) => ({ ...prev, minute: m }))}
+                                    >
+                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                            {String(m).padStart(2, "0")}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+
+                        {/* AM / PM */}
+                        <ScrollView
+                            style={pickerSharedStyles.timeColumnScroll}
+                            showsVerticalScrollIndicator={false}
+                            bounces={false}
+                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                        >
+                            {periods.map((p) => {
+                                const selected = timeDraft.period === p;
+                                return (
+                                    <Pressable
+                                        key={`p-${p}`}
+                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                        onPress={() => setTimeDraft((prev) => ({ ...prev, period: p }))}
+                                    >
+                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                            {p}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+                    </View>
                 </View>
-                <View style={styles.timePickerRow}>
-                    <View style={styles.timeColumn}>
-                        {hours12.map((h) => {
-                            const selected = timeDraft.hour === h;
-                            return (
-                                <Pressable
-                                    key={`h-${h}`}
-                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                    onPress={() => setTimeDraft((prev) => ({ ...prev, hour: h }))}
-                                >
-                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                        {String(h).padStart(2, "0")}
-                                    </Text>
-                                </Pressable>
-                            );
-                        })}
-                    </View>
-                    <View style={styles.timeColumn}>
-                        {minutes.map((m) => {
-                            const selected = timeDraft.minute === m;
-                            return (
-                                <Pressable
-                                    key={`m-${m}`}
-                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                    onPress={() => setTimeDraft((prev) => ({ ...prev, minute: m }))}
-                                >
-                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                        {String(m).padStart(2, "0")}
-                                    </Text>
-                                </Pressable>
-                            );
-                        })}
-                    </View>
-                    <View style={styles.timeColumn}>
-                        {periods.map((p) => {
-                            const selected = timeDraft.period === p;
-                            return (
-                                <Pressable
-                                    key={`p-${p}`}
-                                    style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                    onPress={() => setTimeDraft((prev) => ({ ...prev, period: p }))}
-                                >
-                                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                        {p}
-                                    </Text>
-                                </Pressable>
-                            );
-                        })}
-                    </View>
-                </View>
-            </AppPickerSheet>
+            </Modal>
 
             {selectedGame !== "cs2" && selectedGame !== "fc26" && (
                 <View style={styles.section}>
@@ -386,16 +415,15 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
 }
 
 /**
- * Local styles only for the date-picker Modal shell.
- * Everything inside still uses the existing `styles` from create.styles.
+ * Shared shell styles used by both the date picker and time picker modals.
+ * Both modals are visually identical: backdrop + bottom sheet capped at 90%.
  */
-const datePickerStyles = StyleSheet.create({
+const pickerSharedStyles = StyleSheet.create({
     backdrop: {
         flex: 1,
         backgroundColor: "rgba(0,0,0,0.5)",
     },
     sheet: {
-        // Sits at the bottom, grows naturally with content, capped at 90% screen
         maxHeight: "90%",
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
@@ -409,5 +437,18 @@ const datePickerStyles = StyleSheet.create({
         backgroundColor: "#555",
         marginTop: 8,
         marginBottom: 4,
+    },
+    /**
+     * Each time column scrolls independently so 12 hour-rows never overflow.
+     * maxHeight is derived from the real screen height so it scales on every
+     * device: 90% sheet cap minus ~120 px for the handle + header + padding.
+     */
+    timeColumnScroll: {
+        flex: 1,
+        maxHeight: SCREEN_H * 0.9 - 315,
+    },
+    timeColumnContent: {
+        gap: 8,
+        paddingBottom: 4,
     },
 });

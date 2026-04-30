@@ -1,5 +1,6 @@
+import { useFocusEffect } from "expo-router";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, Text, View } from "react-native";
 
 import { api } from "../../../../convex/_generated/api";
@@ -52,24 +53,17 @@ const PROFILE_GAME_BADGES: Array<{
   label: string;
   enabled: (player: Player) => boolean;
 }> = [
-  { key: "cs2", label: "CS2", enabled: (player) => !!player.playsCs2 },
-  { key: "cs16", label: "CS 1.6", enabled: (player) => !!player.playsCs16 },
-  { key: "valorant", label: "Valorant", enabled: (player) => !!player.playsValorant },
-  { key: "fc26", label: "FC26", enabled: (player) => !!player.playsFc },
-  { key: "tekken8", label: "Tekken 8", enabled: (player) => !!player.playsTekken },
-  { key: "futsal", label: "Futsal", enabled: (player) => !!player.playsFutsal },
-  {
-    key: "indoor_cricket",
-    label: "Cricket",
-    enabled: (player) => !!player.playsIndoorCricket,
-  },
-  { key: "padel", label: "Padel", enabled: (player) => !!player.playsPadel },
-  {
-    key: "pickleball",
-    label: "Pickleball",
-    enabled: (player) => !!player.playsPickleball,
-  },
-];
+    { key: "cs2", label: "CS2", enabled: (player) => !!player.playsCs2 },
+    { key: "cs16", label: "CS 1.6", enabled: (player) => !!player.playsCs16 },
+    { key: "valorant", label: "Valorant", enabled: (player) => !!player.playsValorant },
+    { key: "fc26", label: "FC26", enabled: (player) => !!player.playsFc },
+    { key: "tekken8", label: "Tekken 8", enabled: (player) => !!player.playsTekken },
+    // Physical sports are temporarily disabled.
+    // { key: "futsal", label: "Futsal", enabled: (player) => !!player.playsFutsal },
+    // { key: "indoor_cricket", label: "Cricket", enabled: (player) => !!player.playsIndoorCricket },
+    // { key: "padel", label: "Padel", enabled: (player) => !!player.playsPadel },
+    // { key: "pickleball", label: "Pickleball", enabled: (player) => !!player.playsPickleball },
+  ];
 
 const abbreviateRole = (role: string): string => {
   const abbreviations: Record<string, string> = {
@@ -277,13 +271,21 @@ export default function DiscoverPlayerList({
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const fetchPlayers = useCallback(async () => {
+  // Tracks the last fetch params so silent refocus fetches are skipped
+  // when nothing has actually changed.
+  const lastFetchKey = useRef<string>("");
+
+  const fetchPlayers = useCallback(async (silent = false) => {
     if (!user) {
       setPlayers([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
+
+    // silent=false → show loading spinner (filter/search changes)
+    // silent=true  → no spinner but always hits the network (focus refetch)
+    if (!silent) setLoading(true);
 
     try {
       const playerDocs = await convex.query(api.discover.listDiscoverPlayers, {
@@ -311,11 +313,17 @@ export default function DiscoverPlayerList({
     }
   }, [filters, searchQuery, user]);
 
+  // Filter/search changes → fetch with spinner
   useEffect(() => {
-    setLoading(true);
     fetchPlayers();
   }, [fetchPlayers]);
 
+  // Back navigation → silent fetch, no spinner, always runs
+  useFocusEffect(
+    useCallback(() => {
+      fetchPlayers(true);
+    }, [fetchPlayers]),
+  );
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchPlayers();

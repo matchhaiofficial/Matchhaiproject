@@ -260,6 +260,13 @@ export default StyleSheet.create({
     buttonContent: {
         width: '100%',
     },
+    floatingActionBar: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        elevation: 100,
+    },
     headerActionButton: {
         padding: 2,
     },
@@ -585,6 +592,24 @@ export default StyleSheet.create({
         borderRadius: 8,
         borderWidth: 1,
         borderColor: 'rgba(66, 165, 245, 0.3)',
+    },
+    requestedSlotButton: {
+        backgroundColor: COLORS.successBright + '14',
+        borderColor: COLORS.successBright + '55',
+    },
+    requestedSlotText: {
+        color: COLORS.successBright,
+        textTransform: 'uppercase',
+        fontWeight: '700',
+    },
+    rejectedSlotButton: {
+        backgroundColor: COLORS.error + '14',
+        borderColor: COLORS.error + '55',
+    },
+    rejectedSlotText: {
+        color: COLORS.error,
+        textTransform: 'uppercase',
+        fontWeight: '700',
     },
     joinSlotText: {
         color: COLORS.accent,

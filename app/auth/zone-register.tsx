@@ -65,7 +65,7 @@ export default function AdminRegisterStep1() {
     strengthColor,
     strengthWidth,
   } = useMemo(() => {
-    const businessTypeValid = ["gaming", "sports", "hybrid"].includes(String(step1.type || ""));
+    const businessTypeValid = ["gaming"].includes(String(step1.type || ""));
     const nameValid = ownerFullName.trim().length >= 3;
     const brandValid = venueBrandName.trim().length >= 3;
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
@@ -293,8 +293,9 @@ export default function AdminRegisterStep1() {
         <View style={styles.chipRow}>
           {[
             { label: "Zone", value: "gaming" },
-            { label: "Court", value: "sports" },
-            { label: "Both", value: "hybrid" },
+            // Physical sports are temporarily disabled.
+            // { label: "Court", value: "sports" },
+            // { label: "Both", value: "hybrid" },
           ].map((option) => (
             <Pressable
               key={option.value}

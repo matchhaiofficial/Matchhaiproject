@@ -43,10 +43,11 @@ export function useMatchroomDetailUiState({
     setFriends((prev) =>
       shallowArrayEqual(prev, convexFriends) ? prev : convexFriends,
     );
-    setLoadingFriends((prev) =>
-      prev === loadingConvexFriends ? prev : loadingConvexFriends,
-    );
-  }, [convexFriends, loadingConvexFriends]);
+  }, [convexFriends]);
+
+  useEffect(() => {
+    setLoadingFriends(loadingConvexFriends);
+  }, [loadingConvexFriends]);
 
   const [showSuggestModal, setShowSuggestModal] = useState(false);
   const [counterPrice, setCounterPrice] = useState("");

@@ -1,5 +1,6 @@
 import { router } from "expo-router";
-import { useCallback, useState } from "react";
+import { useAction } from "convex/react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
 import { api } from "../../../../convex/_generated/api";
@@ -19,6 +20,11 @@ import { getUserProfile } from "../../../../src/services/userService";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { useToast } from "../../../../src/hooks/useToast";
 import Logger from "../../../../src/utils/logger";
+import {
+  formatPakistaniPhone,
+  isValidPakistaniPhone,
+  normalizePakistaniPhone,
+} from "../../../../src/utils/phoneUtils";
 import {
   hasVerifiedEmail,
   showEmailVerificationRequiredAlert,
@@ -62,6 +68,11 @@ type FormDataShape = {
 };
 
 type Branch = { id: string; label: string } | null;
+export type MatchroomCreateSubmitFeedback = {
+  message: string;
+  title: string;
+  type: "success" | "error" | "warning" | "info";
+};
 
 type Params = {
   adminBranches: Array<{ id: string; label: string }>;
@@ -95,6 +106,7 @@ type Params = {
   selectedZoneName: string | null;
   selectableTeamMembers: Array<{ uid: string; username?: string }>;
   seriesType: string;
+  setSubmitFeedback: React.Dispatch<React.SetStateAction<MatchroomCreateSubmitFeedback | null>>;
   setFormData: React.Dispatch<React.SetStateAction<FormDataShape>>;
   setHostSkillScore: React.Dispatch<React.SetStateAction<number | null>>;
   setHostSkillTier: React.Dispatch<React.SetStateAction<SkillTier | null>>;
@@ -152,6 +164,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     selectedZoneName,
     selectableTeamMembers,
     seriesType,
+    setSubmitFeedback,
     setFormData,
     setHostSkillScore,
     setHostSkillTier,
@@ -175,59 +188,114 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     useState<UserProfile | null>(null);
   const [showActivationPrompt, setShowActivationPrompt] = useState(false);
   const [showAssessment, setShowAssessment] = useState(false);
+  const [showEasypaisaPhonePrompt, setShowEasypaisaPhonePrompt] =
+    useState(false);
+  const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
+  const [easypaisaPaymentAmount, setEasypaisaPaymentAmount] = useState(0);
+  const [startingEasypaisaPayment, setStartingEasypaisaPayment] =
+    useState(false);
   const { showToast } = useToast();
+  const startCheckout = useAction((api as any).easypaisa.startCheckout);
+
+  const notify = useCallback(
+    (feedback: MatchroomCreateSubmitFeedback) => {
+      setSubmitFeedback(feedback);
+      showToast(feedback);
+    },
+    [setSubmitFeedback, showToast],
+  );
+
+  useEffect(() => {
+    if (!showEasypaisaPhonePrompt) {
+      setEasypaisaCheckoutPhone(
+        user?.phone ? formatPakistaniPhone(String(user.phone)) : "",
+      );
+    }
+  }, [showEasypaisaPhonePrompt, user?.phone]);
 
   const promptPaymentChoice = useCallback(async (amountDue: number) => {
-    return await new Promise<"paid" | "cancel" | "topup">((resolve) => {
+    return await new Promise<"paid" | "cancel" | "easypaisa">((resolve) => {
       Alert.alert(
         "Wallet Payment Required",
-        `To continue, pay from your MatchHai wallet.\n\nAmount: PKR ${amountDue}\n\nFor testing, you can instantly add funds here.\n\n${FEATURE_READINESS.payments.card.walletOnlyInfo}`,
+        `To continue, pay from your MatchHai wallet.\n\nAmount: PKR ${amountDue}\n\nPay now with Easypaisa, or use your wallet balance if you already have funds.\n\n${FEATURE_READINESS.payments.card.walletOnlyInfo}`,
         [
           { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-          { text: "Add Test Funds", onPress: () => resolve("topup") },
+          { text: "Pay Now", onPress: () => resolve("easypaisa") },
           { text: "Pay with Wallet", onPress: () => resolve("paid") },
         ],
       );
     });
   }, []);
 
-  const addTestFunds = useCallback(
-    async (amountDue: number) => {
-      if (!user?._id) {
-        return { ok: false as const, message: "Not authenticated." };
-      }
+  const handleEasypaisaPhoneChange = useCallback((value: string) => {
+    setEasypaisaCheckoutPhone(formatPakistaniPhone(value));
+  }, []);
 
-      try {
-        const currentBalance =
-          Number(
-            await convex.query(api.wallet.getBalance, {
-              userId: user._id as Id<"users">,
-            }),
-          ) || 0;
-        const normalizedAmountDue = Math.max(0, Math.ceil(Number(amountDue || 0)));
-        const shortfall = Math.max(0, normalizedAmountDue - currentBalance);
-        const topUpAmount = Math.max(shortfall, normalizedAmountDue, 500);
+  const closeEasypaisaPhonePrompt = useCallback(() => {
+    if (!startingEasypaisaPayment) {
+      setShowEasypaisaPhonePrompt(false);
+    }
+  }, [startingEasypaisaPayment]);
 
-        await convex.mutation(api.wallet.addFunds, {
-          amount: topUpAmount,
-          userId: user._id as Id<"users">,
-        });
+  const confirmEasypaisaPayment = useCallback(async () => {
+    if (!user?._id || startingEasypaisaPayment) return;
+    const amount = Math.max(0, Math.ceil(Number(easypaisaPaymentAmount || 0)));
+    if (amount <= 0) {
+      notify({
+        message: "Unable to resolve the payment amount.",
+        title: "Payment unavailable",
+        type: "error",
+      });
+      return;
+    }
+    if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
+      notify({
+        message: "Enter a valid Pakistani mobile number for Easypaisa.",
+        title: "Invalid number",
+        type: "warning",
+      });
+      return;
+    }
 
-        return {
-          addedAmount: topUpAmount,
-          newBalance: currentBalance + topUpAmount,
-          ok: true as const,
-        };
-      } catch (error) {
-        Logger.error("CreateMatchroom", "Failed to add test funds", error);
-        return {
-          message: "Could not add test funds to wallet.",
-          ok: false as const,
-        };
-      }
-    },
-    [user?._id],
-  );
+    setStartingEasypaisaPayment(true);
+    try {
+      const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
+      const checkout: any = await startCheckout({
+        kind: "wallet_topup",
+        amount,
+        userId: user._id as Id<"users">,
+        phone: normalizedPhone.phoneE164 || easypaisaCheckoutPhone,
+        transactionType: "MA",
+      });
+
+      setShowEasypaisaPhonePrompt(false);
+      const instruction =
+        checkout.transactionType === "OTC"
+          ? `Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires. MatchHai will keep checking the status.`
+          : "Approve the payment in your Easypaisa app or mobile account flow. MatchHai will keep checking the status.";
+      notify({
+        message: instruction,
+        title: "Payment started",
+        type: "info",
+      });
+    } catch (error: any) {
+      Logger.error("CreateMatchroom", "Failed to start Easypaisa payment", error);
+      notify({
+        message: error?.message || "Could not start the Easypaisa payment.",
+        title: "Payment failed",
+        type: "error",
+      });
+    } finally {
+      setStartingEasypaisaPayment(false);
+    }
+  }, [
+    easypaisaCheckoutPhone,
+    easypaisaPaymentAmount,
+    notify,
+    startCheckout,
+    startingEasypaisaPayment,
+    user?._id,
+  ]);
 
   const payWithWallet = useCallback(
     async (amountDue: number) => {
@@ -354,7 +422,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     }
 
     if (!userProfile) {
-      showToast({
+      notify({
         message: "We could not load your profile yet. Please try again in a moment.",
         title: "Profile missing",
         type: "error",
@@ -366,7 +434,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     try {
       const latestProfileResult = await getUserProfile(user._id as Id<"users">);
       if (!latestProfileResult.ok || !latestProfileResult.data) {
-        showToast({
+        notify({
           message: latestProfileResult.ok
             ? "We could not load your profile yet."
             : latestProfileResult.message || "We could not load your profile yet.",
@@ -388,6 +456,11 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
       if (participation.status === "needs_activation") {
         setPendingParticipationProfile(participation.profile);
+        setSubmitFeedback({
+          message: `Enable ${participation.gameLabel} in your profile to continue.`,
+          title: "Game setup required",
+          type: "warning",
+        });
         setShowActivationPrompt(true);
         setSubmitting(false);
         return;
@@ -395,6 +468,11 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
       if (participation.status === "needs_assessment") {
         setPendingParticipationProfile(participation.profile);
+        setSubmitFeedback({
+          message: `Complete your ${participation.gameLabel} skill check before creating this request.`,
+          title: "Skill check required",
+          type: "warning",
+        });
         setShowAssessment(true);
         setSubmitting(false);
         return;
@@ -411,32 +489,26 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         }));
       }
 
-      const amountDue = effectivePriceValue;
+      const amountDue = Math.max(0, Math.ceil(Number(effectivePriceValue || 0)));
       const seatsPaid = captainSeatsPaid;
-      let paymentChoice = await promptPaymentChoice(amountDue);
-      if (paymentChoice === "cancel") {
-        setSubmitting(false);
-        return;
-      }
-
-      if (paymentChoice === "topup") {
-        const topUpResult = await addTestFunds(amountDue);
-        if (!topUpResult.ok) {
-          showToast({
-            message: topUpResult.message || "Unable to add funds right now.",
-            title: "Top-up failed",
-            type: "error",
+      if (amountDue > 0) {
+        const paymentChoice = await promptPaymentChoice(amountDue);
+        if (paymentChoice === "cancel") {
+          notify({
+            message: "Your booking request was not sent.",
+            title: "Payment cancelled",
+            type: "warning",
           });
           setSubmitting(false);
           return;
         }
 
-        showToast({
-          message: `PKR ${topUpResult.addedAmount} added to your wallet for testing.`,
-          title: "Funds added",
-          type: "success",
-        });
-        paymentChoice = "paid";
+        if (paymentChoice === "easypaisa") {
+          setEasypaisaPaymentAmount(amountDue);
+          setShowEasypaisaPhonePrompt(true);
+          setSubmitting(false);
+          return;
+        }
       }
 
       const paymentStatus = "paid";
@@ -446,7 +518,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       if (shouldCreateBookingRequest) {
         const walletPayment = await payWithWallet(amountDue);
         if (!walletPayment.ok) {
-          showToast({
+          notify({
             message: walletPayment.message || "Wallet payment failed.",
             title: "Payment failed",
             type: "error",
@@ -483,13 +555,17 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         });
 
         if (result.ok) {
-          Alert.alert(
-            "Request Sent!",
-            "Your booking request was sent to the venue. The admin can now review it from their requests queue.",
-            [{ text: "OK", onPress: () => router.back() }],
-          );
+          notify({
+            message: "Your booking request was sent to the venue for admin review.",
+            title: "Request sent",
+            type: "success",
+          });
+          router.replace({
+            params: { t: Date.now().toString() },
+            pathname: "/(player)/(tabs)/index",
+          } as any);
         } else {
-          showToast({
+          notify({
             message: result.message || "Failed to create request.",
             title: "Request failed",
             type: "error",
@@ -560,7 +636,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             await convex.mutation(api.matchrooms.remove, {
               matchroomId: result.id as Id<"matchrooms">,
             });
-            showToast({
+            notify({
               message: "Wallet payment failed. The broadcast matchroom was not created.",
               title: "Payment failed",
               type: "error",
@@ -583,7 +659,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           ],
         );
       } else {
-        showToast({
+        notify({
           message: result.message || "Failed to create matchroom.",
           title: "Create failed",
           type: "error",
@@ -591,7 +667,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       }
     } catch (error) {
       Logger.error("CreateMatchroom", "Error creating matchroom", error);
-      showToast({
+      notify({
         message: "Something went wrong. Please try again.",
         title: "Create failed",
         type: "error",
@@ -600,7 +676,6 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setSubmitting(false);
     }
   }, [
-    addTestFunds,
     adminBranches,
     adminZone,
     authUser,
@@ -615,6 +690,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     isZoneWalkInAdmin,
     locationMode,
     memberSportRoleByUid,
+    notify,
     payWithWallet,
     promptPaymentChoice,
     reservedSlots,
@@ -634,7 +710,9 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     setHostSkillScore,
     setHostSkillTier,
     setSubmitting,
+    setSubmitFeedback,
     setUserProfile,
+    showToast,
     teamMode,
     teamPaymentMode,
     teams,
@@ -735,10 +813,17 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     closeActivationPrompt,
     closeAssessment,
     completeAssessment,
+    closeEasypaisaPhonePrompt,
+    confirmEasypaisaPayment,
     confirmActivation,
+    easypaisaCheckoutPhone,
+    easypaisaPaymentAmount,
+    handleEasypaisaPhoneChange,
     handleSubmit: submit,
     pendingParticipationProfile,
+    showEasypaisaPhonePrompt,
     showActivationPrompt,
     showAssessment,
+    startingEasypaisaPayment,
   };
 }

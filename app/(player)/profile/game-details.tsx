@@ -22,6 +22,7 @@ import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
+import { SKILL_ASSESSMENT_CONFIG } from "../../../src/constants/skillQuestions";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
@@ -325,7 +326,17 @@ export default function GameDetails() {
         const needsAssessment = !currentScore && !externalCalibration;
 
         if (needsAssessment) {
-            setShowAssessment(true);
+            if (SKILL_ASSESSMENT_CONFIG[gameId]) {
+                setShowAssessment(true);
+                return;
+            }
+
+            showToast({
+                type: "warning",
+                title: "Skill check unavailable",
+                message: "Saved your game preferences without a skill score.",
+            });
+            persistChanges();
         } else {
             persistChanges();
         }
@@ -349,16 +360,24 @@ export default function GameDetails() {
         setSkillScores(prev => ({ ...prev, [gameId]: newScore })); // Optimistic UI
 
         const asyncUpdate = async () => {
-            // Fetch current user to get existing skillScores
-            const userData = await convex.query(api.users.getById, { userId: user!._id as Id<"users"> });
-            const existingScores = (userData as any)?.skillScores || {};
-            await convex.mutation(api.users.updateGamePreferences, {
-                userId: user!._id as Id<"users">,
-                updates: {
-                    skillScores: { ...existingScores, [gameId]: newScore },
-                },
-            });
-            persistChanges(); // Save other pref changes
+            try {
+                const userData = await convex.query(api.users.getById, { userId: user!._id as Id<"users"> });
+                const existingScores = (userData as any)?.skillScores || {};
+                await convex.mutation(api.users.updateGamePreferences, {
+                    userId: user!._id as Id<"users">,
+                    updates: {
+                        skillScores: { ...existingScores, [gameId]: newScore },
+                    },
+                });
+                persistChanges();
+            } catch (error) {
+                Logger.error("GameDetails", "Assessment save failed", error);
+                showToast({
+                    type: "error",
+                    title: "Save failed",
+                    message: "Could not save your skill check. Please try again.",
+                });
+            }
         };
         asyncUpdate();
     };

@@ -237,9 +237,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.sm,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
     },
     zoneCardActive: {
         backgroundColor: '#1e2a38',
@@ -249,7 +249,6 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.body,
-        marginBottom: 2,
     },
     zoneDetail: {
         color: COLORS.muted,
@@ -259,7 +258,12 @@ export default StyleSheet.create({
     zonePrice: {
         color: COLORS.accent,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.body,
+        fontSize: TEXT_SIZES.label,
+    },
+    zonePriceMuted: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
     },
 
     // Modal
@@ -446,6 +450,11 @@ export default StyleSheet.create({
         textAlign: 'center',
         color: COLORS.warning,
     },
+    submitFeedbackText: {
+        marginTop: 10,
+        textAlign: 'center',
+        lineHeight: 16,
+    },
     accentText: {
         color: COLORS.accent,
     },
@@ -545,6 +554,12 @@ export default StyleSheet.create({
     zoneListScroll: {
         maxHeight: 300,
     },
+    zoneCardTopRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        marginBottom: 4,
+    },
     zoneInfoWrapper: {
         flex: 1,
         minWidth: 0,
@@ -552,7 +567,7 @@ export default StyleSheet.create({
     },
     zonePriceWrapper: {
         alignItems: 'flex-end',
-        minWidth: 80,
+        minWidth: 104,
         flexShrink: 0,
     },
     memberGrid: {
@@ -773,6 +788,54 @@ export default StyleSheet.create({
     timeOptionTextActive: {
         color: COLORS.text,
         fontWeight: '700',
+    },
+    phoneDialogCard: {
+        width: '100%',
+        maxWidth: 420,
+        ...SHADOWS.cardElevated,
+    },
+    phoneDialogContent: {},
+    phoneModalContent: {
+        gap: SPACING.md,
+        paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    phoneAmountLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.bold,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 22,
+    },
+    phoneSectionLabel: {
+        color: COLORS.text,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 13,
+        marginTop: 2,
+    },
+    phoneInput: {
+        minHeight: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 0,
+        textAlignVertical: 'center',
+    },
+    phoneFooter: {
+        paddingHorizontal: SPACING.xl,
+    },
+    phoneActionsRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    phoneActionBtn: {
+        flex: 1,
     },
 });
 

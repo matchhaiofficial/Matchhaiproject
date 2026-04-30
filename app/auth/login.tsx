@@ -97,6 +97,26 @@ const COMMON_EMAIL_DOMAINS = [
 
 const MAX_ATTEMPTS = 5; // (7)
 const LOCKOUT_SECONDS = 30; // (7)
+const LOGIN_REQUEST_TIMEOUT_MS = 20000;
+const LOGIN_CLEANUP_TIMEOUT_MS = 5000;
+
+async function withLoginTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export default function Login() {
   useRouteLogger("LoginScreen");
@@ -126,8 +146,9 @@ export default function Login() {
 
   const emailRef = useRef<TextInput | null>(null);
   const passwordRef = useRef<TextInput | null>(null);
+  const loginAttemptRef = useRef(0);
 
-  const { showToast } = useToast();
+  const { showToast, hideToast } = useToast();
   const { refreshSession } = useAuth();
 
   // NEW: user type (player vs zone admin)
@@ -314,6 +335,8 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
+    if (loading) return;
+
     logFlowEvent("Login", "Login attempt started", {
       userType,
       identifierType: emailOrPhone.includes("@") ? "email" : "phone",
@@ -344,9 +367,23 @@ export default function Login() {
       });
       return;
     }
+    const attemptId = loginAttemptRef.current + 1;
+    loginAttemptRef.current = attemptId;
+    const finishAttempt = () => {
+      if (loginAttemptRef.current === attemptId) {
+        setLoading(false);
+      }
+    };
+
+    setLoading(true);
+    const timeout = setTimeout(() => {
+      if (loginAttemptRef.current !== attemptId) return;
+      loginAttemptRef.current = attemptId + 1;
+      setLoading(false);
+      showToast({ type: "error", title: "Timed out", message: "Request took too long. Please try again." });
+    }, LOGIN_REQUEST_TIMEOUT_MS);
 
     try {
-      setLoading(true);
       setEmailServerError("");
       setModeHelper(null);
       setRecoveryHelper(null);
@@ -355,9 +392,10 @@ export default function Login() {
       });
 
       const res = await signInWithEmail(emailOrPhone, password /*, userType */);
+      if (loginAttemptRef.current !== attemptId) return;
 
       if (!res.ok) {
-        setLoading(false);
+        finishAttempt();
         Logger.warn("Login", "signInWithEmail failed", {
           code: res.code,
           message: res.message,
@@ -412,6 +450,7 @@ export default function Login() {
         userType,
       });
       const profileRes = await getUserProfile(res.userId);
+      if (loginAttemptRef.current !== attemptId) return;
 
       if (!profileRes.ok) {
         Logger.error("Login", "Failed to fetch user profile for role check", {
@@ -423,10 +462,12 @@ export default function Login() {
             res.user,
             userType === "zone" ? "zone" : "player",
           );
+          if (loginAttemptRef.current !== attemptId) return;
 
           if (recovered.ok) {
             await refreshSession();
-            setLoading(false);
+            if (loginAttemptRef.current !== attemptId) return;
+            finishAttempt();
             showToast({
               type: "success",
               title: "Profile restored",
@@ -441,8 +482,14 @@ export default function Login() {
           setRecoveryHelper("We signed you in, but could not verify your MatchHai profile yet. Please try again.");
         }
 
-        await signOutUser();
-        setLoading(false);
+        finishAttempt();
+        await withLoginTimeout(
+          signOutUser(),
+          LOGIN_CLEANUP_TIMEOUT_MS,
+          "Sign-out cleanup timed out.",
+        ).catch((cleanupError) => {
+          Logger.warn("Login", "Profile verification cleanup failed", cleanupError);
+        });
         showToast({
           type: "error",
           title: isMissing ? "Profile Missing" : "Login Error",
@@ -473,8 +520,14 @@ export default function Login() {
             accountType,
             userId: res.userId,
           });
-          await signOutUser();
-          setLoading(false);
+          finishAttempt();
+          await withLoginTimeout(
+            signOutUser(),
+            LOGIN_CLEANUP_TIMEOUT_MS,
+            "Sign-out cleanup timed out.",
+          ).catch((cleanupError) => {
+            Logger.warn("Login", "Zone mismatch cleanup failed", cleanupError);
+          });
           setEmailServerError("This account is registered as a player account.");
           setModeHelper({
             message: "This email belongs to a player account. Switch to Player mode and sign in again.",
@@ -494,8 +547,14 @@ export default function Login() {
             accountType,
             userId: res.userId,
           });
-          await signOutUser();
-          setLoading(false);
+          finishAttempt();
+          await withLoginTimeout(
+            signOutUser(),
+            LOGIN_CLEANUP_TIMEOUT_MS,
+            "Sign-out cleanup timed out.",
+          ).catch((cleanupError) => {
+            Logger.warn("Login", "Player mismatch cleanup failed", cleanupError);
+          });
           setEmailServerError("This account is registered as a zone account.");
           setModeHelper({
             message: "This email belongs to a zone account. Switch to Zone Admin mode and sign in again.",
@@ -520,8 +579,9 @@ export default function Login() {
 
       // Refresh the auth session to ensure AuthContext is updated
       await refreshSession();
+      if (loginAttemptRef.current !== attemptId) return;
 
-      setLoading(false);
+      finishAttempt();
 
       showToast({
         type: "success",
@@ -548,12 +608,15 @@ export default function Login() {
       }
     } catch (e) {
       Logger.error("Login", "signInWithEmail threw error", e);
-      setLoading(false);
+      finishAttempt();
       showToast({
         type: "error",
         title: "Sign In Failed",
         message: "Something went wrong. Please try again.",
       });
+    } finally {
+      clearTimeout(timeout);
+      finishAttempt();
     }
   };
 
@@ -709,6 +772,7 @@ export default function Login() {
                     next = formatPakistaniPhone(text);
                   }
                   setEmailOrPhone(next);
+                  hideToast();
                   if (emailServerError) setEmailServerError("");
                 }}
                 onFocus={() => setEmailFocused(true)}
@@ -782,6 +846,7 @@ export default function Login() {
                 value={password}
                 onChangeText={(text) => {
                   setPassword(text);
+                  hideToast();
                   if (!passwordTouched) setPasswordTouched(true);
                 }}
                 onFocus={() => setPassFocused(true)}

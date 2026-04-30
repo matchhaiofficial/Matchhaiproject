@@ -28,7 +28,9 @@ export default function VenueHeroCard({
       <View style={styles.heroTopRow}>
         <View style={styles.heroTitleWrap}>
           <Text style={styles.heroEyebrow}>Venue Details</Text>
-          <Text style={styles.heroTitle}>{title}</Text>
+          <Text style={styles.heroTitle} numberOfLines={2} ellipsizeMode="tail">
+            {title}
+          </Text>
           <Text style={styles.heroSubtitle}>
             {subtitle || subtitleFallbackLabel}
           </Text>

@@ -15,6 +15,7 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEntrance } from "../motion/useEntrance";
+import { SPACING } from "../theme";
 import { AppIcon } from "./AppIcon";
 import styles from "./AppModalPrimitives.styles";
 
@@ -133,9 +134,9 @@ export function AppModalFooter({ children, style }: AppModalFooterProps) {
       style={[
         styles.footer,
         {
-          // Keep footer flush to the bottom; respect only the real device inset.
-          // The previous minimum padding reads as "bottom margin" on Android.
-          paddingBottom: Math.max(0, insets.bottom),
+          // Always leave room inside the rounded card so stacked actions do not
+          // get clipped when Android reports a zero bottom inset inside modals.
+          paddingBottom: Math.max(SPACING.md, insets.bottom),
         },
         style,
       ]}
@@ -154,7 +155,11 @@ export function AppDialog({
   cardStyle,
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
-  const maxCardHeight = Math.floor(windowHeight * 0.75);
+  const insets = useSafeAreaInsets();
+  const androidNavigationFallback = Platform.OS === "android" ? 48 : 0;
+  const bottomClearance = Math.max(insets.bottom, androidNavigationFallback);
+  const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
+  const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
     visible,
     axis: "y",
@@ -172,7 +177,12 @@ export function AppDialog({
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
       <Pressable
-        style={[StyleSheet.absoluteFillObject, styles.overlayBase, styles.dialogOverlay]}
+        style={[
+          StyleSheet.absoluteFillObject,
+          styles.overlayBase,
+          styles.dialogOverlay,
+          { paddingBottom: bottomClearance + SPACING.md },
+        ]}
         onPress={() => closeIfAllowed(onClose, dismissDisabled)}
       >
         <Animated.View style={[styles.dialogFrame, entrance.animatedStyle]}>

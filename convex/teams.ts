@@ -33,6 +33,48 @@ function getGameLabel(game: string): string {
   return labels[game] || game.toUpperCase();
 }
 
+function getRosterRule(game: string) {
+  const key = String(game || "").toLowerCase();
+  if (key === "cs2" || key === "cs16" || key === "valorant") {
+    return { mainSize: 5, maxSubstitutes: 2 };
+  }
+  if (key === "fc25" || key === "fc26" || key === "tekken8") {
+    return { mainSize: 2, maxSubstitutes: 1 };
+  }
+  return { mainSize: 5, maxSubstitutes: 0 };
+}
+
+function getTeamMainRosterSize(team: any) {
+  const configured = Number(team?.mainRosterSize || 0);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return getRosterRule(team?.game).mainSize;
+}
+
+function getTeamSubstituteSlots(team: any) {
+  const configured = Number(team?.maxSubstitutes);
+  if (Number.isFinite(configured) && configured >= 0) return configured;
+  const maxMembers = Number(team?.maxMembers || 0);
+  return Math.max(0, Math.min(getRosterRule(team?.game).maxSubstitutes, maxMembers - getTeamMainRosterSize(team)));
+}
+
+function getTeamRosterCapacity(team: any) {
+  return getTeamMainRosterSize(team) + getTeamSubstituteSlots(team);
+}
+
+async function getNextRosterRole(ctx: any, team: any) {
+  const mainSize = getTeamMainRosterSize(team);
+  const members = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_teamId", (q: any) => q.eq("teamId", team._id))
+    .collect();
+  const sortedMembers = members.sort((a: any, b: any) => Number(a.rosterOrder ?? 0) - Number(b.rosterOrder ?? 0));
+  const mainCount = sortedMembers.filter((member: any, index: number) => {
+    const fallbackRole = index < mainSize ? "main" : "substitute";
+    return (member.rosterRole || fallbackRole) === "main";
+  }).length;
+  return mainCount < mainSize ? "main" : "substitute";
+}
+
 async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
 
@@ -229,6 +271,8 @@ export const create = mutation({
     captainUid: v.id("users"),
     captainUsername: v.string(),
     maxMembers: v.optional(v.number()),
+    mainRosterSize: v.optional(v.number()),
+    maxSubstitutes: v.optional(v.number()),
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<any> => {
@@ -238,6 +282,10 @@ export const create = mutation({
     }
 
     const now = Date.now();
+    const rule = getRosterRule(args.game);
+    const mainRosterSize = args.mainRosterSize || rule.mainSize;
+    const maxSubstitutes = Math.max(0, Math.min(args.maxSubstitutes ?? 0, rule.maxSubstitutes));
+    const maxMembers = args.maxMembers || mainRosterSize + maxSubstitutes;
 
     // Create the team
     const teamId = await ctx.db.insert("teams", {
@@ -249,7 +297,9 @@ export const create = mutation({
       captainUsername: args.captainUsername,
       memberUids: [args.captainUid],
       memberCount: 1,
-      maxMembers: args.maxMembers || 10,
+      maxMembers,
+      mainRosterSize,
+      maxSubstitutes,
       description: args.description,
       stats: {
         wins: 0,
@@ -266,6 +316,8 @@ export const create = mutation({
       odxerId: args.captainUid,
       username: args.captainUsername,
       role: "captain",
+      rosterRole: "main",
+      rosterOrder: 0,
       joinedAt: now,
     });
 
@@ -325,7 +377,7 @@ export const addMember = mutation({
     }
 
     // Check roster cap
-    if (team.memberCount >= team.maxMembers) {
+    if (team.memberCount >= getTeamRosterCapacity(team)) {
       throw new Error("Team is full");
     }
 
@@ -352,6 +404,8 @@ export const addMember = mutation({
       odxerId: args.userId,
       username: args.username,
       role: "member",
+      rosterRole: await getNextRosterRole(ctx, team),
+      rosterOrder: team.memberCount,
       joinedAt: now,
     });
 
@@ -801,7 +855,7 @@ export const respondToTeamInvite = mutation({
     }
 
     // Capacity check
-    if (team.memberCount >= team.maxMembers) {
+    if (team.memberCount >= getTeamRosterCapacity(team)) {
       await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
       throw new Error("Team is full");
     }
@@ -823,6 +877,8 @@ export const respondToTeamInvite = mutation({
       odxerId: args.userId,
       username,
       role: "member",
+      rosterRole: await getNextRosterRole(ctx, team),
+      rosterOrder: team.memberCount,
       joinedAt: now,
     });
 
@@ -906,7 +962,7 @@ export const respondToJoinRequest = mutation({
     if (!requesterUid) throw new Error("Requester not found");
 
     // Check capacity
-    if (team.memberCount >= team.maxMembers) {
+    if (team.memberCount >= getTeamRosterCapacity(team)) {
       await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
       throw new Error("Team is full");
     }
@@ -944,6 +1000,8 @@ export const respondToJoinRequest = mutation({
       odxerId: requesterUid,
       username,
       role: "member",
+      rosterRole: await getNextRosterRole(ctx, team),
+      rosterOrder: team.memberCount,
       joinedAt: now,
     });
 
@@ -1030,7 +1088,7 @@ export const requestToJoinTeam = mutation({
     const team = await ctx.db.get(args.teamId);
     if (!team) throw new Error("Team not found");
 
-    if (team.memberCount >= team.maxMembers) throw new Error("Team is full");
+    if (team.memberCount >= getTeamRosterCapacity(team)) throw new Error("Team is full");
 
     // Check player has this game in their profile
     if (team.game && !doesUserPlayGame(actor, team.game)) {

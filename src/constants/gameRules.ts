@@ -1,4 +1,5 @@
 import { CS2_ROLES, FUTSAL_POSITIONS, INDOOR_CRICKET_ROLES, PADEL_ROLES, PICKLEBALL_ROLES, VALORANT_ROLES } from "../../constants/profileOptions";
+import { isEnabledGameKey } from "../../constants/gameAvailability";
 
 export type PlatformStatus = 'idle' | 'verifying' | 'verified' | 'taken' | 'error';
 
@@ -63,7 +64,7 @@ const FC_RULE: GameRule = {
     skillSource: ['psn', 'steam']
 };
 
-export const GAME_RULES: Record<string, GameRule> = {
+const ALL_GAME_RULES: Record<string, GameRule> = {
     cs2: {
         label: 'Counter-Strike 2',
         requiresOneOf: ['steam', 'faceit'],
@@ -117,3 +118,7 @@ export const GAME_RULES: Record<string, GameRule> = {
         hasPosition: true
     },
 };
+
+export const GAME_RULES: Record<string, GameRule> = Object.fromEntries(
+    Object.entries(ALL_GAME_RULES).filter(([gameKey]) => isEnabledGameKey(gameKey)),
+);

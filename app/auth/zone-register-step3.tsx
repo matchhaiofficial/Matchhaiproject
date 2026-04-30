@@ -168,14 +168,11 @@ export default function AdminRegisterStep3() {
         });
       };
 
-      validateCourtCategory(branch.supportsFutsal, branch.pricing.futsal, "Futsal court");
-      validateCourtCategory(
-        branch.supportsIndoorCricket,
-        branch.pricing.indoor_cricket,
-        "Indoor cricket lane",
-      );
-      validateCourtCategory(branch.supportsPadel, branch.pricing.padel, "Padel court");
-      validateCourtCategory(branch.supportsPickleball, branch.pricing.pickleball, "Pickleball court");
+      // Physical sports are temporarily disabled.
+      // validateCourtCategory(branch.supportsFutsal, branch.pricing.futsal, "Futsal court");
+      // validateCourtCategory(branch.supportsIndoorCricket, branch.pricing.indoor_cricket, "Indoor cricket lane");
+      // validateCourtCategory(branch.supportsPadel, branch.pricing.padel, "Padel court");
+      // validateCourtCategory(branch.supportsPickleball, branch.pricing.pickleball, "Pickleball court");
 
       return errors;
     });
@@ -184,11 +181,7 @@ export default function AdminRegisterStep3() {
       (branch) =>
         branch.supportsCs2 ||
         branch.supportsFc25 ||
-        branch.supportsTekken8 ||
-        branch.supportsFutsal ||
-        branch.supportsIndoorCricket ||
-        branch.supportsPadel ||
-        branch.supportsPickleball,
+        branch.supportsTekken8,
     );
 
     return {
@@ -203,7 +196,7 @@ export default function AdminRegisterStep3() {
       showToast({
         type: "info",
         title: "Missing inventory",
-        message: "Please add at least one game or court to a branch.",
+        message: "Please add at least one game setup to a branch.",
       });
       return;
     }
@@ -249,14 +242,15 @@ export default function AdminRegisterStep3() {
           { label: "Tekken 8", key: "supportsTekken8", icon: "sports-mma" },
         ]
       : []),
-    ...(step1.type === "sports" || step1.type === "hybrid"
-      ? [
-          { label: "Futsal", key: "supportsFutsal", icon: "sports-soccer" },
-          { label: "Cricket", key: "supportsIndoorCricket", icon: "sports-cricket" },
-          { label: "Padel", key: "supportsPadel", icon: "sports-tennis" },
-          { label: "Pickleball", key: "supportsPickleball", icon: "sports-tennis" },
-        ]
-      : []),
+    // Physical sports are temporarily disabled.
+    // ...(step1.type === "sports" || step1.type === "hybrid"
+    //   ? [
+    //       { label: "Futsal", key: "supportsFutsal", icon: "sports-soccer" },
+    //       { label: "Cricket", key: "supportsIndoorCricket", icon: "sports-cricket" },
+    //       { label: "Padel", key: "supportsPadel", icon: "sports-tennis" },
+    //       { label: "Pickleball", key: "supportsPickleball", icon: "sports-tennis" },
+    //     ]
+    //   : []),
   ] as const;
 
   return (
@@ -500,7 +494,7 @@ export default function AdminRegisterStep3() {
         </View>
       ) : null}
 
-      {activeBranch.supportsFutsal ? (
+      {false && activeBranch.supportsFutsal ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Futsal courts</Text>
           {FUTSAL_COURT_TYPES.filter((type) => type.value).map((type) => (
@@ -543,7 +537,7 @@ export default function AdminRegisterStep3() {
         </View>
       ) : null}
 
-      {activeBranch.supportsIndoorCricket ? (
+      {false && activeBranch.supportsIndoorCricket ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Indoor cricket</Text>
           {INDOOR_CRICKET_SURFACES.filter((type) => type.value).map((type) => (
@@ -590,7 +584,7 @@ export default function AdminRegisterStep3() {
         </View>
       ) : null}
 
-      {activeBranch.supportsPadel ? (
+      {false && activeBranch.supportsPadel ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Padel courts</Text>
           {PADEL_SURFACES.filter((type) => type.value).map((type) => (
@@ -633,7 +627,7 @@ export default function AdminRegisterStep3() {
         </View>
       ) : null}
 
-      {activeBranch.supportsPickleball ? (
+      {false && activeBranch.supportsPickleball ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pickleball courts</Text>
           {PICKLEBALL_SURFACES.filter((type) => type.value).map((type) => (

@@ -8,7 +8,7 @@ import { convex } from "../../../../src/lib/convex";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { recordPayloadMetric } from "../../../../src/utils/perfInstrumentation";
-import { deriveZoneRate, Zone } from "../../../services/convex/zoneService";
+import { deriveZoneRate, formatSupportedGameLabels, Zone } from "../../../services/convex/zoneService";
 import type { ZoneFilters } from "../filterConfig";
 import {
   DiscoverEmptyState,
@@ -33,6 +33,12 @@ const ZoneRow = React.memo(function ZoneRow({
     .join(", ");
   const isSportsCourt = zone.type === "sports";
   const isHybrid = zone.type === "hybrid";
+  const supportedGames = formatSupportedGameLabels(zone.games);
+  const visibleGames =
+    selectedGameOrSport === "all"
+      ? supportedGames
+      : supportedGames.filter((game) => game.key === selectedGameOrSport);
+  const gameTags = visibleGames.length > 0 ? visibleGames : supportedGames;
 
   const handlePress = useCallback(() => {
     onPressZone(zone.id);
@@ -52,6 +58,16 @@ const ZoneRow = React.memo(function ZoneRow({
           <Text style={styles.cardTitle} numberOfLines={1} ellipsizeMode="tail">
             {zone.venueBrandName}
           </Text>
+          {gameTags.length > 0 ? (
+            <View style={styles.gameTags}>
+              {gameTags.slice(0, 2).map((game) => (
+                <DiscoverTag key={game.key} label={game.label.toUpperCase()} tone="accent" />
+              ))}
+              {gameTags.length > 2 ? (
+                <DiscoverTag label={`+${gameTags.length - 2}`} tone="ghost" />
+              ) : null}
+            </View>
+          ) : null}
           <View style={styles.cardSubtitleRow}>
             <AppIcon name="location-on" size={12} tone="muted" />
             <Text style={styles.cardSubtitle} numberOfLines={1}>
@@ -69,18 +85,6 @@ const ZoneRow = React.memo(function ZoneRow({
           label={isHybrid ? "Hybrid" : isSportsCourt ? "Court" : "Zone"}
           tone={isSportsCourt ? "success" : "neutral"}
         />
-        {selectedGameOrSport !== "all" ? (
-          <DiscoverTag
-            label={
-              selectedGameOrSport === "cs16"
-                ? "CS 1.6"
-                : selectedGameOrSport === "valorant"
-                  ? "Valorant"
-                  : selectedGameOrSport.toUpperCase()
-            }
-            tone="neutral"
-          />
-        ) : null}
       </View>
     </DiscoverPressableCard>
   );

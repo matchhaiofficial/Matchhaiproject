@@ -15,12 +15,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { GAME_FORMATS } from "../../src/constants/gameRules";
+import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
 import { AppIcon } from "../../src/components/AppIcon";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../../src/context/AuthContext";
 import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
+import { useToast } from "../../src/hooks/useToast";
 import { createTeamAction, inviteToTeamAction } from "../../src/services/convex/teamActionService";
 import { COLORS } from "../../src/theme";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
@@ -33,10 +34,11 @@ const GAMES = [
     { key: 'valorant', label: 'Valorant' },
     { key: 'fc26', label: 'FC26' },
     { key: 'tekken8', label: 'Tekken 8' },
-    { key: 'futsal', label: 'Futsal' },
-    { key: 'indoor_cricket', label: 'Cricket' },
-    { key: 'padel', label: 'Padel' },
-    { key: 'pickleball', label: 'Pickleball' },
+    // Physical sports are temporarily disabled.
+    // { key: 'futsal', label: 'Futsal' },
+    // { key: 'indoor_cricket', label: 'Cricket' },
+    // { key: 'padel', label: 'Padel' },
+    // { key: 'pickleball', label: 'Pickleball' },
 ];
 
 const localStyles = StyleSheet.create({
@@ -57,11 +59,13 @@ const localStyles = StyleSheet.create({
 export default function CreateTeam() {
     const { user, authUser } = useAuth();
     const router = useRouter();
+    const { showToast } = useToast();
     const touchDebugEnabled = false;
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
     const [selectedSize, setSelectedSize] = useState<number | null>(null);
+    const [substituteSlots, setSubstituteSlots] = useState(0);
     const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
     useRouteLogger("CreateTeamScreen", {
@@ -77,11 +81,9 @@ export default function CreateTeam() {
             : "skip"
     );
 
-    // Get available sizes for selected game
-    const availableFormats = useMemo(() => {
-        if (!selectedGame) return [];
-        return GAME_FORMATS[selectedGame] || [];
-    }, [selectedGame]);
+    const mainRosterSize = selectedGame ? getTeamMainRosterSize(selectedGame) : 0;
+    const maxSubstituteSlots = selectedGame ? getTeamMaxSubstitutes(selectedGame) : 0;
+    const effectiveTeamSize = selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : selectedSize;
 
     const eligibleFriends = useMemo(
         () => (eligibleFriendsRaw ?? []).map((friend: any) => ({
@@ -93,7 +95,7 @@ export default function CreateTeam() {
         [eligibleFriendsRaw]
     );
 
-    const maxInviteCount = Math.max(0, (selectedSize ?? 1) - 1);
+    const maxInviteCount = Math.max(0, (effectiveTeamSize ?? 1) - 1);
     const selectedGameLabel = useMemo(
         () => GAMES.find((game) => game.key === selectedGame)?.label ?? "this game",
         [selectedGame]
@@ -102,9 +104,8 @@ export default function CreateTeam() {
     // Reset size when game changes
     const handleGameSelect = (gameKey: string) => {
         setSelectedGame(gameKey);
-        const formats = GAME_FORMATS[gameKey] || [];
-        // Default to first format if available
-        setSelectedSize(formats.length > 0 ? formats[0].size : null);
+        setSelectedSize(getTeamMainRosterSize(gameKey));
+        setSubstituteSlots(0);
         setSelectedFriendIds([]);
     };
 
@@ -114,7 +115,11 @@ export default function CreateTeam() {
                 return prev.filter((id) => id !== friendId);
             }
             if (prev.length >= maxInviteCount) {
-                alert(`You can invite up to ${maxInviteCount} friend${maxInviteCount === 1 ? "" : "s"} for this team size.`);
+                showToast({
+                    type: "warning",
+                    title: "Invite limit reached",
+                    message: `You can invite up to ${maxInviteCount} friend${maxInviteCount === 1 ? "" : "s"} for this team size.`,
+                });
                 return prev;
             }
             return [...prev, friendId];
@@ -126,25 +131,25 @@ export default function CreateTeam() {
         logFlowEvent("CreateTeam", "Submitting team creation", {
             nameLength: name.trim().length,
             selectedGame,
-            selectedSize,
+            selectedSize: effectiveTeamSize,
             invitedCount: selectedFriendIds.length,
             uid: user?._id
         });
 
         if (!user) {
-            alert("You must be logged in");
+            showToast({ type: "error", title: "Login required", message: "You must be logged in." });
             return;
         }
         if (!name.trim()) {
-            alert("Please enter a team name");
+            showToast({ type: "warning", title: "Team name required", message: "Please enter a team name." });
             return;
         }
         if (!selectedGame) {
-            alert("Please select a game");
+            showToast({ type: "warning", title: "Game required", message: "Please select a game." });
             return;
         }
-        if (!selectedSize) {
-            alert("Please select a team size");
+        if (!effectiveTeamSize) {
+            showToast({ type: "warning", title: "Team size required", message: "Please select a team size." });
             return;
         }
         if (!hasVerifiedEmail(authUser)) {
@@ -159,7 +164,8 @@ export default function CreateTeam() {
                 description: description.trim(),
                 game: selectedGame,
                 visibility: 'public',
-                maxMembers: selectedSize
+                maxMembers: effectiveTeamSize,
+                substituteSlots,
             });
 
             if (result.ok) {
@@ -179,17 +185,25 @@ export default function CreateTeam() {
                     params: { showInvite: 'true' }
                 } as any);
             } else {
-                alert(result.message || "Failed to create team");
+                showToast({
+                    type: "error",
+                    title: "Create team failed",
+                    message: result.message || "Failed to create team.",
+                });
             }
         } catch (error) {
             Logger.error("CreateTeam", "Error creating team", error);
-            alert("An error occurred");
+            showToast({
+                type: "error",
+                title: "Create team failed",
+                message: "An error occurred.",
+            });
         } finally {
             setSubmitting(false);
         }
     };
 
-    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!selectedSize && !submitting;
+    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!effectiveTeamSize && !submitting;
 
     return (
         <SafeAreaView style={styles.screen}>
@@ -258,32 +272,44 @@ export default function CreateTeam() {
                         </View>
                     </View>
 
-                    {/* Team Size Selection (only if game has multiple formats) */}
-                    {selectedGame && availableFormats.length > 1 && (
+                    {selectedGame && (
                         <View style={styles.section}>
                             <Text style={styles.sectionLabel}>
-                                Team Size *
+                                Roster Size
                             </Text>
-                            <View style={styles.chipRow}>
-                                {availableFormats.map(format => (
+                            <View style={styles.infoBox}>
+                                <Text style={styles.infoBoxText}>
+                                    {mainRosterSize} main players required for {selectedGameLabel}.
+                                </Text>
+                                <Text style={styles.infoBoxSmall}>
+                                    Optional substitutes: {substituteSlots}/{maxSubstituteSlots}. Total roster slots: {effectiveTeamSize}.
+                                </Text>
+                            </View>
+                            {maxSubstituteSlots > 0 ? (
+                                <View style={styles.chipRow}>
+                                    {Array.from({ length: maxSubstituteSlots + 1 }, (_, count) => (
                                     <Pressable
-                                        key={format.size}
-                                        onPress={() => setSelectedSize(format.size)}
+                                        key={count}
+                                        onPress={() => {
+                                            setSubstituteSlots(count);
+                                            setSelectedFriendIds((prev) => prev.slice(0, Math.max(0, mainRosterSize + count - 1)));
+                                        }}
                                         style={({ pressed }) => [
                                             styles.optionChip,
-                                            selectedSize === format.size && styles.optionChipActive,
+                                            substituteSlots === count && styles.optionChipActive,
                                             pressed && localStyles.chipPressed,
                                         ]}
                                     >
                                         <Text style={[
                                             styles.optionChipText,
-                                            selectedSize === format.size && styles.optionChipTextActive
+                                            substituteSlots === count && styles.optionChipTextActive
                                         ]}>
-                                            {format.label}
+                                            {count === 0 ? "No subs" : `${count} sub${count === 1 ? "" : "s"}`}
                                         </Text>
                                     </Pressable>
-                                ))}
-                            </View>
+                                    ))}
+                                </View>
+                            ) : null}
                         </View>
                     )}
 

@@ -16,6 +16,7 @@ import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { getUserTeams, Team } from "../../src/services/convex/teamService";
 import { COLORS } from "../../src/theme";
+import { isPhysicalGameDisabled } from "../../constants/gameAvailability";
 import Logger from "../../src/utils/logger";
 import styles from "./(tabs)/teams.styles"; // Reuse styles from tabs/teams
 
@@ -55,8 +56,8 @@ const TeamRow = React.memo(function TeamRow({
 
             <View style={styles.teamTitleRow}>
                 <Text style={styles.teamName} numberOfLines={1}>{team.name}</Text>
-                <Pressable style={styles.viewBtn} onPress={handleOpen} hitSlop={HIT_SLOP_8} disabled={!team.id}>
-                    <Text style={styles.viewBtnText}>View</Text>
+                <Pressable style={styles.requestBtn} onPress={handleOpen} hitSlop={HIT_SLOP_8} disabled={!team.id}>
+                    <Text style={styles.requestBtnText}>View</Text>
                 </Pressable>
             </View>
 
@@ -98,7 +99,7 @@ export default function MyTeams() {
             if (showRefresh) setRefreshing(true);
             const result = await getUserTeams(user._id);
             if (result.ok && result.data) {
-                setTeams(result.data);
+                setTeams(result.data.filter((team) => !isPhysicalGameDisabled(team.game)));
             }
         } catch (error) {
             Logger.error("MyTeams", "Error fetching teams", error);

@@ -3,6 +3,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { ensureVerifiedEmailAccess, currentUser } from "./authService";
 import { GAME_FORMATS } from "../../constants/gameRules";
+import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../constants/teamRosterRules";
 import Logger from "../../utils/logger";
 
 export type TeamActionResponse =
@@ -15,6 +16,7 @@ export interface CreateTeamData {
   description?: string;
   visibility?: "public" | "private";
   maxMembers?: number;
+  substituteSlots?: number;
 }
 
 async function resolveUserId(authIdOrConvexId: string): Promise<Id<"users"> | null> {
@@ -70,18 +72,19 @@ export async function createTeamAction(data: CreateTeamData): Promise<TeamAction
     const me = await getCurrentUserConvexId();
     if (!me) throw new Error("Not authenticated");
 
-    const { name, game, description, maxMembers: inputMaxMembers } = data;
+    const { name, game, description, maxMembers: inputMaxMembers, substituteSlots = 0 } = data;
     const formats = GAME_FORMATS[game];
     if (!formats || formats.length === 0) throw new Error("Unsupported game type");
 
-    let cap = inputMaxMembers;
-    if (cap) {
-      const validSizes = formats.map((f) => f.size);
-      if (!validSizes.includes(cap)) {
-        throw new Error(`Invalid team size. Allowed sizes for ${game}: ${validSizes.join(", ")}`);
-      }
-    } else {
-      cap = formats[0].size;
+    const mainRosterSize = getTeamMainRosterSize(game);
+    const maxSubstitutes = getTeamMaxSubstitutes(game);
+    const safeSubstituteSlots = Math.max(0, Math.min(maxSubstitutes, Math.floor(substituteSlots)));
+    const cap = inputMaxMembers || getTeamTotalRosterCapacity(game, safeSubstituteSlots);
+
+    if (cap < mainRosterSize || cap > mainRosterSize + maxSubstitutes) {
+      throw new Error(
+        `Invalid roster size. ${game} teams require ${mainRosterSize} main players and can add up to ${maxSubstitutes} substitute${maxSubstitutes === 1 ? "" : "s"}.`,
+      );
     }
 
     await checkUserTeamLimit(me.convexId, game);
@@ -97,6 +100,8 @@ export async function createTeamAction(data: CreateTeamData): Promise<TeamAction
       captainUid: me.convexId,
       captainUsername: me.username,
       maxMembers: cap,
+      mainRosterSize,
+      maxSubstitutes: safeSubstituteSlots,
       description,
     });
 

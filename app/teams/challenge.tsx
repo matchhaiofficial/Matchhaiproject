@@ -1,9 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "convex/react";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import { AppButton, StatusPill } from "../../src/components/AppPrimitives";
 import { DetailSectionCard } from "../../src/components/DetailSurface";
 import Screen from "../../src/components/Screen";
@@ -21,6 +24,7 @@ import {
 import type { Zone } from "../../src/services/convex/zoneService";
 import { COLORS } from "../../src/theme";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
 import styles from "./challenge.styles";
 
@@ -46,6 +50,14 @@ export default function TeamMatchChallengeDetails() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+    const [selectedLineup, setSelectedLineup] = useState<string[]>([]);
+
+    const opponentTeamWithMembers = useQuery(
+        api.teams.getWithMembers,
+        challenge?.opponentTeamId && user?._id && challenge.captainBUid === user._id
+            ? { teamId: challenge.opponentTeamId as Id<"teams"> }
+            : "skip",
+    );
 
     useEffect(() => {
         if (!challengeId) return;
@@ -107,6 +119,52 @@ export default function TeamMatchChallengeDetails() {
     const canRejectNow = !!(isPending && !isAdminPending && isCaptain);
     const canProposeVenue = !!(isAcceptedFlow && isCaptain && !challenge?.matchroomId);
 
+    const opponentMembers = useMemo(() => {
+        const members = Array.isArray(opponentTeamWithMembers?.members) ? opponentTeamWithMembers.members : [];
+        return members.map((member: any, index: number) => ({
+            uid: String(member.odxerId || member.uid || ""),
+            username: member.username || "Player",
+            rosterRole: member.rosterRole || (index < getTeamMainRosterSize(challenge?.gameKey) ? "main" : "substitute"),
+        })).filter((member) => member.uid);
+    }, [challenge?.gameKey, opponentTeamWithMembers?.members]);
+
+    const activeLineupSize = useMemo(
+        () => getTeamMainRosterSize(challenge?.gameKey),
+        [challenge?.gameKey],
+    );
+
+    const defaultOpponentLineup = useMemo(() => {
+        const main = opponentMembers
+            .filter((member) => member.rosterRole === "main")
+            .slice(0, activeLineupSize)
+            .map((member) => member.uid);
+        return main.length > 0 ? main : opponentMembers.slice(0, activeLineupSize).map((member) => member.uid);
+    }, [activeLineupSize, opponentMembers]);
+
+    const hasOpponentSubstitutes = opponentMembers.some((member) => member.rosterRole === "substitute");
+
+    useEffect(() => {
+        if (!canAcceptNow || !isCaptainB || selectedLineup.length > 0) return;
+        setSelectedLineup(defaultOpponentLineup);
+    }, [canAcceptNow, defaultOpponentLineup, isCaptainB, selectedLineup.length]);
+
+    const toggleLineupPlayer = (uid: string) => {
+        setSelectedLineup((prev) => {
+            if (prev.includes(uid)) {
+                return prev.filter((item) => item !== uid);
+            }
+            if (prev.length >= activeLineupSize) {
+                showToast({
+                    type: "warning",
+                    title: "Lineup full",
+                    message: `Select exactly ${activeLineupSize} players. Remove one player before adding another.`,
+                });
+                return prev;
+            }
+            return [...prev, uid];
+        });
+    };
+
     const handleProposeVenue = async () => {
         if (!challengeId || !selectedZone || !isCaptain) return;
         setSubmitting(true);
@@ -131,8 +189,19 @@ export default function TeamMatchChallengeDetails() {
 
     const handleAcceptChallenge = async () => {
         if (!challengeId || !isPending) return;
+        const lineupForAccept: string[] | undefined = isCaptainB
+            ? (selectedLineup.length > 0 ? selectedLineup : defaultOpponentLineup)
+            : undefined;
+        if (isCaptainB && hasOpponentSubstitutes && (lineupForAccept?.length || 0) !== activeLineupSize) {
+            showToast({
+                type: "warning",
+                title: "Lineup required",
+                message: `Select exactly ${activeLineupSize} players before accepting.`,
+            });
+            return;
+        }
         setSubmitting(true);
-        const result = await acceptTeamMatchChallenge({ challengeId });
+        const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept });
         setSubmitting(false);
         if (!result.ok) {
             if ((result.message || "").toLowerCase().includes("resolved")) {
@@ -288,6 +357,39 @@ export default function TeamMatchChallengeDetails() {
                                         ? "Waiting for Captain A to accept Team B's alternative venue."
                                         : "Waiting for challenged captain to accept, or reject if needed."}
                         </Text>
+                        {canAcceptNow && isCaptainB && hasOpponentSubstitutes ? (
+                            <View style={styles.lineupPanel}>
+                                <Text style={styles.lineupTitle}>
+                                    Active lineup ({selectedLineup.length}/{activeLineupSize})
+                                </Text>
+                                <Text style={styles.meta}>
+                                    Main players are selected by default. Swap in a substitute if needed before accepting.
+                                </Text>
+                                <View style={styles.lineupGrid}>
+                                    {opponentMembers.map((member) => {
+                                        const selected = selectedLineup.includes(member.uid);
+                                        const isSub = member.rosterRole === "substitute";
+                                        return (
+                                            <Pressable
+                                                key={member.uid}
+                                                onPress={() => toggleLineupPlayer(member.uid)}
+                                                style={({ pressed }) => [
+                                                    styles.lineupChip,
+                                                    selected && styles.lineupChipSelected,
+                                                    isSub && styles.lineupChipSub,
+                                                    pressed && styles.chatButtonPressed,
+                                                ]}
+                                            >
+                                                <Text style={[styles.lineupChipText, selected && styles.lineupChipTextSelected]}>
+                                                    {member.username}
+                                                </Text>
+                                                {isSub ? <Text style={styles.lineupSubText}>SUB</Text> : null}
+                                            </Pressable>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        ) : null}
                         <AppButton
                             onPress={handleAcceptChallenge}
                             disabled={!canAcceptNow || submitting}

@@ -1,7 +1,8 @@
 // src/hooks/useMatchroomData.ts
 // Convex-based real-time hooks for matchroom detail screen
 
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
+import { useMemo } from "react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
@@ -17,13 +18,7 @@ export function useMyJoinRequests(matchroomId: string | undefined) {
 
   const notifications = useQuery(
     api.notifications.listByFromUidAndType,
-    userId
-      ? {
-          fromUid: userId,
-          type: MATCH_JOIN_REQUEST_TYPE,
-          limit: 50,
-        }
-      : "skip"
+    userId ? { fromUid: userId, type: MATCH_JOIN_REQUEST_TYPE, limit: 50 } : "skip"
   );
 
   const bookingIntents = useQuery(
@@ -33,48 +28,51 @@ export function useMyJoinRequests(matchroomId: string | undefined) {
       : "skip"
   );
 
-  // Filter to the specific matchroom and get slot statuses
-  const requestedSlots = new Map<string, string>();
-  let genericRequestStatus: string | null = null;
-  const activeIntentIds: string[] = [];
+  // ─── Wrap everything in useMemo so references are stable ──────────
+  const result = useMemo(() => {
+    const requestedSlots = new Map<string, string>();
+    let genericRequestStatus: string | null = null;
+    const activeIntentIds: string[] = [];
 
-  if (notifications && matchroomId) {
-    notifications.forEach((n: any) => {
-      const isActiveRequest = n.status === "pending";
-      if (
-        isActiveRequest &&
-        (n.data?.matchroomId === matchroomId || n.matchroomId === matchroomId)
-      ) {
-        if (n.data?.slotId) {
-          requestedSlots.set(n.data.slotId, n.status);
-        } else {
-          genericRequestStatus = n.status;
+    if (notifications && matchroomId) {
+      notifications.forEach((n: any) => {
+        const isActiveRequest = n.status === "pending";
+        if (
+          isActiveRequest &&
+          (n.data?.matchroomId === matchroomId || n.matchroomId === matchroomId)
+        ) {
+          if (n.data?.slotId) {
+            requestedSlots.set(n.data.slotId, n.status);
+          } else {
+            genericRequestStatus = n.status;
+          }
         }
-      }
-    });
-  }
+      });
+    }
 
-  if (bookingIntents && matchroomId) {
-    bookingIntents.forEach((intent: any) => {
-      activeIntentIds.push(String(intent._id));
-      const slotIds = Array.isArray(intent.selectedSlotIds)
-        ? intent.selectedSlotIds
-        : [];
+    if (bookingIntents && matchroomId) {
+      bookingIntents.forEach((intent: any) => {
+        activeIntentIds.push(String(intent._id));
+        const slotIds = Array.isArray(intent.selectedSlotIds)
+          ? intent.selectedSlotIds
+          : [];
 
-      if (slotIds.length > 0) {
-        slotIds.forEach((slotId: string) => {
-          requestedSlots.set(slotId, intent.status);
-        });
-      } else if (!genericRequestStatus) {
-        genericRequestStatus = intent.status;
-      }
-    });
-  }
+        if (slotIds.length > 0) {
+          slotIds.forEach((slotId: string) => {
+            requestedSlots.set(slotId, intent.status);
+          });
+        } else if (!genericRequestStatus) {
+          genericRequestStatus = intent.status;
+        }
+      });
+    }
+
+    return { requestedSlots, genericRequestStatus, activeIntentIds };
+  }, [notifications, bookingIntents, matchroomId]);
+  // ──────────────────────────────────────────────────────────────────
 
   return {
-    requestedSlots,
-    genericRequestStatus,
-    activeIntentIds,
+    ...result,
     loading: notifications === undefined || bookingIntents === undefined,
   };
 }
@@ -91,10 +89,10 @@ export function useMyActiveMatchroomRoomStates() {
     api.notifications.listByFromUidAndType,
     userId
       ? {
-          fromUid: userId,
-          type: MATCH_JOIN_REQUEST_TYPE,
-          limit: 100,
-        }
+        fromUid: userId,
+        type: MATCH_JOIN_REQUEST_TYPE,
+        limit: 100,
+      }
       : "skip"
   );
 
@@ -151,14 +149,19 @@ export function useIncomingJoinRequests(
     api.notifications.listMatchroomJoinRequests,
     matchroomId && isHostOrAdmin
       ? {
-          matchroomId: matchroomId as Id<"matchrooms">,
-          status: "pending",
-        }
+        matchroomId: matchroomId as Id<"matchrooms">,
+        status: "pending",
+      }
       : "skip"
   );
 
+  // FIX: stabilize fallback so `|| []` doesn't produce a new reference every
+  // render, which would cause the useEffect in useMatchroomDetailState to fire
+  // every render even when no data has changed.
+  const stableRequests = useMemo(() => requests || [], [requests]);
+
   return {
-    requests: requests || [],
+    requests: stableRequests,
     loading: requests === undefined,
   };
 }
@@ -170,20 +173,21 @@ export function usePlayerSkillScores(
   playerUids: string[],
   game: string | undefined
 ) {
-  const userIds = playerUids.map((uid) => uid as Id<"users">);
+  // ✅ FIX: memoize so Convex doesn't get a new args object every render
+  const userIds = useMemo(
+    () => playerUids.map((uid) => uid as Id<"users">),
+    [playerUids],
+  );
 
   const scores = useQuery(
     api.users.getSkillScores,
-    game && userIds.length > 0
-      ? {
-          userIds,
-          game,
-        }
-      : "skip"
+    game && userIds.length > 0 ? { userIds, game } : "skip",
   );
 
+  const stableRatings = useMemo(() => scores || {}, [scores]);
+
   return {
-    ratings: scores || {},
+    ratings: stableRatings,
     loading: scores === undefined,
   };
 }
@@ -200,15 +204,24 @@ export function useFriendsForInvite() {
     userId ? { userId } : "skip"
   );
 
-  // Transform to include uid field for compatibility
-  const friendsList = friends?.map((f: any) => ({
-    id: f.friendshipId,
-    uid: f.friendId,
-    username: f.username,
-    fullName: f.fullName,
-    photoURL: f.photoURL,
-    isOnline: f.isOnline,
-  })) || [];
+  // FIX: this was the primary infinite loop cause. friends?.map(...) created new
+  // object references on every render. shallowArrayEqual compares items with ===,
+  // so {uid: x} !== {uid: x} (different objects) → always returned false →
+  // setFriends fired every render → infinite setState loop.
+  // useMemo ensures the transformed array is only recreated when `friends` actually
+  // changes (i.e. when Convex pushes new data).
+  const friendsList = useMemo(
+    () =>
+      friends?.map((f: any) => ({
+        id: f.friendshipId,
+        uid: f.friendId,
+        username: f.username,
+        fullName: f.fullName,
+        photoURL: f.photoURL,
+        isOnline: f.isOnline,
+      })) || [],
+    [friends]
+  );
 
   return {
     friends: friendsList,

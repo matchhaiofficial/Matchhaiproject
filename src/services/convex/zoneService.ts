@@ -5,6 +5,7 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { ZoneLifecycleStatus, ZoneMigrationState } from "../../utils/zoneLifecycle";
+import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 
 export interface EffectiveRateResult {
   rate: number | null;
@@ -228,10 +229,10 @@ function transformZone(zone: any): Zone {
       supportsFc25: zone.games.includes("fc25") || zone.games.includes("fc26"),
       supportsFc26: zone.games.includes("fc26") || zone.games.includes("fc25"),
       supportsTekken8: zone.games.includes("tekken8"),
-      supportsFutsal: zone.games.includes("futsal"),
-      supportsIndoorCricket: zone.games.includes("indoor_cricket"),
-      supportsPadel: zone.games.includes("padel"),
-      supportsPickleball: zone.games.includes("pickleball"),
+      supportsFutsal: false,
+      supportsIndoorCricket: false,
+      supportsPadel: false,
+      supportsPickleball: false,
     };
   }
 
@@ -375,10 +376,10 @@ export function formatSupportedGameLabels(games?: Zone["games"]) {
         supportsFc25: games.includes("fc25") || games.includes("fc26"),
         supportsFc26: games.includes("fc26") || games.includes("fc25"),
         supportsTekken8: games.includes("tekken8"),
-        supportsFutsal: games.includes("futsal"),
-        supportsIndoorCricket: games.includes("indoor_cricket"),
-        supportsPadel: games.includes("padel"),
-        supportsPickleball: games.includes("pickleball"),
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
       }
     : games;
 
@@ -388,10 +389,11 @@ export function formatSupportedGameLabels(games?: Zone["games"]) {
     ["valorant", flags?.supportsValorant],
     ["fc26", flags?.supportsFc26 || flags?.supportsFc25],
     ["tekken8", flags?.supportsTekken8],
-    ["futsal", flags?.supportsFutsal],
-    ["indoor_cricket", flags?.supportsIndoorCricket],
-    ["padel", flags?.supportsPadel],
-    ["pickleball", flags?.supportsPickleball],
+    // Physical sports are temporarily disabled.
+    // ["futsal", flags?.supportsFutsal],
+    // ["indoor_cricket", flags?.supportsIndoorCricket],
+    // ["padel", flags?.supportsPadel],
+    // ["pickleball", flags?.supportsPickleball],
   ] as const;
 
   return entries
@@ -403,8 +405,9 @@ export function formatSupportedGameLabels(games?: Zone["games"]) {
         : gameKey === "cs16" ? "CS 1.6"
         : gameKey === "fc26" ? "FC26"
         : gameKey === "tekken8" ? "Tekken 8"
-        : gameKey === "indoor_cricket" ? "Indoor Cricket"
-        : gameKey === "pickleball" ? "Pickleball"
+        // Physical sports are temporarily disabled.
+        // : gameKey === "indoor_cricket" ? "Indoor Cricket"
+        // : gameKey === "pickleball" ? "Pickleball"
         : gameKey.charAt(0).toUpperCase() + gameKey.slice(1),
     }));
 }
@@ -531,13 +534,14 @@ function buildResourceSummary(zone: Zone, pricing: any): PlayerVenueResourceItem
   const resources: PlayerVenueResourceItem[] = [];
   const pcSeats = Math.max(getPcSeatCount(zone), 0);
   const consoleSeats = Math.max(getConsoleSeatCount(zone), 0);
-  const futsalCourts = Math.max(Number(zone.capacity?.futsalCourts || 0), getSportCount(pricing?.futsal));
-  const indoorCricketNets = Math.max(
-    Number(zone.capacity?.indoorCricketNets || 0),
-    getSportCount(pricing?.indoorCricket || pricing?.indoor_cricket),
-  );
-  const padelCourts = Math.max(Number(zone.capacity?.padelCourts || 0), getSportCount(pricing?.padel));
-  const pickleballCourts = Math.max(Number(zone.capacity?.pickleballCourts || 0), getSportCount(pricing?.pickleball));
+  // Physical sports are temporarily disabled.
+  // const futsalCourts = Math.max(Number(zone.capacity?.futsalCourts || 0), getSportCount(pricing?.futsal));
+  // const indoorCricketNets = Math.max(
+  //   Number(zone.capacity?.indoorCricketNets || 0),
+  //   getSportCount(pricing?.indoorCricket || pricing?.indoor_cricket),
+  // );
+  // const padelCourts = Math.max(Number(zone.capacity?.padelCourts || 0), getSportCount(pricing?.padel));
+  // const pickleballCourts = Math.max(Number(zone.capacity?.pickleballCourts || 0), getSportCount(pricing?.pickleball));
 
   if (pcSeats > 0) {
     resources.push({
@@ -559,45 +563,11 @@ function buildResourceSummary(zone: Zone, pricing: any): PlayerVenueResourceItem
     });
   }
 
-  if (futsalCourts > 0) {
-    resources.push({
-      key: "futsal",
-      label: "Futsal Courts",
-      count: futsalCourts,
-      countLabel: formatCountLabel(futsalCourts, "court"),
-      icon: "sports-soccer",
-    });
-  }
-
-  if (indoorCricketNets > 0) {
-    resources.push({
-      key: "indoor_cricket",
-      label: "Indoor Cricket Nets",
-      count: indoorCricketNets,
-      countLabel: formatCountLabel(indoorCricketNets, "net"),
-      icon: "sports-cricket",
-    });
-  }
-
-  if (padelCourts > 0) {
-    resources.push({
-      key: "padel",
-      label: "Padel Courts",
-      count: padelCourts,
-      countLabel: formatCountLabel(padelCourts, "court"),
-      icon: "sports-tennis",
-    });
-  }
-
-  if (pickleballCourts > 0) {
-    resources.push({
-      key: "pickleball",
-      label: "Pickleball Courts",
-      count: pickleballCourts,
-      countLabel: formatCountLabel(pickleballCourts, "court"),
-      icon: "sports-tennis",
-    });
-  }
+  // Physical sports are temporarily disabled.
+  // if (futsalCourts > 0) { ... }
+  // if (indoorCricketNets > 0) { ... }
+  // if (padelCourts > 0) { ... }
+  // if (pickleballCourts > 0) { ... }
 
   return resources;
 }
@@ -719,19 +689,13 @@ function buildCourtPricingRows(
 }
 
 function buildSportsPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
-  const rows: PlayerVenuePricingRow[] = [];
-  buildCourtPricingRows(rows, pricing?.futsal, "Futsal", "court", 10);
-  buildCourtPricingRows(rows, pricing?.padel, "Padel", "court", 30);
-  buildCourtPricingRows(rows, pricing?.pickleball, "Pickleball", "court", 50);
-  buildCourtPricingRows(rows, pricing?.indoorCricket || pricing?.indoor_cricket, "Indoor Cricket", "net", 70);
-
-  return rows.length > 0
-    ? {
-        key: "sports",
-        title: "Sports",
-        rows: rows.sort((a, b) => a.sortOrder - b.sortOrder),
-      }
-    : null;
+  // Physical sports are temporarily disabled.
+  // const rows: PlayerVenuePricingRow[] = [];
+  // buildCourtPricingRows(rows, pricing?.futsal, "Futsal", "court", 10);
+  // buildCourtPricingRows(rows, pricing?.padel, "Padel", "court", 30);
+  // buildCourtPricingRows(rows, pricing?.pickleball, "Pickleball", "court", 50);
+  // buildCourtPricingRows(rows, pricing?.indoorCricket || pricing?.indoor_cricket, "Indoor Cricket", "net", 70);
+  return null;
 }
 
 function buildPricingGroups(pricing: any): PlayerVenuePricingGroup[] {
@@ -756,11 +720,14 @@ export function buildCreateMatchroomParams(zone: Zone, branch?: { id?: string | 
   const cleanedGames = (supportedGameKeys || [])
     .filter(Boolean)
     .map((gameKey) => (gameKey === "fc25" ? "fc26" : gameKey));
+  const enabledGames = cleanedGames.filter((gameKey) => !isPhysicalGameDisabled(gameKey));
+  const branchId = String(branch?.id || "").trim();
 
   return {
     zoneId: zone.id,
     zoneName: zone.venueBrandName,
-    zoneSupportedGames: JSON.stringify(Array.from(new Set(cleanedGames))),
+    zoneSupportedGames: JSON.stringify(Array.from(new Set(enabledGames))),
+    ...(branchId ? { branchId } : {}),
   } satisfies PlayerVenueActionParams;
 }
 
@@ -889,6 +856,10 @@ export async function getActiveZones(
   gameKey?: string
 ): Promise<Result<Zone[]>> {
   try {
+    if (isPhysicalGameDisabled(gameKey)) {
+      return { ok: true, data: [] };
+    }
+
     const rawZones = await convex.query(api.zones.listActive, { limit: 200 });
     let zones = rawZones.map(transformZone);
 
@@ -1080,10 +1051,11 @@ export async function saveZoneRegistration(data: {
       supportsFc25: branches.some((b) => b.supportsFc25),
       supportsFc26: branches.some((b) => b.supportsFc26 || b.supportsFc25),
       supportsTekken8: branches.some((b) => b.supportsTekken8),
-      supportsFutsal: branches.some((b) => b.supportsFutsal),
-      supportsIndoorCricket: branches.some((b) => b.supportsIndoorCricket),
-      supportsPadel: branches.some((b) => b.supportsPadel),
-      supportsPickleball: branches.some((b) => b.supportsPickleball),
+      // Physical sports are temporarily disabled.
+      supportsFutsal: false,
+      supportsIndoorCricket: false,
+      supportsPadel: false,
+      supportsPickleball: false,
     };
 
     // Convert games object to array for Convex

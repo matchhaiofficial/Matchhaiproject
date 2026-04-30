@@ -1,6 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../../src/context/AuthContext";
 import {
   useFriendsForInvite,
@@ -13,34 +12,9 @@ import {
   getMatchroom,
   Matchroom,
 } from "../../../src/services/convex/matchService";
-import {
-  GameSkillScore,
-} from "../../../src/services/skillRatingService";
+import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserProfile } from "../../../src/services/userService";
 import Logger from "../../../src/utils/logger";
-
-const mapsEqual = (a: Map<string, string>, b: Map<string, string>) => {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const [key, value] of a.entries()) {
-    if (b.get(key) !== value) return false;
-  }
-  return true;
-};
-
-const recordEqual = <T extends Record<string, any>>(a: T, b: T) => {
-  if (a === b) return true;
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => a[key] === b[key]);
-};
-
-const shallowArrayEqual = (a: any[], b: any[]) => {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  return a.every((item, index) => item === b[index]);
-};
 
 const identityMatches = (
   candidate: unknown,
@@ -53,148 +27,153 @@ const identityMatches = (
   );
 };
 
-type Params = {
-  id: string;
-};
+type Params = { id: string };
 
 export function useMatchroomDetailState({ id }: Params) {
   const router = useRouter();
   const { user, authUser, refreshSession } = useAuth();
   const { showToast } = useToast();
+  const showToastRef = useRef(showToast);
+  const routerRef = useRef(router);
+  showToastRef.current = showToast;
+  routerRef.current = router;
 
   const [room, setRoom] = useState<Matchroom | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
-  const [requestedSlots, setRequestedSlots] = useState<Map<string, string>>(
-    new Map(),
-  );
-  const [genericRequestStatus, setGenericRequestStatus] = useState<
-    string | null
-  >(null);
+  const [requestedSlots, setRequestedSlots] = useState<Map<string, string>>(new Map());
+  const [genericRequestStatus, setGenericRequestStatus] = useState<string | null>(null);
   const [requestLoading, setRequestLoading] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState<any[]>([]);
-  const [processingRequestId, setProcessingRequestId] = useState<string | null>(
-    null,
-  );
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [playerRatings, setPlayerRatings] = useState<
-    Record<string, GameSkillScore | null>
-  >({});
+  const [playerRatings, setPlayerRatings] = useState<Record<string, GameSkillScore | null>>({});
   const [bookingRequestId, setBookingRequestId] = useState<string | null>(null);
+  const isFetchingRef = useRef(false);
 
   const currentIdentityValues = useMemo(
     () => [user?._id, authUser?.id],
     [authUser?.id, user?._id],
   );
-  const isHostEarly = identityMatches(room?.hostUid, currentIdentityValues);
-  const isAdminEarly =
-    profile?.role === "zone-admin" || profile?.role === "super-admin";
 
-  const {
-    requestedSlots: convexRequestedSlots,
-    genericRequestStatus: convexGenericRequestStatus,
-    activeIntentIds,
-  } = useMyJoinRequests(id);
-  const { requests: convexIncomingRequests } = useIncomingJoinRequests(
-    id,
-    id.length > 0 && (isHostEarly || isAdminEarly),
+  const isHostEarly = useMemo(
+    () => identityMatches(room?.hostUid, currentIdentityValues),
+    [room?.hostUid, currentIdentityValues],
   );
-  const playerUids = room?.players?.map((p: any) => p.uid) || [];
-  const { ratings: convexPlayerRatings } = usePlayerSkillScores(
-    playerUids,
-    room?.game,
+  const isAdminEarly = useMemo(
+    () => profile?.role === "zone-admin" || profile?.role === "super-admin",
+    [profile?.role],
   );
-  const { friends: convexFriends, loading: loadingConvexFriends } =
-    useFriendsForInvite();
 
+  // ─── Convex data ─────────────────────────────────────────────
+  const myJoinRequests = useMyJoinRequests(id);
+  const incomingJoinRequests = useIncomingJoinRequests(id, id.length > 0 && (isHostEarly || isAdminEarly));
+  const playerUids = useMemo(() => room?.players?.map((p: any) => p.uid) ?? [], [room?.players]);
+  const skillScores = usePlayerSkillScores(playerUids, room?.game);
+  const friendsData = useFriendsForInvite();
+
+  // ─── Stabilised values (prevents infinite loops) ─────────────────
+  const stableRequestedSlots = useMemo(() => myJoinRequests.requestedSlots, [myJoinRequests.requestedSlots]);
+  const stableGenericStatus = useMemo(() => myJoinRequests.genericRequestStatus, [myJoinRequests.genericRequestStatus]);
+  const stableIncoming = useMemo(() => incomingJoinRequests.requests, [incomingJoinRequests.requests]);
+  const stableRatings = useMemo(() => skillScores.ratings, [skillScores.ratings]);
+
+  // ─── Safe state updates (only when data actually changes) ────────
   useEffect(() => {
-    setRequestedSlots((prev) =>
-      mapsEqual(prev, convexRequestedSlots) ? prev : convexRequestedSlots,
-    );
-  }, [convexRequestedSlots]);
+    setRequestedSlots((prev) => {
+      if (prev.size !== stableRequestedSlots.size) return stableRequestedSlots;
+      for (const [k, v] of stableRequestedSlots.entries()) {
+        if (prev.get(k) !== v) return stableRequestedSlots;
+      }
+      return prev;
+    });
+  }, [stableRequestedSlots]);
 
   useEffect(() => {
     setGenericRequestStatus((prev) =>
-      prev === convexGenericRequestStatus ? prev : convexGenericRequestStatus,
+      prev === stableGenericStatus ? prev : stableGenericStatus,
     );
-  }, [convexGenericRequestStatus]);
+  }, [stableGenericStatus]);
 
   useEffect(() => {
-    const next = convexIncomingRequests as any[];
-    setIncomingRequests((prev) => (shallowArrayEqual(prev, next) ? prev : next));
-  }, [convexIncomingRequests]);
+    setIncomingRequests((prev) => {
+      if (prev.length !== stableIncoming.length) return stableIncoming;
+      const prevIds = prev.map((r: any) => r._id ?? r.id).join(",");
+      const nextIds = stableIncoming.map((r: any) => r._id ?? r.id).join(",");
+      return prevIds === nextIds ? prev : stableIncoming;
+    });
+  }, [stableIncoming]);
 
   useEffect(() => {
-    const nextRatings = convexPlayerRatings as Record<
-      string,
-      GameSkillScore | null
-    >;
-    setPlayerRatings((prev) =>
-      recordEqual(prev, nextRatings) ? prev : nextRatings,
-    );
-  }, [convexPlayerRatings]);
+    setPlayerRatings((prev) => {
+      try {
+        return JSON.stringify(prev) === JSON.stringify(stableRatings) ? prev : (stableRatings as Record<string, GameSkillScore | null>);
+      } catch {
+        return stableRatings as Record<string, GameSkillScore | null>;
+      }
+    });
+  }, [stableRatings]);
 
+  // ─── Fetch room (with guard) ─────────────────────────────────────
   const fetchRoom = useCallback(async () => {
-    if (!id) return;
+    if (!id || isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       const res = await getMatchroom(id);
       if (res.ok && res.data) {
         setRoom(res.data);
       } else {
-        showToast({
+        showToastRef.current({
           message: "Matchroom not found.",
           title: "Load failed",
           type: "error",
         });
-        router.back();
+        routerRef.current.back();
       }
     } catch (e) {
       Logger.error("MatchroomDetails", "Error fetching room", e);
-      showToast({
+      showToastRef.current({
         message: "Failed to load matchroom details.",
         title: "Load failed",
         type: "error",
       });
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [id, router, showToast]);
+  }, [id]);
 
   useEffect(() => {
-    void fetchRoom();
-  }, [fetchRoom, user?._id]);
+    fetchRoom();
+  }, [fetchRoom]);
 
   useFocusEffect(
-    React.useCallback(() => {
-      void refreshSession();
+    useCallback(() => {
+      refreshSession();
     }, [refreshSession]),
   );
 
   useEffect(() => {
     if (!user?._id) return;
     getUserProfile(user._id).then((res) => {
-      if (res.ok) setProfile(res.data);
+      if (res.ok) {
+        setProfile((prev: any) =>
+          JSON.stringify(prev) === JSON.stringify(res.data) ? prev : res.data
+        );
+      }
     });
   }, [user?._id]);
 
-  const isZoneAdmin =
-    profile?.role === "zone-admin" || profile?.role === "super-admin";
+  const isZoneAdmin = profile?.role === "zone-admin" || profile?.role === "super-admin";
 
   const rawBookingRequestId = useMemo(() => {
     if (!room) return null;
-    const raw: any = room as any;
-    return (
-      raw.bookingRequestId ||
-      raw.requestId ||
-      raw.booking?.requestId ||
-      raw.bookingRequest?.id ||
-      null
-    );
+    const raw: any = room;
+    return raw.bookingRequestId || raw.requestId || raw.booking?.requestId || raw.bookingRequest?.id || null;
   }, [room]);
 
   useEffect(() => {
-    const next = rawBookingRequestId || null;
-    setBookingRequestId((prev) => (prev === next ? prev : next));
+    setBookingRequestId((prev) => (prev === rawBookingRequestId ? prev : rawBookingRequestId));
   }, [rawBookingRequestId]);
 
   return {
@@ -222,9 +201,9 @@ export function useMatchroomDetailState({ id }: Params) {
     isZoneAdmin,
     bookingRequestId,
     setBookingRequestId,
-    activeIntentIds,
-    convexFriends,
-    loadingConvexFriends,
+    activeIntentIds: myJoinRequests.activeIntentIds,
+    convexFriends: friendsData.friends,
+    loadingConvexFriends: friendsData.loading,
     fetchRoom,
   };
 }

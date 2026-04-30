@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
     cardSubtitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 2,
+        marginTop: 6,
         minWidth: 0,
     },
     cardSubtitle: {
@@ -77,6 +77,13 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         marginTop: 4,
         gap: 8,
+    },
+    gameTags: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 6,
     },
 });
 export default styles;

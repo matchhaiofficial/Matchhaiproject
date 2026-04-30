@@ -57,6 +57,50 @@ const FC_ASSESSMENT_CONFIG: GameAssessmentConfig = {
 };
 
 export const SKILL_ASSESSMENT_CONFIG: Record<string, GameAssessmentConfig> = {
+    cs2: {
+        questions: [
+            {
+                id: 'recent_level',
+                label: 'What best describes your current CS2 level?',
+                options: [
+                    { label: 'New / casual only', value: 1 },
+                    { label: 'Low Premier / Silver-Gold', value: 2 },
+                    { label: 'Mid Premier / MG-DMG', value: 3 },
+                    { label: 'High Premier / LE-Global', value: 4 },
+                    { label: 'FACEIT / tournament regular', value: 5 },
+                ]
+            },
+            {
+                id: 'impact',
+                label: 'In matches around your level, how often do you impact rounds?',
+                options: [
+                    { label: 'Still learning basics', value: 1 },
+                    { label: 'Some good rounds, inconsistent', value: 2 },
+                    { label: 'Usually reliable', value: 3 },
+                    { label: 'Often top impact', value: 4 },
+                    { label: 'Can carry difficult games', value: 5 },
+                ]
+            },
+            {
+                id: 'teamplay',
+                label: 'How comfortable are you with team play and utility?',
+                options: [
+                    { label: 'Mostly solo plays', value: 1 },
+                    { label: 'Know basic smokes/flashes', value: 2 },
+                    { label: 'Trade and use utility well', value: 3 },
+                    { label: 'Can call setups and executes', value: 4 },
+                    { label: 'Strong team structure and reads', value: 5 },
+                ]
+            }
+        ],
+        thresholds: [
+            { maxScore: 5, rating: 20, tier: 'Beginner' },
+            { maxScore: 8, rating: 45, tier: 'Casual' },
+            { maxScore: 11, rating: 65, tier: 'Intermediate' },
+            { maxScore: 13, rating: 82, tier: 'Advanced' },
+            { maxScore: 15, rating: 95, tier: 'Pro' }
+        ]
+    },
     cs16: {
         questions: [
             {

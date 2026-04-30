@@ -116,6 +116,8 @@ function SlotActionButtons({
       <AnimatedPressable
         style={styles.inviteSlotButton}
         onPress={() => onInvitePress(team, slotId)}
+        unstable_pressDelay={0}
+        pressRetentionOffset={footerHitSlop}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         hitSlop={footerHitSlop}
@@ -133,6 +135,8 @@ function SlotActionButtons({
         <AnimatedPressable
           style={styles.inviteSlotButton}
           onPress={() => onInvitePress(team, slotId)}
+          unstable_pressDelay={0}
+          pressRetentionOffset={footerHitSlop}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
           hitSlop={footerHitSlop}
@@ -150,11 +154,12 @@ function SlotActionButtons({
         <AnimatedPressable
           style={[
             styles.joinSlotButton,
-            {
-              backgroundColor:
-                status === "rejected" ? COLORS.error : COLORS.muted,
-            },
+            status === "rejected"
+              ? styles.rejectedSlotButton
+              : styles.requestedSlotButton,
           ]}
+          unstable_pressDelay={0}
+          pressRetentionOffset={footerHitSlop}
           onPress={() => {
             if (status === "rejected") {
               Alert.alert(
@@ -186,7 +191,9 @@ function SlotActionButtons({
             <Text
               style={[
                 styles.joinSlotText,
-                { color: "#FFF" },
+                status === "rejected"
+                  ? styles.rejectedSlotText
+                  : styles.requestedSlotText,
               ]}
             >
               {status === "approved_pending_payment"
@@ -201,6 +208,8 @@ function SlotActionButtons({
         <AnimatedPressable
           style={styles.joinSlotButton}
           onPress={() => onRequestJoin(`Team ${team}`, slotId)}
+          unstable_pressDelay={0}
+          pressRetentionOffset={footerHitSlop}
           onPressIn={onPressIn}
           onPressOut={onPressOut}
           hitSlop={footerHitSlop}

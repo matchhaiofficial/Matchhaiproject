@@ -56,6 +56,27 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         marginTop: SPACING.xs,
     },
+    infoBox: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    infoBoxText: {
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        lineHeight: 20,
+    },
+    infoBoxSmall: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+        marginTop: SPACING.xs,
+    },
     chipRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',

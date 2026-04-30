@@ -28,6 +28,7 @@ import {
   hasVerifiedEmail,
   resendVerificationEmailWithAlert,
 } from "../../../src/utils/emailVerificationGate";
+import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import Logger from "../../../src/utils/logger";
 import { recordCountMetric } from "../../../src/utils/perfInstrumentation";
@@ -54,11 +55,7 @@ type ZoneGamesKeys =
   | "supportsCs16"
   | "supportsValorant"
   | "supportsFc25"
-  | "supportsTekken8"
-  | "supportsFutsal"
-  | "supportsIndoorCricket"
-  | "supportsPadel"
-  | "supportsPickleball";
+  | "supportsTekken8";
 
 const ZONE_GAME_TAGS: Array<{ key: ZoneGamesKeys; label: string }> = [
   { key: "supportsCs2", label: "CS2" },
@@ -66,10 +63,11 @@ const ZONE_GAME_TAGS: Array<{ key: ZoneGamesKeys; label: string }> = [
   { key: "supportsValorant", label: "Valorant" },
   { key: "supportsFc25", label: "FC26" },
   { key: "supportsTekken8", label: "Tekken 8" },
-  { key: "supportsFutsal", label: "Futsal" },
-  { key: "supportsIndoorCricket", label: "Indoor Cricket" },
-  { key: "supportsPadel", label: "Padel" },
-  { key: "supportsPickleball", label: "Pickleball" },
+  // Physical sports are temporarily disabled.
+  // { key: "supportsFutsal", label: "Futsal" },
+  // { key: "supportsIndoorCricket", label: "Indoor Cricket" },
+  // { key: "supportsPadel", label: "Padel" },
+  // { key: "supportsPickleball", label: "Pickleball" },
 ];
 
 const REASON_LABELS: Record<string, string> = {
@@ -178,10 +176,11 @@ const getZoneCapacityLabel = (zone: Zone) => {
   const pcSeats = Number(zone.capacity?.pcSeats || 0);
   const consoleSeats = Number(zone.capacity?.consoleSeats || 0);
   const consolePlatform = (zone.capacity?.consolePlatform || "").toLowerCase();
-  const futsalCourts = sumCountMap(zone.pricing?.futsal);
-  const indoorCricketNets = sumCountMap((zone.pricing as any)?.indoorCricket);
-  const padelCourts = sumCountMap(zone.pricing?.padel);
-  const pickleballCourts = sumCountMap(zone.pricing?.pickleball);
+  // Physical sports are temporarily disabled.
+  // const futsalCourts = sumCountMap(zone.pricing?.futsal);
+  // const indoorCricketNets = sumCountMap((zone.pricing as any)?.indoorCricket);
+  // const padelCourts = sumCountMap(zone.pricing?.padel);
+  // const pickleballCourts = sumCountMap(zone.pricing?.pickleball);
 
   if (pcSeats > 0) chunks.push(`${pcSeats} PCs`);
   if (consoleSeats > 0) {
@@ -193,10 +192,11 @@ const getZoneCapacityLabel = (zone: Zone) => {
           : "Consoles";
     chunks.push(`${consoleSeats} ${label}`);
   }
-  if (futsalCourts > 0) chunks.push(`${futsalCourts} Futsal courts`);
-  if (indoorCricketNets > 0) chunks.push(`${indoorCricketNets} Cricket nets`);
-  if (padelCourts > 0) chunks.push(`${padelCourts} Padel courts`);
-  if (pickleballCourts > 0) chunks.push(`${pickleballCourts} Pickleball courts`);
+  // Physical sports are temporarily disabled.
+  // if (futsalCourts > 0) chunks.push(`${futsalCourts} Futsal courts`);
+  // if (indoorCricketNets > 0) chunks.push(`${indoorCricketNets} Cricket nets`);
+  // if (padelCourts > 0) chunks.push(`${padelCourts} Padel courts`);
+  // if (pickleballCourts > 0) chunks.push(`${pickleballCourts} Pickleball courts`);
 
   return chunks.length > 0 ? chunks.slice(0, 2).join(" | ") : "Capacity on open";
 };
@@ -217,13 +217,14 @@ const collectPositiveRates = (zone: Zone) => {
   pushRate(zone.pricing?.console?.xbox?.price1v1);
   pushRate(zone.pricing?.console?.xbox?.price2v2);
 
-  [zone.pricing?.futsal, (zone.pricing as any)?.indoorCricket, zone.pricing?.padel, zone.pricing?.pickleball]
-    .filter(Boolean)
-    .forEach((bucket: any) => {
-      Object.values(bucket || {}).forEach((entry: any) =>
-        pushRate(entry?.price as number | undefined),
-      );
-    });
+  // Physical sports are temporarily disabled.
+  // [zone.pricing?.futsal, (zone.pricing as any)?.indoorCricket, zone.pricing?.padel, zone.pricing?.pickleball]
+  //   .filter(Boolean)
+  //   .forEach((bucket: any) => {
+  //     Object.values(bucket || {}).forEach((entry: any) =>
+  //       pushRate(entry?.price as number | undefined),
+  //     );
+  //   });
 
   return rates;
 };
@@ -309,10 +310,14 @@ export default function PlayerDashboard() {
   );
 
   const tags = dashboardSummary?.tags || [];
-  const upcomingRooms = (dashboardSummary?.upcomingRooms || []) as Matchroom[];
-  const recommendedRooms = (dashboardSummary?.recommendedRooms || []) as Matchroom[];
-  const myTeams = (dashboardSummary?.myTeams || []) as Team[];
-  const nearbyZones = (dashboardSummary?.nearbyZones || []) as Zone[];
+  const upcomingRooms = ((dashboardSummary?.upcomingRooms || []) as Matchroom[])
+    .filter((room) => !isPhysicalGameDisabled(room.game));
+  const recommendedRooms = ((dashboardSummary?.recommendedRooms || []) as Matchroom[])
+    .filter((room) => !isPhysicalGameDisabled(room.game));
+  const myTeams = ((dashboardSummary?.myTeams || []) as Team[])
+    .filter((team) => !isPhysicalGameDisabled(team.game));
+  const nearbyZones = ((dashboardSummary?.nearbyZones || []) as Zone[])
+    .filter((zone) => zone.type !== "sports" && getZoneGameLabels(zone).length > 0);
   const requestStats = dashboardSummary?.requestStats || { myRequests: 0, myOffers: 0 };
   const friendCount = dashboardSummary?.friendCount || 0;
   const walletStats = dashboardSummary?.walletStats || {
@@ -639,7 +644,7 @@ export default function PlayerDashboard() {
               </View>
             </View>
 
-            <View style={styles.section}>
+            {/* <View style={styles.section}>
               <PlayerSectionHeader
                 title="Latest Alerts"
                 actionLabel="View All"
@@ -661,7 +666,7 @@ export default function PlayerDashboard() {
               ) : (
                 <PlayerEmptyStateCard title="No pending alerts right now." />
               )}
-            </View>
+            </View> */}
 
             <View style={styles.section}>
               <PlayerSectionHeader

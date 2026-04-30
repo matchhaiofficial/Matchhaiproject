@@ -12,14 +12,15 @@ export function normalizeGameKey(input: string | undefined | null): GameKey | nu
     if (normalized === 'valorant' || normalized === 'valo') return 'valorant';
     if (normalized === 'fc25' || normalized === 'fc26') return 'fc26';
     if (normalized === 'tekken8') return 'tekken8';
-    if (normalized === 'futsal') return 'futsal';
-    if (normalized === 'padel') return 'padel';
-    if (normalized === 'pickleball') return 'pickleball';
+    // Physical sports are temporarily disabled.
+    // if (normalized === 'futsal') return 'futsal';
+    // if (normalized === 'padel') return 'padel';
+    // if (normalized === 'pickleball') return 'pickleball';
 
     // Normalizations
-    if (normalized === 'indoorcricket' || normalized === 'indoor_cricket' || normalized === 'cricket') {
-        return 'indoor_cricket';
-    }
+    // if (normalized === 'indoorcricket' || normalized === 'indoor_cricket' || normalized === 'cricket') {
+    //     return 'indoor_cricket';
+    // }
 
     // Fallback checks (e.g. if input is just "Tekken")
     if (normalized.includes('tekken')) return 'tekken8';

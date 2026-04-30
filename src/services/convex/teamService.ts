@@ -28,6 +28,8 @@ export interface Team {
   memberUids: string[];
   memberCount: number;
   maxMembers: number;
+  mainRosterSize?: number;
+  maxSubstitutes?: number;
   visibility?: "public" | "private";
   createdAt: any;
   updatedAt?: any;
@@ -70,6 +72,8 @@ export async function createTeam(
       captainUid: captain._id,
       captainUsername: data.captainUsername || captain.username,
       maxMembers: data.maxMembers || 10,
+      mainRosterSize: data.mainRosterSize,
+      maxSubstitutes: data.maxSubstitutes,
       description: data.description,
     });
 

@@ -110,11 +110,7 @@ export default function RegisterStep3() {
       playsCs16 ||
       playsValorant ||
       playsFc ||
-      playsTekken ||
-      playsFutsal ||
-      playsIndoorCricket ||
-      playsPadel ||
-      playsPickleball;
+      playsTekken;
     if (!step2.selectedAreas.length || !hasActivity) {
       router.replace("/auth/register-step2");
     }
@@ -123,10 +119,6 @@ export default function RegisterStep3() {
     playsCs2,
     playsCs16,
     playsFc,
-    playsFutsal,
-    playsIndoorCricket,
-    playsPadel,
-    playsPickleball,
     playsTekken,
     playsValorant,
     step2.selectedAreas.length,

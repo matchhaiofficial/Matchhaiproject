@@ -4,9 +4,39 @@ import { isUserHiddenFromPublic } from "./userVisibility";
 
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
 const ACTIVE_TEAM_JOIN_REQUEST_TYPES = new Set(["team_join_request", "team.join_request"]);
+const DISABLED_PHYSICAL_GAME_KEYS = new Set(["futsal", "indoor_cricket", "padel", "pickleball"]);
 
 function normalizeGameKey(value?: string | null) {
   return String(value || "").trim().toLowerCase();
+}
+
+function isDisabledPhysicalGame(value?: string | null) {
+  return DISABLED_PHYSICAL_GAME_KEYS.has(normalizeGameKey(value));
+}
+
+function playerHasEnabledGame(player: any) {
+  return !!(
+    player?.playsCs2 ||
+    player?.playsCs16 ||
+    player?.playsValorant ||
+    player?.playsFc ||
+    player?.playsTekken
+  );
+}
+
+function zoneHasEnabledGame(zone: any) {
+  const games = zone?.games;
+  if (Array.isArray(games)) {
+    return games.some((gameKey) => !isDisabledPhysicalGame(String(gameKey || "")));
+  }
+  return !!(
+    games?.supportsCs2 ||
+    games?.supportsCs16 ||
+    games?.supportsValorant ||
+    games?.supportsFc25 ||
+    games?.supportsFc26 ||
+    games?.supportsTekken8
+  );
 }
 
 function getCandidateFetchLimit(limit: number, options: { min: number; max: number; multiplier?: number }) {
@@ -277,6 +307,10 @@ export const listDiscoverPlayers = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit || 150;
+    if (isDisabledPhysicalGame(args.selectedGame)) {
+      return [];
+    }
+
     const playerFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 300 });
     const [players, friendships, pendingRequests] = await Promise.all([
       ctx.db.query("users").withIndex("by_accountType", (q) => q.eq("accountType", "player")).take(playerFetchLimit),
@@ -300,6 +334,7 @@ export const listDiscoverPlayers = query({
     return players
       .filter((player: any) => String(player._id) !== String(args.viewerUserId))
       .filter((player: any) => !isUserHiddenFromPublic(player))
+      .filter(playerHasEnabledGame)
       .filter((player: any) => !search || String(player.username || "").toLowerCase().includes(search))
       .filter((player: any) => args.selectedGame === "all" || playerHasGameEnabled(player, args.selectedGame))
       .filter((player: any) => {
@@ -378,6 +413,10 @@ export const listDiscoverMatchrooms = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit || 150;
+    if (isDisabledPhysicalGame(args.selectedGame)) {
+      return [];
+    }
+
     const roomFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 250 });
     const baseRooms =
       args.selectedGame !== "all"
@@ -390,6 +429,7 @@ export const listDiscoverMatchrooms = query({
     const search = args.searchQuery.trim().toLowerCase();
     return baseRooms
       .filter((room: any) => !isRoomExpired(room))
+      .filter((room: any) => !isDisabledPhysicalGame(room.game))
       .filter((room: any) => {
         if (!search) return true;
         return (
@@ -460,6 +500,10 @@ export const listDiscoverTeams = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit || 50;
+    if (isDisabledPhysicalGame(args.selectedGame)) {
+      return [];
+    }
+
     const teamFetchLimit = getCandidateFetchLimit(limit, { min: 100, max: 200 });
     const search = args.searchQuery.trim().toLowerCase();
     const hydrateCaptainMap = async (teams: any[]) => {
@@ -480,6 +524,7 @@ export const listDiscoverTeams = query({
 
       return teamDocs
         .filter(Boolean)
+        .filter((team: any) => !isDisabledPhysicalGame(team.game))
         .filter((team: any) => args.selectedGame === "all" || normalizeGameKey(team.game) === args.selectedGame)
         .filter((team: any) => {
           if (!search) return true;
@@ -516,6 +561,7 @@ export const listDiscoverTeams = query({
     const captainMap = await hydrateCaptainMap(baseTeams);
 
     return baseTeams
+      .filter((team: any) => !isDisabledPhysicalGame(team.game))
       .filter((team: any) => !Array.isArray(team.memberUids) || !team.memberUids.includes(String(args.viewerUserId)))
       .filter((team: any) => {
         if (!search) return true;
@@ -570,6 +616,10 @@ export const listDiscoverZones = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit || 100;
+    if (isDisabledPhysicalGame(args.selectedGame) || args.selectedVenueType === "courts") {
+      return [];
+    }
+
     const zoneFetchLimit = getCandidateFetchLimit(limit, { min: 40, max: 100, multiplier: 2 });
     const zones = await ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).take(zoneFetchLimit);
     const search = args.searchQuery.trim().toLowerCase();
@@ -577,7 +627,7 @@ export const listDiscoverZones = query({
     const normalizedCity = String(args.userCity || "").trim().toLowerCase();
 
     const matchesGame = (zone: any) => {
-      if (args.selectedGame === "all") return true;
+      if (args.selectedGame === "all") return zoneHasEnabledGame(zone);
       const games = zone.games;
       if (Array.isArray(games)) {
         return games.includes(args.selectedGame) || (args.selectedGame === "fc26" && games.includes("fc25"));
@@ -588,10 +638,11 @@ export const listDiscoverZones = query({
         valorant: "supportsValorant",
         fc26: "supportsFc25",
         tekken8: "supportsTekken8",
-        futsal: "supportsFutsal",
-        indoor_cricket: "supportsIndoorCricket",
-        padel: "supportsPadel",
-        pickleball: "supportsPickleball",
+        // Physical sports are temporarily disabled.
+        // futsal: "supportsFutsal",
+        // indoor_cricket: "supportsIndoorCricket",
+        // padel: "supportsPadel",
+        // pickleball: "supportsPickleball",
       };
       const key = gameFieldMap[args.selectedGame];
       return key ? games?.[key] === true : true;
@@ -599,8 +650,10 @@ export const listDiscoverZones = query({
 
     return zones
       .filter((zone: any) => {
+        if (zone.type === "sports") return false;
         if (args.selectedVenueType === "zones") return zone.type !== "sports";
-        if (args.selectedVenueType === "courts") return zone.type !== "gaming";
+        // Physical sports are temporarily disabled.
+        // if (args.selectedVenueType === "courts") return zone.type !== "gaming";
         return true;
       })
       .filter(matchesGame)

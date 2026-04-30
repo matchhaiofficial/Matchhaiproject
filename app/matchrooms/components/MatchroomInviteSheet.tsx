@@ -18,23 +18,35 @@ import { AppButton } from "../../../src/components/AppPrimitives";
 import { COLORS } from "../../../src/theme";
 
 const localStyles = StyleSheet.create({
+  sheet: {
+    minHeight: 0,
+    maxHeight: "78%",
+  },
   loadingWrap: {
-    padding: 40,
+    paddingVertical: 32,
     alignItems: "center",
   },
   avatarTextAccent: {
     color: COLORS.accent,
   },
   bodyContent: {
+    flexShrink: 1,
+    minHeight: 0,
     paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 16,
+    paddingTop: 20,
+    paddingBottom: 14,
+  },
+  list: {
+    flexGrow: 0,
+    maxHeight: 320,
   },
   listContent: {
     paddingBottom: 8,
   },
   footer: {
     paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 18,
   },
 });
 
@@ -96,9 +108,9 @@ export function MatchroomInviteSheet({
   }, [joining, onInvite, styles]);
 
   return (
-    <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.modalContent}>
+    <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={[styles.modalContent, localStyles.sheet]}>
       <AppModalHeader title="Invite Teammate" onClose={onClose} />
-      <AppModalBody scroll contentContainerStyle={localStyles.bodyContent}>
+      <AppModalBody contentContainerStyle={localStyles.bodyContent}>
         {loading ? (
           <View style={localStyles.loadingWrap}>
             <ActivityIndicator color={COLORS.accent} />
@@ -120,7 +132,9 @@ export function MatchroomInviteSheet({
               </View>
             }
             renderItem={renderItem}
+            style={localStyles.list}
             contentContainerStyle={localStyles.listContent}
+            keyboardShouldPersistTaps="handled"
           />
         )}
       </AppModalBody>

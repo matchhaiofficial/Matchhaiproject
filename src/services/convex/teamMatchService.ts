@@ -8,6 +8,7 @@ import { currentUser, ensureVerifiedEmailAccess } from "./authService";
 import { createMatchroom } from "./matchService";
 import Logger from "../../utils/logger";
 import { parseScheduledDateTime } from "../../utils/matchroomTime";
+import { getTeamMainRosterSize } from "../../constants/teamRosterRules";
 
 // Re-export types from original
 export type TeamMatchChallengeStatus =
@@ -53,6 +54,8 @@ export interface TeamMatchChallenge {
     matchroomId?: string | null;
     bookingRequestId?: string | null;
     adminReviewStatus?: "pending" | "approved" | "rejected" | null;
+    lineupA?: string[];
+    lineupB?: string[];
     createdAt?: any;
     updatedAt?: any;
 }
@@ -164,21 +167,34 @@ const getTeamData = async (teamId: string) => {
     ]);
 
     const usernameByUid: Record<string, string> = {};
+    const members = Array.isArray(team.members) ? team.members : [];
     if (team.members) {
-        team.members.forEach((m: any) => {
+        members.forEach((m: any) => {
             if (m.odxerId) {
                 usernameByUid[m.odxerId] = m.username || "Player";
             }
         });
     }
 
-    return { team, memberUids, usernameByUid };
+    return { team, memberUids, usernameByUid, members };
 };
 
-const isTeamFilled = (team: any, memberUids: string[]) => {
-    const maxMembers = Number(team.maxMembers || 0);
-    if (!Number.isFinite(maxMembers) || maxMembers <= 0) return false;
-    return memberUids.length >= maxMembers;
+const isTeamFilled = (team: any, members: any[]) => {
+    const mainRosterSize = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
+    if (!Number.isFinite(mainRosterSize) || mainRosterSize <= 0) return false;
+    return getDefaultLineup(team, members).length >= mainRosterSize;
+};
+
+const getDefaultLineup = (team: any, members: any[]) => {
+    const mainRosterSize = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
+    const mainMembers = members
+        .filter((member: any, index: number) => (member.rosterRole || (index < mainRosterSize ? "main" : "substitute")) === "main")
+        .slice(0, mainRosterSize)
+        .map((member: any) => String(member.odxerId || member.uid || ""))
+        .filter(Boolean);
+    return mainMembers.length > 0
+        ? mainMembers
+        : dedupe([team.captainUid, ...(team.memberUids || [])]).slice(0, mainRosterSize).map(String);
 };
 
 // Send a team match challenge
@@ -215,7 +231,7 @@ export const sendTeamMatchChallenge = async (input: {
             return { ok: false, message: "Challenge match must be at least 24 hours from now." };
         }
 
-        const [{ team: teamA, memberUids: teamAMemberUids }, { team: teamB, memberUids: teamBMemberUids }] = await Promise.all([
+        const [{ team: teamA, members: teamAMembers }, { team: teamB, members: teamBMembers }] = await Promise.all([
             getTeamData(input.challengerTeamId),
             getTeamData(input.opponentTeamId),
         ]);
@@ -229,7 +245,7 @@ export const sendTeamMatchChallenge = async (input: {
         if (String(teamA.game || "").toLowerCase() !== String(teamB.game || "").toLowerCase()) {
             return { ok: false, message: "Both teams must be from the same game." };
         }
-        if (!isTeamFilled(teamA, teamAMemberUids) || !isTeamFilled(teamB, teamBMemberUids)) {
+        if (!isTeamFilled(teamA, teamAMembers) || !isTeamFilled(teamB, teamBMembers)) {
             return { ok: false, message: "Team challenge can only be sent when both teams are full." };
         }
 
@@ -237,7 +253,8 @@ export const sendTeamMatchChallenge = async (input: {
         const requestedPlayers = Number(input.maxPlayers || 0);
         const computedPlayers = Math.max(2, requestedPlayers > 0 ? requestedPlayers : fallbackPlayers);
         const normalizedGame = String(teamA.game || "").toLowerCase();
-        const maxPlayers = normalizedGame === "cs2" || normalizedGame === "cs16" || normalizedGame === "valorant" ? 10 : computedPlayers;
+        const activePlayers = Number(teamA.mainRosterSize || getTeamMainRosterSize(teamA.game)) + Number(teamB.mainRosterSize || getTeamMainRosterSize(teamB.game));
+        const maxPlayers = normalizedGame === "cs2" || normalizedGame === "cs16" || normalizedGame === "valorant" ? 10 : activePlayers || computedPlayers;
 
         const computedPricePerPlayer = await computeChallengePricePerPlayer({
             zoneId: input.proposedVenueByCaptainA.zoneId,
@@ -271,6 +288,7 @@ export const sendTeamMatchChallenge = async (input: {
             pricePerPlayer: computedPricePerPlayer,
             proposedVenueByCaptainA: input.proposedVenueByCaptainA,
             commonAreas: [],
+            lineupA: getDefaultLineup(teamA, teamAMembers),
         });
 
         return { ok: true, challengeId };
@@ -283,6 +301,7 @@ export const sendTeamMatchChallenge = async (input: {
 // Accept team match challenge
 export const acceptTeamMatchChallenge = async (input: {
     challengeId: string;
+    lineupB?: string[];
 }): Promise<ServerResponse> => {
     try {
         const me = await getCurrentUserInfo();
@@ -298,10 +317,17 @@ export const acceptTeamMatchChallenge = async (input: {
             return { ok: false, message: `Challenge is already ${statusText}.` };
         }
 
+        let lineupB = input.lineupB;
+        if (!lineupB || lineupB.length === 0) {
+            const { team: opponentTeam, members: opponentMembers } = await getTeamData(String(challenge.opponentTeamId));
+            lineupB = getDefaultLineup(opponentTeam, opponentMembers);
+        }
+
         // Accept the challenge
         const response = await convex.mutation(api.teamChallenges.respond, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: true,
+            lineupB,
         });
 
         // Create chat
@@ -459,6 +485,31 @@ export const proposeTeamChallengeVenue = async (input: {
             if (!latest) {
                 return { ok: false, message: "Challenge not found after venue confirmation." };
             }
+            const [teamAData, teamBData] = await Promise.all([
+                getTeamData(String(latest.challengerTeamId)),
+                getTeamData(String(latest.opponentTeamId)),
+            ]);
+            const lineupA = Array.isArray(latest.lineupA) && latest.lineupA.length > 0
+                ? latest.lineupA.map(String)
+                : getDefaultLineup(teamAData.team, teamAData.members);
+            const lineupB = Array.isArray(latest.lineupB) && latest.lineupB.length > 0
+                ? latest.lineupB.map(String)
+                : getDefaultLineup(teamBData.team, teamBData.members);
+            const activePlayerUids = dedupe([...lineupA, ...lineupB]);
+            const activePlayers = [
+                ...lineupA.map((uid) => ({
+                    uid,
+                    username: teamAData.usernameByUid[uid] || (uid === String(latest.captainAUid) ? latest.captainAName : "Team A Player") || "Team A Player",
+                    joinedAt: Date.now(),
+                    role: "Team A",
+                })),
+                ...lineupB.map((uid) => ({
+                    uid,
+                    username: teamBData.usernameByUid[uid] || (uid === String(latest.captainBUid) ? latest.captainBName : "Team B Player") || "Team B Player",
+                    joinedAt: Date.now(),
+                    role: "Team B",
+                })),
+            ];
 
             const matchroom = await createMatchroom({
                 hostUid: String(latest.captainAUid || me.convexId),
@@ -467,23 +518,10 @@ export const proposeTeamChallengeVenue = async (input: {
                 title: toChallengeTitle(latest.challengerTeamName || "Team A", latest.opponentTeamName || "Team B"),
                 description: latest.message || "Team challenge matchroom",
                 status: "open",
-                maxPlayers: Number(latest.maxPlayers || 10),
-                currentPlayers: 2,
-                players: [
-                    {
-                        uid: String(latest.captainAUid),
-                        username: latest.captainAName || "Captain A",
-                        joinedAt: Date.now(),
-                        role: "Captain A",
-                    },
-                    {
-                        uid: String(latest.captainBUid),
-                        username: latest.captainBName || "Captain B",
-                        joinedAt: Date.now(),
-                        role: "Captain B",
-                    },
-                ],
-                playerUids: [String(latest.captainAUid), String(latest.captainBUid)],
+                maxPlayers: Number(latest.maxPlayers || activePlayers.length || 10),
+                currentPlayers: activePlayers.length,
+                players: activePlayers,
+                playerUids: activePlayerUids,
                 locationMode: "zone",
                 zoneId: result.confirmedVenue.zoneId,
                 location: result.confirmedVenue.venueName,

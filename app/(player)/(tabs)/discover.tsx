@@ -45,6 +45,7 @@ const SEGMENT_ITEMS: { key: DiscoverSegment; label: string }[] = [
   { key: "zones", label: "Venues" },
 ];
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+const CUSTOM_TAB_BAR_MIN_HEIGHT = 72;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -121,7 +122,16 @@ export default function DiscoverScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const bottomPadding = HIDE_PLAYER_TAB_BAR ? insets.bottom + 16 : 16;
+  const tabBarClearance = Math.max(
+    tabBarHeight,
+    insets.bottom + CUSTOM_TAB_BAR_MIN_HEIGHT,
+  );
+  const bottomPadding = HIDE_PLAYER_TAB_BAR
+    ? insets.bottom + 16
+    : tabBarClearance + 16;
+  const fabBottom = HIDE_PLAYER_TAB_BAR
+    ? insets.bottom + 16
+    : tabBarClearance + 16;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -494,12 +504,7 @@ export default function DiscoverScreen() {
         <View
           style={[
             styles.fabWrapper,
-            {
-              bottom: Math.max(
-                insets.bottom + 16,
-                HIDE_PLAYER_TAB_BAR ? 0 : tabBarHeight - 50,
-              ),
-            },
+            { bottom: fabBottom },
           ]}
         >
           <Fab

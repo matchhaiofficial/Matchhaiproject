@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { GameSkillScore, SkillTier } from "../../../src/services/skillRatingService";
 import {
   isRoomExpired,
@@ -21,14 +21,14 @@ type Params = {
 
 type SkillBadgeProps =
   | {
-      tier: SkillTier;
-      rating?: number;
-      showRating: true;
-    }
+    tier: SkillTier;
+    rating?: number;
+    showRating: true;
+  }
   | {
-      tier: SkillTier;
-      showRating: false;
-    }
+    tier: SkillTier;
+    showRating: false;
+  }
   | null;
 
 export function useMatchroomDetailViewModel({
@@ -76,23 +76,29 @@ export function useMatchroomDetailViewModel({
       ? identityMatches(captainUidBResolved, currentIdentityValues)
       : isHost);
 
-  const getSkillBadgeProps = (uid?: string, fallbackTierRaw?: unknown): SkillBadgeProps => {
-    if (uid && playerRatings[uid]) {
-      return {
-        tier: playerRatings[uid]!.tier,
-        rating: playerRatings[uid]!.rating,
-        showRating: true,
-      };
-    }
-    const walkInTier = normalizeWalkInSkillTier(fallbackTierRaw);
-    if (walkInTier) {
-      return {
-        tier: walkInTier,
-        showRating: false,
-      };
-    }
-    return null;
-  };
+  const getSkillBadgeProps = useCallback(
+    (uid?: string, fallbackTierRaw?: unknown): SkillBadgeProps => {
+      if (uid && playerRatings[uid]) {
+        return {
+          tier: playerRatings[uid]!.tier,
+          rating: playerRatings[uid]!.rating,
+          showRating: true,
+        };
+      }
+
+      const walkInTier = normalizeWalkInSkillTier(fallbackTierRaw);
+
+      if (walkInTier) {
+        return {
+          tier: walkInTier,
+          showRating: false,
+        };
+      }
+
+      return null;
+    },
+    [playerRatings]
+  );
 
   return {
     isHost,

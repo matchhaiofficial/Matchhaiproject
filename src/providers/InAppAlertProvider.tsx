@@ -155,7 +155,7 @@ export default function InAppAlertProvider({ children }: { children: React.React
                   : undefined
               }
             />
-            <AppModalBody contentContainerStyle={{ paddingBottom: SPACING.lg }}>
+            <AppModalBody scroll contentContainerStyle={{ paddingBottom: SPACING.lg }}>
               {activeAlert.message ? (
                 <Text
                   style={{

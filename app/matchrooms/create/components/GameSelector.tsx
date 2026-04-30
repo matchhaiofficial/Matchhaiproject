@@ -19,18 +19,17 @@ interface GameSelectorProps {
     allowedGameKeys?: string[];
 }
 
-const GAME_ICONS: Record<string, React.ComponentProps<typeof AppIcon>["name"]> = {
-    cs2: "sports-esports",
-    cs16: "sports-esports",
-    valorant: "sports-esports",
-    fc26: "sports-soccer",
-    tekken8: "sports-kabaddi",
-    futsal: "sports-soccer",
-    indoor_cricket: "sports-cricket",
-    padel: "sports-tennis",
-    pickleball: "sports-tennis",
+const GAME_ICONS: Record<string, string> = {
+    cs2: "🎯",
+    cs16: "💣",
+    valorant: "⚡",
+    fc26: "⚽",
+    tekken8: "🥊",
+    futsal: "🏟️",
+    indoor_cricket: "🏏",
+    padel: "🎾",
+    pickleball: "🏓",
 };
-
 // Check if user has added this game to their profile
 const isGameActive = (gameKey: string, profile: any): boolean => {
     return isProfileGameEnabled(profile, gameKey);
@@ -57,10 +56,13 @@ export default function GameSelector({
         : byProfile;
 
     if (activeGames.length === 0) {
-        const isVenueFiltered = allowAllGames && allowSet !== null;
+        const isVenueFiltered = allowSet !== null;
+        const emptyVenueCopy = allowAllGames
+            ? 'This venue branch has no supported games configured yet.'
+            : 'This venue does not support any games currently active in your profile.';
         return (
             <Animated.View style={[styles.section, animatedStyle]}>
-                <Text style={styles.sectionLabel}>Select Game / Sport</Text>
+                <Text style={styles.sectionLabel}>Select Game</Text>
                 <View style={styles.emptyContainer}>
                     <AppIcon name="sports-esports" size={56} color={COLORS.muted} />
                     <Text style={styles.emptyTitle}>
@@ -68,7 +70,7 @@ export default function GameSelector({
                     </Text>
                     <Text style={styles.emptySubtitle}>
                         {isVenueFiltered
-                            ? 'This venue branch has no supported games configured yet.'
+                            ? emptyVenueCopy
                             : 'Add games to your profile to start creating matchrooms and playing with others'}
                     </Text>
                     {!isVenueFiltered ? (
@@ -88,7 +90,7 @@ export default function GameSelector({
 
     return (
         <Animated.View style={[styles.section, animatedStyle]}>
-            <Text style={styles.sectionLabel}>Select Game / Sport</Text>
+            <Text style={styles.sectionLabel}>Select Game</Text>
             <View style={styles.gameGrid}>
                 {activeGames.map((game) => (
                     <MotionPressable
@@ -99,12 +101,12 @@ export default function GameSelector({
                         ]}
                         onPress={() => onSelectGame(game.key)}
                     >
-                        <AppIcon
-                            name={GAME_ICONS[game.key] || "sports-esports"}
-                            size={32}
-                            color={selectedGame === game.key ? COLORS.accent : COLORS.muted}
-                            style={styles.gameIcon}
-                        />
+                        <Text style={[
+                            styles.gameIcon,
+                            { fontSize: 32, textAlign: "center" }
+                        ]}>
+                            {GAME_ICONS[game.key] || "🎮"}
+                        </Text>
                         <Text
                             style={[
                                 styles.gameName,

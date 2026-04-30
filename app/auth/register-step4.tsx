@@ -48,11 +48,7 @@ export default function RegisterStep4() {
       (step2 as any).playsCs16 ||
       (step2 as any).playsValorant ||
       step2.playsFc ||
-      step2.playsTekken ||
-      (step2 as any).playsFutsal ||
-      (step2 as any).playsIndoorCricket ||
-      (step2 as any).playsPadel ||
-      (step2 as any).playsPickleball;
+      step2.playsTekken;
     if (!step2.selectedAreas.length || !hasActivity) {
       router.replace("/auth/register-step2");
     }
@@ -65,10 +61,11 @@ export default function RegisterStep4() {
     if ((step2 as any).playsValorant) items.push("Valorant");
     if (step2.playsFc) items.push("FC26");
     if (step2.playsTekken) items.push("Tekken 8");
-    if ((step2 as any).playsFutsal) items.push("Futsal");
-    if ((step2 as any).playsIndoorCricket) items.push("Indoor Cricket");
-    if ((step2 as any).playsPadel) items.push("Padel");
-    if ((step2 as any).playsPickleball) items.push("Pickleball");
+    // Physical sports are temporarily disabled.
+    // if ((step2 as any).playsFutsal) items.push("Futsal");
+    // if ((step2 as any).playsIndoorCricket) items.push("Indoor Cricket");
+    // if ((step2 as any).playsPadel) items.push("Padel");
+    // if ((step2 as any).playsPickleball) items.push("Pickleball");
 
     const details: string[] = [];
     const futsalPositions = (((step2 as any).futsalPositions ?? []) as string[]) || [];
@@ -80,18 +77,11 @@ export default function RegisterStep4() {
     const padelRole = ((step2 as any).padelRole as string) ?? null;
     const pickleballRole = ((step2 as any).pickleballRole as string) ?? null;
 
-    if (futsalPositions.length) details.push(`Futsal: ${futsalPositions.join(" / ")}`);
-    if (indoorCricketRole) {
-      let roleLabel = indoorCricketRole;
-      if (indoorCricketRole === "Bowler" && indoorCricketBowlingStyle) {
-        roleLabel += ` (${indoorCricketBowlingStyle})`;
-      } else if (indoorCricketRole === "Batsman" && indoorCricketBattingStyle) {
-        roleLabel += ` (${indoorCricketBattingStyle})`;
-      }
-      details.push(`Indoor Cricket: ${roleLabel}`);
-    }
-    if (padelRole) details.push(`Padel: ${padelRole}`);
-    if (pickleballRole) details.push(`Pickleball: ${pickleballRole}`);
+    // Physical sports are temporarily disabled.
+    // if (futsalPositions.length) details.push(`Futsal: ${futsalPositions.join(" / ")}`);
+    // if (indoorCricketRole) { ... }
+    // if (padelRole) details.push(`Padel: ${padelRole}`);
+    // if (pickleballRole) details.push(`Pickleball: ${pickleballRole}`);
 
     return {
       selectedActivities: items,
@@ -192,18 +182,16 @@ export default function RegisterStep4() {
           fcFormation: step2.fcFormation,
           playsTekken: step2.playsTekken,
           tekkenFavorites: step2.tekkenFavorites,
-          playsFutsal: (step2 as any).playsFutsal ?? false,
-          playsIndoorCricket: (step2 as any).playsIndoorCricket ?? false,
-          playsPadel: (step2 as any).playsPadel ?? false,
-          playsPickleball: (step2 as any).playsPickleball ?? false,
-          futsalPositions: (((step2 as any).futsalPositions ?? []) as string[]) || [],
-          indoorCricketRole: ((step2 as any).indoorCricketRole as string) ?? null,
-          indoorCricketBowlingStyle:
-            ((step2 as any).indoorCricketBowlingStyle as string) ?? null,
-          indoorCricketBattingStyle:
-            ((step2 as any).indoorCricketBattingStyle as string) ?? null,
-          padelRole: ((step2 as any).padelRole as string) ?? null,
-          pickleballRole: ((step2 as any).pickleballRole as string) ?? null,
+          playsFutsal: false,
+          playsIndoorCricket: false,
+          playsPadel: false,
+          playsPickleball: false,
+          futsalPositions: [],
+          indoorCricketRole: null,
+          indoorCricketBowlingStyle: null,
+          indoorCricketBattingStyle: null,
+          padelRole: null,
+          pickleballRole: null,
         } as any);
         if (!saveStep2Result.ok) {
           throw { step: 2, message: saveStep2Result.message };

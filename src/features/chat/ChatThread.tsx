@@ -479,12 +479,8 @@ export default function ChatThread({
     const todayLabel = useMemo(() => new Date().toDateString(), []);
 
     const listContentContainerStyle = useMemo(() => {
-        if (!showComposer) return styles.listContent;
-        const paddingBottom = Platform.OS === "android"
-            ? Math.max(insets.bottom, 8)
-            : Math.max(insets.bottom, 12);
-        return [styles.listContent, { paddingBottom }];
-    }, [insets.bottom, showComposer]);
+        return [styles.listContent, { paddingBottom: 8 }];
+    }, []);
 
     const trimmedInput = input.trim();
     const trailingAction = recording
@@ -580,205 +576,347 @@ export default function ChatThread({
         todayLabel,
     ]);
 
+    // Bottom padding for the composer: respect gesture-nav inset, but don't add
+    // artificial extra space on phones with hardware buttons (insets.bottom === 0).
+    const composerBottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 4 : 0) + 8;
+
     return (
         <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
-          <GestureHandlerRootView style={styles.flex1}>
-            <View style={styles.shell}>
-                <View style={styles.shellSurface}>
-                    <View style={styles.header}>
-                        <Pressable onPress={onBack} style={styles.headerAction} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
-                            <AppIcon name="arrow-back" size={20} color={COLORS.text} />
-                        </Pressable>
-                        <View style={styles.headerAvatarWrap}>
-                            <HeaderAvatarStack others={otherParticipants} />
-                        </View>
-                        <View style={styles.flex1}>
-                            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-                            {typingNames.length > 0 ? (
-                                <Text style={styles.headerTypingSubtitle} numberOfLines={1}>
-                                    {typingNames.length === 1
-                                        ? `${typingNames[0]} is typing\u2026`
-                                        : `${typingNames.slice(0, 2).join(", ")} typing\u2026`}
-                                </Text>
-                            ) : presenceLabel ? (
-                                <Text style={styles.headerPresenceSubtitle} numberOfLines={1}>{presenceLabel}</Text>
-                            ) : subtitle ? (
-                                <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text>
-                            ) : null}
-                        </View>
-                    </View>
-
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === "ios" ? "padding" : undefined}
-                        style={styles.keyboardShell}
-                        keyboardVerticalOffset={Platform.OS === "ios" ? 84 : 0}
-                    >
-                        <View style={styles.threadContent}>
-                            {pinnedMessages.length > 0 ? (
-                                <ChatPinnedBanner
-                                    pinnedMessages={pinnedMessages}
-                                    onUnpin={onUnpinMessage}
-                                    canUnpin={canUnpin}
-                                />
-                            ) : null}
-                            {loading ? (
-                                <View style={styles.emptyState}>
-                                    <ActivityIndicator color={COLORS.accent} />
-                                </View>
-                            ) : (
-                                <FlatList<RenderableChatMessage>
-                                    ref={listRef}
-                                    style={styles.messageList}
-                                    data={groupedMessages}
-                                    keyExtractor={keyExtractor}
-                                    contentContainerStyle={listContentContainerStyle}
-                                    keyboardShouldPersistTaps="always"
-                                    keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-                                    onContentSizeChange={handleContentSizeChange}
-                                    onScroll={handleScroll}
-                                    scrollEventThrottle={16}
-                                    renderItem={renderItem}
-                                    ListHeaderComponent={
-                                        contextCard ? <View style={styles.contextCard}>{contextCard}</View> : undefined
-                                    }
-                                    ListEmptyComponent={
-                                        <View style={styles.emptyState}>
-                                            <AppIcon name="forum" size={38} color="#94a3b8" />
-                                            <Text style={styles.emptyTitle}>{emptyTitle}</Text>
-                                            <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
-                                        </View>
-                                    }
-                                />
-                            )}
-                        </View>
-                    </KeyboardAvoidingView>
-                </View>
-                {showComposer ? (
-                    <View
-                        style={[
-                            styles.composerShell,
-                            {
-                                paddingBottom: Platform.OS === "android"
-                                    ? Math.max(insets.bottom, 24) + 14
-                                    : Math.max(insets.bottom, 26) + 10,
-                            },
-                        ]}
-                    >
-                        <View style={styles.composerContent}>
-                            {editingMessage ? (
-                                <View style={styles.composerEditBanner}>
-                                    <AppIcon name="edit" size={14} color={COLORS.accent} />
-                                    <View style={styles.flex1}>
-                                        <Text style={styles.composerReplyTitle}>Editing message</Text>
-                                        <Text style={styles.composerReplyText} numberOfLines={1}>
-                                            {editingMessage.text}
-                                        </Text>
-                                    </View>
-                                    <Pressable onPress={onClearEdit} style={styles.headerAction} hitSlop={8}>
-                                        <AppIcon name="close" size={16} color={COLORS.textSecondary} />
-                                    </Pressable>
-                                </View>
-                            ) : replyTo ? (
-                                <View style={styles.composerReply}>
-                                    <View style={styles.flex1}>
-                                        <Text style={styles.composerReplyTitle}>Replying to {replyTo.senderName}</Text>
-                                        <Text style={styles.composerReplyText} numberOfLines={1}>
-                                            {replyTo.type === "voice" ? "Voice message" : replyTo.text}
-                                        </Text>
-                                    </View>
-                                    <Pressable onPress={onClearReply} style={styles.headerAction} hitSlop={8}>
-                                        <AppIcon name="close" size={16} color={COLORS.textSecondary} />
-                                    </Pressable>
-                                </View>
-                            ) : null}
-                            {recording ? (
-                                <View style={styles.recordingPill}>
-                                    <Text style={styles.recordingText}>Recording... {recordingDurationLabel}</Text>
-                                </View>
-                            ) : null}
-                            <View style={styles.composerRow}>
-                                {(onPickImage || onPickFile) ? (
-                                    <Pressable
-                                        onPress={() => setAttachmentMenuOpen(true)}
-                                        style={styles.composerIconAction}
-                                        accessibilityRole="button"
-                                        accessibilityLabel="Attach file"
-                                    >
-                                        <AppIcon name="add" size={22} color={COLORS.accent} />
-                                    </Pressable>
+            <GestureHandlerRootView style={styles.flex1}>
+                <View style={styles.shell}>
+                    <View style={styles.shellSurface}>
+                        {/* ── Header ── */}
+                        <View style={styles.header}>
+                            <Pressable onPress={onBack} style={styles.headerAction} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
+                                <AppIcon name="arrow-back" size={20} color={COLORS.text} />
+                            </Pressable>
+                            <View style={styles.headerAvatarWrap}>
+                                <HeaderAvatarStack others={otherParticipants} />
+                            </View>
+                            <View style={styles.flex1}>
+                                <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+                                {typingNames.length > 0 ? (
+                                    <Text style={styles.headerTypingSubtitle} numberOfLines={1}>
+                                        {typingNames.length === 1
+                                            ? `${typingNames[0]} is typing\u2026`
+                                            : `${typingNames.slice(0, 2).join(", ")} typing\u2026`}
+                                    </Text>
+                                ) : presenceLabel ? (
+                                    <Text style={styles.headerPresenceSubtitle} numberOfLines={1}>{presenceLabel}</Text>
+                                ) : subtitle ? (
+                                    <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text>
                                 ) : null}
-                                <View style={styles.composerInputWrap}>
-                                    <TextInput
-                                        value={input}
-                                        onChangeText={onInputChange}
-                                        style={styles.composerInput}
-                                        placeholder="Type message..."
-                                        placeholderTextColor={COLORS.textSecondary}
-                                        multiline
-                                    />
-                                    <Pressable
-                                        onPress={() => setEmojiOpen(true)}
-                                        style={styles.composerEmojiAction}
-                                        accessibilityRole="button"
-                                        accessibilityLabel="Emoji picker"
-                                    >
-                                        <AppIcon name="mood" size={22} color={COLORS.textSecondary} />
-                                    </Pressable>
-                                </View>
-                                <Pressable
-                                    onPress={handleTrailingActionPress}
-                                    disabled={trailingActionDisabled}
-                                    style={({ pressed }) => [
-                                        styles.composerSendAction,
-                                        trailingAction === "send" && styles.composerSendActionActive,
-                                        trailingAction === "mic" && recording && styles.recordActive,
-                                        trailingActionDisabled && styles.composerSendActionDisabled,
-                                        pressed && { opacity: 0.88 },
-                                    ]}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={trailingAction === "send" ? "Send message" : recording ? "Stop recording" : "Record voice message"}
-                                >
-                                    {sending ? (
-                                        <ActivityIndicator color={trailingAction === "send" ? "#fff" : COLORS.accent} />
-                                    ) : (
-                                        <AppIcon
-                                            name={trailingAction === "send" ? "send" : "keyboard-voice"}
-                                            size={20}
-                                            color={
-                                                trailingAction === "send"
-                                                    ? "#fff"
-                                                    : recording
-                                                        ? COLORS.error
-                                                        : COLORS.accent
-                                            }
-                                        />
-                                    )}
-                                </Pressable>
                             </View>
                         </View>
+
+                        {/*
+                         * The keyboard should affect only the composer area, not the whole
+                         * screen. The message list stays in place and the composer is the
+                         * only section that avoids the keyboard.
+                         */}
+                        <KeyboardAvoidingView
+                            style={styles.keyboardShell}
+                            behavior={Platform.OS === "ios" ? "padding" : "height"}
+                            keyboardVerticalOffset={Platform.OS === "ios" ? 84 : 0}
+                        >
+                            <View style={styles.threadContent}>
+                                {pinnedMessages.length > 0 ? (
+                                    <ChatPinnedBanner
+                                        pinnedMessages={pinnedMessages}
+                                        onUnpin={onUnpinMessage}
+                                        canUnpin={canUnpin}
+                                    />
+                                ) : null}
+                                {loading ? (
+                                    <View style={styles.emptyState}>
+                                        <ActivityIndicator color={COLORS.accent} />
+                                    </View>
+                                ) : (
+                                    <FlatList<RenderableChatMessage>
+                                        ref={listRef}
+                                        style={styles.messageList}
+                                        data={groupedMessages}
+                                        keyExtractor={keyExtractor}
+                                        contentContainerStyle={listContentContainerStyle}
+                                        keyboardShouldPersistTaps="always"
+                                        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                                        onContentSizeChange={handleContentSizeChange}
+                                        onScroll={handleScroll}
+                                        scrollEventThrottle={16}
+                                        renderItem={renderItem}
+                                        ListHeaderComponent={
+                                            contextCard ? <View style={styles.contextCard}>{contextCard}</View> : undefined
+                                        }
+                                        ListEmptyComponent={
+                                            <View style={styles.emptyState}>
+                                                <AppIcon name="forum" size={38} color="#94a3b8" />
+                                                <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+                                                <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
+                                            </View>
+                                        }
+                                    />
+                                )}
+                            </View>
+
+                            {/* Composer isolated so it does not push the entire screen upward */}
+                            {/* {showComposer ? (
+                                Platform.OS === "ios" ? (
+                                    <KeyboardAvoidingView
+                                        behavior="padding"
+                                        keyboardVerticalOffset={84}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.composerShell,
+                                                { paddingBottom: composerBottomPadding },
+                                            ]}
+                                        >
+                                            <View style={styles.composerContent}>
+                                                {editingMessage ? (
+                                                    <View style={styles.composerEditBanner}>
+                                                        <AppIcon name="edit" size={14} color={COLORS.accent} />
+                                                        <View style={styles.flex1}>
+                                                            <Text style={styles.composerReplyTitle}>Editing message</Text>
+                                                            <Text style={styles.composerReplyText} numberOfLines={1}>
+                                                                {editingMessage.text}
+                                                            </Text>
+                                                        </View>
+                                                        <Pressable onPress={onClearEdit} style={styles.headerAction} hitSlop={8}>
+                                                            <AppIcon name="close" size={16} color={COLORS.textSecondary} />
+                                                        </Pressable>
+                                                    </View>
+                                                ) : replyTo ? (
+                                                    <View style={styles.composerReply}>
+                                                        <View style={styles.flex1}>
+                                                            <Text style={styles.composerReplyTitle}>Replying to {replyTo.senderName}</Text>
+                                                            <Text style={styles.composerReplyText} numberOfLines={1}>
+                                                                {replyTo.type === "voice" ? "Voice message" : replyTo.text}
+                                                            </Text>
+                                                        </View>
+                                                        <Pressable onPress={onClearReply} style={styles.headerAction} hitSlop={8}>
+                                                            <AppIcon name="close" size={16} color={COLORS.textSecondary} />
+                                                        </Pressable>
+                                                    </View>
+                                                ) : null}
+
+                                                {recording ? (
+                                                    <View style={styles.recordingPill}>
+                                                        <Text style={styles.recordingText}>
+                                                            Recording... {recordingDurationLabel}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
+
+                                                <View style={styles.composerRow}>
+                                                    {(onPickImage || onPickFile) ? (
+                                                        <Pressable
+                                                            onPress={() => setAttachmentMenuOpen(true)}
+                                                            style={styles.composerIconAction}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel="Attach file"
+                                                        >
+                                                            <AppIcon name="add" size={22} color={COLORS.accent} />
+                                                        </Pressable>
+                                                    ) : null}
+
+                                                    <View style={styles.composerInputWrap}>
+                                                        <TextInput
+                                                            value={input}
+                                                            onChangeText={onInputChange}
+                                                            style={styles.composerInput}
+                                                            placeholder="Type message..."
+                                                            placeholderTextColor={COLORS.textSecondary}
+                                                            multiline
+                                                        />
+                                                        <Pressable
+                                                            onPress={() => setEmojiOpen(true)}
+                                                            style={styles.composerEmojiAction}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel="Emoji picker"
+                                                        >
+                                                            <AppIcon name="mood" size={22} color={COLORS.textSecondary} />
+                                                        </Pressable>
+                                                    </View>
+
+                                                    <Pressable
+                                                        onPress={handleTrailingActionPress}
+                                                        disabled={trailingActionDisabled}
+                                                        style={({ pressed }) => [
+                                                            styles.composerSendAction,
+                                                            trailingAction === "send" && styles.composerSendActionActive,
+                                                            trailingAction === "mic" && recording && styles.recordActive,
+                                                            trailingActionDisabled && styles.composerSendActionDisabled,
+                                                            pressed && { opacity: 0.88 },
+                                                        ]}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={
+                                                            trailingAction === "send"
+                                                                ? "Send message"
+                                                                : recording
+                                                                    ? "Stop recording"
+                                                                    : "Record voice message"
+                                                        }
+                                                    >
+                                                        {sending ? (
+                                                            <ActivityIndicator
+                                                                color={trailingAction === "send" ? "#fff" : COLORS.accent}
+                                                            />
+                                                        ) : (
+                                                            <AppIcon
+                                                                name={trailingAction === "send" ? "send" : "keyboard-voice"}
+                                                                size={20}
+                                                                color={
+                                                                    trailingAction === "send"
+                                                                        ? "#fff"
+                                                                        : recording
+                                                                            ? COLORS.error
+                                                                            : COLORS.accent
+                                                                }
+                                                            />
+                                                        )}
+                                                    </Pressable>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </KeyboardAvoidingView>
+                                ) : 
+                                ( */}
+                                    <View
+                                        style={[
+                                            styles.composerShell,
+                                            { paddingBottom: composerBottomPadding },
+                                        ]}
+                                    >
+                                        <View style={styles.composerContent}>
+                                            {editingMessage ? (
+                                                <View style={styles.composerEditBanner}>
+                                                    <AppIcon name="edit" size={14} color={COLORS.accent} />
+                                                    <View style={styles.flex1}>
+                                                        <Text style={styles.composerReplyTitle}>Editing message</Text>
+                                                        <Text style={styles.composerReplyText} numberOfLines={1}>
+                                                            {editingMessage.text}
+                                                        </Text>
+                                                    </View>
+                                                    <Pressable onPress={onClearEdit} style={styles.headerAction} hitSlop={8}>
+                                                        <AppIcon name="close" size={16} color={COLORS.textSecondary} />
+                                                    </Pressable>
+                                                </View>
+                                            ) : replyTo ? (
+                                                <View style={styles.composerReply}>
+                                                    <View style={styles.flex1}>
+                                                        <Text style={styles.composerReplyTitle}>Replying to {replyTo.senderName}</Text>
+                                                        <Text style={styles.composerReplyText} numberOfLines={1}>
+                                                            {replyTo.type === "voice" ? "Voice message" : replyTo.text}
+                                                        </Text>
+                                                    </View>
+                                                    <Pressable onPress={onClearReply} style={styles.headerAction} hitSlop={8}>
+                                                        <AppIcon name="close" size={16} color={COLORS.textSecondary} />
+                                                    </Pressable>
+                                                </View>
+                                            ) : null}
+
+                                            {recording ? (
+                                                <View style={styles.recordingPill}>
+                                                    <Text style={styles.recordingText}>
+                                                        Recording... {recordingDurationLabel}
+                                                    </Text>
+                                                </View>
+                                            ) : null}
+
+                                            <View style={styles.composerRow}>
+                                                {(onPickImage || onPickFile) ? (
+                                                    <Pressable
+                                                        onPress={() => setAttachmentMenuOpen(true)}
+                                                        style={styles.composerIconAction}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel="Attach file"
+                                                    >
+                                                        <AppIcon name="add" size={22} color={COLORS.accent} />
+                                                    </Pressable>
+                                                ) : null}
+
+                                                <View style={styles.composerInputWrap}>
+                                                    <TextInput
+                                                        value={input}
+                                                        onChangeText={onInputChange}
+                                                        style={styles.composerInput}
+                                                        placeholder="Type message..."
+                                                        placeholderTextColor={COLORS.textSecondary}
+                                                        multiline
+                                                    />
+                                                    <Pressable
+                                                        onPress={() => setEmojiOpen(true)}
+                                                        style={styles.composerEmojiAction}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel="Emoji picker"
+                                                    >
+                                                        <AppIcon name="mood" size={22} color={COLORS.textSecondary} />
+                                                    </Pressable>
+                                                </View>
+
+                                                <Pressable
+                                                    onPress={handleTrailingActionPress}
+                                                    disabled={trailingActionDisabled}
+                                                    style={({ pressed }) => [
+                                                        styles.composerSendAction,
+                                                        trailingAction === "send" && styles.composerSendActionActive,
+                                                        trailingAction === "mic" && recording && styles.recordActive,
+                                                        trailingActionDisabled && styles.composerSendActionDisabled,
+                                                        pressed && { opacity: 0.88 },
+                                                    ]}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={
+                                                        trailingAction === "send"
+                                                            ? "Send message"
+                                                            : recording
+                                                                ? "Stop recording"
+                                                                : "Record voice message"
+                                                    }
+                                                >
+                                                    {sending ? (
+                                                        <ActivityIndicator
+                                                            color={trailingAction === "send" ? "#fff" : COLORS.accent}
+                                                        />
+                                                    ) : (
+                                                        <AppIcon
+                                                            name={trailingAction === "send" ? "send" : "keyboard-voice"}
+                                                            size={20}
+                                                            color={
+                                                                trailingAction === "send"
+                                                                    ? "#fff"
+                                                                    : recording
+                                                                        ? COLORS.error
+                                                                        : COLORS.accent
+                                                            }
+                                                        />
+                                                    )}
+                                                </Pressable>
+                                            </View>
+                                        </View>
+                                    </View>
+                        </KeyboardAvoidingView>
                     </View>
-                ) : null}
-            </View>
-            <ImagePreviewModal
-                uri={previewImageUri}
-                visible={!!previewImageUri}
-                onClose={() => setPreviewImageUri(null)}
-            />
-            {(onPickImage || onPickFile) ? (
-                <ChatAttachmentMenu
-                    visible={attachmentMenuOpen}
-                    onClose={() => setAttachmentMenuOpen(false)}
-                    onPickImage={onPickImage || (() => undefined)}
-                    onPickFile={onPickFile || (() => undefined)}
+                </View>
+                <ImagePreviewModal
+                    uri={previewImageUri}
+                    visible={!!previewImageUri}
+                    onClose={() => setPreviewImageUri(null)}
                 />
-            ) : null}
-            <EmojiPicker
-                open={emojiOpen}
-                onClose={() => setEmojiOpen(false)}
-                onEmojiSelected={handleEmojiSelected}
-                allowMultipleSelections
-            />
-          </GestureHandlerRootView>
+                {(onPickImage || onPickFile) ? (
+                    <ChatAttachmentMenu
+                        visible={attachmentMenuOpen}
+                        onClose={() => setAttachmentMenuOpen(false)}
+                        onPickImage={onPickImage || (() => undefined)}
+                        onPickFile={onPickFile || (() => undefined)}
+                    />
+                ) : null}
+                <EmojiPicker
+                    open={emojiOpen}
+                    onClose={() => setEmojiOpen(false)}
+                    onEmojiSelected={handleEmojiSelected}
+                    allowMultipleSelections
+                />
+            </GestureHandlerRootView>
         </Screen>
     );
 }
