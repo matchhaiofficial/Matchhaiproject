@@ -89,6 +89,8 @@ export default StyleSheet.create({
   },
   amountInput: {
     flex: 1,
+    height: 48,
+    minHeight: 48,
     backgroundColor: COLORS.overlayLight,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
@@ -97,11 +99,14 @@ export default StyleSheet.create({
     fontFamily: FONTS.body,
     fontSize: 14,
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingVertical: 0,
     marginRight: SPACING.sm,
+    textAlignVertical: "center",
   },
   addFundsBtn: {
-    minWidth: 132,
+    height: 48,
+    minHeight: 48,
+    minWidth: 92,
   },
   addFundsBtnDisabled: {
     opacity: 0.6,
@@ -135,16 +140,15 @@ export default StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  statsRow: {
+  statsGrid: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: SPACING.md,
+    flexWrap: "wrap",
+    gap: SPACING.sm,
   },
   statCard: {
-    flex: 1,
-  },
-  statCardLast: {
-    marginRight: 0,
+    width: "48.5%",
+    minHeight: 80,
+    justifyContent: "center",
   },
   statLabel: {
     color: COLORS.textSecondary,

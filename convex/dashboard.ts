@@ -19,16 +19,17 @@ function normalizeGameKey(value?: string | null) {
     case "tekken8":
     case "tekken":
       return "tekken8";
-    case "futsal":
-      return "futsal";
-    case "cricket":
-    case "indoorcricket":
-    case "indoor_cricket":
-      return "indoor_cricket";
-    case "padel":
-      return "padel";
-    case "pickleball":
-      return "pickleball";
+    // Physical sports are temporarily disabled.
+    // case "futsal":
+    //   return "futsal";
+    // case "cricket":
+    // case "indoorcricket":
+    // case "indoor_cricket":
+    //   return "indoor_cricket";
+    // case "padel":
+    //   return "padel";
+    // case "pickleball":
+    //   return "pickleball";
     default:
       return normalized || null;
   }
@@ -42,10 +43,11 @@ function getPreferredGameKeysFromProfile(profile: any) {
   if (profile.playsValorant) games.push("valorant");
   if (profile.playsFc) games.push("fc26");
   if (profile.playsTekken) games.push("tekken8");
-  if (profile.playsFutsal) games.push("futsal");
-  if (profile.playsIndoorCricket) games.push("indoor_cricket");
-  if (profile.playsPadel) games.push("padel");
-  if (profile.playsPickleball) games.push("pickleball");
+  // Physical sports are temporarily disabled.
+  // if (profile.playsFutsal) games.push("futsal");
+  // if (profile.playsIndoorCricket) games.push("indoor_cricket");
+  // if (profile.playsPadel) games.push("padel");
+  // if (profile.playsPickleball) games.push("pickleball");
   return games;
 }
 
@@ -57,10 +59,11 @@ function getGameTagsFromProfile(profile: any) {
   if (profile.playsValorant) tags.push("Valorant");
   if (profile.playsFc) tags.push("FC26");
   if (profile.playsTekken) tags.push("Tekken 8");
-  if (profile.playsFutsal) tags.push("Futsal");
-  if (profile.playsIndoorCricket) tags.push("Cricket");
-  if (profile.playsPadel) tags.push("Padel");
-  if (profile.playsPickleball) tags.push("Pickleball");
+  // Physical sports are temporarily disabled.
+  // if (profile.playsFutsal) tags.push("Futsal");
+  // if (profile.playsIndoorCricket) tags.push("Cricket");
+  // if (profile.playsPadel) tags.push("Padel");
+  // if (profile.playsPickleball) tags.push("Pickleball");
   return tags;
 }
 

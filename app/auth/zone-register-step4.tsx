@@ -72,22 +72,11 @@ export default function AdminRegisterStep4() {
         const sumCounts = (record?: Record<string, { count: string; price: string }>) =>
           Object.values(record || {}).reduce((sum, item) => sum + Number(item.count || 0), 0);
 
-        if (branch.supportsFutsal) {
-          const count = sumCounts(branch.pricing.futsal);
-          if (count > 0) items.push(`${count} futsal courts`);
-        }
-        if (branch.supportsIndoorCricket) {
-          const count = sumCounts(branch.pricing.indoor_cricket);
-          if (count > 0) items.push(`${count} cricket lanes`);
-        }
-        if (branch.supportsPadel) {
-          const count = sumCounts(branch.pricing.padel);
-          if (count > 0) items.push(`${count} padel courts`);
-        }
-        if (branch.supportsPickleball) {
-          const count = sumCounts(branch.pricing.pickleball);
-          if (count > 0) items.push(`${count} pickleball courts`);
-        }
+        // Physical sports are temporarily disabled.
+        // if (branch.supportsFutsal) { ... }
+        // if (branch.supportsIndoorCricket) { ... }
+        // if (branch.supportsPadel) { ... }
+        // if (branch.supportsPickleball) { ... }
 
         return {
           id: branch.id,
@@ -349,9 +338,7 @@ export default function AdminRegisterStep4() {
             <Text style={styles.reviewValue}>
               {step1.type === "gaming"
                 ? "Zone (Gaming)"
-                : step1.type === "sports"
-                  ? "Court (Sports)"
-                  : "Both (Hybrid)"}
+                : "Zone (Gaming)"}
             </Text>
           </View>
           <View style={styles.reviewRow}>

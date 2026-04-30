@@ -122,9 +122,11 @@ export default StyleSheet.create({
   fabWrapper: {
     position: "absolute",
     right: 24,
-    zIndex: 20,
-    elevation: 12,
-    pointerEvents: "box-none",
+    width: 58,
+    height: 58,
+    zIndex: 10000,
+    elevation: 30,
+    pointerEvents: "auto",
   },
   fab: {
     ...CTA.fabButton,

@@ -64,10 +64,11 @@ const GAMES = [
     { key: 'cs2', label: 'CS2' },
     { key: 'tekken8', label: 'Tekken 8' },
     { key: 'fc26', label: 'FC26' },
-    { key: 'futsal', label: 'Futsal' },
-    { key: 'indoor_cricket', label: 'Cricket' },
-    { key: 'padel', label: 'Padel' },
-    { key: 'pickleball', label: 'Pickleball' },
+    // Physical sports are temporarily disabled.
+    // { key: 'futsal', label: 'Futsal' },
+    // { key: 'indoor_cricket', label: 'Cricket' },
+    // { key: 'padel', label: 'Padel' },
+    // { key: 'pickleball', label: 'Pickleball' },
 ];
 
 const REPORT_REASONS = [

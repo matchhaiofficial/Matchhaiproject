@@ -37,11 +37,7 @@ type AssetFilter =
     | "all"
     | "pc"
     | "ps5"
-    | "xbox"
-    | "indoor_cricket"
-    | "futsal"
-    | "padel"
-    | "pickleball";
+    | "xbox";
 type StatusFilter = "all" | ResourceLifecycleStatus;
 type ResourcesViewMode = "grid" | "allocation";
 type ResourceSection = {
@@ -63,10 +59,11 @@ const ASSET_FILTER_LABELS: Record<AssetFilter, string> = {
     pc: "PCs",
     ps5: "PS5s",
     xbox: "Xbox",
-    indoor_cricket: "Indoor cricket",
-    futsal: "Futsal",
-    padel: "Padel",
-    pickleball: "Pickleball",
+    // Physical sports are temporarily disabled.
+    // indoor_cricket: "Indoor cricket",
+    // futsal: "Futsal",
+    // padel: "Padel",
+    // pickleball: "Pickleball",
 };
 const STATUS_LABELS: Record<StatusFilter, string> = {
     all: "All",
@@ -91,10 +88,11 @@ const assetFilterForResource = (resource: ZoneBranchResource): AssetFilter => {
         const tier = String(resource.tier || resource.label || "").toLowerCase();
         return tier.includes("xbox") ? "xbox" : "ps5";
     }
-    if (resource.assetType === "indoor_cricket") return "indoor_cricket";
-    if (resource.assetType === "futsal") return "futsal";
-    if (resource.assetType === "padel") return "padel";
-    if (resource.assetType === "pickleball") return "pickleball";
+    // Physical sports are temporarily disabled.
+    // if (resource.assetType === "indoor_cricket") return "indoor_cricket";
+    // if (resource.assetType === "futsal") return "futsal";
+    // if (resource.assetType === "padel") return "padel";
+    // if (resource.assetType === "pickleball") return "pickleball";
     return "all";
 };
 
@@ -336,7 +334,7 @@ export default function ZoneResourcesModule() {
 
     const availableAssetFilters = useMemo(() => {
         const present = new Set<AssetFilter>(resources.map(assetFilterForResource));
-        return (["all", "pc", "ps5", "indoor_cricket", "futsal", "padel", "pickleball", "xbox"] as AssetFilter[]).filter(
+        return (["all", "pc", "ps5", "xbox"] as AssetFilter[]).filter(
             (filter) => filter === "all" || present.has(filter),
         );
     }, [resources]);
@@ -377,10 +375,11 @@ export default function ZoneResourcesModule() {
         const xboxResources = filteredResources.filter((item) => assetFilterForResource(item) === "xbox");
         pushSection("xbox", "Xbox", "xbox", xboxResources, (items) => buildCourtRooms(items));
 
-        (["indoor_cricket", "futsal", "padel", "pickleball"] as AssetFilter[]).forEach((filter) => {
-            const sectionResources = filteredResources.filter((item) => assetFilterForResource(item) === filter);
-            pushSection(filter, ASSET_FILTER_LABELS[filter], filter, sectionResources, buildCourtRooms);
-        });
+        // Physical sports are temporarily disabled.
+        // (["indoor_cricket", "futsal", "padel", "pickleball"] as AssetFilter[]).forEach((filter) => {
+        //     const sectionResources = filteredResources.filter((item) => assetFilterForResource(item) === filter);
+        //     pushSection(filter, ASSET_FILTER_LABELS[filter], filter, sectionResources, buildCourtRooms);
+        // });
 
         return sections;
     }, [filteredResources]);

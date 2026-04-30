@@ -43,10 +43,11 @@ function inventorySummary(zone: Zone) {
   if (zone.games?.supportsCs2) items.push("PC Gaming (CS2 support)");
   if (zone.games?.supportsCs16) items.push("PC Gaming (CS 1.6 support)");
   if (zone.games?.supportsFc25 || zone.games?.supportsTekken8) items.push("Console Gaming (FC/Tekken support)");
-  if (zone.games?.supportsFutsal) items.push("Futsal courts");
-  if (zone.games?.supportsIndoorCricket) items.push("Indoor cricket nets");
-  if (zone.games?.supportsPadel) items.push("Padel courts");
-  if (zone.games?.supportsPickleball) items.push("Pickleball courts");
+  // Physical sports are temporarily disabled.
+  // if (zone.games?.supportsFutsal) items.push("Futsal courts");
+  // if (zone.games?.supportsIndoorCricket) items.push("Indoor cricket nets");
+  // if (zone.games?.supportsPadel) items.push("Padel courts");
+  // if (zone.games?.supportsPickleball) items.push("Pickleball courts");
   return items;
 }
 

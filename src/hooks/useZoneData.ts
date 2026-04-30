@@ -21,10 +21,10 @@ function transformZone(zone: any): any {
             supportsValorant: zone.games.includes("valorant"),
             supportsFc25: zone.games.includes("fc25") || zone.games.includes("fc26"),
             supportsTekken8: zone.games.includes("tekken8"),
-            supportsFutsal: zone.games.includes("futsal"),
-            supportsIndoorCricket: zone.games.includes("indoor_cricket"),
-            supportsPadel: zone.games.includes("padel"),
-            supportsPickleball: zone.games.includes("pickleball"),
+            supportsFutsal: false,
+            supportsIndoorCricket: false,
+            supportsPadel: false,
+            supportsPickleball: false,
         };
     }
 

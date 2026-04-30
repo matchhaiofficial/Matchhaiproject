@@ -331,13 +331,15 @@ export const TEKKEN_CHARACTERS = [
   "Lidia Sobieska",
 ] as const;
 
-// --- Offline sports options (futsal, indoor cricket, padel, pickleball) ---
-
-export const SPORT_OPTIONS = [
-  { key: "futsal", label: "Futsal" },
-  { key: "indoor_cricket", label: "Indoor Cricket" },
-  { key: "padel", label: "Padel" },
-  { key: "pickleball", label: "Pickleball" },
+// Physical sports are temporarily disabled across the app.
+export const SPORT_OPTIONS: ReadonlyArray<{
+  key: "futsal" | "indoor_cricket" | "padel" | "pickleball";
+  label: string;
+}> = [
+  // { key: "futsal", label: "Futsal" },
+  // { key: "indoor_cricket", label: "Indoor Cricket" },
+  // { key: "padel", label: "Padel" },
+  // { key: "pickleball", label: "Pickleball" },
 ] as const;
 
 export const FUTSAL_POSITIONS = [

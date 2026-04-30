@@ -9,11 +9,9 @@ import {
   type ViewProps,
   type ViewStyle,
 } from "react-native";
-import Animated from "react-native-reanimated";
 
 import { COLORS, STATUS_TONES } from "../theme";
 import { AppIcon, type AppIconName, type AppIconTone } from "./AppIcon";
-import { usePressScale } from "../motion/usePressScale";
 import { Perf, PerfScope } from "../utils/perfInstrumentation";
 import styles from "./AppPrimitives.styles";
 
@@ -78,7 +76,6 @@ export function AppButton({
   perf?: ButtonPerfConfig;
 }) {
   const isDisabled = disabled || loading;
-  const { animatedStyle, onPressIn, onPressOut } = usePressScale();
   const textVariantStyle =
     variant === "primary"
       ? styles.buttonTextPrimary
@@ -121,16 +118,11 @@ export function AppButton({
     <Pressable
       {...rest}
       disabled={isDisabled}
+      unstable_pressDelay={0}
+      pressRetentionOffset={{ top: 16, bottom: 16, left: 16, right: 16 }}
+      android_ripple={{ color: "rgba(255,255,255,0.15)" }}
       onPress={handlePress}
-      onPressIn={(event) => {
-        onPressIn();
-        rest.onPressIn?.(event);
-      }}
-      onPressOut={(event) => {
-        onPressOut();
-        rest.onPressOut?.(event);
-      }}
-      style={[
+      style={({ pressed }) => [
         styles.buttonBase,
         size === "sm" && styles.buttonSm,
         size === "md" && styles.buttonMd,
@@ -141,10 +133,13 @@ export function AppButton({
         variant === "danger" && styles.buttonDanger,
         variant === "success" && styles.buttonSuccess,
         isDisabled && styles.buttonDisabled,
+        pressed && styles.buttonPressed,
         style,
       ]}
+      onPressIn={rest.onPressIn}
+      onPressOut={rest.onPressOut}
     >
-      <Animated.View style={[styles.buttonContent, animatedStyle]}>
+      <View style={styles.buttonContent}>
         {leadingIcon ? (
           <AppIcon
             name={leadingIcon}
@@ -164,7 +159,7 @@ export function AppButton({
             tone={iconTone ?? (variant === "primary" ? "inverse" : "default")}
           />
         ) : null}
-      </Animated.View>
+      </View>
     </Pressable>
   );
 }

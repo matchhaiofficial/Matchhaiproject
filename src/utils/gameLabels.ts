@@ -13,14 +13,15 @@ export function getCanonicalGameLabel(value?: string | null): string {
       return "FC26";
     case "tekken8":
       return "Tekken 8";
-    case "futsal":
-      return "Futsal";
-    case "indoor_cricket":
-      return "Indoor Cricket";
-    case "padel":
-      return "Padel";
-    case "pickleball":
-      return "Pickleball";
+    // Physical sports are temporarily disabled.
+    // case "futsal":
+    //   return "Futsal";
+    // case "indoor_cricket":
+    //   return "Indoor Cricket";
+    // case "padel":
+    //   return "Padel";
+    // case "pickleball":
+    //   return "Pickleball";
     default:
       return key ? key.toUpperCase() : "Game";
   }

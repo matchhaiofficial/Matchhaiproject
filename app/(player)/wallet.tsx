@@ -66,6 +66,15 @@ const getMillis = (value: any) => {
 
 const formatCurrency = (value: number) => `Rs ${Math.round(value)}`;
 
+const formatReferenceLabel = (value?: string | null) => {
+  if (!value) return "N/A";
+  return value
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
 const getPhoneSourceLabel = (source?: string | null) => {
   if (source === "checkout_override") return "entered here";
   if (source === "profile") return "profile";
@@ -548,7 +557,7 @@ export default function WalletScreen() {
                       },
                     }}
                   >
-                    {!userId ? "Profile unavailable" : "Top up via Easypaisa"}
+                    {!userId ? "Profile unavailable" : "Top up"}
                   </AppButton>
                 </View>
               </AppCard>
@@ -649,25 +658,22 @@ export default function WalletScreen() {
                 </Text>
               </AppCard>
 
-              <View style={styles.statsRow}>
+              <View style={styles.statsGrid}>
                 <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>Pending Amount</Text>
                   <Text style={styles.statValue}>
                     {formatCurrency(totals.pendingAmount)}
                   </Text>
                 </AppCard>
-                <AppCard style={[styles.statCard, styles.statCardLast]}>
+                <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>Paid Bookings</Text>
                   <Text style={styles.statValue}>{totals.paidCount}</Text>
                 </AppCard>
-              </View>
-
-              <View style={styles.statsRow}>
                 <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>My Requests</Text>
                   <Text style={styles.statValue}>{requestsCount}</Text>
                 </AppCard>
-                <AppCard style={[styles.statCard, styles.statCardLast]}>
+                <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>Offers Received</Text>
                   <Text style={styles.statValue}>{offersCount}</Text>
                 </AppCard>
@@ -706,7 +712,7 @@ export default function WalletScreen() {
                         </Text>
                       ) : null}
                       <Text style={styles.transactionMeta}>
-                        Reference: {item.reference || "N/A"}
+                        Reference: {formatReferenceLabel(item.reference)}
                       </Text>
                       <Text style={styles.transactionMeta}>
                         Created:{" "}

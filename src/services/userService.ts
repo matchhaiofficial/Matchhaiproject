@@ -44,6 +44,7 @@ export {
 } from "./convex/userService";
 
 import type { UserProfile } from "./convex/userService";
+import { isPhysicalGameDisabled } from "../../constants/gameAvailability";
 
 // Utility functions for sport profiles
 
@@ -51,6 +52,7 @@ const canonicalizeProfileGameKey = (gameKey: string) => gameKey === "fc25" ? "fc
 
 export const isProfileGameEnabled = (profile: UserProfile | null | undefined, gameKey: string): boolean => {
   if (!profile) return false;
+  if (isPhysicalGameDisabled(gameKey)) return false;
 
   switch (canonicalizeProfileGameKey(gameKey)) {
     case 'cs2':

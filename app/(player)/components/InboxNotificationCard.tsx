@@ -15,10 +15,11 @@ const GAME_LABELS: Record<string, string> = {
   fc26: "FC26",
   fc25: "FC26",
   tekken8: "Tekken 8",
-  futsal: "Futsal",
-  indoor_cricket: "Indoor Cricket",
-  padel: "Padel",
-  pickleball: "Pickleball",
+  // Physical sports are temporarily disabled.
+  // futsal: "Futsal",
+  // indoor_cricket: "Indoor Cricket",
+  // padel: "Padel",
+  // pickleball: "Pickleball",
 };
 
 const REASON_LABELS: Record<string, string> = {

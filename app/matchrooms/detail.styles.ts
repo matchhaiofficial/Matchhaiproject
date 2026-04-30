@@ -260,6 +260,13 @@ export default StyleSheet.create({
     buttonContent: {
         width: '100%',
     },
+    floatingActionBar: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        elevation: 100,
+    },
     headerActionButton: {
         padding: 2,
     },

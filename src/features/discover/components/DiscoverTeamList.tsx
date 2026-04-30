@@ -33,16 +33,19 @@ import styles from "../styles/teams.styles";
 const TeamRow = React.memo(function TeamRow({
   team,
   mode,
+  actionLoadingTeamId,
   onPressTeam,
   onRequestToJoin,
 }: {
   team: Team;
   mode: "my" | "discover";
+  actionLoadingTeamId: string | null;
   onPressTeam: (teamId: string) => void;
   onRequestToJoin: (teamId: string) => void;
 }) {
   const isMyTeam = mode === "my";
   const isRequested = Boolean((team as any).isRequested);
+  const isLoading = actionLoadingTeamId === team.id;
   const rawMemberCount = team.memberUids?.length ?? team.memberCount ?? 0;
   const maxMembers = team.maxMembers || 0;
   const memberCount =
@@ -69,16 +72,17 @@ const TeamRow = React.memo(function TeamRow({
           {team.name}
         </Text>
         {isMyTeam ? (
-          <DiscoverActionChip label="View" tone="neutral" onPress={handlePress} />
+          <DiscoverActionChip label="View" tone="accent" onPress={handlePress} />
         ) : isRequested ? (
           <DiscoverActionChip label="Requested" tone="warning" />
         ) : isFull ? (
           <DiscoverActionChip label="Full" tone="danger" />
         ) : (
           <DiscoverActionChip
-            label="Request to Join"
+            label={isLoading ? "Requesting..." : "Request to Join"}
             tone="accent"
             onPress={handleRequestJoin}
+            disabled={isLoading}
           />
         )}
       </View>
@@ -122,6 +126,7 @@ export default function DiscoverTeamList({
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchTeams = useCallback(async () => {
     if (!user) {
@@ -176,11 +181,13 @@ export default function DiscoverTeamList({
 
   const handleRequestToJoin = useCallback(
     async (teamId: string) => {
+      if (actionLoading || !teamId) return;
       if (!hasVerifiedEmail(authUser)) {
         showEmailVerificationRequiredAlert();
         return;
       }
 
+      setActionLoading(teamId);
       try {
         const response = await requestToJoinTeam(teamId);
         if (response.ok) {
@@ -208,9 +215,11 @@ export default function DiscoverTeamList({
           title: "Error",
           message: "An unexpected error occurred.",
         });
+      } finally {
+        setActionLoading(null);
       }
     },
-    [authUser, showToast],
+    [actionLoading, authUser, showToast],
   );
 
   const contentContainerStyle = useMemo(
@@ -231,12 +240,13 @@ export default function DiscoverTeamList({
         <TeamRow
           team={item}
           mode={filters.mode}
+          actionLoadingTeamId={actionLoading}
           onPressTeam={onPressTeam}
           onRequestToJoin={handleRequestToJoin}
         />
       );
     },
-    [filters.mode, handleRequestToJoin, onPressTeam],
+    [actionLoading, filters.mode, handleRequestToJoin, onPressTeam],
   );
 
   const displayedTeams = filters.mode === "my" ? myTeams : publicTeams;

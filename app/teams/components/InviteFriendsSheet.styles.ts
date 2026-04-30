@@ -44,9 +44,14 @@ export default StyleSheet.create({
         alignItems: 'center',
     },
     listBody: {
+        flexShrink: 1,
+        minHeight: 0,
         paddingHorizontal: SPACING.xl,
         paddingTop: SPACING.lg,
         paddingBottom: SPACING.md,
+    },
+    listScroller: {
+        flexGrow: 0,
     },
     list: {
         paddingBottom: SPACING.sm,

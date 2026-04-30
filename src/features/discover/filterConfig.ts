@@ -74,16 +74,18 @@ export const DISCOVER_GAMES: Array<{ key: GameKey; label: string }> = [
   { key: "valorant", label: "Valorant" },
   { key: "fc26", label: "FC26" },
   { key: "tekken8", label: "Tekken 8" },
-  { key: "futsal", label: "Futsal" },
-  { key: "indoor_cricket", label: "Cricket" },
-  { key: "padel", label: "Padel" },
-  { key: "pickleball", label: "Pickleball" },
+  // Physical sports are temporarily disabled.
+  // { key: "futsal", label: "Futsal" },
+  // { key: "indoor_cricket", label: "Cricket" },
+  // { key: "padel", label: "Padel" },
+  // { key: "pickleball", label: "Pickleball" },
 ];
 
 export const DISCOVER_VENUE_TYPES: Array<{ key: VenueType; label: string }> = [
   { key: "all", label: "All Venues" },
   { key: "zones", label: "Gaming Zones" },
-  { key: "courts", label: "Sports Courts" },
+  // Physical sports are temporarily disabled.
+  // { key: "courts", label: "Sports Courts" },
 ];
 
 export const SEGMENT_LABELS: Record<DiscoverSegment, string> = {
@@ -181,10 +183,11 @@ const ESPORTS_GAMES = [
 
 const SPORTS_GAMES = [
   { key: "all", label: "All" },
-  { key: "futsal", label: "Futsal" },
-  { key: "indoor_cricket", label: "Cricket" },
-  { key: "padel", label: "Padel" },
-  { key: "pickleball", label: "Pickleball" },
+  // Physical sports are temporarily disabled.
+  // { key: "futsal", label: "Futsal" },
+  // { key: "indoor_cricket", label: "Cricket" },
+  // { key: "padel", label: "Padel" },
+  // { key: "pickleball", label: "Pickleball" },
 ];
 
 export const DEFAULT_MATCHROOM_FILTERS: MatchroomFilters = {

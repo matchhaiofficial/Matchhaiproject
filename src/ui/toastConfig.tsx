@@ -12,7 +12,7 @@ interface CustomToastProps extends BaseToastProps {
 
 export const toastConfig = {
     error: ({ text1, text2 }: CustomToastProps) => (
-        <View style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
+        <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.errorIcon]}>
                 <AppIcon name="error-outline" size={20} tone="danger" />
             </View>
@@ -24,7 +24,7 @@ export const toastConfig = {
     ),
 
     success: ({ text1, text2 }: CustomToastProps) => (
-        <View style={[toastStyles.baseContainer, toastStyles.successContainer]}>
+        <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.successContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.successIcon]}>
                 <AppIcon name="check-circle" size={20} tone="success" color="#81C784" />
             </View>
@@ -36,7 +36,7 @@ export const toastConfig = {
     ),
 
     warning: ({ text1, text2 }: CustomToastProps) => (
-        <View style={[toastStyles.baseContainer, toastStyles.warningContainer]}>
+        <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.warningContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.warningIcon]}>
                 <AppIcon name="warning" size={20} tone="warning" />
             </View>
@@ -48,7 +48,7 @@ export const toastConfig = {
     ),
 
     delete: ({ text1, text2 }: CustomToastProps) => (
-        <View style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
+        <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.errorIcon]}>
                 <AppIcon name="delete-outline" size={20} tone="danger" />
             </View>

@@ -4,7 +4,7 @@
     "slug": "matchhai",
     "version": "1.0.0",
     "orientation": "portrait",
-     "icon": "./assets/images/icon.png", 
+    "icon": "./assets/images/icon.png",
     "scheme": "matchhai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,8 +16,10 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "MatchHai uses your microphone to record voice messages in chat."
-      }
+        "NSMicrophoneUsageDescription": "MatchHai uses your microphone to record voice messages in chat.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.ovaisto.matchhai"
     },
     "android": {
       "package": "com.ovaisto.matchhai",
@@ -27,12 +29,12 @@
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png", 
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "softwareKeyboardLayoutMode": "nothing"
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "bundler": "metro",

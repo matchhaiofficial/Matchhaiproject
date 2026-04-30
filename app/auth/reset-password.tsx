@@ -1,6 +1,6 @@
 import { useLocalSearchParams, router } from "expo-router";
-import React, { useMemo, useState } from "react";
-import styles2 from "./register.styles";
+import React, { useMemo, useRef, useState } from "react";
+import registerStyles from "./register.styles";
 import {
     KeyboardAvoidingView,
     Platform,
@@ -10,18 +10,21 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { authClient } from "../../src/lib/auth-client";
 import { AppButton } from "../../src/components/AppPrimitives";
 import { AppIcon } from "../../src/components/AppIcon";
 import LogoHalo from "../../src/components/LogoHalo";
 import { useToast } from "../../src/hooks/useToast";
+import { resetPasswordWithToken } from "../../src/services/convex/authService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import styles from "./login.styles";
 
 type FocusField = "password" | "confirm" | null;
 
 export default function ResetPassword() {
-    const { token } = useLocalSearchParams<{ token: string }>();
+    const params = useLocalSearchParams<{
+        error?: string | string[];
+        token?: string | string[];
+    }>();
     const { showToast } = useToast();
 
     const [password, setPassword] = useState("");
@@ -30,6 +33,7 @@ export default function ResetPassword() {
     const [confirmVisible, setConfirmVisible] = useState(false);
     const [focused, setFocused] = useState<FocusField>(null);
     const [submitting, setSubmitting] = useState(false);
+    const confirmInputRef = useRef<TextInput>(null);
 
     const {
         hasUpper,
@@ -85,11 +89,19 @@ export default function ResetPassword() {
         };
     }, [password]);
 
+    const resetToken = useMemo(() => {
+        const rawToken = Array.isArray(params.token) ? params.token[0] : params.token;
+        return String(rawToken || "").trim();
+    }, [params.token]);
+    const resetError = useMemo(() => {
+        const rawError = Array.isArray(params.error) ? params.error[0] : params.error;
+        return String(rawError || "").trim();
+    }, [params.error]);
     const isFormValid = isPasswordValid && password === confirm;
     const showRequirements = password.length > 0 && !(hasUpper && hasLower && hasNumber && hasSpecial);
 
     const handleReset = async () => {
-        if (!token) {
+        if (!resetToken) {
             showToast({ type: "error", title: "Invalid link", message: "Reset token is missing. Please request a new reset link." });
             return;
         }
@@ -104,9 +116,9 @@ export default function ResetPassword() {
 
         setSubmitting(true);
         try {
-            const { error } = await authClient.resetPassword({ newPassword: password, token });
-            if (error) {
-                showToast({ type: "error", title: "Reset failed", message: error.message ?? "Could not reset password. Try again." });
+            const result = await resetPasswordWithToken(resetToken, password);
+            if (!result.ok) {
+                showToast({ type: "error", title: "Reset failed", message: result.message || "Could not reset password. Try again." });
                 return;
             }
             showToast({ type: "success", title: "Password updated", message: "Your password has been reset. Please sign in." });
@@ -123,13 +135,17 @@ export default function ResetPassword() {
         ? { style: styles.screen, behavior: "padding" as const }
         : { style: styles.screen };
 
-    if (!token) {
+    if (!resetToken) {
         return (
             <Container {...containerProps}>
                 <View style={styles.container}>
                     <LogoHalo />
                     <Text style={styles.heading}>Invalid link</Text>
-                    <Text style={styles.sub}>This reset link is invalid or has already been used. Please request a new one.</Text>
+                    <Text style={styles.sub}>
+                        {resetError
+                            ? "This reset link is invalid or has expired. Please request a new one."
+                            : "This reset link is invalid or has already been used. Please request a new one."}
+                    </Text>
                     <AppButton onPress={() => router.replace("/auth/forgot-password")}>Request new link</AppButton>
                 </View>
             </Container>
@@ -170,6 +186,10 @@ export default function ResetPassword() {
                                 onChangeText={setPassword}
                                 onFocus={() => setFocused("password")}
                                 onBlur={() => setFocused(null)}
+                                returnKeyType="next"
+                                onSubmitEditing={() => confirmInputRef.current?.focus()}
+                                textContentType="newPassword"
+                                autoComplete="new-password"
                             />
                             <Pressable onPress={() => setPasswordVisible((v) => !v)} hitSlop={10}>
                                 <AppIcon
@@ -185,11 +205,11 @@ export default function ResetPassword() {
 
                     {/* Strength meter */}
                     {password.length > 0 && (
-                        <View style={styles2.passwordStrengthWrapper}>
-                            <View style={styles2.strengthMeterTrack}>
+                        <View style={registerStyles.passwordStrengthWrapper}>
+                            <View style={registerStyles.strengthMeterTrack}>
                                 <View
                                     style={[
-                                        styles2.strengthMeterFill,
+                                        registerStyles.strengthMeterFill,
                                         { width: `${strengthWidth}%`, backgroundColor: strengthColor } as any,
                                     ]}
                                 />
@@ -204,20 +224,20 @@ export default function ResetPassword() {
 
                     {/* Requirements checklist */}
                     {showRequirements && (
-                        <View style={styles2.passwordRequirementsRow}>
-                            <View style={styles2.requirementColumn}>
-                                <Text style={[styles2.passwordRequirementText, hasUpper && styles2.passwordRequirementTextDone]}>
+                        <View style={registerStyles.passwordRequirementsRow}>
+                            <View style={registerStyles.requirementColumn}>
+                                <Text style={[registerStyles.passwordRequirementText, hasUpper && registerStyles.passwordRequirementTextDone]}>
                                     {hasUpper ? "OK" : "X"} 1 uppercase character
                                 </Text>
-                                <Text style={[styles2.passwordRequirementText, hasLower && styles2.passwordRequirementTextDone]}>
+                                <Text style={[registerStyles.passwordRequirementText, hasLower && registerStyles.passwordRequirementTextDone]}>
                                     {hasLower ? "OK" : "X"} 1 lowercase character
                                 </Text>
                             </View>
-                            <View style={styles2.requirementColumn}>
-                                <Text style={[styles2.passwordRequirementText, hasNumber && styles2.passwordRequirementTextDone]}>
+                            <View style={registerStyles.requirementColumn}>
+                                <Text style={[registerStyles.passwordRequirementText, hasNumber && registerStyles.passwordRequirementTextDone]}>
                                     {hasNumber ? "OK" : "X"} 1 numeric character
                                 </Text>
-                                <Text style={[styles2.passwordRequirementText, hasSpecial && styles2.passwordRequirementTextDone]}>
+                                <Text style={[registerStyles.passwordRequirementText, hasSpecial && registerStyles.passwordRequirementTextDone]}>
                                     {hasSpecial ? "OK" : "X"} 1 special character
                                 </Text>
                             </View>
@@ -237,6 +257,7 @@ export default function ResetPassword() {
                                 color={confirm.length > 0 && password === confirm ? COLORS.accent : COLORS.muted}
                             />
                             <TextInput
+                                ref={confirmInputRef}
                                 placeholder="Repeat your password"
                                 placeholderTextColor={COLORS.muted}
                                 style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
@@ -248,6 +269,10 @@ export default function ResetPassword() {
                                 onChangeText={setConfirm}
                                 onFocus={() => setFocused("confirm")}
                                 onBlur={() => setFocused(null)}
+                                returnKeyType="done"
+                                onSubmitEditing={handleReset}
+                                textContentType="newPassword"
+                                autoComplete="new-password"
                             />
                             <Pressable onPress={() => setConfirmVisible((v) => !v)} hitSlop={10}>
                                 <AppIcon

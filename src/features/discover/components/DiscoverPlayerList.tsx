@@ -58,18 +58,11 @@ const PROFILE_GAME_BADGES: Array<{
     { key: "valorant", label: "Valorant", enabled: (player) => !!player.playsValorant },
     { key: "fc26", label: "FC26", enabled: (player) => !!player.playsFc },
     { key: "tekken8", label: "Tekken 8", enabled: (player) => !!player.playsTekken },
-    { key: "futsal", label: "Futsal", enabled: (player) => !!player.playsFutsal },
-    {
-      key: "indoor_cricket",
-      label: "Cricket",
-      enabled: (player) => !!player.playsIndoorCricket,
-    },
-    { key: "padel", label: "Padel", enabled: (player) => !!player.playsPadel },
-    {
-      key: "pickleball",
-      label: "Pickleball",
-      enabled: (player) => !!player.playsPickleball,
-    },
+    // Physical sports are temporarily disabled.
+    // { key: "futsal", label: "Futsal", enabled: (player) => !!player.playsFutsal },
+    // { key: "indoor_cricket", label: "Cricket", enabled: (player) => !!player.playsIndoorCricket },
+    // { key: "padel", label: "Padel", enabled: (player) => !!player.playsPadel },
+    // { key: "pickleball", label: "Pickleball", enabled: (player) => !!player.playsPickleball },
   ];
 
 const abbreviateRole = (role: string): string => {

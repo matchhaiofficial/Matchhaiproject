@@ -24,6 +24,7 @@ import {
 import { useToast } from "../../../src/hooks/useToast";
 import Logger from "../../../src/utils/logger";
 import { getUserProfile } from "../../../src/services/userService";
+import { useCallback, useEffect, useRef } from "react";
 
 type DetailActionDeps = {
   id: string;
@@ -32,7 +33,7 @@ type DetailActionDeps = {
   profile: any;
   router: any;
   fetchRoom: () => Promise<void>;
-  startJoin: (input: any) => Promise<void>;
+  startJoin: (input: any) => Promise<string | void>;
   activeIntentIds: string[];
   bookingRequestId: string | null;
   setBookingRequestId: (value: string) => void;
@@ -122,6 +123,8 @@ export function useMatchroomDetailActions({
   currentIdentityValues,
 }: DetailActionDeps) {
   const { showToast } = useToast();
+  const roomRef = useRef(room);
+  roomRef.current = room;
 
   const ensureBookingRequestLink = async () => {
     if (bookingRequestId) return bookingRequestId;
@@ -458,17 +461,33 @@ export function useMatchroomDetailActions({
     }
   };
 
-  const handleRequestJoin = async (team?: string, slotId?: string) => {
-    if (!room || !user || !id) return;
+  const isRequestingRef = useRef(false);
+
+  const handleRequestJoin = useCallback(async (team?: string, slotId?: string) => {
+    if (isRequestingRef.current) return;
+    if (!roomRef.current || !id) {
+      showToast({
+        message: "Matchroom details are still loading. Try again in a moment.",
+        title: "Not ready",
+        type: "warning",
+      });
+      return;
+    }
+    isRequestingRef.current = true;
     setJoining(true);
     try {
-      await startJoin({
-        room,
+      const outcome = await startJoin({
+        room: roomRef.current,
         team,
         slotId,
         onJoined: async () => {
           const profileRes = await getUserProfile(user._id);
-          if (profileRes.ok) setProfile(profileRes.data);
+          if (profileRes.ok) {
+            setProfile((prev: any) => {
+              if (JSON.stringify(prev) === JSON.stringify(profileRes.data)) return prev;
+              return profileRes.data;
+            });
+          }
           await fetchRoom();
         },
         onRequested: () => {
@@ -479,13 +498,21 @@ export function useMatchroomDetailActions({
           }
         },
       });
+      if (outcome === "requested" || outcome === "joined") {
+        await fetchRoom();
+      }
     } catch (e) {
       Logger.error("MatchroomDetails", "Error requesting join", e);
+      showToast({
+        message: "Could not start the join request. Please try again.",
+        title: "Join failed",
+        type: "error",
+      });
     } finally {
       setJoining(false);
+      isRequestingRef.current = false;
     }
-  };
-
+  }, [user, id, startJoin, fetchRoom, showToast])
   const handleShare = async () => {
     try {
       await Share.share({
@@ -874,9 +901,9 @@ export function useMatchroomDetailActions({
       { text: "Cancel", style: "cancel" },
       ...(!isCurrentCaptain
         ? [{
-            text: "Make Captain",
-            onPress: () => handleTransferCaptain(team, playerUid, playerName),
-          }]
+          text: "Make Captain",
+          onPress: () => handleTransferCaptain(team, playerUid, playerName),
+        }]
         : []),
       {
         text: "Kick Player",

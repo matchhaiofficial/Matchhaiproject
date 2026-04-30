@@ -65,11 +65,7 @@ export default function RegisterStep2() {
       playsCs16 ||
       playsValorant ||
       playsFc ||
-      playsTekken ||
-      playsFutsal ||
-      playsIndoorCricket ||
-      playsPadel ||
-      playsPickleball;
+      playsTekken;
 
     return {
       isLocationValid: locationValid,
@@ -83,10 +79,6 @@ export default function RegisterStep2() {
     playsValorant,
     playsFc,
     playsTekken,
-    playsFutsal,
-    playsIndoorCricket,
-    playsPadel,
-    playsPickleball,
   ]);
 
   const toggleArea = (area: string) => {
@@ -132,7 +124,7 @@ export default function RegisterStep2() {
       showToast({
         type: "info",
         title: "Check details",
-        message: "Select your areas and at least one game or sport before continuing.",
+        message: "Select your areas and at least one game before continuing.",
       });
       return;
     }
@@ -151,10 +143,10 @@ export default function RegisterStep2() {
       fcTeam: "",
       fcFormation: null,
       tekkenFavorites: [],
-      playsFutsal,
-      playsIndoorCricket,
-      playsPadel,
-      playsPickleball,
+      playsFutsal: false,
+      playsIndoorCricket: false,
+      playsPadel: false,
+      playsPickleball: false,
       futsalPositions: [],
       indoorCricketRole: null,
       padelRole: null,
@@ -247,38 +239,40 @@ export default function RegisterStep2() {
         </View>
       </View>
 
-      <View style={styles.fieldGroup}>
-        <RegistrationFieldLabel label="Physical sports interests" />
-        <View style={styles.chipRow}>
-          {SPORT_OPTIONS.map((sport) => {
-            let active = false;
-            if (sport.key === "futsal") active = playsFutsal;
-            if (sport.key === "indoor_cricket") active = playsIndoorCricket;
-            if (sport.key === "padel") active = playsPadel;
-            if (sport.key === "pickleball") active = playsPickleball;
+      {SPORT_OPTIONS.length > 0 ? (
+        <View style={styles.fieldGroup}>
+          <RegistrationFieldLabel label="Disabled sports interests" />
+          <View style={styles.chipRow}>
+            {SPORT_OPTIONS.map((sport) => {
+              let active = false;
+              if (sport.key === "futsal") active = playsFutsal;
+              if (sport.key === "indoor_cricket") active = playsIndoorCricket;
+              if (sport.key === "padel") active = playsPadel;
+              if (sport.key === "pickleball") active = playsPickleball;
 
-            return (
-              <Pressable
-                key={sport.key}
-                onPress={() => toggleSport(sport.key)}
-                style={({ pressed }) => [
-                  styles.optionChip,
-                  active && styles.optionChipActive,
-                  pressed && { opacity: 0.9 },
-                ]}
-              >
-                <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
-                  {sport.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+              return (
+                <Pressable
+                  key={sport.key}
+                  onPress={() => toggleSport(sport.key)}
+                  style={({ pressed }) => [
+                    styles.optionChip,
+                    active && styles.optionChipActive,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                >
+                  <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                    {sport.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {!hasAnyActivity ? (
         <Text style={[styles.helperText, styles.helperWarning, { marginBottom: 16 }]}>
-          Select at least one game or sport.
+          Select at least one game.
         </Text>
       ) : null}
 

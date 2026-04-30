@@ -112,7 +112,7 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
         <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.content}>
             <AppModalHeader title="Invite Friends" subtitle={`to ${teamName}`} onClose={onClose} />
 
-            <AppModalBody scroll contentContainerStyle={styles.listBody}>
+            <AppModalBody contentContainerStyle={styles.listBody}>
                 {loading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator color={COLORS.accent} />
@@ -122,7 +122,9 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                         data={friends}
                         renderItem={renderFriendItem}
                         keyExtractor={(item) => item.uid}
+                        style={styles.listScroller}
                         contentContainerStyle={styles.list}
+                        keyboardShouldPersistTaps="handled"
                         ListEmptyComponent={
                             <View style={styles.emptyContainer}>
                                 <AppIcon name="person-add" size={48} color={COLORS.muted} />

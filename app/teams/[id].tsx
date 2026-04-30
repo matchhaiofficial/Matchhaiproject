@@ -4,15 +4,16 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppImage } from "../../src/components/AppImage";
-import { AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
+import { AppBottomSheet, AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import { DetailSectionCard } from "../../src/components/DetailSurface";
+import ReportIssueModal from "../../src/components/ReportIssueModal";
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
@@ -27,6 +28,7 @@ import {
     transferCaptainAction,
 } from "../../src/services/convex/teamActionService";
 import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "../../src/services/convex/teamService";
+import { submitUserReport } from "../../src/services/convex/reportService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
@@ -52,6 +54,15 @@ const GAME_MAX_MEMBERS: Record<string, number> = {
     futsal: 7,
     indoor_cricket: 8,
 };
+
+const REPORT_REASONS = [
+    "Toxic Behavior",
+    "Cheating/Hacking",
+    "Impersonation",
+    "Inappropriate Name",
+    "Spam/Harassment",
+    "Other",
+];
 
 function HeaderIconButton({
     icon,
@@ -86,6 +97,22 @@ function HeaderIconButton({
     );
 }
 
+function ReportIconButton({ onPress }: { onPress: () => void }) {
+    const { animatedStyle, onPressIn, onPressOut } = usePressScale({ activeScale: 0.99 });
+
+    return (
+        <AnimatedPressable
+            onPress={onPress}
+            onPressIn={onPressIn}
+            onPressOut={onPressOut}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[styles.reportIconButton, animatedStyle]}
+        >
+            <AppIcon name="report-problem" size={20} color={COLORS.error} />
+        </AnimatedPressable>
+    );
+}
+
 export default function TeamDetails() {
     const params = useLocalSearchParams();
     const { id } = params;
@@ -109,9 +136,23 @@ export default function TeamDetails() {
 
     // Invite States
     const [showInviteSheet, setShowInviteSheet] = useState(false);
+
+    // Report States
+    const [showReportModal, setShowReportModal] = useState(false);
+    const [reportReason, setReportReason] = useState("");
+    const [reportDescription, setReportDescription] = useState("");
+    const [reporting, setReporting] = useState(false);
+    const [showRoleRequiredSheet, setShowRoleRequiredSheet] = useState(false);
+
     useRouteLogger("TeamDetailsScreen", { teamId: id, userId: user?._id });
     const touchDebugEnabled = false;
     const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
+    const roleRequiredSheetBottomOffset = Platform.OS === "android"
+        ? Math.max(insets.bottom, 48)
+        : 0;
+    const roleRequiredFooterBottomPadding = Platform.OS === "android"
+        ? SPACING.xl
+        : Math.max(insets.bottom, SPACING.xl);
     const { animatedStyle: contentEntranceStyle } = useEntrance({ distance: 18 });
 
     // ---- Convex reactive queries ----
@@ -132,15 +173,15 @@ export default function TeamDetails() {
     // Build team object from Convex data
     const team: Team | null = teamWithMembers
         ? {
-              ...teamWithMembers,
-              id: teamWithMembers._id,
-              members: (teamWithMembers.members ?? []).map((m: any) => ({
-                  uid: m.odxerId ?? m.uid,
-                  username: m.username,
-                  role: m.role,
-                  joinedAt: m.joinedAt,
-              })),
-          } as Team
+            ...teamWithMembers,
+            id: teamWithMembers._id,
+            members: (teamWithMembers.members ?? []).map((m: any) => ({
+                uid: m.odxerId ?? m.uid,
+                username: m.username,
+                role: m.role,
+                joinedAt: m.joinedAt,
+            })),
+        } as Team
         : null;
 
     // Determine isCaptain early so we can conditionally query pending requests
@@ -266,14 +307,7 @@ export default function TeamDetails() {
             }
 
             if (!userRole) {
-                Alert.alert(
-                    "Set your role first",
-                    `Choose your role for ${getCanonicalGameLabel(team?.game)} to request teams.`,
-                    [
-                        { text: "Cancel", style: "cancel" },
-                        { text: "Set Role", onPress: () => router.push('/(player)/profile/edit' as any) }
-                    ]
-                );
+                setShowRoleRequiredSheet(true);
                 return;
             }
 
@@ -506,6 +540,31 @@ export default function TeamDetails() {
         } as any);
     };
 
+    const handleSubmitTeamReport = async () => {
+        if (!team?.captainUid || !reportReason) return;
+        setReporting(true);
+        const result = await submitUserReport({
+            reportedUserId: team.captainUid,
+            reason: reportReason,
+            description: reportDescription,
+        });
+        setReporting(false);
+
+        if (!result.ok) {
+            showToast({ type: "error", title: "Report failed", message: result.message });
+            return;
+        }
+
+        showToast({
+            type: "success",
+            title: result.data.created ? "Report submitted" : "Report already exists",
+            message: result.message || "Our moderation team will review it.",
+        });
+        setShowReportModal(false);
+        setReportReason("");
+        setReportDescription("");
+    };
+
     // Button State Logic
     const getButtonState = () => {
         if (isMember) return 'member';
@@ -594,248 +653,263 @@ export default function TeamDetails() {
             />
 
             <View style={styles.body}>
-            <ScrollView
-                style={styles.scroll}
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-            >
-                <Animated.View style={contentEntranceStyle}>
-                {/* Team Info Section */}
-                <AppCard variant="elevated" style={styles.teamHeader}>
-                    <Pressable
-                        onPress={handlePickLogo}
-                        disabled={!isCaptain || submitting}
-                        style={({ pressed }) => [
-                            styles.teamLogoLarge,
-                            isCaptain && styles.teamLogoLargeCaptain,
-                            pressed && isCaptain && styles.logoPressed,
-                        ]}
-                    >
-                        {team.logoUrl ? (
-                            <AppImage source={{ uri: team.logoUrl }} containerStyle={styles.teamLogoImage} />
-                        ) : (
-                            <Text style={styles.teamLogoTextLarge}>
-                                {team.name.charAt(0).toUpperCase()}
-                            </Text>
-                        )}
-                        {isCaptain && (
-                            <View style={styles.logoEditBadge}>
-                                <AppIcon name="photo-camera" size={14} color="#FFF" />
-                            </View>
-                        )}
-                    </Pressable>
-                    <View style={styles.teamNameContainer}>
-                        <Text style={styles.teamNameLarge} numberOfLines={1} ellipsizeMode="tail">
-                            {team.name}
-                        </Text>
-                        {isCaptain && (
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <Animated.View style={contentEntranceStyle}>
+                        {/* Team Info Section */}
+                        <AppCard variant="elevated" style={styles.teamHeader}>
+                            <View pointerEvents="none" style={styles.teamHeaderAccent} />
                             <Pressable
-                                onPress={() => {
-                                    setNewName(team.name);
-                                    setShowRenameModal(true);
-                                }}
+                                onPress={handlePickLogo}
+                                disabled={!isCaptain || submitting}
                                 style={({ pressed }) => [
-                                    styles.editNameIcon,
-                                    pressed && styles.headerIconPressed
+                                    styles.teamLogoLarge,
+                                    isCaptain && styles.teamLogoLargeCaptain,
+                                    pressed && isCaptain && styles.logoPressed,
                                 ]}
-                                android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 20 }}
                             >
-                                <AppIcon name="edit" size={20} color={COLORS.accent} />
-                            </Pressable>
-                        )}
-                    </View>
-                    <StatusPill tone="info" label={getCanonicalGameLabel(team.game)} style={styles.gamePill} />
-                    {team.description && <Text style={styles.description}>{team.description}</Text>}
-
-                    {/* Occupancy Indicator */}
-                    <View style={styles.occupancyRow}>
-                        <AppIcon name="people" size={16} color={COLORS.muted} />
-                        <Text style={styles.occupancyText}>
-                            {memberCountDisplay} / {maxMembers}
-                        </Text>
-                        {isFull && <StatusPill tone="danger" label="Full" />}
-                    </View>
-
-                    {/* Member Badge */}
-                    {isMember && (
-                        <StatusPill tone="success" label="You're a member" style={styles.memberPill} />
-                    )}
-                </AppCard>
-
-                {/* Stats */}
-                <DetailSectionCard title="Team Stats" style={styles.statsCard}>
-                    <View style={styles.statsRow}>
-                        <View style={styles.statItem}>
-                            <Text style={[styles.statValue, styles.statPrimary]}>{team.stats?.matchesPlayed || 0}</Text>
-                            <Text style={styles.statLabel}>Matches</Text>
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.statItem}>
-                            <Text style={[styles.statValue, styles.statSuccess]}>{team.stats?.wins || 0}</Text>
-                            <Text style={styles.statLabel}>Wins</Text>
-                        </View>
-                        <View style={styles.divider} />
-                        <View style={styles.statItem}>
-                            <Text style={[styles.statValue, styles.statError]}>{team.stats?.losses || 0}</Text>
-                            <Text style={styles.statLabel}>Losses</Text>
-                        </View>
-                    </View>
-                </DetailSectionCard>
-
-                {/* Captain's Request Section */}
-                {isCaptain && pendingRequests.length > 0 && (
-                    <DetailSectionCard title={`Join Requests (${pendingRequests.length})`} style={styles.requestSection}>
-                        {pendingRequests.map(req => (
-                            <AppCard key={req.id} style={styles.requestCard}>
-                                <View style={styles.requestHeader}>
-                                    <Text style={styles.requestUser}>{req.fromUsername}</Text>
-                                    <Text style={styles.snapshotText}>{req.data?.requesterSnapshot?.city || 'No city'}</Text>
-                                </View>
-                                <View style={styles.requestSnapshot}>
-                                    <Text style={styles.snapshotText}>
-                                        Tier: {req.data?.requesterSnapshot?.skillTier?.[team.game] || 'Unranked'}
-                                        {req.data?.requesterSnapshot?.stats?.faceitLevel ? ` • Faceit Lvl ${req.data.requesterSnapshot.stats.faceitLevel}` : ''}
+                                {team.logoUrl ? (
+                                    <AppImage source={{ uri: team.logoUrl }} containerStyle={styles.teamLogoImage} />
+                                ) : (
+                                    <Text style={styles.teamLogoTextLarge}>
+                                        {team.name.charAt(0).toUpperCase()}
                                     </Text>
-                                </View>
-                                <View style={styles.requestActions}>
-                                    <AppButton
-                                        variant="success"
-                                        size="sm"
-                                        onPress={() => handleRespondRequest(req.id, 'accept')}
-                                        disabled={submitting}
+                                )}
+                                {isCaptain && (
+                                    <View style={styles.logoEditBadge}>
+                                        <AppIcon name="photo-camera" size={14} color="#FFF" />
+                                    </View>
+                                )}
+                            </Pressable>
+                            <View style={styles.teamNameContainer}>
+                                <Text style={styles.teamNameLarge} numberOfLines={1} ellipsizeMode="tail">
+                                    {team.name}
+                                </Text>
+                                {isCaptain && (
+                                    <Pressable
+                                        onPress={() => {
+                                            setNewName(team.name);
+                                            setShowRenameModal(true);
+                                        }}
+                                        style={({ pressed }) => [
+                                            styles.editNameIcon,
+                                            pressed && styles.headerIconPressed
+                                        ]}
+                                        android_ripple={{ color: COLORS.overlayMedium, borderless: true, radius: 20 }}
                                     >
-                                        <Text style={styles.actionText}>Accept</Text>
-                                    </AppButton>
+                                        <AppIcon name="edit" size={20} color={COLORS.accent} />
+                                    </Pressable>
+                                )}
+                            </View>
+                            <StatusPill tone="info" label={getCanonicalGameLabel(team.game)} style={styles.gamePill} />
+                            {team.description && <Text style={styles.description}>{team.description}</Text>}
+
+                            {/* Occupancy Indicator with Report Button */}
+                            <View style={styles.occupancyActionRow}>
+                                <View style={styles.occupancyInfoPill}>
+                                    <AppIcon name="people" size={16} color={COLORS.muted} />
+                                    <Text style={styles.occupancyText}>
+                                        {memberCountDisplay} / {maxMembers}
+                                    </Text>
+                                    {isFull && <StatusPill tone="danger" label="Full" />}
+                                </View>
+
+                                {!isCaptain && (
+                                    <View style={styles.reportActionSlot}>
+                                        <ReportIconButton onPress={() => setShowReportModal(true)} />
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* Member Badge */}
+                            {isMember && (
+                                <StatusPill
+                                    tone="success"
+                                    label="Member"
+                                    caps={false}
+                                    style={styles.memberPill}
+                                    textStyle={styles.memberPillText}
+                                />
+                            )}
+                        </AppCard>
+
+                        {/* Stats */}
+                        <DetailSectionCard title="Team Stats" style={styles.statsCard}>
+                            <View style={styles.statsRow}>
+                                <View style={styles.statItem}>
+                                    <Text style={[styles.statValue, styles.statPrimary]}>{team.stats?.matchesPlayed || 0}</Text>
+                                    <Text style={styles.statLabel}>Matches</Text>
+                                </View>
+                                <View style={styles.divider} />
+                                <View style={styles.statItem}>
+                                    <Text style={[styles.statValue, styles.statSuccess]}>{team.stats?.wins || 0}</Text>
+                                    <Text style={styles.statLabel}>Wins</Text>
+                                </View>
+                                <View style={styles.divider} />
+                                <View style={styles.statItem}>
+                                    <Text style={[styles.statValue, styles.statError]}>{team.stats?.losses || 0}</Text>
+                                    <Text style={styles.statLabel}>Losses</Text>
+                                </View>
+                            </View>
+                        </DetailSectionCard>
+
+                        {/* Captain's Request Section */}
+                        {isCaptain && pendingRequests.length > 0 && (
+                            <DetailSectionCard title={`Join Requests (${pendingRequests.length})`} style={styles.requestSection}>
+                                {pendingRequests.map(req => (
+                                    <AppCard key={req.id} style={styles.requestCard}>
+                                        <View style={styles.requestHeader}>
+                                            <Text style={styles.requestUser}>{req.fromUsername}</Text>
+                                            <Text style={styles.snapshotText}>{req.data?.requesterSnapshot?.city || 'No city'}</Text>
+                                        </View>
+                                        <View style={styles.requestSnapshot}>
+                                            <Text style={styles.snapshotText}>
+                                                Tier: {req.data?.requesterSnapshot?.skillTier?.[team.game] || 'Unranked'}
+                                                {req.data?.requesterSnapshot?.stats?.faceitLevel ? ` • Faceit Lvl ${req.data.requesterSnapshot.stats.faceitLevel}` : ''}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.requestActions}>
+                                            <AppButton
+                                                variant="success"
+                                                size="sm"
+                                                onPress={() => handleRespondRequest(req.id, 'accept')}
+                                                disabled={submitting}
+                                            >
+                                                <Text style={styles.actionText}>Accept</Text>
+                                            </AppButton>
+                                            <AppButton
+                                                variant="danger"
+                                                size="sm"
+                                                onPress={() => handleRespondRequest(req.id, 'reject')}
+                                                disabled={submitting}
+                                            >
+                                                <Text style={styles.rejectText}>Decline</Text>
+                                            </AppButton>
+                                        </View>
+                                    </AppCard>
+                                ))}
+                            </DetailSectionCard>
+                        )}
+
+                        {/* Roster Slots (Slot Grid) */}
+                        <DetailSectionCard
+                            title="Lineup"
+                            subtitle={isCaptain ? "Manage members, invites, and captain actions from here." : undefined}
+                            style={styles.rosterSection}
+                        >
+                            <RosterSlots
+                                maxMembers={maxMembers}
+                                members={team.members || []}
+                                captainUid={team.captainUid}
+                                viewerUid={user?._id}
+                                isCaptain={isCaptain}
+                                game={team.game}
+                                onEmptySlotPress={handleEmptySlotPress}
+                                onMemberPress={(member) => {
+                                    if (isCaptain && member.uid !== user?._id) {
+                                        setMemberActionTarget({ uid: member.uid, username: member.username });
+                                        return;
+                                    }
+                                    router.push(`/(player)/profile/${member.uid}` as any);
+                                }}
+                            />
+                        </DetailSectionCard>
+                        {/* Action Bar */}
+                        {isMember && !isCaptain && (
+                            <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
+                                <View style={styles.actionBarContent}>
                                     <AppButton
                                         variant="danger"
-                                        size="sm"
-                                        onPress={() => handleRespondRequest(req.id, 'reject')}
+                                        size="lg"
+                                        onPressIn={() => {
+                                            if (touchDebugEnabled) {
+                                                Logger.debug("TouchDebug", "pressIn", { tag: "team_leave" });
+                                            }
+                                        }}
+                                        onPress={handleLeaveTeam}
                                         disabled={submitting}
+                                        style={styles.leaveButton}
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                     >
-                                        <Text style={styles.rejectText}>Decline</Text>
+                                        {submitting ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <Text style={styles.leaveButtonText}>Leave Team</Text>
+                                        )}
                                     </AppButton>
                                 </View>
-                            </AppCard>
-                        ))}
-                    </DetailSectionCard>
-                )}
-
-                {/* Roster Slots (Slot Grid) */}
-                <DetailSectionCard
-                    title="Lineup"
-                    subtitle={isCaptain ? "Manage members, invites, and captain actions from here." : undefined}
-                    style={styles.rosterSection}
-                >
-                    <RosterSlots
-                        maxMembers={maxMembers}
-                        members={team.members || []}
-                        captainUid={team.captainUid}
-                        viewerUid={user?._id}
-                        isCaptain={isCaptain}
-                        game={team.game}
-                        onEmptySlotPress={handleEmptySlotPress}
-                        onMemberPress={(member) => {
-                            if (isCaptain && member.uid !== user?._id) {
-                                setMemberActionTarget({ uid: member.uid, username: member.username });
-                                return;
-                            }
-                            router.push(`/(player)/profile/${member.uid}` as any);
-                        }}
-                    />
-                </DetailSectionCard>
-                {/* Action Bar */}
-                {isMember && !isCaptain && (
-                <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
-                    <View style={styles.actionBarContent}>
-                    <AppButton
-                        variant="danger"
-                        size="lg"
-                        onPressIn={() => {
-                            if (touchDebugEnabled) {
-                                Logger.debug("TouchDebug", "pressIn", { tag: "team_leave" });
-                            }
-                        }}
-                        onPress={handleLeaveTeam}
-                        disabled={submitting}
-                        style={styles.leaveButton}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                        {submitting ? (
-                            <ActivityIndicator size="small" color="#FFF" />
-                        ) : (
-                            <Text style={styles.leaveButtonText}>Leave Team</Text>
+                            </View>
                         )}
-                    </AppButton>
-                    </View>
-                </View>
-            )}
 
-            {/* Action Bar (Non-Members Only) */}
-            {!isMember && (
-                <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
-                    <View style={styles.actionBarContent}>
-                    {buttonState === 'eligible' && (
-                        <>
-                            {captainedTeams.some(
-                                (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
-                            ) ? (
-                                <AppButton
-                                    variant="success"
-                                    size="lg"
-                                    onPress={handleChallenge}
-                                    disabled={submitting}
-                                    style={styles.challengeButton}
-                                >
-                                    <Text style={styles.challengeButtonText}>Challenge Team</Text>
-                                </AppButton>
-                            ) : null}
-                            <AppButton
-                                size="lg"
-                                onPressIn={() => {
-                                    if (touchDebugEnabled) {
-                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_request_join" });
-                                    }
-                                }}
-                                onPress={handleJoinRequest}
-                                disabled={submitting}
-                                style={styles.actionButton}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            >
-                                <Text style={styles.actionButtonText}>Request to Join</Text>
-                            </AppButton>
-                            <Text style={styles.helperText}>Captain approval required. You'll see updates in Inbox.</Text>
-                        </>
-                    )}
-                    {buttonState === 'requested' && (
-                        <>
-                            <AppCard style={styles.actionButtonDisabled}>
-                                <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
-                                <Text style={styles.actionButtonTextDisabled}>Requested</Text>
-                            </AppCard>
-                            <Text style={styles.helperText}>Waiting for captain approval</Text>
-                        </>
-                    )}
-                    {buttonState === 'full' && (
-                        <>
-                            <AppCard style={styles.actionButtonDisabled}>
-                                <Text style={styles.actionButtonTextDisabled}>Full</Text>
-                            </AppCard>
-                            <Text style={styles.helperText}>This lineup is complete.</Text>
-                        </>
-                    )}
-                    {buttonState === 'private' && (
-                        <>
-                            <AppCard style={styles.actionButtonDisabled}>
-                                <Text style={styles.actionButtonTextDisabled}>Invite Only</Text>
-                            </AppCard>
-                            <Text style={styles.helperText}>This team requires an invite.</Text>
-                        </>
-                    )}
-                    </View>
-                </View>
-            )}
-                </Animated.View>
-            </ScrollView>
+                        {/* Action Bar (Non-Members Only) */}
+                        {!isMember && (
+                            <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
+                                <View style={styles.actionBarContent}>
+                                    {buttonState === 'eligible' && (
+                                        <>
+                                            {captainedTeams.some(
+                                                (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+                                            ) ? (
+                                                <AppButton
+                                                    variant="success"
+                                                    size="lg"
+                                                    onPress={handleChallenge}
+                                                    disabled={submitting}
+                                                    style={styles.challengeButton}
+                                                >
+                                                    <Text style={styles.challengeButtonText}>Challenge Team</Text>
+                                                </AppButton>
+                                            ) : null}
+                                            <AppButton
+                                                size="lg"
+                                                onPressIn={() => {
+                                                    if (touchDebugEnabled) {
+                                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_request_join" });
+                                                    }
+                                                }}
+                                                onPress={handleJoinRequest}
+                                                disabled={submitting}
+                                                style={styles.actionButton}
+                                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                            >
+                                                <Text style={styles.actionButtonText}>Request to Join</Text>
+                                            </AppButton>
+                                            <Text style={styles.helperText}>Captain approval required. You'll see updates in Inbox.</Text>
+                                        </>
+                                    )}
+                                    {buttonState === 'requested' && (
+                                        <>
+                                            <AppCard style={styles.actionButtonDisabled}>
+                                                <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
+                                                <Text style={styles.actionButtonTextDisabled}>Requested</Text>
+                                            </AppCard>
+                                            <Text style={styles.helperText}>Waiting for captain approval</Text>
+                                        </>
+                                    )}
+                                    {buttonState === 'full' && (
+                                        <>
+                                            <AppCard style={styles.actionButtonDisabled}>
+                                                <Text style={styles.actionButtonTextDisabled}>Full</Text>
+                                            </AppCard>
+                                            <Text style={styles.helperText}>This lineup is complete.</Text>
+                                        </>
+                                    )}
+                                    {buttonState === 'private' && (
+                                        <>
+                                            <AppCard style={styles.actionButtonDisabled}>
+                                                <Text style={styles.actionButtonTextDisabled}>Invite Only</Text>
+                                            </AppCard>
+                                            <Text style={styles.helperText}>This team requires an invite.</Text>
+                                        </>
+                                    )}
+                                </View>
+                            </View>
+                        )}
+                    </Animated.View>
+                </ScrollView>
             </View>
 
             <AppDialog
@@ -866,6 +940,52 @@ export default function TeamDetails() {
                     </View>
                 </AppModalFooter>
             </AppDialog>
+
+            <AppBottomSheet
+                visible={showRoleRequiredSheet}
+                onClose={() => setShowRoleRequiredSheet(false)}
+                sheetStyle={[
+                    styles.roleRequiredSheet,
+                    roleRequiredSheetBottomOffset
+                        ? { marginBottom: roleRequiredSheetBottomOffset }
+                        : null,
+                ]}
+            >
+                <AppModalHeader
+                    title="Set your role first"
+                    onClose={() => setShowRoleRequiredSheet(false)}
+                />
+                <AppModalBody contentContainerStyle={styles.roleRequiredContent}>
+                    <Text style={styles.roleRequiredMessage}>
+                        Choose your role for {getCanonicalGameLabel(team?.game)} to request teams.
+                    </Text>
+                </AppModalBody>
+                <AppModalFooter
+                    style={[
+                        styles.roleRequiredFooter,
+                        { paddingBottom: roleRequiredFooterBottomPadding },
+                    ]}
+                >
+                    <View style={styles.roleRequiredActions}>
+                        <AppButton
+                            variant="secondary"
+                            style={styles.roleRequiredActionButton}
+                            onPress={() => setShowRoleRequiredSheet(false)}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton
+                            style={styles.roleRequiredActionButton}
+                            onPress={() => {
+                                setShowRoleRequiredSheet(false);
+                                router.push('/(player)/profile/edit' as any);
+                            }}
+                        >
+                            Set Role
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppBottomSheet>
 
             <AppDialog
                 visible={memberActionTarget !== null}
@@ -956,7 +1076,22 @@ export default function TeamDetails() {
                 game={team.game}
                 memberUids={team.memberUids}
             />
+
+            {/* Report Team Modal */}
+            <ReportIssueModal
+                visible={showReportModal}
+                title="Report Team"
+                subtitle="Flag behavior that violates MatchHai policies."
+                reasons={REPORT_REASONS}
+                reason={reportReason}
+                description={reportDescription}
+                onChangeReason={setReportReason}
+                onChangeDescription={setReportDescription}
+                onSubmit={handleSubmitTeamReport}
+                onClose={() => setShowReportModal(false)}
+                loading={reporting}
+                submitLabel="Submit Report"
+            />
         </Screen>
     );
 }
-

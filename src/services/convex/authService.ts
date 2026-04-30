@@ -27,6 +27,15 @@ function mapAuthError(error?: any): string {
   if (code.includes("weak-password") || code.includes("WEAK_PASSWORD")) {
     return "Password is too weak (use at least 6 characters).";
   }
+  if (raw.includes("PASSWORD_TOO_SHORT")) {
+    return "Password is too short.";
+  }
+  if (raw.includes("PASSWORD_TOO_LONG")) {
+    return "Password is too long.";
+  }
+  if (raw.includes("INVALID_TOKEN")) {
+    return "This reset link is invalid or has expired. Please request a new one.";
+  }
   if (code.includes("user-not-found") || code.includes("USER_NOT_FOUND")) {
     return "Incorrect email or password.";
   }
@@ -487,26 +496,28 @@ export async function sendPasswordReset(email: string): Promise<SimpleResult> {
   try {
     const payload = {
       email: email.trim().toLowerCase(),
-      redirectTo: `${APP_SCHEME}://auth/reset-password`,   // ← deep link
-      callbackURL: `${APP_SCHEME}://auth/reset-password`,  // ← deep link
+      redirectTo: `${APP_SCHEME}://auth/reset-password`,
     };
 
-    const candidateMethods = [
-      (authClient as any).forgetPassword,
-      (authClient as any).forgotPassword,
-      (authClient as any).requestPasswordReset,
-      (authClient as any).sendResetPassword,
-    ].filter(Boolean);
-
-    for (const method of candidateMethods) {
-      const response = await method(payload);
+    const requestPasswordReset = (authClient as any).requestPasswordReset;
+    if (requestPasswordReset) {
+      const response = await withTimeout<any>(
+        requestPasswordReset(payload),
+        AUTH_CALL_TIMEOUT_MS,
+        "Password reset request timed out. Please try again.",
+      );
       if (!response?.error) return { ok: true };
+      return {
+        ok: false,
+        message: mapAuthError(response.error),
+        code: response.error?.code,
+      };
     }
 
     const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
     if (siteUrl) {
       const response = await fetch(
-        `${siteUrl.replace(/\/$/, "")}/api/auth/forget-password`,
+        `${siteUrl.replace(/\/$/, "")}/request-password-reset`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -514,6 +525,65 @@ export async function sendPasswordReset(email: string): Promise<SimpleResult> {
         }
       );
       if (response.ok) return { ok: true };
+    }
+
+    return { ok: false, message: "Password reset is not available right now." };
+  } catch (e: any) {
+    return { ok: false, message: mapAuthError(e), code: e?.code };
+  }
+}
+
+/** Apply a password reset token from the email reset deep link. */
+export async function resetPasswordWithToken(
+  token: string,
+  newPassword: string,
+): Promise<SimpleResult> {
+  try {
+    const trimmedToken = String(token || "").trim();
+    if (!trimmedToken) {
+      return {
+        ok: false,
+        message: "Reset token is missing. Please request a new reset link.",
+        code: "auth/invalid-token",
+      };
+    }
+
+    const resetPassword = (authClient as any).resetPassword;
+    if (resetPassword) {
+      const { error } = await withTimeout<any>(
+        resetPassword({
+          newPassword,
+          token: trimmedToken,
+        }),
+        AUTH_CALL_TIMEOUT_MS,
+        "Password reset timed out. Please try again.",
+      );
+
+      if (!error) return { ok: true };
+      return { ok: false, message: mapAuthError(error), code: error?.code };
+    }
+
+    const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
+    if (siteUrl) {
+      const response = await fetch(
+        `${siteUrl.replace(/\/$/, "")}/reset-password`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ newPassword, token: trimmedToken }),
+        },
+      );
+
+      if (response.ok) return { ok: true };
+
+      let message = "Could not reset password. Try again.";
+      try {
+        const data = await response.json();
+        message = data?.message || message;
+      } catch {
+        // Keep the fallback message when the server does not return JSON.
+      }
+      return { ok: false, message };
     }
 
     return { ok: false, message: "Password reset is not available right now." };

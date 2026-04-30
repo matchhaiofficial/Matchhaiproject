@@ -21,6 +21,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../../src/context/AuthContext";
 import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
+import { useToast } from "../../src/hooks/useToast";
 import { createTeamAction, inviteToTeamAction } from "../../src/services/convex/teamActionService";
 import { COLORS } from "../../src/theme";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
@@ -33,11 +34,14 @@ const GAMES = [
     { key: 'valorant', label: 'Valorant' },
     { key: 'fc26', label: 'FC26' },
     { key: 'tekken8', label: 'Tekken 8' },
-    { key: 'futsal', label: 'Futsal' },
-    { key: 'indoor_cricket', label: 'Cricket' },
-    { key: 'padel', label: 'Padel' },
-    { key: 'pickleball', label: 'Pickleball' },
+    // Physical sports are temporarily disabled.
+    // { key: 'futsal', label: 'Futsal' },
+    // { key: 'indoor_cricket', label: 'Cricket' },
+    // { key: 'padel', label: 'Padel' },
+    // { key: 'pickleball', label: 'Pickleball' },
 ];
+
+const FIXED_1V1_TEAM_GAMES = new Set(["fc26", "tekken8"]);
 
 const localStyles = StyleSheet.create({
     flexOne: {
@@ -57,6 +61,7 @@ const localStyles = StyleSheet.create({
 export default function CreateTeam() {
     const { user, authUser } = useAuth();
     const router = useRouter();
+    const { showToast } = useToast();
     const touchDebugEnabled = false;
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
@@ -82,6 +87,11 @@ export default function CreateTeam() {
         if (!selectedGame) return [];
         return GAME_FORMATS[selectedGame] || [];
     }, [selectedGame]);
+    const usesFixed1v1TeamSize = selectedGame ? FIXED_1V1_TEAM_GAMES.has(selectedGame) : false;
+    const effectiveTeamSize = usesFixed1v1TeamSize ? 1 : selectedSize;
+    const shouldShowTeamSizeSelector = Boolean(
+        selectedGame && !usesFixed1v1TeamSize && availableFormats.length > 1,
+    );
 
     const eligibleFriends = useMemo(
         () => (eligibleFriendsRaw ?? []).map((friend: any) => ({
@@ -93,7 +103,7 @@ export default function CreateTeam() {
         [eligibleFriendsRaw]
     );
 
-    const maxInviteCount = Math.max(0, (selectedSize ?? 1) - 1);
+    const maxInviteCount = Math.max(0, (effectiveTeamSize ?? 1) - 1);
     const selectedGameLabel = useMemo(
         () => GAMES.find((game) => game.key === selectedGame)?.label ?? "this game",
         [selectedGame]
@@ -114,7 +124,11 @@ export default function CreateTeam() {
                 return prev.filter((id) => id !== friendId);
             }
             if (prev.length >= maxInviteCount) {
-                alert(`You can invite up to ${maxInviteCount} friend${maxInviteCount === 1 ? "" : "s"} for this team size.`);
+                showToast({
+                    type: "warning",
+                    title: "Invite limit reached",
+                    message: `You can invite up to ${maxInviteCount} friend${maxInviteCount === 1 ? "" : "s"} for this team size.`,
+                });
                 return prev;
             }
             return [...prev, friendId];
@@ -126,25 +140,25 @@ export default function CreateTeam() {
         logFlowEvent("CreateTeam", "Submitting team creation", {
             nameLength: name.trim().length,
             selectedGame,
-            selectedSize,
+            selectedSize: effectiveTeamSize,
             invitedCount: selectedFriendIds.length,
             uid: user?._id
         });
 
         if (!user) {
-            alert("You must be logged in");
+            showToast({ type: "error", title: "Login required", message: "You must be logged in." });
             return;
         }
         if (!name.trim()) {
-            alert("Please enter a team name");
+            showToast({ type: "warning", title: "Team name required", message: "Please enter a team name." });
             return;
         }
         if (!selectedGame) {
-            alert("Please select a game");
+            showToast({ type: "warning", title: "Game required", message: "Please select a game." });
             return;
         }
-        if (!selectedSize) {
-            alert("Please select a team size");
+        if (!effectiveTeamSize) {
+            showToast({ type: "warning", title: "Team size required", message: "Please select a team size." });
             return;
         }
         if (!hasVerifiedEmail(authUser)) {
@@ -159,7 +173,7 @@ export default function CreateTeam() {
                 description: description.trim(),
                 game: selectedGame,
                 visibility: 'public',
-                maxMembers: selectedSize
+                maxMembers: effectiveTeamSize
             });
 
             if (result.ok) {
@@ -179,17 +193,25 @@ export default function CreateTeam() {
                     params: { showInvite: 'true' }
                 } as any);
             } else {
-                alert(result.message || "Failed to create team");
+                showToast({
+                    type: "error",
+                    title: "Create team failed",
+                    message: result.message || "Failed to create team.",
+                });
             }
         } catch (error) {
             Logger.error("CreateTeam", "Error creating team", error);
-            alert("An error occurred");
+            showToast({
+                type: "error",
+                title: "Create team failed",
+                message: "An error occurred.",
+            });
         } finally {
             setSubmitting(false);
         }
     };
 
-    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!selectedSize && !submitting;
+    const canSubmit = !!user && !!name.trim() && !!selectedGame && !!effectiveTeamSize && !submitting;
 
     return (
         <SafeAreaView style={styles.screen}>
@@ -258,8 +280,8 @@ export default function CreateTeam() {
                         </View>
                     </View>
 
-                    {/* Team Size Selection (only if game has multiple formats) */}
-                    {selectedGame && availableFormats.length > 1 && (
+                    {/* Team Size Selection */}
+                    {shouldShowTeamSizeSelector && (
                         <View style={styles.section}>
                             <Text style={styles.sectionLabel}>
                                 Team Size *

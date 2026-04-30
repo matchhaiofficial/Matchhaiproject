@@ -34,6 +34,7 @@ import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
 import { COLORS } from "../../../src/theme";
+import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
@@ -156,7 +157,7 @@ export default function Profile() {
             setLoadingTeams(true);
             const teamsRes = await getUserTeams(user._id);
             if (teamsRes.ok && teamsRes.data) {
-                setMyTeams(teamsRes.data);
+                setMyTeams(teamsRes.data.filter((team) => !isPhysicalGameDisabled(team.game)));
             } else {
                 setMyTeams([]);
             }

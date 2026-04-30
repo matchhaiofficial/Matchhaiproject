@@ -1,12 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    Text,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +20,7 @@ import {
   MatchroomAdminCancelSheet,
   MatchroomFallbackRoster,
   MatchroomInviteSheet,
+  MatchroomJoinTeamSheet,
   MatchroomPendingRequestsPanel,
   MatchroomSuggestSheet,
   MatchroomSummarySection,
@@ -62,6 +63,17 @@ const identityMatches = (
   );
 };
 
+const isOpenJoinSlot = (slot: any) => {
+  const status = String(slot?.status || "open").toLowerCase();
+  return (
+    Boolean(slot?.slotId) &&
+    !getSlotUserId(slot) &&
+    !slot?.reservedForUid &&
+    status !== "reserved" &&
+    status !== "confirmed"
+  );
+};
+
 function HeaderIconButton({
   icon,
   color,
@@ -100,6 +112,7 @@ export default function MatchroomDetails() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const [showJoinTeamSheet, setShowJoinTeamSheet] = useState(false);
   const footerHitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
   const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
   const touchDebugEnabled =
@@ -145,29 +158,25 @@ export default function MatchroomDetails() {
     distance: 18,
   });
 
-  const logDebugLayout = (tag: string, event: any) => {
+  const logDebugLayout = useCallback((tag: string, event: any) => {
     if (!touchDebugEnabled) return;
-    const { x, y, width: layoutWidth, height } = event.nativeEvent.layout;
-    Logger.debug("TouchDebug", "layout", {
-      tag,
-      x: Math.round(x),
-      y: Math.round(y),
-      width: Math.round(layoutWidth),
-      height: Math.round(height),
-    });
-  };
+    try {
+      const { x, y, width: layoutWidth, height } = event.nativeEvent.layout;
+      Logger.debug("TouchDebug", "layout", { tag, x: Math.round(x), y: Math.round(y), width: Math.round(layoutWidth), height: Math.round(height) });
+    } catch (error) {
+      Logger.error("TouchDebug", "layout logging failed", error);
+    }
+  }, [touchDebugEnabled]);
 
-  const logDebugTouch = (tag: string, event: any, phase: string = "touch") => {
+  const logDebugTouch = useCallback((tag: string, event: any, phase = "touch") => {
     if (!touchDebugEnabled) return;
-    const { pageX, pageY, locationX, locationY } = event.nativeEvent;
-    Logger.debug("TouchDebug", phase, {
-      tag,
-      pageX: Math.round(pageX),
-      pageY: Math.round(pageY),
-      locationX: Math.round(locationX),
-      locationY: Math.round(locationY),
-    });
-  };
+    try {
+      const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+      Logger.debug("TouchDebug", phase, { tag, pageX: Math.round(pageX), pageY: Math.round(pageY), locationX: Math.round(locationX), locationY: Math.round(locationY) });
+    } catch (error) {
+      Logger.error("TouchDebug", "touch logging failed", error);
+    }
+  }, [touchDebugEnabled]);
 
   const {
     showComplainModal,
@@ -308,6 +317,45 @@ export default function MatchroomDetails() {
     currentIdentityValues,
   });
 
+  const openSlotsA = useMemo(
+    () => (displaySlotsA || []).filter(isOpenJoinSlot),
+    [displaySlotsA],
+  );
+  const openSlotsB = useMemo(
+    () => (displaySlotsB || []).filter(isOpenJoinSlot),
+    [displaySlotsB],
+  );
+  const joinTeamOptions = useMemo(
+    () => ({
+      teamA: { team: "A" as const, availableCount: openSlotsA.length },
+      teamB: { team: "B" as const, availableCount: openSlotsB.length },
+    }),
+    [openSlotsA.length, openSlotsB.length],
+  );
+  const handleFooterRequestJoinPress = useCallback(() => {
+    if (!joining) {
+      setShowJoinTeamSheet(true);
+    }
+  }, [joining]);
+  const handleSelectJoinTeam = useCallback((team: "A" | "B") => {
+    const slot = (team === "A" ? openSlotsA : openSlotsB)[0];
+    if (!slot?.slotId || joining) return;
+    setShowJoinTeamSheet(false);
+    handleRequestJoinAction(`Team ${team}`, String(slot.slotId));
+  }, [handleRequestJoinAction, joining, openSlotsA, openSlotsB]);
+  const hasOpenTeamSlot = openSlotsA.length > 0 || openSlotsB.length > 0;
+  const showFloatingRequestJoin =
+    !isZoneAdmin &&
+    !isExpired &&
+    room?.status !== "in-progress" &&
+    room?.status !== "completed" &&
+    !isJoined &&
+    requestedSlots.size === 0 &&
+    !genericRequestStatus &&
+    !isLocked &&
+    !isFull &&
+    hasOpenTeamSlot;
+
   if (loading) {
     return (
       <Screen style={styles.screen} scroll={false}>
@@ -412,16 +460,6 @@ export default function MatchroomDetails() {
         style={styles.body}
         collapsable={false}
         onLayout={(event) => logDebugLayout("lobby_body_wrapper", event)}
-        onTouchStart={
-          touchDebugEnabled
-            ? (event) => logDebugTouch("lobby_body_wrapper", event, "touchStart")
-            : undefined
-        }
-        onTouchEndCapture={
-          touchDebugEnabled
-            ? (event) => logDebugTouch("lobby_body_wrapper", event, "touchEndCapture")
-            : undefined
-        }
       >
         <ScrollView
           style={{ flex: 1 }}
@@ -430,448 +468,503 @@ export default function MatchroomDetails() {
             isZoneAdmin ? styles.adminContent : null,
           ]}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           collapsable={false}
           onLayout={(event) => logDebugLayout("lobby_scroll_view", event)}
-          onTouchStart={
-            touchDebugEnabled
-              ? (event) => logDebugTouch("lobby_scroll_view", event, "touchStart")
-              : undefined
-          }
-          onTouchEndCapture={
-            touchDebugEnabled
-              ? (event) => logDebugTouch("lobby_scroll_view", event, "touchEndCapture")
-              : undefined
-          }
         >
           <Animated.View style={contentEntranceStyle}>
-          {/* Expired Banner */}
-          {isExpired && (
-            <View style={[styles.banner, styles.expiredBanner]}>
-              <AppIcon name="warning" size={20} color="#FFF" />
-              <Text style={styles.bannerText}>
-                This matchroom has expired (valid for 48 hours)
-              </Text>
-            </View>
-          )}
-
-          {/* Locked Banner */}
-          {isLocked && !isExpired && (
-            <View style={[styles.banner, styles.lockedBanner]}>
-              <AppIcon name="lock" size={20} color="#FFF" />
-              <Text style={styles.bannerText}>
-                Matchroom is full and locked
-              </Text>
-            </View>
-          )}
-
-          <MatchroomSummarySection
-            room={room}
-            isLocked={isLocked}
-            qrValue={qrValue}
-            matchCode={matchCode}
-            styles={styles}
-          />
-
-          {/* Squad Section */}
-          <DetailSectionHeader
-            title={
-              (displaySlotsA?.length || 0) > 0
-                ? "Teams"
-                : `Squad (${occupiedSeatCount}/${room.maxPlayers})`
-            }
-            accessory={
-              (displaySlotsA?.length || 0) > 0 ? (
-                <Text style={styles.sectionMetaText}>
-                  {occupiedSeatCount}/{room.maxPlayers} Players
+            {/* Expired Banner */}
+            {isExpired && (
+              <View style={[styles.banner, styles.expiredBanner]}>
+                <AppIcon name="warning" size={20} color="#FFF" />
+                <Text style={styles.bannerText}>
+                  This matchroom has expired (valid for 48 hours)
                 </Text>
-              ) : undefined
-            }
-          />
+              </View>
+            )}
 
-          {(displaySlotsA?.length || 0) > 0 ? (
-            <View
-              style={[
-                styles.teamsWrapper,
-                { flexDirection: width < 600 ? "column" : "row" },
-              ]}
-            >
-              <View
-                style={{
-                  flex: width < 600 ? 0 : 1,
-                  width: width < 600 ? "100%" : "auto",
-                }}
-              >
-                <MatchroomTeamSection
-                  team="A"
-                  title="TEAM A"
-                  slots={displaySlotsA || []}
-                  styles={styles}
-                  currentUserId={user?._id}
-                  captainUid={captainUidAResolved}
-                  canManage={canManageTeamA}
-                  canInvite={canInviteTeamA}
-                  canJoin={canJoin}
-                  isJoined={isJoined}
-                  isZoneAdmin={isZoneAdmin}
-                  requestedSlots={requestedSlots}
-                  joining={joining}
-                  footerHitSlop={footerHitSlop}
-                  getSlotUserId={getSlotUserId}
-                  getDisplayRole={getDisplayRole}
-                  identityMatches={identityMatches}
-                  getSkillBadgeProps={getSkillBadgeProps}
-                  onManagePlayer={handleManagePlayerAction}
-                  onInvitePress={handleInvitePressAction}
-                  onRequestJoin={handleRequestJoinAction}
-                  onCancelRequest={handleCancelRequestAction}
-                />
+            {/* Locked Banner */}
+            {isLocked && !isExpired && (
+              <View style={[styles.banner, styles.lockedBanner]}>
+                <AppIcon name="lock" size={20} color="#FFF" />
+                <Text style={styles.bannerText}>
+                  Matchroom is full and locked
+                </Text>
               </View>
-              <View
-                style={{
-                  flex: width < 600 ? 0 : 1,
-                  width: width < 600 ? "100%" : "auto",
-                }}
-              >
-                <MatchroomTeamSection
-                  team="B"
-                  title="TEAM B"
-                  slots={displaySlotsB || []}
-                  styles={styles}
-                  currentUserId={user?._id}
-                  captainUid={captainUidBResolved}
-                  canManage={canManageTeamB}
-                  canInvite={canInviteTeamB}
-                  canJoin={canJoin}
-                  isJoined={isJoined}
-                  isZoneAdmin={isZoneAdmin}
-                  requestedSlots={requestedSlots}
-                  joining={joining}
-                  footerHitSlop={footerHitSlop}
-                  getSlotUserId={getSlotUserId}
-                  getDisplayRole={getDisplayRole}
-                  identityMatches={identityMatches}
-                  getSkillBadgeProps={getSkillBadgeProps}
-                  onManagePlayer={handleManagePlayerAction}
-                  onInvitePress={handleInvitePressAction}
-                  onRequestJoin={handleRequestJoinAction}
-                  onCancelRequest={handleCancelRequestAction}
-                />
-              </View>
-            </View>
-          ) : (
-            <MatchroomFallbackRoster
-              players={room.players || []}
+            )}
+
+            <MatchroomSummarySection
+              room={room}
+              isLocked={isLocked}
+              qrValue={qrValue}
+              matchCode={matchCode}
               styles={styles}
-              hostUid={room.hostUid}
-              currentUserId={user?._id}
-              identityMatches={identityMatches}
-              getDisplayRole={getDisplayRole}
-              getSkillBadgeProps={getSkillBadgeProps}
             />
-          )}
 
-          {/* ── Pending Join Requests (Host / Admin only) ── */}
-          {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
-            <DetailSectionCard
-              title={`Pending Join Requests (${incomingRequests.length})`}
-              style={styles.pendingRequestsCard}
-            >
-              <MatchroomPendingRequestsPanel
-                requests={incomingRequests}
-                processingRequestId={processingRequestId}
-                onRespond={handleRespondToRequestAction}
-              />
-            </DetailSectionCard>
-          )}
-          {/* Footer Actions */}
-          <View
-            style={[
-              styles.buttonWrapper,
-              { marginBottom: ctaBottomGuard },
-            ]}
-            collapsable={false}
-            onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
-          >
-            <View style={styles.buttonContent}>
-          {isZoneAdmin ? (
-            <View style={{ gap: SPACING.sm }}>
-              <Text
-                style={{ textAlign: "center", color: COLORS.textSecondary }}
-              >
-                Booking actions (zone admin)
-              </Text>
-              <View style={styles.footerRow}>
-                <AppButton
-                  size="lg"
-                  onPress={handleZoneAcceptAction}
-                  disabled={adminProcessing !== null}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.footerAction}
-                >
-                  {adminProcessing === "accept" ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <Text style={styles.joinButtonText}>Accept</Text>
-                  )}
-                </AppButton>
-                <AppButton
-                  variant="danger"
-                  size="lg"
-                  onPress={handleZoneRejectAction}
-                  disabled={adminProcessing !== null}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.footerAction}
-                >
-                  {adminProcessing === "reject" ? (
-                    <ActivityIndicator size="small" color={COLORS.error} />
-                  ) : (
-                    <Text style={styles.secondaryButtonText}>Reject</Text>
-                  )}
-                </AppButton>
-              </View>
-              <AppButton
-                variant="ghost"
-                size="lg"
-                onPress={() => setShowSuggestModal(true)}
-                disabled={adminProcessing !== null}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.warningActionButton}
-              >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <AppIcon name="edit" size={18} color={COLORS.warning} />
-                  <Text style={styles.warningActionText}>Suggest Alternative</Text>
-                </View>
-              </AppButton>
-              <AppButton
-                variant="danger"
-                size="lg"
-                onPress={() => setShowAdminCancelModal(true)}
-                disabled={adminProcessing !== null}
-                style={styles.forceCancelButton}
-              >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <AppIcon name="cancel" size={18} color={COLORS.error} />
-                  <Text style={styles.secondaryButtonText}>
-                    Force Cancel (Admin)
+            {/* Squad Section */}
+            <DetailSectionHeader
+              title={
+                (displaySlotsA?.length || 0) > 0
+                  ? "Teams"
+                  : `Squad (${occupiedSeatCount}/${room.maxPlayers})`
+              }
+              accessory={
+                (displaySlotsA?.length || 0) > 0 ? (
+                  <Text style={styles.sectionMetaText}>
+                    {occupiedSeatCount}/{room.maxPlayers} Players
                   </Text>
-                </View>
-              </AppButton>
-            </View>
-          ) : isExpired ? (
-            <View style={[styles.fullButton, styles.expiredBanner]}>
-              <Text style={styles.fullText}>Matchroom Expired</Text>
-            </View>
-          ) : room.status !== "in-progress" && room.status !== "completed" ? (
-            !isJoined ? (
-              <View style={{ gap: SPACING.md }}>
-                {isFull || room.isLocked ? (
-                  <View
-                    style={[
-                      styles.fullButton,
-                      room.isLocked && !isFull ? styles.lockedBanner : null,
-                    ]}
-                  >
-                    <Text style={styles.fullText}>
-                      {room.isLocked && !isFull ? "Lobby Locked" : "Lobby Full"}
-                    </Text>
-                  </View>
-                ) : null}
+                ) : undefined
+              }
+            />
 
+            {(displaySlotsA?.length || 0) > 0 ? (
+              <View
+                style={[
+                  styles.teamsWrapper,
+                  { flexDirection: width < 600 ? "column" : "row" },
+                ]}
+              >
                 <View
-                  style={{ marginTop: SPACING.xs, width: "100%" }}
-                  collapsable={false}
-                  onLayout={(event) =>
-                    logDebugLayout("lobby_footer_action_wrapper", event)
-                  }
+                  style={{
+                    flex: width < 600 ? 0 : 1,
+                    width: width < 600 ? "100%" : "auto",
+                  }}
                 >
-                  {requestedSlots.size > 0 || genericRequestStatus ? (
-                    <View>
-                      <Text
-                        style={{
-                          textAlign: "center",
-                          color: COLORS.muted,
-                          marginBottom: 8,
-                        }}
-                      >
-                        {genericRequestStatus === "approved_pending_payment" ||
-                        Array.from(requestedSlots.values()).includes("approved_pending_payment")
-                          ? "Payment pending. Complete payment or cancel this slot."
-                          : requestedSlots.size > 0
-                            ? `You have requested ${requestedSlots.size} slot${requestedSlots.size > 1 ? "s" : ""}.`
-                            : "Request Sent. Waiting for host approval."}
-                      </Text>
-                      <AppButton
-                        variant="danger"
-                        size="lg"
-                        onPress={handleCancelRequestAction}
-                        disabled={requestLoading}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        style={styles.cancelRequestButton}
-                      >
-                        {requestLoading ? (
-                          <ActivityIndicator color={COLORS.error} />
-                        ) : (
-                          <Text style={styles.cancelRequestButtonText}>
-                            Cancel Request
-                          </Text>
-                        )}
-                      </AppButton>
-                    </View>
-                  ) : (
-                    !isLocked &&
-                    !isFull && (
-                      <AppButton
-                        size="lg"
-                        onPress={() => {
-                          if (!joining) handleRequestJoinAction();
-                        }}
-                        disabled={joining}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        style={[styles.getRequestButton, joining && { opacity: 0.6 }]}
-                      >
-                        {joining ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <Text style={styles.getRequestButtonText}>
-                            Request to Join
-                          </Text>
-                        )}
-                      </AppButton>
-                    )
-                  )}
+                  <MatchroomTeamSection
+                    team="A"
+                    title="TEAM A"
+                    slots={displaySlotsA || []}
+                    styles={styles}
+                    currentUserId={user?._id}
+                    captainUid={captainUidAResolved}
+                    canManage={canManageTeamA}
+                    canInvite={canInviteTeamA}
+                    canJoin={canJoin}
+                    isJoined={isJoined}
+                    isZoneAdmin={isZoneAdmin}
+                    requestedSlots={requestedSlots}
+                    joining={joining}
+                    footerHitSlop={footerHitSlop}
+                    getSlotUserId={getSlotUserId}
+                    getDisplayRole={getDisplayRole}
+                    identityMatches={identityMatches}
+                    getSkillBadgeProps={getSkillBadgeProps}
+                    onManagePlayer={handleManagePlayerAction}
+                    onInvitePress={handleInvitePressAction}
+                    onRequestJoin={handleRequestJoinAction}
+                    onCancelRequest={handleCancelRequestAction}
+                  />
+                </View>
+                <View
+                  style={{
+                    flex: width < 600 ? 0 : 1,
+                    width: width < 600 ? "100%" : "auto",
+                  }}
+                >
+                  <MatchroomTeamSection
+                    team="B"
+                    title="TEAM B"
+                    slots={displaySlotsB || []}
+                    styles={styles}
+                    currentUserId={user?._id}
+                    captainUid={captainUidBResolved}
+                    canManage={canManageTeamB}
+                    canInvite={canInviteTeamB}
+                    canJoin={canJoin}
+                    isJoined={isJoined}
+                    isZoneAdmin={isZoneAdmin}
+                    requestedSlots={requestedSlots}
+                    joining={joining}
+                    footerHitSlop={footerHitSlop}
+                    getSlotUserId={getSlotUserId}
+                    getDisplayRole={getDisplayRole}
+                    identityMatches={identityMatches}
+                    getSkillBadgeProps={getSkillBadgeProps}
+                    onManagePlayer={handleManagePlayerAction}
+                    onInvitePress={handleInvitePressAction}
+                    onRequestJoin={handleRequestJoinAction}
+                    onCancelRequest={handleCancelRequestAction}
+                  />
                 </View>
               </View>
             ) : (
-              <View style={styles.footerRow}>
-                <View style={[styles.joinedButton, { flex: 1.5 }]}>
-                  <Text style={styles.joinedText}>
-                    {isHost ? "Waiting for kickoff..." : "You are in!"}
-                  </Text>
-                </View>
+              <MatchroomFallbackRoster
+                players={room.players || []}
+                styles={styles}
+                hostUid={room.hostUid}
+                currentUserId={user?._id}
+                identityMatches={identityMatches}
+                getDisplayRole={getDisplayRole}
+                getSkillBadgeProps={getSkillBadgeProps}
+              />
+            )}
 
-                {/* Self-Leave Button if not Host (Host deletes) */}
-                {!isHost && (
+            {/* ── Pending Join Requests (Host / Admin only) ── */}
+            {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
+              <DetailSectionCard
+                title={`Pending Join Requests (${incomingRequests.length})`}
+                style={styles.pendingRequestsCard}
+              >
+                <MatchroomPendingRequestsPanel
+                  requests={incomingRequests}
+                  processingRequestId={processingRequestId}
+                  onRespond={handleRespondToRequestAction}
+                />
+              </DetailSectionCard>
+            )}
+            {/* Footer Actions */}
+            <View
+              style={[
+                styles.buttonWrapper,
+                { marginBottom: ctaBottomGuard },
+              ]}
+              collapsable={false}
+              onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
+            >
+              <View style={styles.buttonContent}>
+                {isZoneAdmin ? (
+                  <View style={{ gap: SPACING.sm }}>
+                    <Text
+                      style={{ textAlign: "center", color: COLORS.textSecondary }}
+                    >
+                      Booking actions (zone admin)
+                    </Text>
+                    <View style={styles.footerRow}>
+                      <AppButton
+                        size="lg"
+                        onPress={handleZoneAcceptAction}
+                        disabled={adminProcessing !== null}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.footerAction}
+                      >
+                        {adminProcessing === "accept" ? (
+                          <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                          <Text style={styles.joinButtonText}>Accept</Text>
+                        )}
+                      </AppButton>
+                      <AppButton
+                        variant="danger"
+                        size="lg"
+                        onPress={handleZoneRejectAction}
+                        disabled={adminProcessing !== null}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.footerAction}
+                      >
+                        {adminProcessing === "reject" ? (
+                          <ActivityIndicator size="small" color={COLORS.error} />
+                        ) : (
+                          <Text style={styles.secondaryButtonText}>Reject</Text>
+                        )}
+                      </AppButton>
+                    </View>
+                    <AppButton
+                      variant="ghost"
+                      size="lg"
+                      onPress={() => setShowSuggestModal(true)}
+                      disabled={adminProcessing !== null}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={styles.warningActionButton}
+                    >
+                      <View
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                      >
+                        <AppIcon name="edit" size={18} color={COLORS.warning} />
+                        <Text style={styles.warningActionText}>Suggest Alternative</Text>
+                      </View>
+                    </AppButton>
+                    <AppButton
+                      variant="danger"
+                      size="lg"
+                      onPress={() => setShowAdminCancelModal(true)}
+                      disabled={adminProcessing !== null}
+                      style={styles.forceCancelButton}
+                    >
+                      <View
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                      >
+                        <AppIcon name="cancel" size={18} color={COLORS.error} />
+                        <Text style={styles.secondaryButtonText}>
+                          Force Cancel (Admin)
+                        </Text>
+                      </View>
+                    </AppButton>
+                  </View>
+                ) : isExpired ? (
+                  <View style={[styles.fullButton, styles.expiredBanner]}>
+                    <Text style={styles.fullText}>Matchroom Expired</Text>
+                  </View>
+                ) : room.status !== "in-progress" && room.status !== "completed" ? (
+                  !isJoined ? (
+                    <View style={{ gap: SPACING.md }}>
+                      {isFull || room.isLocked ? (
+                        <View
+                          style={[
+                            styles.fullButton,
+                            room.isLocked && !isFull ? styles.lockedBanner : null,
+                          ]}
+                        >
+                          <Text style={styles.fullText}>
+                            {room.isLocked && !isFull ? "Lobby Locked" : "Lobby Full"}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      <View
+                        style={{ marginTop: SPACING.xs, width: "100%" }}
+                        collapsable={false}
+                        onLayout={(event) =>
+                          logDebugLayout("lobby_footer_action_wrapper", event)
+                        }
+                      >
+                        {requestedSlots.size > 0 || genericRequestStatus ? (
+                          <View>
+                            <Text
+                              style={{
+                                textAlign: "center",
+                                color: COLORS.muted,
+                                marginBottom: 8,
+                              }}
+                            >
+                              {genericRequestStatus === "approved_pending_payment" ||
+                                Array.from(requestedSlots.values()).includes("approved_pending_payment")
+                                ? "Payment pending. Complete payment or cancel this slot."
+                                : requestedSlots.size > 0
+                                  ? `You have requested ${requestedSlots.size} slot${requestedSlots.size > 1 ? "s" : ""}.`
+                                  : "Request Sent. Waiting for host approval."}
+                            </Text>
+                            <AppButton
+                              variant="danger"
+                              size="lg"
+                              onPress={handleCancelRequestAction}
+                              disabled={requestLoading}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              style={styles.cancelRequestButton}
+                            >
+                              {requestLoading ? (
+                                <ActivityIndicator color={COLORS.error} />
+                              ) : (
+                                <Text style={styles.cancelRequestButtonText}>
+                                  Cancel Request
+                                </Text>
+                              )}
+                            </AppButton>
+                          </View>
+                        ) : (
+                          !showFloatingRequestJoin &&
+                          !isLocked &&
+                          !isFull &&
+                          hasOpenTeamSlot && (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityState={{ disabled: joining }}
+                              testID="matchroom-request-join-button"
+                              onPress={handleFooterRequestJoinPress}
+                              disabled={joining}
+                              hitSlop={footerHitSlop}
+                              unstable_pressDelay={0}
+                              pressRetentionOffset={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                              onPressIn={() => {
+                                handleFooterRequestJoinPress();
+                                if (touchDebugEnabled) {
+                                  Logger.debug("TouchDebug", "pressIn", {
+                                    tag: "lobby_request_join",
+                                  });
+                                }
+                              }}
+                              style={({ pressed }) => [
+                                styles.getRequestButton,
+                                pressed && styles.footerButtonPressed,
+                                joining && { opacity: 0.6 },
+                              ]}
+                            >
+                              {joining ? (
+                                <ActivityIndicator color="#fff" />
+                              ) : (
+                                <Text style={styles.getRequestButtonText}>
+                                  Request to Join
+                                </Text>
+                              )}
+                            </Pressable>
+                          )
+                        )}
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.footerRow}>
+                      <View style={[styles.joinedButton, { flex: 1.5 }]}>
+                        <Text style={styles.joinedText}>
+                          {isHost ? "Waiting for kickoff..." : "You are in!"}
+                        </Text>
+                      </View>
+
+                      {/* Self-Leave Button if not Host (Host deletes) */}
+                      {!isHost && (
+                        <AppButton
+                          variant="danger"
+                          size="lg"
+                          onPress={() => {
+                            if (touchDebugEnabled) {
+                              Logger.debug("TouchDebug", "press", {
+                                tag: "lobby_leave",
+                              });
+                            }
+                            handleLeaveAction();
+                          }}
+                          onPressIn={() => {
+                            if (touchDebugEnabled) {
+                              Logger.debug("TouchDebug", "pressIn", {
+                                tag: "lobby_leave",
+                              });
+                            }
+                          }}
+                          disabled={joining}
+                          style={styles.footerAction}
+                          hitSlop={footerHitSlop}
+                        >
+                          {joining ? (
+                            <ActivityIndicator color={COLORS.error} />
+                          ) : (
+                            <Text style={styles.secondaryButtonText}>Leave</Text>
+                          )}
+                        </AppButton>
+                      )}
+                    </View>
+                  )
+                ) : (
+                  // Match In Progress or Verifying
+                  <View style={{ gap: SPACING.sm }}>
+                    <View style={styles.statusBanner}>
+                      <Text style={styles.statusText}>
+                        Status:{" "}
+                        {room.status === "in-progress"
+                          ? "In Progress"
+                          : "Verifying Results"}
+                      </Text>
+                    </View>
+
+                    {/* Captain Result Action */}
+                    {(room.status === "in-progress" ||
+                      room.resultVerification?.status === "pending") &&
+                      isJoined && (
+                        <AppButton
+                          variant="ghost"
+                          size="lg"
+                          onPressIn={() => {
+                            if (touchDebugEnabled) {
+                              Logger.debug("TouchDebug", "pressIn", {
+                                tag: "lobby_report_result",
+                              });
+                            }
+                          }}
+                          onPress={handleResultSubmissionAction}
+                          style={styles.warningActionButton}
+                          hitSlop={footerHitSlop}
+                        >
+                          <Text style={styles.warningActionText}>Report Result</Text>
+                        </AppButton>
+                      )}
+
+                    {/* Participant Vote Action */}
+                    {room.resultVerification?.status === "participant_vote" &&
+                      isJoined && (
+                        <AppButton
+                          variant="danger"
+                          size="lg"
+                          onPressIn={() => {
+                            if (touchDebugEnabled) {
+                              Logger.debug("TouchDebug", "pressIn", {
+                                tag: "lobby_vote_dispute",
+                              });
+                            }
+                          }}
+                          onPress={handleVoteAction}
+                          style={styles.forceCancelButton}
+                          hitSlop={footerHitSlop}
+                        >
+                          <Text style={styles.secondaryButtonText}>Vote on Dispute</Text>
+                        </AppButton>
+                      )}
+                  </View>
+                )}
+
+                {/* Complain Button (Visible for In-Progress or Completed 24h) */}
+                {room && (isJoined || isZoneAdmin) && canSubmitComplain(room) && (
                   <AppButton
                     variant="danger"
                     size="lg"
-                    onPress={() => {
-                      if (touchDebugEnabled) {
-                        Logger.debug("TouchDebug", "press", {
-                          tag: "lobby_leave",
-                        });
-                      }
-                      handleLeaveAction();
-                    }}
                     onPressIn={() => {
                       if (touchDebugEnabled) {
                         Logger.debug("TouchDebug", "pressIn", {
-                          tag: "lobby_leave",
+                          tag: "lobby_complain",
                         });
                       }
                     }}
-                    disabled={joining}
-                    style={styles.footerAction}
-                    hitSlop={footerHitSlop}
+                    onPress={() => setShowComplainModal(true)}
+                    style={styles.complainBtn}
                   >
-                    {joining ? (
-                      <ActivityIndicator color={COLORS.error} />
-                    ) : (
-                      <Text style={styles.secondaryButtonText}>Leave</Text>
-                    )}
+                    <AppIcon
+                      name="report-problem"
+                      size={20}
+                      color={COLORS.error}
+                    />
+                    <Text style={styles.complainBtnText}>Report Issue</Text>
                   </AppButton>
                 )}
               </View>
-            )
-          ) : (
-            // Match In Progress or Verifying
-            <View style={{ gap: SPACING.sm }}>
-              <View style={styles.statusBanner}>
-                <Text style={styles.statusText}>
-                  Status:{" "}
-                  {room.status === "in-progress"
-                    ? "In Progress"
-                    : "Verifying Results"}
-                </Text>
-              </View>
-
-              {/* Captain Result Action */}
-              {(room.status === "in-progress" ||
-                room.resultVerification?.status === "pending") &&
-                isJoined && (
-                  <AppButton
-                    variant="ghost"
-                    size="lg"
-                    onPressIn={() => {
-                      if (touchDebugEnabled) {
-                        Logger.debug("TouchDebug", "pressIn", {
-                          tag: "lobby_report_result",
-                        });
-                      }
-                    }}
-                    onPress={handleResultSubmissionAction}
-                    style={styles.warningActionButton}
-                    hitSlop={footerHitSlop}
-                  >
-                    <Text style={styles.warningActionText}>Report Result</Text>
-                  </AppButton>
-                )}
-
-              {/* Participant Vote Action */}
-              {room.resultVerification?.status === "participant_vote" &&
-                isJoined && (
-                  <AppButton
-                    variant="danger"
-                    size="lg"
-                    onPressIn={() => {
-                      if (touchDebugEnabled) {
-                        Logger.debug("TouchDebug", "pressIn", {
-                          tag: "lobby_vote_dispute",
-                        });
-                      }
-                    }}
-                    onPress={handleVoteAction}
-                    style={styles.forceCancelButton}
-                    hitSlop={footerHitSlop}
-                  >
-                    <Text style={styles.secondaryButtonText}>Vote on Dispute</Text>
-                  </AppButton>
-                )}
             </View>
-          )}
-
-          {/* Complain Button (Visible for In-Progress or Completed 24h) */}
-          {room && (isJoined || isZoneAdmin) && canSubmitComplain(room) && (
-            <AppButton
-              variant="danger"
-              size="lg"
+          </Animated.View>
+        </ScrollView>
+        {showFloatingRequestJoin && (
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.floatingActionBar,
+              { bottom: Math.max(insets.bottom + 16, 16) },
+            ]}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: joining }}
+              testID="matchroom-floating-request-join-button"
+              onPress={handleFooterRequestJoinPress}
+              disabled={joining}
+              hitSlop={footerHitSlop}
+              unstable_pressDelay={0}
+              pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
               onPressIn={() => {
+                handleFooterRequestJoinPress();
                 if (touchDebugEnabled) {
                   Logger.debug("TouchDebug", "pressIn", {
-                    tag: "lobby_complain",
+                    tag: "lobby_floating_request_join",
                   });
                 }
               }}
-              onPress={() => setShowComplainModal(true)}
-              style={styles.complainBtn}
+              style={({ pressed }) => [
+                styles.getRequestButton,
+                pressed && styles.footerButtonPressed,
+                joining && { opacity: 0.6 },
+              ]}
             >
-              <AppIcon
-                name="report-problem"
-                size={20}
-                color={COLORS.error}
-              />
-              <Text style={styles.complainBtnText}>Report Issue</Text>
-            </AppButton>
-          )}
-            </View>
+              {joining ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.getRequestButtonText}>Request to Join</Text>
+              )}
+            </Pressable>
           </View>
-          </Animated.View>
-        </ScrollView>
+        )}
       </View>
+
+      <MatchroomJoinTeamSheet
+        visible={showJoinTeamSheet}
+        onClose={() => setShowJoinTeamSheet(false)}
+        joining={joining}
+        styles={styles}
+        teamA={joinTeamOptions.teamA}
+        teamB={joinTeamOptions.teamB}
+        onSelectTeam={handleSelectJoinTeam}
+      />
 
       <MatchroomInviteSheet
         visible={showInviteModal}

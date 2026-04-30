@@ -12,6 +12,13 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
+import {
+  AppDialog,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import GameActivationPromptModal from "../../../src/components/GameActivationPromptModal";
 import Screen from "../../../src/components/Screen";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
@@ -39,6 +46,7 @@ import { getZoneById, type Zone } from "../../../src/services/convex/zoneService
 import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS, FONTS } from "../../../src/theme";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../../src/utils/emailVerificationGate";
+import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 
 import Logger from "../../../src/utils/logger";
 import BasicFields from "./components/BasicFields";
@@ -54,7 +62,10 @@ import {
   useMatchroomCreatePricing,
   type ZoneRateOption,
 } from "./hooks/useMatchroomCreatePricing";
-import { useMatchroomCreateSubmitFlow } from "./hooks/useMatchroomCreateSubmitFlow";
+import {
+  useMatchroomCreateSubmitFlow,
+  type MatchroomCreateSubmitFeedback,
+} from "./hooks/useMatchroomCreateSubmitFlow";
 import { useMatchroomCreateTeamBooking } from "./hooks/useMatchroomCreateTeamBooking";
 import { useMatchroomCreateBroadcastAreas } from "./hooks/useMatchroomCreateBroadcastAreas";
 import {
@@ -77,17 +88,42 @@ const ZONE_GAME_SUPPORT_MAP: Array<{ gameKey: string; flags: string[] }> = [
   { gameKey: "valorant", flags: ["supportsValorant"] },
   { gameKey: "fc26", flags: ["supportsFc25", "supportsFc26"] },
   { gameKey: "tekken8", flags: ["supportsTekken8"] },
-  { gameKey: "futsal", flags: ["supportsFutsal"] },
-  { gameKey: "indoor_cricket", flags: ["supportsIndoorCricket"] },
-  { gameKey: "padel", flags: ["supportsPadel"] },
-  { gameKey: "pickleball", flags: ["supportsPickleball"] },
+  // Physical sports are temporarily disabled.
+  // { gameKey: "futsal", flags: ["supportsFutsal"] },
+  // { gameKey: "indoor_cricket", flags: ["supportsIndoorCricket"] },
+  // { gameKey: "padel", flags: ["supportsPadel"] },
+  // { gameKey: "pickleball", flags: ["supportsPickleball"] },
 ];
 
 const getSupportedGameKeysFromZoneGames = (zoneGames: any): string[] => {
   if (!zoneGames || typeof zoneGames !== "object") return [];
   return ZONE_GAME_SUPPORT_MAP.filter(({ flags }) =>
     flags.some((flag) => zoneGames?.[flag] === true),
-  ).map(({ gameKey }) => gameKey);
+  )
+    .map(({ gameKey }) => gameKey)
+    .filter((gameKey) => !isPhysicalGameDisabled(gameKey));
+};
+
+const parseSupportedGamesParam = (value: unknown): string[] | undefined => {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  if (typeof rawValue !== "string" || rawValue.trim().length === 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return undefined;
+
+    const games = parsed
+      .filter((gameKey): gameKey is string => typeof gameKey === "string")
+      .map((gameKey) => (gameKey === "fc25" ? "fc26" : gameKey))
+      .filter((gameKey) => !isPhysicalGameDisabled(gameKey));
+
+    return Array.from(new Set(games));
+  } catch (error) {
+    Logger.error("CreateMatchroom", "Error parsing zoneSupportedGames", error);
+    return undefined;
+  }
 };
 
 const WALKIN_SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
@@ -146,6 +182,8 @@ const formatCategoryLabel = (value: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
+const formatCurrency = (value: number) => `Rs ${Math.round(value)}`;
+
 export default function CreateMatchroom() {
   useRouteLogger("CreateMatchroomScreen");
   const { user, authUser } = useAuth();
@@ -160,9 +198,15 @@ export default function CreateMatchroom() {
     branchId?: string;
   }>();
   const isZoneWalkInAdmin = params.mode === "zone_walkin_admin";
+  const venueAllowedGameKeys = useMemo(
+    () => parseSupportedGamesParam(params.zoneSupportedGames),
+    [params.zoneSupportedGames],
+  );
+  const isVenueDirectBooking = !isZoneWalkInAdmin && Boolean(params.zoneId && venueAllowedGameKeys);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [submitFeedback, setSubmitFeedback] = useState<MatchroomCreateSubmitFeedback | null>(null);
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const { animatedStyle: contentEntranceStyle } = useEntrance({
     visible: Boolean(selectedGame),
@@ -380,6 +424,11 @@ export default function CreateMatchroom() {
   }, [adminZone, isZoneWalkInAdmin]);
 
   useEffect(() => {
+    if (!isVenueDirectBooking) return;
+    setLocationMode("zone");
+  }, [isVenueDirectBooking]);
+
+  useEffect(() => {
     if (isZoneWalkInAdmin) return;
     if (!selectedZoneId) {
       setSelectedZone(null);
@@ -516,100 +565,94 @@ export default function CreateMatchroom() {
   // Check if user has games configured that match the venue's offerings
   useEffect(() => {
     if (isZoneWalkInAdmin) return;
-    if (!userProfile || !params.zoneSupportedGames) return;
+    if (!userProfile || !venueAllowedGameKeys) return;
 
-    try {
-      const zoneSupportedGames: string[] = JSON.parse(
-        params.zoneSupportedGames,
-      );
-      if (zoneSupportedGames.length === 0) return;
+    const zoneSupportedGames = venueAllowedGameKeys;
+    if (zoneSupportedGames.length === 0) return;
 
-      // Game labels for display
-      const gameLabels: Record<string, string> = {
-          cs2: "CS2",
-          cs16: "CS 1.6",
-          valorant: "Valorant",
-          fc26: "FC26",
-        tekken8: "Tekken 8",
-        futsal: "Futsal",
-        indoor_cricket: "Indoor Cricket",
-        padel: "Padel",
-        pickleball: "Pickleball",
-      };
+    // Game labels for display
+    const gameLabels: Record<string, string> = {
+      cs2: "CS2",
+      cs16: "CS 1.6",
+      valorant: "Valorant",
+      fc26: "FC26",
+      tekken8: "Tekken 8",
+      futsal: "Futsal",
+      indoor_cricket: "Indoor Cricket",
+      padel: "Padel",
+      pickleball: "Pickleball",
+    };
 
-      // Map game keys to profile flags
-      const gameToProfileFlag: Record<string, keyof typeof userProfile> = {
-          cs2: "playsCs2",
-          cs16: "playsCs16" as keyof typeof userProfile,
-          valorant: "playsValorant" as keyof typeof userProfile,
-          fc26: "playsFc",
-        tekken8: "playsTekken",
-        futsal: "playsFutsal",
-        indoor_cricket: "playsIndoorCricket",
-        padel: "playsPadel",
-        pickleball: "playsPickleball",
-      };
+    // Map game keys to profile flags
+    const gameToProfileFlag: Record<string, keyof typeof userProfile> = {
+      cs2: "playsCs2",
+      cs16: "playsCs16" as keyof typeof userProfile,
+      valorant: "playsValorant" as keyof typeof userProfile,
+      fc26: "playsFc",
+      tekken8: "playsTekken",
+      futsal: "playsFutsal",
+      indoor_cricket: "playsIndoorCricket",
+      padel: "playsPadel",
+      pickleball: "playsPickleball",
+    };
 
-      // Get user's configured games
-      const userConfiguredGames = Object.entries(gameToProfileFlag)
-        .filter(([game, flag]) => userProfile[flag])
-        .map(([game]) => game);
+    // Get user's configured games
+    const userConfiguredGames = Object.entries(gameToProfileFlag)
+      .filter(([game, flag]) => userProfile[flag])
+      .map(([game]) => game);
 
-      // Check if user has any of the venue's supported games configured
-      const matchingGames = zoneSupportedGames.filter((game) => {
-        const flagKey = gameToProfileFlag[game];
-        return flagKey && userProfile[flagKey];
-      });
+    // Check if user has any of the venue's supported games configured
+    const matchingGames = zoneSupportedGames.filter((game) => {
+      const flagKey = gameToProfileFlag[game];
+      return flagKey && userProfile[flagKey];
+    });
 
-      if (matchingGames.length === 0) {
-        const supportedLabels = zoneSupportedGames
-          .map((g) => gameLabels[g] || g)
-          .join(", ");
-        const userGamesLabels = userConfiguredGames
-          .map((g) => gameLabels[g] || g)
-          .join(", ");
+    if (matchingGames.length === 0) {
+      const supportedLabels = zoneSupportedGames
+        .map((g) => gameLabels[g] || g)
+        .join(", ");
+      const userGamesLabels = userConfiguredGames
+        .map((g) => gameLabels[g] || g)
+        .join(", ");
 
-        // Different message based on whether user has any games at all
-        if (userConfiguredGames.length > 0) {
-          // User has games but they don't match venue
-          Alert.alert(
-            "Game Mismatch",
-            `Your games: ${userGamesLabels}\n\nThis venue supports: ${supportedLabels}\n\nTo create a matchroom here, please add one of the venue's supported games to your profile.`,
-            [
-              {
-                text: "Go Back",
-                style: "cancel",
-                onPress: () => router.back(),
-              },
-              {
-                text: "Add Game",
-                onPress: () => router.replace("/(player)/(tabs)/profile"),
-              },
-            ],
-          );
-        } else {
-          // User has no games configured at all
-          Alert.alert(
-            "Add a Game First",
-            `This venue supports: ${supportedLabels}\n\nPlease add one of these games to your profile to create a matchroom here.`,
-            [
-              {
-                text: "Go Back",
-                style: "cancel",
-                onPress: () => router.back(),
-              },
-              {
-                text: "Edit Profile",
-                onPress: () => router.replace("/(player)/(tabs)/profile"),
-              },
-            ],
-          );
-        }
+      // Different message based on whether user has any games at all
+      if (userConfiguredGames.length > 0) {
+        // User has games but they don't match venue
+        Alert.alert(
+          "Game Mismatch",
+          `Your games: ${userGamesLabels}\n\nThis venue supports: ${supportedLabels}\n\nTo create a matchroom here, please add one of the venue's supported games to your profile.`,
+          [
+            {
+              text: "Go Back",
+              style: "cancel",
+              onPress: () => router.back(),
+            },
+            {
+              text: "Add Game",
+              onPress: () => router.replace("/(player)/(tabs)/profile"),
+            },
+          ],
+        );
+      } else {
+        // User has no games configured at all
+        Alert.alert(
+          "Add a Game First",
+          `This venue supports: ${supportedLabels}\n\nPlease add one of these games to your profile to create a matchroom here.`,
+          [
+            {
+              text: "Go Back",
+              style: "cancel",
+              onPress: () => router.back(),
+            },
+            {
+              text: "Edit Profile",
+              onPress: () => router.replace("/(player)/(tabs)/profile"),
+            },
+          ],
+        );
       }
-    } catch (e) {
-      Logger.error("CreateMatchroom", "Error parsing zoneSupportedGames", e);
     }
-  }, [isZoneWalkInAdmin, userProfile, params.zoneSupportedGames]);
+  }, [isZoneWalkInAdmin, userProfile, venueAllowedGameKeys]);
 
   const loadUserProfile = async () => {
     if (!user?._id) {
@@ -735,6 +778,8 @@ export default function CreateMatchroom() {
   };
 
   const handleGameSelect = async (gameKey: string) => {
+    if (isPhysicalGameDisabled(gameKey)) return;
+
     setSelectedGame(gameKey);
 
     // Auto-initialize hostRole from profile
@@ -1026,11 +1071,18 @@ export default function CreateMatchroom() {
     activating,
     closeActivationPrompt,
     closeAssessment,
+    closeEasypaisaPhonePrompt,
     completeAssessment,
+    confirmEasypaisaPayment,
     confirmActivation,
+    easypaisaCheckoutPhone,
+    easypaisaPaymentAmount,
+    handleEasypaisaPhoneChange,
     handleSubmit,
+    showEasypaisaPhonePrompt,
     showActivationPrompt,
     showAssessment,
+    startingEasypaisaPayment,
   } = useMatchroomCreateSubmitFlow({
     adminBranches,
     adminZone,
@@ -1057,6 +1109,7 @@ export default function CreateMatchroom() {
     selectedZoneName,
     selectableTeamMembers,
     seriesType,
+    setSubmitFeedback,
     setFormData,
     setHostSkillScore,
     setHostSkillTier,
@@ -1089,6 +1142,12 @@ export default function CreateMatchroom() {
     formData.overs,
   );
   const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
+  const submitFeedbackColor =
+    submitFeedback?.type === "success"
+      ? COLORS.success
+      : submitFeedback?.type === "error"
+        ? COLORS.error
+        : COLORS.warning;
   if (loading) {
     return (
       <Screen style={styles.screen} scroll={false}>
@@ -1328,6 +1387,7 @@ export default function CreateMatchroom() {
                   styles.primaryButtonPressed,
                 ]}
                 onPress={() => {
+                  setSubmitFeedback(null);
                   if (emailVerificationLocked) {
                     showEmailVerificationRequiredAlert();
                     return;
@@ -1350,6 +1410,17 @@ export default function CreateMatchroom() {
                   Complete required fields: {submitBlockers[0]}
                 </Text>
               )}
+              {submitFeedback ? (
+                <Text
+                  style={[
+                    styles.helperTextTiny,
+                    styles.submitFeedbackText,
+                    { color: submitFeedbackColor },
+                  ]}
+                >
+                  {submitFeedback.title}: {submitFeedback.message}
+                </Text>
+              ) : null}
             </View>
           </>
         )}
@@ -1380,6 +1451,7 @@ export default function CreateMatchroom() {
         selectedGame={selectedGame}
         onSelectGame={handleGameSelect}
         userProfile={userProfile}
+        allowedGameKeys={venueAllowedGameKeys}
       />
 
       {selectedGame && (
@@ -1449,10 +1521,12 @@ export default function CreateMatchroom() {
           />
 
           {/* Phase 3: Location Mode Selector */}
-          <LocationModeSelector
-            locationMode={locationMode}
-            onModeChange={setLocationMode}
-          />
+          {!isVenueDirectBooking ? (
+            <LocationModeSelector
+              locationMode={locationMode}
+              onModeChange={setLocationMode}
+            />
+          ) : null}
 
           {/* Zone Picker (Specific Zone Mode) */}
           {locationMode === "zone" && (
@@ -1460,6 +1534,8 @@ export default function CreateMatchroom() {
               <ZonePicker
                 gameKey={selectedGame}
                 selectedZoneId={selectedZoneId}
+                lockedZone={selectedZone}
+                lockToSelectedZone={isVenueDirectBooking}
                 onZoneSelect={(zone) => {
                   setSelectedZoneId(zone.id || null);
                   setSelectedZoneName(zone.venueBrandName || null);
@@ -1970,6 +2046,7 @@ export default function CreateMatchroom() {
             ]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             onPress={() => {
+              setSubmitFeedback(null);
               if (emailVerificationLocked) {
                 showEmailVerificationRequiredAlert();
                 return;
@@ -1994,7 +2071,7 @@ export default function CreateMatchroom() {
                 <Text style={styles.primaryButtonText}>
                   {locationMode === "broadcast"
                     ? "Send Broadcast"
-                    : "Create Matchroom"}
+                    : "Send Booking Request"}
                 </Text>
               )}
             </Animated.View>
@@ -2004,6 +2081,17 @@ export default function CreateMatchroom() {
               Complete required fields: {submitBlockers[0]}
             </Text>
           )}
+          {submitFeedback ? (
+            <Text
+              style={[
+                styles.helperTextTiny,
+                styles.submitFeedbackText,
+                { color: submitFeedbackColor },
+              ]}
+            >
+              {submitFeedback.title}: {submitFeedback.message}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -2022,6 +2110,65 @@ export default function CreateMatchroom() {
         userId={user?._id || ""}
         onSuccess={completeAssessment}
       />
+
+      <AppDialog
+        visible={showEasypaisaPhonePrompt}
+        onClose={closeEasypaisaPhonePrompt}
+        dismissDisabled={startingEasypaisaPayment}
+        cardStyle={styles.phoneDialogCard}
+      >
+        <AppModalHeader
+          title="Confirm Easypaisa Number"
+          subtitle="Use the number you want to pay with for this top-up."
+          onClose={closeEasypaisaPhonePrompt}
+          closeDisabled={startingEasypaisaPayment}
+        />
+        <AppModalBody
+          scroll
+          style={styles.phoneDialogContent}
+          contentContainerStyle={styles.phoneModalContent}
+        >
+          <Text style={styles.phoneAmountLabel}>
+            Top-up amount: {formatCurrency(Number(easypaisaPaymentAmount || 0))}
+          </Text>
+          <Text style={styles.phoneSectionLabel}>Mobile Account Number</Text>
+          <TextInput
+            style={styles.phoneInput}
+            keyboardType="phone-pad"
+            value={easypaisaCheckoutPhone}
+            onChangeText={handleEasypaisaPhoneChange}
+            placeholder="03XX XXX XXXX"
+            placeholderTextColor={COLORS.textSecondary}
+            editable={!startingEasypaisaPayment}
+          />
+        </AppModalBody>
+        <AppModalFooter style={styles.phoneFooter}>
+          <View style={styles.phoneActionsRow}>
+            <AppButton
+              variant="secondary"
+              style={styles.phoneActionBtn}
+              onPress={closeEasypaisaPhonePrompt}
+              disabled={startingEasypaisaPayment}
+            >
+              Cancel
+            </AppButton>
+            <AppButton
+              style={styles.phoneActionBtn}
+              onPress={confirmEasypaisaPayment}
+              loading={startingEasypaisaPayment}
+              disabled={startingEasypaisaPayment}
+              perf={{
+                actionKey: "matchroom_create_easypaisa_phone_confirm",
+                meta: {
+                  source: "matchroom_create",
+                },
+              }}
+            >
+              Continue to Pay
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
     </Screen>
   );
 }

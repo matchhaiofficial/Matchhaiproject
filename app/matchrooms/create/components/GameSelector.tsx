@@ -56,10 +56,13 @@ export default function GameSelector({
         : byProfile;
 
     if (activeGames.length === 0) {
-        const isVenueFiltered = allowAllGames && allowSet !== null;
+        const isVenueFiltered = allowSet !== null;
+        const emptyVenueCopy = allowAllGames
+            ? 'This venue branch has no supported games configured yet.'
+            : 'This venue does not support any games currently active in your profile.';
         return (
             <Animated.View style={[styles.section, animatedStyle]}>
-                <Text style={styles.sectionLabel}>Select Game / Sport</Text>
+                <Text style={styles.sectionLabel}>Select Game</Text>
                 <View style={styles.emptyContainer}>
                     <AppIcon name="sports-esports" size={56} color={COLORS.muted} />
                     <Text style={styles.emptyTitle}>
@@ -67,7 +70,7 @@ export default function GameSelector({
                     </Text>
                     <Text style={styles.emptySubtitle}>
                         {isVenueFiltered
-                            ? 'This venue branch has no supported games configured yet.'
+                            ? emptyVenueCopy
                             : 'Add games to your profile to start creating matchrooms and playing with others'}
                     </Text>
                     {!isVenueFiltered ? (
@@ -87,7 +90,7 @@ export default function GameSelector({
 
     return (
         <Animated.View style={[styles.section, animatedStyle]}>
-            <Text style={styles.sectionLabel}>Select Game / Sport</Text>
+            <Text style={styles.sectionLabel}>Select Game</Text>
             <View style={styles.gameGrid}>
                 {activeGames.map((game) => (
                     <MotionPressable

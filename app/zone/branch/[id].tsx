@@ -78,8 +78,9 @@ export default function BranchDetails() {
                     // Update capacities
                     "capacity.pcSeats": pcSeats.trim(),
                     "capacity.consoleSeats": consoleSeats.trim(),
-                    "capacity.futsalCourts": futsalCourts.trim(),
-                    "capacity.padelCourts": padelCourts.trim(),
+                    // Physical sports are temporarily disabled.
+                    "capacity.futsalCourts": "",
+                    "capacity.padelCourts": "",
                 });
                 showToast({ type: "success", title: "Success", message: "Branch updated successfully" });
                 Logger.info('BranchDetails', 'Branch updated successfully');
@@ -199,30 +200,33 @@ export default function BranchDetails() {
                         </View>
                     </View>
 
-                    <View style={styles.row}>
-                        <View style={styles.flex1}>
-                            <Text style={styles.inputLabel}>Futsal Courts</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={futsalCourts}
-                                onChangeText={setFutsalCourts}
-                                placeholder="0"
-                                placeholderTextColor={COLORS.muted}
-                                keyboardType="numeric"
-                            />
+                    {/* Physical sports are temporarily disabled. */}
+                    {false ? (
+                        <View style={styles.row}>
+                            <View style={styles.flex1}>
+                                <Text style={styles.inputLabel}>Futsal Courts</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={futsalCourts}
+                                    onChangeText={setFutsalCourts}
+                                    placeholder="0"
+                                    placeholderTextColor={COLORS.muted}
+                                    keyboardType="numeric"
+                                />
+                            </View>
+                            <View style={styles.flex1}>
+                                <Text style={styles.inputLabel}>Padel Courts</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={padelCourts}
+                                    onChangeText={setPadelCourts}
+                                    placeholder="0"
+                                    placeholderTextColor={COLORS.muted}
+                                    keyboardType="numeric"
+                                />
+                            </View>
                         </View>
-                        <View style={styles.flex1}>
-                            <Text style={styles.inputLabel}>Padel Courts</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={padelCourts}
-                                onChangeText={setPadelCourts}
-                                placeholder="0"
-                                placeholderTextColor={COLORS.muted}
-                                keyboardType="numeric"
-                            />
-                        </View>
-                    </View>
+                    ) : null}
 
                     {/* Save Button */}
                     <Pressable

@@ -48,10 +48,11 @@ const getGamesFromFriend = (friend?: {
   if (friend.playsCs2) labels.push("CS2");
   if (friend.playsFc) labels.push("FC26");
   if (friend.playsTekken) labels.push("Tekken 8");
-  if (friend.playsFutsal) labels.push("Futsal");
-  if (friend.playsIndoorCricket) labels.push("Indoor Cricket");
-  if (friend.playsPadel) labels.push("Padel");
-  if (friend.playsPickleball) labels.push("Pickleball");
+  // Physical sports are temporarily disabled.
+  // if (friend.playsFutsal) labels.push("Futsal");
+  // if (friend.playsIndoorCricket) labels.push("Indoor Cricket");
+  // if (friend.playsPadel) labels.push("Padel");
+  // if (friend.playsPickleball) labels.push("Pickleball");
   return labels;
 };
 
