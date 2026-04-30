@@ -33,7 +33,10 @@ import {
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import { ZoneBookingsAllocationSheet } from "./components/ZoneBookingsAllocationSheet";
+import {
+    ZoneBookingsAllocationSheet,
+    type ZoneBookingAllocationResourceOption,
+} from "./components/ZoneBookingsAllocationSheet";
 import { ZoneBookingsCounterOfferSheets } from "./components/ZoneBookingsCounterOfferSheets";
 import { ZoneBookingsMatchroomsSection } from "./components/ZoneBookingsMatchroomsSection";
 import { ZoneBookingsRequestsSection } from "./components/ZoneBookingsRequestsSection";
@@ -51,18 +54,143 @@ type RequestFilter = "all" | "open" | "pending_payment" | "accepted";
 type AssetFilter = "all" | ZoneBookingAssetType;
 
 const REQUEST_FILTERS: RequestFilter[] = ["all", "open", "pending_payment", "accepted"];
-const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "court", "mixed", "unknown"];
+const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "console", "court", "mixed", "unknown"];
+
+const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
+const CONSOLE_GAMES = new Set(["fc25", "fc26", "tekken8"]);
+const COURT_GAME_ASSETS: Record<string, string> = {
+    futsal: "futsal",
+    indoor_cricket: "indoor_cricket",
+    cricket: "indoor_cricket",
+    padel: "padel",
+    pickleball: "pickleball",
+};
+
+const normalizeGameKey = (value?: string | null) => {
+    const gameKey = String(value || "").trim().toLowerCase();
+    return gameKey === "fc25" ? "fc26" : gameKey;
+};
+
+const normalizeResourceToken = (value?: string | null) =>
+    String(value || "").trim().toLowerCase();
+
+const getTierFromRateKey = (value?: string | null) => {
+    const [, tier] = normalizeResourceToken(value).split(":");
+    return tier || "";
+};
+
+const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => {
+    const gameKey = normalizeGameKey(request?.gameKey);
+    const requestedTier =
+        normalizeResourceToken(request?.requestedResourceTier) ||
+        getTierFromRateKey(request?.selectedZoneRateKey);
+    const requestedSurface = normalizeResourceToken(request?.requestedResourceSurface);
+
+    if (CS_STYLE_GAMES.has(gameKey)) {
+        return {
+            assetType: "pc",
+            requiredCount: 2,
+            tier: ["regular", "premium", "elite"].includes(requestedTier) ? requestedTier : "",
+            unit: "pc_room" as const,
+        };
+    }
+
+    if (CONSOLE_GAMES.has(gameKey)) {
+        return {
+            assetType: "console",
+            requiredCount: 1,
+            tier: ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
+            unit: "resource" as const,
+        };
+    }
+
+    const courtAssetType = COURT_GAME_ASSETS[gameKey];
+    if (courtAssetType) {
+        return {
+            assetType: courtAssetType,
+            requiredCount: 1,
+            surface: requestedSurface,
+            unit: "resource" as const,
+        };
+    }
+
+    return {
+        assetType: normalizeResourceToken(request?.requestedResourceAssetType) || request?.assetType || "unknown",
+        requiredCount: 1,
+        unit: "resource" as const,
+    };
+};
+
+const resourceMatchesAllocationProfile = (
+    resource: ZoneBranchResource,
+    profile: ReturnType<typeof getAllocationResourceProfile>,
+) => {
+    if (normalizeResourceToken(resource.assetType) !== profile.assetType) return false;
+    if ("tier" in profile && profile.tier && normalizeResourceToken(resource.tier) !== profile.tier) {
+        return false;
+    }
+    if ("surface" in profile && profile.surface && normalizeResourceToken(resource.surface) !== profile.surface) {
+        return false;
+    }
+    return true;
+};
+
+const sortAllocationResources = (resources: ZoneBranchResource[]) =>
+    [...resources].sort((a, b) =>
+        `${a.roomLabel || ""} ${a.label}`.localeCompare(`${b.roomLabel || ""} ${b.label}`),
+    );
+
+const buildAllocationResourceOptions = (
+    request: ZoneBookingQueueItem | null,
+    resources: ZoneBranchResource[],
+): ZoneBookingAllocationResourceOption[] => {
+    const profile = getAllocationResourceProfile(request);
+    const matchingResources = sortAllocationResources(
+        resources.filter((resource) => resourceMatchesAllocationProfile(resource, profile)),
+    );
+
+    if (profile.unit === "pc_room") {
+        const grouped = new Map<string, ZoneBranchResource[]>();
+        matchingResources.forEach((resource) => {
+            const roomKey = `${normalizeResourceToken(resource.tier) || "pc"}:${resource.roomLabel || "Room"}`;
+            const current = grouped.get(roomKey) || [];
+            current.push(resource);
+            grouped.set(roomKey, current);
+        });
+
+        const options: ZoneBookingAllocationResourceOption[] = [];
+        Array.from(grouped.entries()).forEach(([roomKey, roomResources]) => {
+            const sortedRoomResources = sortAllocationResources(roomResources);
+            for (let index = 0; index < sortedRoomResources.length; index += 5) {
+                const chunk = sortedRoomResources.slice(index, index + 5);
+                if (chunk.length < 5) continue;
+                const baseLabel = chunk[0]?.roomLabel || "PC Room";
+                const label = sortedRoomResources.length > 5
+                    ? `${baseLabel} ${Math.floor(index / 5) + 1}`
+                    : baseLabel;
+                options.push({
+                    id: `${roomKey}:${index}`,
+                    label,
+                    meta: `${chunk[0]?.tier || "PC"} | 5 PCs available`,
+                    resourceIds: chunk.map((resource) => resource.id),
+                });
+            }
+        });
+        return options;
+    }
+
+    return matchingResources.map((resource) => ({
+        id: resource.id,
+        label: resource.roomLabel ? `${resource.label} | ${resource.roomLabel}` : resource.label,
+        meta: [resource.assetType, resource.tier || resource.surface, resource.lifecycleStatus]
+            .filter(Boolean)
+            .join(" | "),
+        resourceIds: [resource.id],
+    }));
+};
 
 const getRequiredResourceCount = (request?: ZoneBookingQueueItem | null) => {
-    if (!request) return 1;
-    if (request.assetType === "pc") {
-        return Math.max(
-            1,
-            Number(request.reservedSlots || request.playerCount || request.maxPlayers || 1),
-        );
-    }
-    if (request.assetType === "court") return 1;
-    return 1;
+    return getAllocationResourceProfile(request).requiredCount;
 };
 
 const getAllocationValidationMessage = (
@@ -73,7 +201,13 @@ const getAllocationValidationMessage = (
     const requiredCount = getRequiredResourceCount(request);
     if (request.assetType === "pc") {
         if (selectedCount !== requiredCount) {
-            return `PC bookings require exactly ${requiredCount} selected resources.`;
+            return `CS/Valorant bookings require exactly ${requiredCount} PC rooms.`;
+        }
+        return null;
+    }
+    if (request.assetType === "console") {
+        if (selectedCount !== 1) {
+            return "Console bookings require exactly 1 selected console.";
         }
         return null;
     }
@@ -457,35 +591,71 @@ export default function ZoneBookingsModule() {
         setAllocationSelectedResourceIds([]);
     }, [allocationBranchId, selectedRequest?.id, showAllocationSheet]);
 
+    const allocationResourceOptions = useMemo(
+        () => buildAllocationResourceOptions(selectedRequest, allocationResources),
+        [allocationResources, selectedRequest],
+    );
+
+    const allocationSelectedUnitCount = useMemo(
+        () =>
+            allocationResourceOptions.filter((option) =>
+                option.resourceIds.every((resourceId) => allocationSelectedResourceIds.includes(resourceId)),
+            ).length,
+        [allocationResourceOptions, allocationSelectedResourceIds],
+    );
+
     const allocationSelectionSummary = useMemo(() => {
         if (!selectedRequest) return "Select resources";
-        const requestedCount = getRequiredResourceCount(selectedRequest);
-        const requestedLabel = selectedRequest.assetType === "court" ? "1 court" : `${requestedCount} resource${requestedCount === 1 ? "" : "s"}`;
-        return `${requestedLabel} required`;
+        const profile = getAllocationResourceProfile(selectedRequest);
+        if (profile.unit === "pc_room") return `${profile.requiredCount} PC rooms required`;
+        if (profile.assetType === "console") return "1 console required";
+        if (selectedRequest.assetType === "court") return "1 court required";
+        return `${profile.requiredCount} resource${profile.requiredCount === 1 ? "" : "s"} required`;
     }, [selectedRequest]);
 
     const allocationValidationMessage = useMemo(
-        () => getAllocationValidationMessage(selectedRequest, allocationSelectedResourceIds.length),
-        [allocationSelectedResourceIds.length, selectedRequest],
+        () => getAllocationValidationMessage(selectedRequest, allocationSelectedUnitCount),
+        [allocationSelectedUnitCount, selectedRequest],
     );
     const allocationCanSubmit = useMemo(() => {
         if (!selectedRequest || !allocationBranchId || loadingAllocationBranches || loadingAllocationResources) {
             return false;
         }
-        if (selectedRequest.assetType === "pc") {
-            return allocationSelectedResourceIds.length === getRequiredResourceCount(selectedRequest);
-        }
-        if (selectedRequest.assetType === "court") {
-            return allocationSelectedResourceIds.length === 1;
-        }
-        return allocationSelectedResourceIds.length >= 1;
+        return allocationSelectedUnitCount === getRequiredResourceCount(selectedRequest);
     }, [
         allocationBranchId,
-        allocationSelectedResourceIds.length,
+        allocationSelectedUnitCount,
         loadingAllocationBranches,
         loadingAllocationResources,
         selectedRequest,
     ]);
+
+    const toggleAllocationResourceOption = (resourceIds: string[]) => {
+        const optionSelected = resourceIds.every((resourceId) =>
+            allocationSelectedResourceIds.includes(resourceId),
+        );
+        if (optionSelected) {
+            setAllocationSelectedResourceIds((prev) =>
+                prev.filter((resourceId) => !resourceIds.includes(resourceId)),
+            );
+            return;
+        }
+
+        const requiredCount = getRequiredResourceCount(selectedRequest);
+        if (allocationSelectedUnitCount >= requiredCount) {
+            showToast({
+                type: "warning",
+                title: "Selection limit reached",
+                message: `This booking allows ${requiredCount} selection${requiredCount === 1 ? "" : "s"}.`,
+            });
+            return;
+        }
+
+        setAllocationSelectedResourceIds((prev) => [
+            ...prev.filter((resourceId) => !resourceIds.includes(resourceId)),
+            ...resourceIds,
+        ]);
+    };
 
     const openAllocationSheet = (targetRequest?: ZoneBookingQueueItem) => {
         const request = targetRequest || selectedRequest;
@@ -641,15 +811,10 @@ export default function ZoneBookingsModule() {
                 selectedBranchId={allocationBranchId}
                 onSelectBranch={setAllocationBranchId}
                 loadingResources={loadingAllocationBranches || loadingAllocationResources}
-                resources={allocationResources}
+                resources={allocationResourceOptions}
                 selectedResourceIds={allocationSelectedResourceIds}
-                onToggleResource={(resourceId) =>
-                    setAllocationSelectedResourceIds((prev) =>
-                        prev.includes(resourceId)
-                            ? prev.filter((item) => item !== resourceId)
-                            : [...prev, resourceId],
-                    )
-                }
+                onToggleResource={toggleAllocationResourceOption}
+                selectedCount={allocationSelectedUnitCount}
                 requiredCount={getRequiredResourceCount(selectedRequest)}
                 selectionSummary={allocationSelectionSummary}
                 validationMessage={allocationValidationMessage}

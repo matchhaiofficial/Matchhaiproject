@@ -211,6 +211,12 @@ export function buildBookingRequestPayload(params: {
   seatsPaid: number;
   selectedTeamId: string | null;
   selectedZoneId: string | null;
+  selectedZoneRateKey: string | null;
+  selectedZoneRateResourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  } | null;
   seriesType: string;
   teamMode: TeamMode;
   userId: string;
@@ -231,6 +237,8 @@ export function buildBookingRequestPayload(params: {
     seatsPaid,
     selectedTeamId,
     selectedZoneId,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     seriesType,
     teamMode,
     userId,
@@ -266,7 +274,11 @@ export function buildBookingRequestPayload(params: {
     preferredDate: formData.date ? new Date(formData.date).getTime() : undefined,
     preferredTime: formData.time || (undefined as never),
     reservedSlots: teamMode === "team" ? reservedSlots : 1,
+    requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || undefined,
+    requestedResourceSurface: selectedZoneRateResourceContext?.surface || undefined,
+    requestedResourceTier: selectedZoneRateResourceContext?.tier || undefined,
     selectedMaps: formData.selectedMaps || [],
+    selectedZoneRateKey: selectedZoneRateKey || undefined,
     seriesType:
       isCsStyleGame(gameKey) || gameKey === "fc26" || gameKey === "tekken8"
         ? seriesType

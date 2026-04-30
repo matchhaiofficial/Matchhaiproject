@@ -59,7 +59,7 @@ export default function SidebarMenu({ visible, onClose, items }: SidebarMenuProp
     <AppDrawer visible={visible} onClose={onClose} drawerStyle={styles.drawer}>
       <View style={[styles.drawerContent, headerPadding]}>
 
-        {/* ── Header ── */}
+        {/* Header */}
         <View style={styles.header}>
           {/* Avatar with online ring */}
           <View style={styles.avatarWrapper}>
@@ -90,10 +90,10 @@ export default function SidebarMenu({ visible, onClose, items }: SidebarMenuProp
           </Pressable>
         </View>
 
-        {/* ── Divider ── */}
+        {/* Divider */}
         <View style={styles.divider} />
 
-        {/* ── Menu Items ── */}
+        {/* Menu Items */}
         <ScrollView
           style={styles.menuScroll}
           contentContainerStyle={[
@@ -131,7 +131,7 @@ export default function SidebarMenu({ visible, onClose, items }: SidebarMenuProp
             </Pressable>
           ))}
 
-          {/* ── Bottom action (e.g. Logout) ── */}
+          {/* Bottom action (e.g. Logout) */}
           {lastItem && (
             <>
               <View style={[styles.divider, { marginVertical: SPACING.md }]} />
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
   },
 
-  // ── Header ──
+  // Header
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
 
-  // ── Divider ──
+  // Divider
   divider: {
     height: 1,
     backgroundColor: COLORS.cardBorder,
@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 
-  // ── Section label ──
+  // Section label
   sectionLabel: {
     color: COLORS.muted,
     fontFamily: FONTS.martelRegular,
@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
     paddingLeft: 2,
   },
 
-  // ── Menu ──
+  // Menu
   menuScroll: {
     flex: 1,
   },
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
 
-  // ── Danger / Logout item ──
+  // Danger / Logout item
   dangerItem: {
     backgroundColor: "rgba(239,83,80,0.05)",
     borderColor: "rgba(239,83,80,0.15)",

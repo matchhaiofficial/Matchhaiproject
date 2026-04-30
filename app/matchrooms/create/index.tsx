@@ -1067,6 +1067,8 @@ export default function CreateMatchroom() {
     teamMode === "team" && teamPaymentMode === "captain_pays_all"
       ? "Total Amount Due (PKR)"
       : "Price Per Player (PKR)";
+  const selectedZoneRateOption =
+    zoneRateOptions.find((option) => option.key === selectedZoneRateKey) || null;
   const {
     activating,
     closeActivationPrompt,
@@ -1106,6 +1108,8 @@ export default function CreateMatchroom() {
     selectedTeamId,
     selectedTeamMemberUids,
     selectedZoneId,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext: selectedZoneRateOption?.resourceContext || null,
     selectedZoneName,
     selectableTeamMembers,
     seriesType,

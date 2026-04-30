@@ -501,28 +501,72 @@ export default function MatchroomDetails() {
               styles={styles}
             />
 
-            {/* Squad Section */}
-            <DetailSectionHeader
-              title={
-                (displaySlotsA?.length || 0) > 0
-                  ? "Teams"
-                  : `Squad (${occupiedSeatCount}/${room.maxPlayers})`
-              }
-              accessory={
-                (displaySlotsA?.length || 0) > 0 ? (
-                  <Text style={styles.sectionMetaText}>
-                    {occupiedSeatCount}/{room.maxPlayers} Players
-                  </Text>
-                ) : undefined
-              }
-            />
-
-            {(displaySlotsA?.length || 0) > 0 ? (
-              <View
-                style={[
-                  styles.teamsWrapper,
-                  { flexDirection: width < 600 ? "column" : "row" },
-                ]}
+          {/* Pending Join Requests (Host / Admin only) */}
+          {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
+            <DetailSectionCard
+              title={`Pending Join Requests (${incomingRequests.length})`}
+              style={styles.pendingRequestsCard}
+            >
+              <MatchroomPendingRequestsPanel
+                requests={incomingRequests}
+                processingRequestId={processingRequestId}
+                onRespond={handleRespondToRequestAction}
+              />
+            </DetailSectionCard>
+          )}
+          {/* Footer Actions */}
+          <View
+            style={[
+              styles.buttonWrapper,
+              { marginBottom: ctaBottomGuard },
+            ]}
+            collapsable={false}
+            onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
+          >
+            <View style={styles.buttonContent}>
+          {isZoneAdmin ? (
+            <View style={{ gap: SPACING.sm }}>
+              <Text
+                style={{ textAlign: "center", color: COLORS.textSecondary }}
+              >
+                Booking actions (zone admin)
+              </Text>
+              <View style={styles.footerRow}>
+                <AppButton
+                  size="lg"
+                  onPress={handleZoneAcceptAction}
+                  disabled={adminProcessing !== null}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.footerAction}
+                >
+                  {adminProcessing === "accept" ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.joinButtonText}>Accept</Text>
+                  )}
+                </AppButton>
+                <AppButton
+                  variant="danger"
+                  size="lg"
+                  onPress={handleZoneRejectAction}
+                  disabled={adminProcessing !== null}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.footerAction}
+                >
+                  {adminProcessing === "reject" ? (
+                    <ActivityIndicator size="small" color={COLORS.error} />
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>Reject</Text>
+                  )}
+                </AppButton>
+              </View>
+              <AppButton
+                variant="ghost"
+                size="lg"
+                onPress={() => setShowSuggestModal(true)}
+                disabled={adminProcessing !== null}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.warningActionButton}
               >
                 <View
                   style={{
@@ -1027,5 +1071,4 @@ export default function MatchroomDetails() {
     </Screen>
   );
 }
-
 
