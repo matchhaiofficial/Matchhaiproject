@@ -154,10 +154,9 @@ function SlotActionButtons({
         <AnimatedPressable
           style={[
             styles.joinSlotButton,
-            {
-              backgroundColor:
-                status === "rejected" ? COLORS.error : COLORS.muted,
-            },
+            status === "rejected"
+              ? styles.rejectedSlotButton
+              : styles.requestedSlotButton,
           ]}
           unstable_pressDelay={0}
           pressRetentionOffset={footerHitSlop}
@@ -192,7 +191,9 @@ function SlotActionButtons({
             <Text
               style={[
                 styles.joinSlotText,
-                { color: "#FFF" },
+                status === "rejected"
+                  ? styles.rejectedSlotText
+                  : styles.requestedSlotText,
               ]}
             >
               {status === "approved_pending_payment"

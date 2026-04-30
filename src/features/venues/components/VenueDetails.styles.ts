@@ -61,6 +61,7 @@ export default StyleSheet.create({
   },
   heroTitleWrap: {
     flex: 1,
+    minWidth: 0,
     gap: SPACING.xs,
   },
   heroEyebrow: {
@@ -73,8 +74,9 @@ export default StyleSheet.create({
   heroTitle: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "700",
   },
   heroSubtitle: {
     color: COLORS.textSecondary,
@@ -121,8 +123,9 @@ export default StyleSheet.create({
   branchTitle: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: 20,
-    lineHeight: 25,
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: "700",
   },
   branchMeta: {
     color: COLORS.textSecondary,

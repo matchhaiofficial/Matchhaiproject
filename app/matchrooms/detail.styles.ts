@@ -593,6 +593,24 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(66, 165, 245, 0.3)',
     },
+    requestedSlotButton: {
+        backgroundColor: COLORS.successBright + '14',
+        borderColor: COLORS.successBright + '55',
+    },
+    requestedSlotText: {
+        color: COLORS.successBright,
+        textTransform: 'uppercase',
+        fontWeight: '700',
+    },
+    rejectedSlotButton: {
+        backgroundColor: COLORS.error + '14',
+        borderColor: COLORS.error + '55',
+    },
+    rejectedSlotText: {
+        color: COLORS.error,
+        textTransform: 'uppercase',
+        fontWeight: '700',
+    },
     joinSlotText: {
         color: COLORS.accent,
         fontSize: 11,

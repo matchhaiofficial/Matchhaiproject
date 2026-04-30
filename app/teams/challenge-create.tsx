@@ -12,6 +12,7 @@ import { Team, getTeamById } from "../../src/services/convex/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
@@ -44,7 +45,11 @@ const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent
     const game = String(gameKey || "").toLowerCase();
     if (game === "cs2" || game === "cs16" || game === "valorant") return 10;
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
-        const teamSize = Math.max(Number(challenger?.maxMembers || 0), Number(opponent?.maxMembers || 0), 1);
+        const teamSize = Math.max(
+            Number(challenger?.mainRosterSize || getTeamMainRosterSize(game)),
+            Number(opponent?.mainRosterSize || getTeamMainRosterSize(game)),
+            1,
+        );
         return teamSize <= 1 ? 2 : 4;
     }
     if (game === "padel") return 4;
@@ -58,6 +63,9 @@ const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent
 
 const getBaseZoneRate = (zone: Zone | null, gameKey: string) => {
     if (!zone) return 0;
+    if (typeof zone.effectiveRate === "number" && zone.effectiveRate > 0) {
+        return zone.effectiveRate;
+    }
     const pricing: any = zone.pricing || zone.branches?.[0]?.pricing || {};
     const game = String(gameKey || "").toLowerCase();
 
@@ -152,7 +160,7 @@ export default function TeamChallengeCreateScreen() {
 
     const isTeamFilled = (team: Team | null) => {
         if (!team) return false;
-        const maxMembers = Number(team.maxMembers || 0);
+    const maxMembers = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
         const memberCount = Math.max(
             Number(team.memberCount || 0),
             Array.isArray(team.memberUids) ? team.memberUids.length : 0,
@@ -164,7 +172,7 @@ export default function TeamChallengeCreateScreen() {
 
     const getTeamCountLabel = (team: Team | null) => {
         if (!team) return "0/0";
-        const maxMembers = Number(team.maxMembers || 0);
+        const maxMembers = Number(team.mainRosterSize || getTeamMainRosterSize(team.game));
         const memberCount = Math.max(
             Number(team.memberCount || 0),
             Array.isArray(team.memberUids) ? team.memberUids.length : 0,
@@ -208,8 +216,8 @@ export default function TeamChallengeCreateScreen() {
 
     const handleCreateChallenge = async () => {
         if (submitting) return;
-        if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time || pricePerPlayer <= 0) {
-            showToast({ type: "warning", title: "Missing details", message: "Select captain team, date/time, preferred zone, and valid pricing before sending challenge." });
+        if (!challengerTeam || !opponentTeam || !selectedZone || !formData.date || !formData.time) {
+            showToast({ type: "warning", title: "Missing details", message: "Select captain team, date/time, and preferred zone before sending challenge." });
             return;
         }
         if (!areBothTeamsFilled) {
@@ -218,6 +226,10 @@ export default function TeamChallengeCreateScreen() {
                 title: "Teams not filled",
                 message: `${challengerTeam.name}: ${getTeamCountLabel(challengerTeam)} | ${opponentTeam.name}: ${getTeamCountLabel(opponentTeam)}. Both teams must be full to send a challenge.`,
             });
+            return;
+        }
+        if (pricePerPlayer <= 0) {
+            showToast({ type: "warning", title: "Missing pricing", message: "Selected zone pricing is missing for this game/series." });
             return;
         }
 

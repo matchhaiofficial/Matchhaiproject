@@ -172,6 +172,58 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.caption,
     },
+    lineupPanel: {
+        marginTop: SPACING.sm,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        gap: SPACING.sm,
+    },
+    lineupTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: "700",
+    },
+    lineupGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    lineupChip: {
+        minHeight: 34,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayMedium,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    lineupChipSelected: {
+        borderColor: COLORS.accent,
+        backgroundColor: `${COLORS.accent}18`,
+    },
+    lineupChipSub: {
+        borderColor: `${COLORS.successBright}55`,
+    },
+    lineupChipText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.caption,
+    },
+    lineupChipTextSelected: {
+        color: COLORS.text,
+    },
+    lineupSubText: {
+        color: COLORS.successBright,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.xs,
+        marginTop: 2,
+    },
     rejectedBanner: {
         flexDirection: "row",
         alignItems: "center",

@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { GAME_FORMATS } from "../../src/constants/gameRules";
+import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
 import { AppIcon } from "../../src/components/AppIcon";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -41,8 +41,6 @@ const GAMES = [
     // { key: 'pickleball', label: 'Pickleball' },
 ];
 
-const FIXED_1V1_TEAM_GAMES = new Set(["fc26", "tekken8"]);
-
 const localStyles = StyleSheet.create({
     flexOne: {
         flex: 1,
@@ -67,6 +65,7 @@ export default function CreateTeam() {
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
     const [selectedSize, setSelectedSize] = useState<number | null>(null);
+    const [substituteSlots, setSubstituteSlots] = useState(0);
     const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
     useRouteLogger("CreateTeamScreen", {
@@ -82,16 +81,9 @@ export default function CreateTeam() {
             : "skip"
     );
 
-    // Get available sizes for selected game
-    const availableFormats = useMemo(() => {
-        if (!selectedGame) return [];
-        return GAME_FORMATS[selectedGame] || [];
-    }, [selectedGame]);
-    const usesFixed1v1TeamSize = selectedGame ? FIXED_1V1_TEAM_GAMES.has(selectedGame) : false;
-    const effectiveTeamSize = usesFixed1v1TeamSize ? 1 : selectedSize;
-    const shouldShowTeamSizeSelector = Boolean(
-        selectedGame && !usesFixed1v1TeamSize && availableFormats.length > 1,
-    );
+    const mainRosterSize = selectedGame ? getTeamMainRosterSize(selectedGame) : 0;
+    const maxSubstituteSlots = selectedGame ? getTeamMaxSubstitutes(selectedGame) : 0;
+    const effectiveTeamSize = selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : selectedSize;
 
     const eligibleFriends = useMemo(
         () => (eligibleFriendsRaw ?? []).map((friend: any) => ({
@@ -112,9 +104,8 @@ export default function CreateTeam() {
     // Reset size when game changes
     const handleGameSelect = (gameKey: string) => {
         setSelectedGame(gameKey);
-        const formats = GAME_FORMATS[gameKey] || [];
-        // Default to first format if available
-        setSelectedSize(formats.length > 0 ? formats[0].size : null);
+        setSelectedSize(getTeamMainRosterSize(gameKey));
+        setSubstituteSlots(0);
         setSelectedFriendIds([]);
     };
 
@@ -173,7 +164,8 @@ export default function CreateTeam() {
                 description: description.trim(),
                 game: selectedGame,
                 visibility: 'public',
-                maxMembers: effectiveTeamSize
+                maxMembers: effectiveTeamSize,
+                substituteSlots,
             });
 
             if (result.ok) {
@@ -280,32 +272,44 @@ export default function CreateTeam() {
                         </View>
                     </View>
 
-                    {/* Team Size Selection */}
-                    {shouldShowTeamSizeSelector && (
+                    {selectedGame && (
                         <View style={styles.section}>
                             <Text style={styles.sectionLabel}>
-                                Team Size *
+                                Roster Size
                             </Text>
-                            <View style={styles.chipRow}>
-                                {availableFormats.map(format => (
+                            <View style={styles.infoBox}>
+                                <Text style={styles.infoBoxText}>
+                                    {mainRosterSize} main players required for {selectedGameLabel}.
+                                </Text>
+                                <Text style={styles.infoBoxSmall}>
+                                    Optional substitutes: {substituteSlots}/{maxSubstituteSlots}. Total roster slots: {effectiveTeamSize}.
+                                </Text>
+                            </View>
+                            {maxSubstituteSlots > 0 ? (
+                                <View style={styles.chipRow}>
+                                    {Array.from({ length: maxSubstituteSlots + 1 }, (_, count) => (
                                     <Pressable
-                                        key={format.size}
-                                        onPress={() => setSelectedSize(format.size)}
+                                        key={count}
+                                        onPress={() => {
+                                            setSubstituteSlots(count);
+                                            setSelectedFriendIds((prev) => prev.slice(0, Math.max(0, mainRosterSize + count - 1)));
+                                        }}
                                         style={({ pressed }) => [
                                             styles.optionChip,
-                                            selectedSize === format.size && styles.optionChipActive,
+                                            substituteSlots === count && styles.optionChipActive,
                                             pressed && localStyles.chipPressed,
                                         ]}
                                     >
                                         <Text style={[
                                             styles.optionChipText,
-                                            selectedSize === format.size && styles.optionChipTextActive
+                                            substituteSlots === count && styles.optionChipTextActive
                                         ]}>
-                                            {format.label}
+                                            {count === 0 ? "No subs" : `${count} sub${count === 1 ? "" : "s"}`}
                                         </Text>
                                     </Pressable>
-                                ))}
-                            </View>
+                                    ))}
+                                </View>
+                            ) : null}
                         </View>
                     )}
 

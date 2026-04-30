@@ -752,6 +752,8 @@ export default defineSchema({
     memberUids: v.array(v.string()),
     memberCount: v.number(),
     maxMembers: v.number(),
+    mainRosterSize: v.optional(v.number()),
+    maxSubstitutes: v.optional(v.number()),
 
     // Logo/branding
     logoStorageId: v.optional(v.id("_storage")),
@@ -784,6 +786,8 @@ export default defineSchema({
     odxerId: v.id("users"),
     username: v.string(),
     role: v.union(v.literal("captain"), v.literal("member")),
+    rosterRole: v.optional(v.union(v.literal("main"), v.literal("substitute"))),
+    rosterOrder: v.optional(v.number()),
     joinedAt: v.number(),
   })
     .index("by_teamId", ["teamId"])
@@ -849,6 +853,8 @@ export default defineSchema({
     adminReviewStatus: v.optional(
       v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.null())
     ),
+    lineupA: v.optional(v.array(v.string())),
+    lineupB: v.optional(v.array(v.string())),
 
     // Venue
     zoneId: v.optional(v.id("zones")),

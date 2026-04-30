@@ -33,6 +33,7 @@ import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { getTeamMainRosterSize, getTeamMaxSubstitutes } from "../../src/constants/teamRosterRules";
 import Logger from "../../src/utils/logger";
 import { buildLegacyTeamsHref } from "../../src/navigation/routes";
 import styles from "./[id].styles";
@@ -179,6 +180,8 @@ export default function TeamDetails() {
                 uid: m.odxerId ?? m.uid,
                 username: m.username,
                 role: m.role,
+                rosterRole: m.rosterRole,
+                rosterOrder: m.rosterOrder,
                 joinedAt: m.joinedAt,
             })),
         } as Team
@@ -213,7 +216,13 @@ export default function TeamDetails() {
 
     // Role & Permission Checks
     const memberCount = team?.members?.length ?? team?.memberUids?.length ?? team?.memberCount ?? 0;
-    const maxMembers = team ? (team.maxMembers || GAME_MAX_MEMBERS[team.game] || 5) : 0;
+    const mainRosterSize = team ? (team.mainRosterSize || getTeamMainRosterSize(team.game)) : 0;
+    const maxSubstitutes = team
+        ? (typeof team.maxSubstitutes === "number"
+            ? team.maxSubstitutes
+            : Math.min(getTeamMaxSubstitutes(team.game), Math.max(0, Number(team.maxMembers || 0) - mainRosterSize)))
+        : 0;
+    const maxMembers = team ? mainRosterSize + maxSubstitutes : 0;
     const memberCountDisplay = maxMembers > 0 ? Math.min(memberCount, maxMembers) : memberCount;
     const isFull = team ? memberCountDisplay >= maxMembers : false;
     const isPrivate = team?.visibility === 'private';
@@ -802,6 +811,8 @@ export default function TeamDetails() {
                         >
                             <RosterSlots
                                 maxMembers={maxMembers}
+                                mainRosterSize={mainRosterSize}
+                                maxSubstitutes={maxSubstitutes}
                                 members={team.members || []}
                                 captainUid={team.captainUid}
                                 viewerUid={user?._id}
