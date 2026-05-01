@@ -13,7 +13,7 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { COLORS, FONTS } from "../../../src/theme";
 
-// ─── Responsive helpers (mirrors PlayerTabsLayout) ────────────────────────────
+// Responsive helpers (mirrors PlayerTabsLayout)
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const isSmall = SCREEN_WIDTH < 360;
 const isLarge = SCREEN_WIDTH >= 428;
@@ -24,7 +24,7 @@ const LABEL_SIZE = isSmall ? 9 : 10;
 const H_PADDING = isSmall ? 10 : isLarge ? 28 : 16;
 const PILL_R = 22;
 
-// ─── Tab definitions ───────────────────────────────────────────────────────────
+// Tab definitions
 type TabDef = { name: string; label: string; icon: string };
 
 const TABS: TabDef[] = [
@@ -32,7 +32,7 @@ const TABS: TabDef[] = [
     { name: "branches", label: "Branches", icon: "store" },
 ];
 
-// ─── Custom Tab Bar ────────────────────────────────────────────────────────────
+// Custom Tab Bar
 function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const insets = useSafeAreaInsets();
 
@@ -118,7 +118,7 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
     );
 }
 
-// ─── Layout ────────────────────────────────────────────────────────────────────
+// Layout
 export default function ZoneTabsLayout() {
     return (
         <Tabs
@@ -144,7 +144,7 @@ export default function ZoneTabsLayout() {
     );
 }
 
-// ─── Styles (identical tokens to PlayerTabsLayout) ────────────────────────────
+// Styles (identical tokens to PlayerTabsLayout)
 const styles = StyleSheet.create({
     outerWrap: {
         position: "absolute",

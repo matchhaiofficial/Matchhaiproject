@@ -13,10 +13,16 @@ import {
 } from "../../../../src/services/convex/zoneAdminBookingService";
 import {
   type ZoneBranch,
-  type ZoneBranchResource,
 } from "../../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../../src/theme";
 import styles from "../bookings.styles";
+
+export type ZoneBookingAllocationResourceOption = {
+  id: string;
+  label: string;
+  meta: string;
+  resourceIds: string[];
+};
 
 type Props = {
   visible: boolean;
@@ -27,9 +33,10 @@ type Props = {
   selectedBranchId: string | null;
   onSelectBranch: (branchId: string) => void;
   loadingResources: boolean;
-  resources: ZoneBranchResource[];
+  resources: ZoneBookingAllocationResourceOption[];
   selectedResourceIds: string[];
-  onToggleResource: (resourceId: string) => void;
+  onToggleResource: (resourceIds: string[]) => void;
+  selectedCount: number;
   requiredCount: number;
   selectionSummary: string;
   validationMessage: string | null;
@@ -49,6 +56,7 @@ export function ZoneBookingsAllocationSheet({
   resources,
   selectedResourceIds,
   onToggleResource,
+  selectedCount,
   requiredCount,
   selectionSummary,
   validationMessage,
@@ -67,10 +75,10 @@ export function ZoneBookingsAllocationSheet({
         <View style={styles.allocateSummaryCard}>
           <Text style={styles.allocateSheetTitle}>{request?.title || "Booking request"}</Text>
           <Text style={styles.allocateSheetMeta}>
-            {String(request?.gameKey || "").toUpperCase()} · {selectionSummary}
+            {String(request?.gameKey || "").toUpperCase()} | {selectionSummary}
           </Text>
           <Text style={styles.allocateSheetMeta}>
-            {request?.preferredTime || "Time TBD"} · {request?.preferredAreas?.[0] || "Zone venue"}
+            {request?.preferredTime || "Time TBD"} | {request?.preferredAreas?.[0] || "Zone venue"}
           </Text>
           {request?.locationMode === "broadcast" ? (
             <>
@@ -115,7 +123,7 @@ export function ZoneBookingsAllocationSheet({
           <View style={styles.allocateResourcesHeader}>
             <Text style={styles.allocateSectionLabel}>Resources</Text>
             <Text style={styles.allocateSelectionCount}>
-              {selectedResourceIds.length}/{requiredCount}
+              {selectedCount}/{requiredCount}
             </Text>
           </View>
           {loadingResources ? (
@@ -131,17 +139,18 @@ export function ZoneBookingsAllocationSheet({
                 <Text style={styles.allocateEmptyText}>No available resources found for this branch.</Text>
               }
               renderItem={({ item }) => {
-                const selected = selectedResourceIds.includes(item.id);
-                const label = item.roomLabel ? `${item.label} · ${item.roomLabel}` : item.label;
+                const selected = item.resourceIds.every((resourceId) =>
+                  selectedResourceIds.includes(resourceId),
+                );
                 return (
                   <Pressable
-                    onPress={() => onToggleResource(item.id)}
+                    onPress={() => onToggleResource(item.resourceIds)}
                     style={[styles.allocateResourceCard, selected && styles.allocateResourceCardActive]}
                   >
                     <View style={styles.allocateResourceInfo}>
-                      <Text style={styles.allocateResourceLabel}>{label}</Text>
+                      <Text style={styles.allocateResourceLabel}>{item.label}</Text>
                       <Text style={styles.allocateResourceMeta}>
-                        {item.assetType} · {item.lifecycleStatus}
+                        {item.meta}
                       </Text>
                     </View>
                     <View style={[styles.allocateResourceTick, selected && styles.allocateResourceTickActive]}>

@@ -11,6 +11,11 @@ export type ZoneRateOption = {
   label: string;
   price: number;
   detailLabel: string;
+  resourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  };
 };
 
 type FormDataShape = {
@@ -251,8 +256,9 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         label,
         price: resolved.rate,
         detailLabel: hasPromo
-          ? `${label} • PKR ${resolved.rate}/hr • Promo`
-          : `${label} • PKR ${resolved.rate}/hr`,
+          ? `${label} | PKR ${resolved.rate}/hr | Promo`
+          : `${label} | PKR ${resolved.rate}/hr`,
+        resourceContext: context,
       });
     };
 

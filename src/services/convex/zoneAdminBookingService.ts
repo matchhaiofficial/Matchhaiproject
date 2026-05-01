@@ -15,7 +15,7 @@ import {
     SharedPollingState,
 } from "./sharedPollingRegistry";
 
-export type ZoneBookingAssetType = "pc" | "court" | "mixed" | "unknown";
+export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
 export type ZoneBookingQueueStatus =
     | "open"
     | "pending_payment"
@@ -52,6 +52,10 @@ export interface ZoneBookingQueueItem {
     allocatedResourceIds?: string[];
     allocatedAt?: any;
     allocatedByUid?: string;
+    requestedResourceAssetType?: string;
+    requestedResourceSurface?: string;
+    requestedResourceTier?: string;
+    selectedZoneRateKey?: string;
     createdAt?: any;
     updatedAt?: any;
     assetType: ZoneBookingAssetType;
@@ -136,7 +140,8 @@ const normalizeGameKey = (value: unknown) =>
     String(value || "").trim().toLowerCase();
 
 const computeAssetTypeFromGame = (gameKey: string): ZoneBookingAssetType => {
-    if (["cs2", "cs16", "valorant", "fc25", "fc26", "tekken8"].includes(gameKey)) return "pc";
+    if (["cs2", "cs16", "valorant"].includes(gameKey)) return "pc";
+    if (["fc25", "fc26", "tekken8"].includes(gameKey)) return "console";
     if (["futsal", "indoor_cricket", "padel", "pickleball"].includes(gameKey)) return "court";
     return "unknown";
 };
@@ -248,6 +253,10 @@ const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueIte
             : undefined,
         allocatedAt: data.allocatedAt,
         allocatedByUid: data.allocatedByUid || undefined,
+        requestedResourceAssetType: data.requestedResourceAssetType || undefined,
+        requestedResourceSurface: data.requestedResourceSurface || undefined,
+        requestedResourceTier: data.requestedResourceTier || undefined,
+        selectedZoneRateKey: data.selectedZoneRateKey || undefined,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
         assetType: computeAssetTypeFromGame(gameKey),
