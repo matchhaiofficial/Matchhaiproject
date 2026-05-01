@@ -19,6 +19,7 @@ import type { UserProfile } from "../../../../src/services/userService";
 import { getUserProfile } from "../../../../src/services/userService";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { useToast } from "../../../../src/hooks/useToast";
+import { APP_ROUTES } from "../../../../src/navigation/routes";
 import Logger from "../../../../src/utils/logger";
 import {
   formatPakistaniPhone,
@@ -562,7 +563,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           });
           router.replace({
             params: { t: Date.now().toString() },
-            pathname: "/(player)/(tabs)/index",
+            pathname: APP_ROUTES.playerHome,
           } as any);
         } else {
           notify({

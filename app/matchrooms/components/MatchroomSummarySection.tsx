@@ -28,7 +28,7 @@ const formatScheduledWindow = (room: any) => {
   }
 
   const format12h = (value: Date) =>
-    value.toLocaleTimeString([], {
+    value.toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
@@ -61,10 +61,7 @@ const formatScheduledWindow = (room: any) => {
 
   if (room.scheduledTime && duration) {
     const end = new Date(start.getTime() + duration * 60000);
-    const endDisplay = end.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const endDisplay = format12h(end);
     return `${startDisplay} - ${endDisplay}`;
   }
 

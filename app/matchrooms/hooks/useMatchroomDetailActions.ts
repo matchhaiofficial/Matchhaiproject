@@ -13,7 +13,7 @@ import {
 } from "../../../src/services/convex/matchService";
 import {
   inviteToMatchroomAction,
-  kickFromMatchroomAction,
+  // kickFromMatchroomAction,
   transferMatchroomCaptainAction,
 } from "../../../src/services/convex/matchroomActionService";
 import { submitMatchroomComplain } from "../../../src/services/convex/reportService";
@@ -837,53 +837,53 @@ export function useMatchroomDetailActions({
     }
   };
 
-  const handleKick = async (playerUid: string, playerName: string) => {
-    if (!id || !user || !room) return;
-
-    Alert.alert(
-      "Kick Player",
-      `Are you sure you want to remove ${playerName} from the matchroom?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Kick",
-          style: "destructive",
-          onPress: async () => {
-            setJoining(true);
-            try {
-              const res = await kickFromMatchroomAction({
-                matchroomId: id,
-                playerUid,
-              });
-              if (res.ok) {
-                showToast({
-                  message: "Player removed.",
-                  title: "Player removed",
-                  type: "success",
-                });
-                await fetchRoom();
-              } else {
-                showToast({
-                  message: res.message || "Kick failed.",
-                  title: "Kick failed",
-                  type: "error",
-                });
-              }
-            } catch (e) {
-              Logger.error("MatchroomDetails", "Kick error", e);
-              showToast({
-                message: "Failed to remove player.",
-                title: "Kick failed",
-                type: "error",
-              });
-            } finally {
-              setJoining(false);
-            }
-          },
-        },
-      ],
-    );
-  };
+  // const handleKick = async (playerUid: string, playerName: string) => {
+  //   if (!id || !user || !room) return;
+  //
+  //   Alert.alert(
+  //     "Kick Player",
+  //     `Are you sure you want to remove ${playerName} from the matchroom?`,
+  //     [
+  //       { text: "Cancel", style: "cancel" },
+  //       {
+  //         text: "Kick",
+  //         style: "destructive",
+  //         onPress: async () => {
+  //           setJoining(true);
+  //           try {
+  //             const res = await kickFromMatchroomAction({
+  //               matchroomId: id,
+  //               playerUid,
+  //             });
+  //             if (res.ok) {
+  //               showToast({
+  //                 message: "Player removed.",
+  //                 title: "Player removed",
+  //                 type: "success",
+  //               });
+  //               await fetchRoom();
+  //             } else {
+  //               showToast({
+  //                 message: res.message || "Kick failed.",
+  //                 title: "Kick failed",
+  //                 type: "error",
+  //               });
+  //             }
+  //           } catch (e) {
+  //             Logger.error("MatchroomDetails", "Kick error", e);
+  //             showToast({
+  //               message: "Failed to remove player.",
+  //               title: "Kick failed",
+  //               type: "error",
+  //             });
+  //           } finally {
+  //             setJoining(false);
+  //           }
+  //         },
+  //       },
+  //     ],
+  //   );
+  // };
 
   const handleManagePlayer = (
     team: "A" | "B",
@@ -905,11 +905,11 @@ export function useMatchroomDetailActions({
           onPress: () => handleTransferCaptain(team, playerUid, playerName),
         }]
         : []),
-      {
-        text: "Kick Player",
-        style: "destructive",
-        onPress: () => handleKick(playerUid, playerName),
-      },
+      // {
+      //   text: "Kick Player",
+      //   style: "destructive",
+      //   onPress: () => handleKick(playerUid, playerName),
+      // },
     ]);
   };
 

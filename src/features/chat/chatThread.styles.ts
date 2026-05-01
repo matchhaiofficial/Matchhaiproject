@@ -154,6 +154,9 @@ export default StyleSheet.create({
     messageList: {
         flex: 1,
     },
+    messageListDismissLayer: {
+        flex: 1,
+    },
     listContent: {
         paddingHorizontal: SPACING.lg,
         paddingVertical: SPACING.md,

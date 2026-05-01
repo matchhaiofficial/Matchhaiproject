@@ -635,7 +635,7 @@ export default function PlayerProfile() {
         );
     };
 
-    const renderPlatformCard = (name: string, value: string | undefined, icon: string, color: string, isVerified: boolean) => {
+    const renderPlatformCard = (name: string, value: string | null | undefined, icon: string, color: string, isVerified: boolean) => {
         if (!value || !profile) {
             return (
                 <View style={[styles.platformCard, styles.notConnected]}>
@@ -692,7 +692,7 @@ export default function PlayerProfile() {
                         )}
                     </Pressable>
                 )}
-                {!isVerified && (
+                {!isVerified && value && (
                     <Pressable onPress={() => Linking.openURL(value)}>
                         <AppIcon name="launch" size={20} color={COLORS.muted} style={{ marginLeft: 8 }} />
                     </Pressable>

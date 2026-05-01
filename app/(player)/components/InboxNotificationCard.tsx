@@ -39,6 +39,7 @@ const MATCH_JOIN_REQUEST_TYPES = new Set(["match.join_request", "match_join_requ
 const TEAM_INVITE_TYPES = new Set(["team.invite", "team_invite"]);
 const TEAM_DECISION_TYPES = new Set(["team.join_request_decision", "team_join_decision"]);
 const SEAT_INVITE_TYPES = new Set(["match.seat_invite", "match_seat_invitation", "match.payment_required"]);
+const PAYMENT_REQUIRED_TYPES = new Set(["match.payment_required", "match_payment_required"]);
 const TEAM_CHALLENGE_TYPES = new Set(["team.challenge_received", "team_match_challenge"]);
 const TEAM_CHALLENGE_UPDATE_TYPES = new Set(["team.challenge_updated", "team_match_challenge_update"]);
 const BOOKING_ACCEPT_TYPES = new Set(["booking.request_accepted", "booking_request_accepted", "resource.allocation_action"]);
@@ -176,7 +177,8 @@ export function InboxNotificationCard({
   const isTeamInvite = TEAM_INVITE_TYPES.has(item.type);
   const isDecision = TEAM_DECISION_TYPES.has(item.type);
   const isBookingApproval = item.type === "match_booking_captain_approval";
-  const isSeatInv = SEAT_INVITE_TYPES.has(item.type);
+  const isPaymentRequired = PAYMENT_REQUIRED_TYPES.has(item.type) || item.meta?.paymentRequired === true;
+  const isSeatInv = SEAT_INVITE_TYPES.has(item.type) && !isPaymentRequired;
   const isTeamChallenge = TEAM_CHALLENGE_TYPES.has(item.type);
   const isTeamChallengeUpdate = TEAM_CHALLENGE_UPDATE_TYPES.has(item.type);
   const isBookingRequestAccepted = BOOKING_ACCEPT_TYPES.has(item.type);
@@ -216,6 +218,7 @@ export function InboxNotificationCard({
     isDecision ||
     isBookingApproval ||
     isMatchJoinRequest ||
+    isPaymentRequired ||
     isSeatInv ||
     isTeamChallenge ||
     isTeamChallengeUpdate ||
@@ -231,6 +234,8 @@ export function InboxNotificationCard({
           ? "Team Invitation"
           : isBookingApproval
             ? "Booking Approval"
+            : isPaymentRequired
+              ? "Request Accepted"
             : isSeatInv
               ? "Seat Invitation"
               : isBookingRequestAccepted
@@ -252,6 +257,7 @@ export function InboxNotificationCard({
     isMatchJoinRequest ||
     isTeamInvite ||
     isBookingApproval ||
+    isPaymentRequired ||
     isSeatInv ||
     isTeamChallenge ||
     isTeamChallengeUpdate;
@@ -261,9 +267,9 @@ export function InboxNotificationCard({
     ? "person-add"
     : isJoinRequest || isTeamInvite
       ? "group"
-      : isBookingApproval
-        ? "gavel"
-        : isSeatInv
+    : isBookingApproval
+      ? "gavel"
+        : isPaymentRequired || isSeatInv
           ? "event-seat"
           : isTeamChallenge || isTeamChallengeUpdate
             ? "sports-esports"
@@ -298,6 +304,8 @@ export function InboxNotificationCard({
       handleBookingApproval(item.id, intentId, "approved");
     } else if (isSeatInv) {
       handleSeatInvitation(item.id, intentId, "accept");
+    } else if (isPaymentRequired) {
+      handleSeatInvitation(item.id, intentId, "accept");
     }
   }, [
     handleBookingApproval,
@@ -310,6 +318,7 @@ export function InboxNotificationCard({
     isBookingApproval,
     isJoinRequest,
     isMatchJoinRequest,
+    isPaymentRequired,
     isRequest,
     isSeatInv,
     isTeamInvite,
@@ -325,6 +334,8 @@ export function InboxNotificationCard({
       handleBookingApproval(item.id, intentId, "rejected");
     } else if (isSeatInv) {
       handleSeatInvitation(item.id, intentId, "decline");
+    } else if (isPaymentRequired) {
+      handleSeatInvitation(item.id, intentId, "decline");
     }
   }, [
     handleBookingApproval,
@@ -337,6 +348,7 @@ export function InboxNotificationCard({
     isBookingApproval,
     isJoinRequest,
     isMatchJoinRequest,
+    isPaymentRequired,
     isRequest,
     isSeatInv,
     isTeamInvite,
@@ -403,12 +415,14 @@ export function InboxNotificationCard({
       <View style={styles.cardBody}>
         <View style={styles.messageWrap}>
           <Text style={styles.messageText}>
-            <Text
-              style={styles.highlightText}
-              onPress={item.fromUid ? () => openProfile(item.fromUid) : undefined}
-            >
-              {senderName}
-            </Text>
+            {!isPaymentRequired && (
+              <Text
+                style={styles.highlightText}
+                onPress={item.fromUid ? () => openProfile(item.fromUid) : undefined}
+              >
+                {senderName}
+              </Text>
+            )}
             {isRequest && " wants to connect with you."}
             {isTeamInvite && (
               <>
@@ -471,6 +485,18 @@ export function InboxNotificationCard({
                 {" invited you to join a squad for a "}
                 <Text style={styles.inlineLinkText}>{getNotificationGameLabel(item)}</Text>
                 {" match."}
+              </>
+            )}
+            {isPaymentRequired && (
+              <>
+                {"Your request for "}
+                <Text
+                  style={styles.inlineLinkText}
+                  onPress={() => openMatchroom(getNotificationMatchroomId(item))}
+                >
+                  {item.meta?.matchroomTitle || "this matchroom"}
+                </Text>
+                {" has been accepted. Pay now to confirm your slot."}
               </>
             )}
             {isTeamChallenge && (
@@ -601,6 +627,7 @@ export function InboxNotificationCard({
           isMatchJoinRequest ||
           isTeamInvite ||
           isBookingApproval ||
+          isPaymentRequired ||
           isSeatInv) && (
           <View style={styles.actionRow}>
             <Pressable
@@ -618,6 +645,8 @@ export function InboxNotificationCard({
                     ? intentId
                       ? "Pay Now"
                       : "Accept Invite"
+                    : isPaymentRequired
+                      ? "Pay Now"
                     : "Approve"}
                 </Text>
               )}

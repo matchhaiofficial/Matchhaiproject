@@ -55,7 +55,10 @@ export function ChatReactionRow({
             {aggregated.map((r) => (
                 <Pressable
                     key={r.emoji}
-                    onPress={() => onToggle(r.emoji)}
+                    onPress={(event) => {
+                        event.stopPropagation();
+                        onToggle(r.emoji);
+                    }}
                     style={[s.chip, r.includesMe && s.chipActive]}
                 >
                     <Text style={s.chipEmoji}>{r.emoji}</Text>
@@ -80,7 +83,8 @@ export function ChatReactionPicker({
             {REACTION_EMOJIS.map((emoji) => (
                 <Pressable
                     key={emoji}
-                    onPress={() => {
+                    onPress={(event) => {
+                        event.stopPropagation();
                         onSelect(emoji);
                         onClose();
                     }}
