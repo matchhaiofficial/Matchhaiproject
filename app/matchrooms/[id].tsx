@@ -501,73 +501,8 @@ export default function MatchroomDetails() {
               styles={styles}
             />
 
-          {/* Pending Join Requests (Host / Admin only) */}
-          {incomingRequests.length > 0 && (isHost || isZoneAdmin) && (
-            <DetailSectionCard
-              title={`Pending Join Requests (${incomingRequests.length})`}
-              style={styles.pendingRequestsCard}
-            >
-              <MatchroomPendingRequestsPanel
-                requests={incomingRequests}
-                processingRequestId={processingRequestId}
-                onRespond={handleRespondToRequestAction}
-              />
-            </DetailSectionCard>
-          )}
-          {/* Footer Actions */}
-          <View
-            style={[
-              styles.buttonWrapper,
-              { marginBottom: ctaBottomGuard },
-            ]}
-            collapsable={false}
-            onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
-          >
-            <View style={styles.buttonContent}>
-          {isZoneAdmin ? (
-            <View style={{ gap: SPACING.sm }}>
-              <Text
-                style={{ textAlign: "center", color: COLORS.textSecondary }}
-              >
-                Booking actions (zone admin)
-              </Text>
-              <View style={styles.footerRow}>
-                <AppButton
-                  size="lg"
-                  onPress={handleZoneAcceptAction}
-                  disabled={adminProcessing !== null}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.footerAction}
-                >
-                  {adminProcessing === "accept" ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <Text style={styles.joinButtonText}>Accept</Text>
-                  )}
-                </AppButton>
-                <AppButton
-                  variant="danger"
-                  size="lg"
-                  onPress={handleZoneRejectAction}
-                  disabled={adminProcessing !== null}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={styles.footerAction}
-                >
-                  {adminProcessing === "reject" ? (
-                    <ActivityIndicator size="small" color={COLORS.error} />
-                  ) : (
-                    <Text style={styles.secondaryButtonText}>Reject</Text>
-                  )}
-                </AppButton>
-              </View>
-              <AppButton
-                variant="ghost"
-                size="lg"
-                onPress={() => setShowSuggestModal(true)}
-                disabled={adminProcessing !== null}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.warningActionButton}
-              >
+            {(displaySlotsA?.length || displaySlotsB?.length) ? (
+              <View style={styles.teamsWrapper}>
                 <View
                   style={{
                     flex: width < 600 ? 0 : 1,
@@ -809,7 +744,6 @@ export default function MatchroomDetails() {
                               unstable_pressDelay={0}
                               pressRetentionOffset={{ top: 16, bottom: 16, left: 16, right: 16 }}
                               onPressIn={() => {
-                                handleFooterRequestJoinPress();
                                 if (touchDebugEnabled) {
                                   Logger.debug("TouchDebug", "pressIn", {
                                     tag: "lobby_request_join",
@@ -977,7 +911,6 @@ export default function MatchroomDetails() {
               unstable_pressDelay={0}
               pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
               onPressIn={() => {
-                handleFooterRequestJoinPress();
                 if (touchDebugEnabled) {
                   Logger.debug("TouchDebug", "pressIn", {
                     tag: "lobby_floating_request_join",

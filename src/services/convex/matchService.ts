@@ -828,15 +828,19 @@ export async function cancelMatchJoinRequest(
       limit: 100,
     });
 
-    const target = requests.find((item: any) => String(item.matchroomId || item.data?.matchroomId) === roomId);
-    if (!target) {
+    const targets = requests.filter((item: any) => String(item.matchroomId || item.data?.matchroomId) === roomId);
+    if (!targets.length) {
       return { ok: false, message: "No pending request found" };
     }
 
-    await convex.mutation(api.notifications.updateStatus, {
-      notificationId: target._id,
-      status: "expired",
-    });
+    await Promise.all(
+      targets.map((target: any) =>
+        convex.mutation(api.notifications.updateStatus, {
+          notificationId: target._id,
+          status: "expired",
+        }),
+      ),
+    );
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] cancelMatchJoinRequest error:", error);

@@ -11,6 +11,7 @@ import {
 // Constants
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SKILL_JOIN_DELTA = 10;
+const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_request"]);
 
 export async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
@@ -607,6 +608,40 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     createdAt: now,
     updatedAt: now,
   });
+}
+
+function isMatchJoinRequestNotification(notification: any) {
+  return MATCH_JOIN_REQUEST_TYPES.has(String(notification?.type || ""));
+}
+
+function getMatchJoinRequesterUid(notification: any) {
+  const data = notification?.data as any;
+  return String(notification?.fromUid || data?.requesterUid || "");
+}
+
+async function closePendingJoinRequestsForJoinedUser(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  joinedUid: string,
+  now: number,
+) {
+  const notifications = await ctx.db
+    .query("notifications")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+
+  for (const notification of notifications) {
+    if (
+      isMatchJoinRequestNotification(notification) &&
+      notification.status === "pending" &&
+      getMatchJoinRequesterUid(notification) === joinedUid
+    ) {
+      await ctx.db.patch(notification._id, {
+        status: "accepted",
+        updatedAt: now,
+      });
+    }
+  }
 }
 
 // ============================================
@@ -1508,35 +1543,20 @@ export const requestToJoinMatchroom = mutation({
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
     if (isRoomLocked(room)) throw new Error("This matchroom is locked.");
     if (room.playerUids.includes(actorUid)) throw new Error("You are already in this matchroom.");
-    const requesterSkill = await requireUserGameSkill(ctx, actorUid, room.game);
-    const skillStats = room.avgSkillScoreLive != null && room.ratedPlayerCount
-      ? {
-          avgSkillScoreLive: room.avgSkillScoreLive,
-          totalSkillSum: room.totalSkillSum || 0,
-          ratedPlayerCount: room.ratedPlayerCount,
-        }
-      : await buildRoomSkillStats(ctx, room.game, room.playerUids || []);
-
-    if (typeof skillStats.avgSkillScoreLive !== "number" || !skillStats.ratedPlayerCount) {
-      throw new Error("Matchroom skill average is unavailable. Ask the host to recreate the room.");
-    }
-
     const now = Date.now();
     const role = args.role || "Player";
     const targetTeam = args.targetTeam || "Any";
-    const approvalGroupKey = `match_join_request_${args.matchroomId}_${actorUid}_${args.slotId || targetTeam || "any"}`;
+    const approvalGroupKey = `match_join_request_${args.matchroomId}_${actorUid}`;
     const roomNotifications = await ctx.db
       .query("notifications")
       .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
       .collect();
 
     const existingPendingRequest = roomNotifications.find((notification) => {
-      const data = notification.data as any;
       return (
-        ["match_join_request", "match.join_request"].includes(String(notification.type || "")) &&
+        isMatchJoinRequestNotification(notification) &&
         notification.status === "pending" &&
-        String(notification.fromUid || "") === actorUid &&
-        String(data?.approvalGroupKey || "") === approvalGroupKey
+        getMatchJoinRequesterUid(notification) === actorUid
       );
     });
 
@@ -1548,6 +1568,19 @@ export const requestToJoinMatchroom = mutation({
         notificationIds: [existingPendingRequest._id],
         message: "Your join request is already pending captain approval.",
       };
+    }
+
+    const requesterSkill = await requireUserGameSkill(ctx, actorUid, room.game);
+    const skillStats = room.avgSkillScoreLive != null && room.ratedPlayerCount
+      ? {
+          avgSkillScoreLive: room.avgSkillScoreLive,
+          totalSkillSum: room.totalSkillSum || 0,
+          ratedPlayerCount: room.ratedPlayerCount,
+        }
+      : await buildRoomSkillStats(ctx, room.game, room.playerUids || []);
+
+    if (typeof skillStats.avgSkillScoreLive !== "number" || !skillStats.ratedPlayerCount) {
+      throw new Error("Matchroom skill average is unavailable. Ask the host to recreate the room.");
     }
 
     const ratingDiff = Math.abs(Number(requesterSkill.rating) - Number(skillStats.avgSkillScoreLive));
@@ -1779,7 +1812,7 @@ export const respondToMatchroomJoinRequest = mutation({
   handler: async (ctx, args) => {
     const notif = await ctx.db.get(args.notificationId);
     if (!notif) throw new Error("Request not found");
-    if (!["match_join_request", "match.join_request"].includes(String(notif.type || ""))) {
+    if (!isMatchJoinRequestNotification(notif)) {
       throw new Error("Invalid notification type");
     }
     if (notif.status !== "pending") throw new Error("Request already handled");
@@ -1806,25 +1839,20 @@ export const respondToMatchroomJoinRequest = mutation({
       return { ok: false, message: "Matchroom expired." };
     }
 
-    const requester = notif.fromUid
-      ? await resolveUserByAnyId(ctx, String(notif.fromUid))
-      : data?.fromAuthId
-        ? await resolveUserByAnyId(ctx, String(data.fromAuthId))
-        : null;
+    const requesterId = String(notif.fromUid || data?.requesterUid || data?.fromAuthId || "");
+    const requester = requesterId ? await resolveUserByAnyId(ctx, requesterId) : null;
     const requesterUid = requester ? String(requester._id) : "";
     const requesterUsername = notif.fromUsername || "Player";
     const role = data?.role || "Flex";
     const targetTeam = data?.targetTeam || "Any";
-    const approvalGroupKey = String(data?.approvalGroupKey || "");
-    const relatedNotifications = approvalRequired && approvalGroupKey
+    const relatedNotifications = approvalRequired && requesterUid
       ? (await ctx.db
           .query("notifications")
           .withIndex("by_matchroomId", (q) => q.eq("matchroomId", matchroomId as Id<"matchrooms">))
           .collect()).filter((notification) => {
-            const notificationData = notification.data as any;
             return (
-              ["match_join_request", "match.join_request"].includes(String(notification.type || "")) &&
-              String(notificationData?.approvalGroupKey || "") === approvalGroupKey
+              isMatchJoinRequestNotification(notification) &&
+              getMatchJoinRequesterUid(notification) === requesterUid
             );
           })
       : [notif];
@@ -1910,8 +1938,8 @@ export const respondToMatchroomJoinRequest = mutation({
         dedupePolicy: "upsert_active",
         matchroomId: matchroomId as Id<"matchrooms">,
         route: `/matchrooms/${String(matchroomId)}`,
-        title: "Pay to Confirm Slot",
-        body: `Your join request for ${room.title} was approved. Pay now to secure your slot.`,
+        title: "Request Accepted",
+        body: `Your request for ${room.title} has been accepted. Pay now to confirm your slot.`,
         data: {
           matchroomId,
           matchroomTitle: room.title,
@@ -1989,8 +2017,8 @@ export const respondToMatchroomJoinRequest = mutation({
       dedupePolicy: "upsert_active",
       matchroomId: matchroomId as Id<"matchrooms">,
       route: `/matchrooms/${String(matchroomId)}`,
-      title: "Pay to Confirm Slot",
-      body: `All captains approved your join request for ${room.title}. Pay now to secure your slot.`,
+      title: "Request Accepted",
+      body: `Your request for ${room.title} has been accepted. Pay now to confirm your slot.`,
       data: {
         matchroomId,
         matchroomTitle: room.title,
@@ -2027,6 +2055,8 @@ export const payMatchroomSeatIntent = mutation({
     if (String(intent.createdByUid) !== payerUid) {
       throw new Error("You can only pay for your own slot.");
     }
+    const payerUsername =
+      intent.createdByUsername || actor.convexUser.username || actor.convexUser.fullName || "Player";
     if (intent.paymentStatus === "paid" || intent.status === "confirmed") {
       return { ok: true, matchroomId: intent.matchroomId, alreadyConfirmed: true };
     }
@@ -2042,6 +2072,8 @@ export const payMatchroomSeatIntent = mutation({
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "match.payment_result",
         toUid: actor.convexUser._id,
+        fromUid: actor.convexUser._id,
+        fromUsername: payerUsername,
         status: "expired",
         dedupeKey: `match.payment_result:${String(args.intentId)}:expired`,
         dedupePolicy: "replace_active",
@@ -2066,11 +2098,13 @@ export const payMatchroomSeatIntent = mutation({
       throw new Error("This matchroom is locked.");
     }
     if ((room.playerUids || []).includes(payerUid)) {
+      const now = Date.now();
       await ctx.db.patch(args.intentId, {
         status: "confirmed",
         paymentStatus: "paid",
-        updatedAt: Date.now(),
+        updatedAt: now,
       });
+      await closePendingJoinRequestsForJoinedUser(ctx, room._id, payerUid, now);
       return { ok: true, matchroomId: room._id, alreadyConfirmed: true };
     }
 
@@ -2096,6 +2130,8 @@ export const payMatchroomSeatIntent = mutation({
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "match.payment_result",
         toUid: actor.convexUser._id,
+        fromUid: actor.convexUser._id,
+        fromUsername: payerUsername,
         status: "expired",
         dedupeKey: `match.payment_result:${String(args.intentId)}:slot_unavailable`,
         dedupePolicy: "replace_active",
@@ -2122,12 +2158,11 @@ export const payMatchroomSeatIntent = mutation({
     }
 
     const role = intent.role || "Player";
-    const username = intent.createdByUsername || actor.convexUser.username || actor.convexUser.fullName || "Player";
     const rosterPatch = await buildMatchroomRosterPatch(
       ctx,
       room,
       payerUid,
-      username,
+      payerUsername,
       role,
       side,
       slotId,
@@ -2181,6 +2216,7 @@ export const payMatchroomSeatIntent = mutation({
         updatedAt: now,
       });
     }
+    await closePendingJoinRequestsForJoinedUser(ctx, intent.matchroomId, payerUid, now);
 
     const relatedPaymentNotifications = await ctx.db
       .query("notifications")
@@ -2205,6 +2241,8 @@ export const payMatchroomSeatIntent = mutation({
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       type: "match.payment_result",
       toUid: actor.convexUser._id,
+      fromUid: actor.convexUser._id,
+      fromUsername: payerUsername,
       status: "accepted",
       dedupeKey: `match.payment_result:${String(args.intentId)}:paid`,
       dedupePolicy: "replace_active",
@@ -2442,7 +2480,7 @@ export const cancelUserPendingMatchroomRequests = mutation({
       .collect();
 
     const pending = notifications.filter(
-      (n) => ["match_join_request", "match.join_request"].includes(String(n.type || "")) && n.status === "pending"
+      (n) => isMatchJoinRequestNotification(n) && n.status === "pending"
     );
 
     const now = Date.now();

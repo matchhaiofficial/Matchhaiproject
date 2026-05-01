@@ -281,6 +281,30 @@ function sortByCreatedAtDesc<T = any>(items: T[]) {
   );
 }
 
+function getPendingMatchJoinDedupeKey(notification: any) {
+  if (notification?.status !== "pending") return "";
+  if (canonicalizeType(String(notification?.type || "")) !== "match.join_request") return "";
+  const data = notification?.data as any;
+  const matchroomId = String(notification?.matchroomId || data?.matchroomId || "");
+  const requesterUid = String(notification?.fromUid || data?.requesterUid || "");
+  if (!matchroomId || !requesterUid) return "";
+  return `match.join_request:${matchroomId}:${requesterUid}`;
+}
+
+function collapsePendingMatchJoinDuplicates<T = any>(notifications: T[]) {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const notification of notifications as any[]) {
+    const key = getPendingMatchJoinDedupeKey(notification);
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    result.push(notification);
+  }
+  return result;
+}
+
 function inferEntity(type: string, input: CanonicalInput) {
   if (input.entity?.kind || input.entity?.id) {
     return {
@@ -657,7 +681,7 @@ export const listInboxPage = query({
 
     const visible = recent.filter(isNotificationActive);
     if (args.tab === "pending") {
-      return visible
+      return collapsePendingMatchJoinDuplicates(visible)
         .filter((notification: any) => notification.status === "pending")
         .slice(0, baseLimit)
         .map(serializeNotification);
@@ -679,7 +703,9 @@ export const countPendingFast = query({
         q.eq("toUid", args.userId).eq("status", "pending")
       )
       .collect();
-    return notifications.filter(isNotificationActive).length;
+    return collapsePendingMatchJoinDuplicates(
+      notifications.filter(isNotificationActive),
+    ).length;
   },
 });
 
@@ -813,15 +839,26 @@ export const listMatchroomJoinRequests = query({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    const joinedUids = new Set(
+      ((room as any)?.playerUids || []).map((uid: unknown) => String(uid)),
+    );
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", args.matchroomId))
       .order("desc")
       .take(DEFAULT_LIMIT * 3);
 
-    return notifications
+    return collapsePendingMatchJoinDuplicates(notifications)
       .filter((notification: any) => canonicalizeType(String(notification.type || "")) === "match.join_request")
       .filter((notification: any) => !args.status || notification.status === args.status)
+      .filter((notification: any) => {
+        const data = notification.data as any;
+        const requesterUid = String(
+          notification.fromUid || data?.requesterUid || "",
+        );
+        return !requesterUid || !joinedUids.has(requesterUid);
+      })
       .filter(isNotificationActive)
       .map(serializeNotification)
       .slice(0, DEFAULT_LIMIT);
