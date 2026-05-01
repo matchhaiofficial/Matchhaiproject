@@ -196,6 +196,9 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     onToggleReaction,
     onPreviewImage,
     onSwipeReply,
+    activeReactionMessageId,
+    onToggleReactionPicker,
+    onDismissReactionPicker,
     nowMs,
 }: {
     item: RenderableChatMessage;
@@ -208,6 +211,9 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     onToggleReaction?: (messageId: string, emoji: string) => void;
     onPreviewImage?: (uri: string) => void;
     onSwipeReply?: (message: ChatThreadMessage) => void;
+    activeReactionMessageId: string | null;
+    onToggleReactionPicker: (messageId: string) => void;
+    onDismissReactionPicker: () => void;
     nowMs: number;
 }) {
     const mine = item.senderUid === currentUserId;
@@ -216,7 +222,8 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         Array.isArray(item.deletedFor) &&
         item.deletedFor.includes(currentUserId);
 
-    const [showReactionPicker, setShowReactionPicker] = useState(false);
+    const showReactionPicker = activeReactionMessageId === item.id;
+    const hasOpenReactionPicker = !!activeReactionMessageId;
 
     const seenLabel = buildSeenLabel(seenNames, otherParticipantCount);
     const statusLabel =
@@ -251,12 +258,20 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         onSwipeReply?.(item);
     }, [item, onSwipeReply]);
 
-    const handleDotsPress = useCallback(() => {
+    const handleDotsPress = useCallback((event: any) => {
+        event.stopPropagation();
         if (onToggleReaction) {
-            setShowReactionPicker((prev) => !prev);
+            onToggleReactionPicker(item.id);
         }
         openActions();
-    }, [onToggleReaction, openActions]);
+    }, [item.id, onToggleReaction, onToggleReactionPicker, openActions]);
+
+    const handleMessageSurfacePress = useCallback((event: any) => {
+        event.stopPropagation();
+        if (hasOpenReactionPicker && !showReactionPicker) {
+            onDismissReactionPicker();
+        }
+    }, [hasOpenReactionPicker, onDismissReactionPicker, showReactionPicker]);
 
     const actionDots = onMessageLongPress || onToggleReaction ? (
         <Pressable
@@ -283,7 +298,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
                 <View style={[styles.reactionPickerWrap, mine ? styles.reactionPickerMine : styles.reactionPickerOther]}>
                     <ChatReactionPicker
                         onSelect={handleReactionSelect}
-                        onClose={() => setShowReactionPicker(false)}
+                        onClose={onDismissReactionPicker}
                     />
                 </View>
             ) : null}
@@ -291,6 +306,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
                 {mine ? actionDots : null}
                 <View style={styles.bubbleWrap}>
                     <Pressable
+                        onPress={handleMessageSurfacePress}
                         onLongPress={onMessageLongPress ? openActions : undefined}
                         style={styles.messagePressable}
                     >
@@ -319,7 +335,16 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
                                     mine={mine}
                                 />
                             ) : item.type === "image" && item.attachment?.url ? (
-                                <Pressable onPress={() => onPreviewImage?.(item.attachment!.url!)}>
+                                <Pressable
+                                    onPress={(event) => {
+                                        event.stopPropagation();
+                                        if (hasOpenReactionPicker && !showReactionPicker) {
+                                            onDismissReactionPicker();
+                                            return;
+                                        }
+                                        onPreviewImage?.(item.attachment!.url!);
+                                    }}
+                                >
                                     <Image
                                         source={{ uri: item.attachment.url }}
                                         style={styles.imageBubble}
@@ -335,7 +360,12 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
                             ) : item.type === "file" && item.attachment ? (
                                 <Pressable
                                     style={styles.fileBubble}
-                                    onPress={() => {
+                                    onPress={(event) => {
+                                        event.stopPropagation();
+                                        if (hasOpenReactionPicker && !showReactionPicker) {
+                                            onDismissReactionPicker();
+                                            return;
+                                        }
                                         if (item.attachment?.url) void Linking.openURL(item.attachment.url);
                                     }}
                                 >
@@ -438,6 +468,7 @@ export default function ChatThread({
     const [emojiOpen, setEmojiOpen] = useState(false);
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
     const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+    const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
 
     const handleEmojiSelected = useCallback(
         (emoji: { emoji: string }) => {
@@ -446,6 +477,12 @@ export default function ChatThread({
         [input, onInputChange]
     );
     const openPreviewImage = useCallback((uri: string) => setPreviewImageUri(uri), []);
+    const dismissReactionPicker = useCallback(() => {
+        setActiveReactionMessageId(null);
+    }, []);
+    const toggleReactionPicker = useCallback((messageId: string) => {
+        setActiveReactionMessageId((current) => current === messageId ? null : messageId);
+    }, []);
 
     const groupedMessages = useMemo<RenderableChatMessage[]>(() => {
         return messages.map((message, index) => {
@@ -490,6 +527,7 @@ export default function ChatThread({
             : "mic";
     const trailingActionDisabled = sending || (!recording && trailingAction === "send" && !trimmedInput);
     const handleTrailingActionPress = () => {
+        dismissReactionPicker();
         if (recording) {
             onToggleRecording();
             return;
@@ -518,6 +556,13 @@ export default function ChatThread({
         previousMessageCountRef.current = messages.length;
     }, [currentUserId, messages]);
 
+    useEffect(() => {
+        setActiveReactionMessageId((current) => {
+            if (!current) return null;
+            return messages.some((message) => message.id === current) ? current : null;
+        });
+    }, [messages]);
+
     const maybeScrollToBottom = useCallback((animated: boolean) => {
         requestAnimationFrame(() => {
             listRef.current?.scrollToEnd({ animated });
@@ -539,11 +584,14 @@ export default function ChatThread({
     }, [maybeScrollToBottom]);
 
     const handleScroll = useCallback((event: any) => {
+        if (activeReactionMessageId) {
+            dismissReactionPicker();
+        }
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
         const distanceFromBottom =
             contentSize.height - (contentOffset.y + layoutMeasurement.height);
         isNearBottomRef.current = distanceFromBottom < 96;
-    }, []);
+    }, [activeReactionMessageId, dismissReactionPicker]);
 
     const keyExtractor = useCallback((item: RenderableChatMessage) => item.id, []);
 
@@ -560,6 +608,9 @@ export default function ChatThread({
                 onToggleReaction={onToggleReaction}
                 onPreviewImage={openPreviewImage}
                 onSwipeReply={onSwipeReply}
+                activeReactionMessageId={activeReactionMessageId}
+                onToggleReactionPicker={toggleReactionPicker}
+                onDismissReactionPicker={dismissReactionPicker}
                 nowMs={nowMs}
             />
         );
@@ -570,10 +621,13 @@ export default function ChatThread({
         onMessageLongPress,
         onSwipeReply,
         onToggleReaction,
+        activeReactionMessageId,
+        dismissReactionPicker,
         openPreviewImage,
         otherParticipantCount,
         seenNamesByMessageId,
         todayLabel,
+        toggleReactionPicker,
     ]);
 
     // Bottom padding for the composer: respect gesture-nav inset, but don't add
@@ -632,29 +686,35 @@ export default function ChatThread({
                                         <ActivityIndicator color={COLORS.accent} />
                                     </View>
                                 ) : (
-                                    <FlatList<RenderableChatMessage>
-                                        ref={listRef}
-                                        style={styles.messageList}
-                                        data={groupedMessages}
-                                        keyExtractor={keyExtractor}
-                                        contentContainerStyle={listContentContainerStyle}
-                                        keyboardShouldPersistTaps="always"
-                                        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-                                        onContentSizeChange={handleContentSizeChange}
-                                        onScroll={handleScroll}
-                                        scrollEventThrottle={16}
-                                        renderItem={renderItem}
-                                        ListHeaderComponent={
-                                            contextCard ? <View style={styles.contextCard}>{contextCard}</View> : undefined
-                                        }
-                                        ListEmptyComponent={
-                                            <View style={styles.emptyState}>
-                                                <AppIcon name="forum" size={38} color="#94a3b8" />
-                                                <Text style={styles.emptyTitle}>{emptyTitle}</Text>
-                                                <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
-                                            </View>
-                                        }
-                                    />
+                                    <Pressable
+                                        style={styles.messageListDismissLayer}
+                                        onPress={dismissReactionPicker}
+                                        disabled={!activeReactionMessageId}
+                                    >
+                                        <FlatList<RenderableChatMessage>
+                                            ref={listRef}
+                                            style={styles.messageList}
+                                            data={groupedMessages}
+                                            keyExtractor={keyExtractor}
+                                            contentContainerStyle={listContentContainerStyle}
+                                            keyboardShouldPersistTaps="always"
+                                            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                                            onContentSizeChange={handleContentSizeChange}
+                                            onScroll={handleScroll}
+                                            scrollEventThrottle={16}
+                                            renderItem={renderItem}
+                                            ListHeaderComponent={
+                                                contextCard ? <View style={styles.contextCard}>{contextCard}</View> : undefined
+                                            }
+                                            ListEmptyComponent={
+                                                <View style={styles.emptyState}>
+                                                    <AppIcon name="forum" size={38} color="#94a3b8" />
+                                                    <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+                                                    <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
+                                                </View>
+                                            }
+                                        />
+                                    </Pressable>
                                 )}
                             </View>
 
@@ -826,7 +886,10 @@ export default function ChatThread({
                                             <View style={styles.composerRow}>
                                                 {(onPickImage || onPickFile) ? (
                                                     <Pressable
-                                                        onPress={() => setAttachmentMenuOpen(true)}
+                                                        onPress={() => {
+                                                            dismissReactionPicker();
+                                                            setAttachmentMenuOpen(true);
+                                                        }}
                                                         style={styles.composerIconAction}
                                                         accessibilityRole="button"
                                                         accessibilityLabel="Attach file"
@@ -842,10 +905,14 @@ export default function ChatThread({
                                                         style={styles.composerInput}
                                                         placeholder="Type message..."
                                                         placeholderTextColor={COLORS.textSecondary}
+                                                        onFocus={dismissReactionPicker}
                                                         multiline
                                                     />
                                                     <Pressable
-                                                        onPress={() => setEmojiOpen(true)}
+                                                        onPress={() => {
+                                                            dismissReactionPicker();
+                                                            setEmojiOpen(true);
+                                                        }}
                                                         style={styles.composerEmojiAction}
                                                         accessibilityRole="button"
                                                         accessibilityLabel="Emoji picker"

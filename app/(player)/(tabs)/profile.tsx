@@ -55,19 +55,31 @@ const faceitLevelIcons: Record<number, any> = {
     10: require("../../../assets/images/faceit-levels/Level 10.png"),
 };
 
-// Generate list from GAME_RULES to ensure consistency
-const ALL_GAMES = Object.entries(GAME_RULES).map(([key, rule]) => ({
-    key,
-    name: rule.label,
-    // Icon mapping (could be moved to constants but fine here for now)
-    icon: (key === 'cs2' ? 'sports-esports' :
+const canonicalProfileGameKey = (key: string) => key === 'fc25' ? 'fc26' : key;
+
+const getGameIcon = (key: string): AppIconName => (
+    key === 'cs2' ? 'sports-esports' :
         key === 'cs16' ? 'sports-esports' :
-        key === 'valorant' ? 'sports-esports' :
-        key === 'fc26' ? 'sports-soccer' :
-            key === 'tekken8' ? 'sports-mma' :
-                key === 'indoor_cricket' ? 'sports-cricket' :
-                    ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer') as AppIconName
-}));
+            key === 'valorant' ? 'sports-esports' :
+                key === 'fc26' ? 'sports-soccer' :
+                    key === 'tekken8' ? 'sports-mma' :
+                        key === 'indoor_cricket' ? 'sports-cricket' :
+                            ['padel', 'pickleball'].includes(key) ? 'sports-tennis' : 'sports-soccer'
+) as AppIconName;
+
+// Generate list from GAME_RULES while collapsing legacy aliases such as fc25.
+const ALL_GAMES = Array.from(
+    Object.entries(GAME_RULES).reduce((games, [key, rule]) => {
+        const canonicalKey = canonicalProfileGameKey(key);
+        games.set(canonicalKey, {
+            key: canonicalKey,
+            name: rule.label,
+            icon: getGameIcon(canonicalKey),
+        });
+        return games;
+    }, new Map<string, { key: string; name: string; icon: AppIconName }>())
+    .values()
+);
 
 interface FullUserProfile {
     uid: string;
