@@ -33,6 +33,7 @@ import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import Logger from "../../../src/utils/logger";
 import { recordCountMetric } from "../../../src/utils/perfInstrumentation";
 import { getZoneStatusLabel } from "../../../src/utils/statusLabels";
+import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import DashboardAlertRow from "../components/dashboard/DashboardAlertRow";
 import DashboardAtGlancePanel from "../components/dashboard/DashboardAtGlancePanel";
 import DashboardQuickActionTile from "../components/dashboard/DashboardQuickActionTile";
@@ -329,14 +330,15 @@ export default function PlayerDashboard() {
   const teamCards = useMemo(
     () =>
       myTeams.map((team) => {
-        const currentMembers = team.memberUids?.length ?? team.memberCount ?? 0;
-        const maxMembers = Math.max(1, Number(team.maxMembers || 1));
+        const rosterDisplay = getTeamMainDisplayRoster(team);
+        const currentMembers = rosterDisplay.currentMembers;
+        const maxMembers = Math.max(1, rosterDisplay.maxMembers);
 
         return {
           team,
           currentMembers,
           maxMembers,
-          fillPercent: Math.min(100, Math.round((currentMembers / maxMembers) * 100)),
+          fillPercent: rosterDisplay.fillPercent,
           wins: Number(team.stats?.wins || 0),
           losses: Number(team.stats?.losses || 0),
           matchesPlayed: Number(team.stats?.matchesPlayed || 0),

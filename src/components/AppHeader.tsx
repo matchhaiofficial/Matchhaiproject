@@ -90,7 +90,7 @@ export default function AppHeader({
 
 const styles = StyleSheet.create({
     container: {
-        paddingTop: SPACING.xs,
+        paddingTop: SPACING.xs + 10,
         marginBottom: SPACING.lg,
     },
     topRow: {

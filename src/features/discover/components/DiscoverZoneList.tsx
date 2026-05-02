@@ -8,7 +8,12 @@ import { convex } from "../../../../src/lib/convex";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
 import { recordPayloadMetric } from "../../../../src/utils/perfInstrumentation";
-import { deriveZoneRate, formatSupportedGameLabels, Zone } from "../../../services/convex/zoneService";
+import {
+  deriveZoneRate,
+  formatBranchAddress,
+  formatSupportedGameLabels,
+  Zone,
+} from "../../../services/convex/zoneService";
 import type { ZoneFilters } from "../filterConfig";
 import {
   DiscoverEmptyState,
@@ -19,6 +24,11 @@ import {
 } from "./DiscoverShared";
 import styles from "../styles/zones.styles";
 
+function getPreferredZoneBranch(zone: Zone) {
+  const branches = Array.isArray(zone.branches) ? zone.branches : [];
+  return branches[0] || zone.primaryBranch || {};
+}
+
 const ZoneRow = React.memo(function ZoneRow({
   zone,
   selectedGameOrSport,
@@ -28,9 +38,16 @@ const ZoneRow = React.memo(function ZoneRow({
   selectedGameOrSport: string;
   onPressZone: (zoneId: string) => void;
 }) {
-  const address = [zone.primaryBranch?.areaLabel, zone.primaryBranch?.city]
-    .filter(Boolean)
-    .join(", ");
+  const branch = getPreferredZoneBranch(zone);
+  const address =
+    formatBranchAddress({
+      addressLine1: branch?.addressLine1 || branch?.address,
+      areaLabel: branch?.areaLabel,
+      city: branch?.city || (zone as any).city,
+    }) ||
+    [branch?.areaLabel, branch?.city || (zone as any).city]
+      .filter(Boolean)
+      .join(", ");
   const isSportsCourt = zone.type === "sports";
   const isHybrid = zone.type === "hybrid";
   const supportedGames = formatSupportedGameLabels(zone.games);

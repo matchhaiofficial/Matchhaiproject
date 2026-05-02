@@ -775,6 +775,10 @@ export default defineSchema({
     // Description
     description: v.optional(v.string()),
 
+    status: v.optional(v.union(v.literal("active"), v.literal("deleted"))),
+    deletedAt: v.optional(v.number()),
+    deletedByUid: v.optional(v.id("users")),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })

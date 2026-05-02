@@ -153,6 +153,8 @@ const styles = StyleSheet.create({
         right: 0,
         alignItems: "center",
         pointerEvents: "box-none",
+        paddingTop: 8,
+        backgroundColor: COLORS.backgroundDark,
     },
 
     glow: {

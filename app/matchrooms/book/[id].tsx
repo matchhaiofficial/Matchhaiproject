@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
@@ -243,12 +244,12 @@ export default function BookSlotsScreen() {
             style={styles.container}
             onTouchEndCapture={(e) => logScreenTouch("book_slots_screen", e)}
         >
-            <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.headerTitle}>Select Teammates</Text>
-            </View>
+            <AppHeader
+                title="Select Teammates"
+                onBack={() => router.back()}
+                inlineTitle
+                style={styles.appHeader}
+            />
 
             <View style={styles.body}>
             <ScrollView

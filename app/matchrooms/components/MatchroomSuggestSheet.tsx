@@ -55,7 +55,7 @@ export function MatchroomSuggestSheet({
       visible={visible}
       onClose={onClose}
       dismissDisabled={dismissDisabled}
-      sheetStyle={[styles.modalContent, { maxHeight: "85%" }]}
+      sheetStyle={styles.modalContent}
     >
       <AppModalHeader
         title="Suggest Alternative"

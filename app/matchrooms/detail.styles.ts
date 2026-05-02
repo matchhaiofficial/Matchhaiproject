@@ -387,8 +387,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
-        minHeight: '60%',
-        maxHeight: '90%',
     },
     modalHeader: {
         flexDirection: 'row',

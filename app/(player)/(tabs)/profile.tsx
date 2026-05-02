@@ -14,6 +14,7 @@ import {
     View
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated from "react-native-reanimated";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
@@ -33,7 +34,9 @@ import type { PsnVerificationResult } from "../../../src/services/convex/externa
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
+import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import { COLORS } from "../../../src/theme";
+import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import {
     PlayerEmptyStateCard,
@@ -123,7 +126,12 @@ interface FullUserProfile {
 export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
+    const bottomChromeClearance = getBottomChromeClearance({
+        bottomInset: insets.bottom,
+        tabBarHeight,
+    });
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -341,7 +349,7 @@ export default function Profile() {
             routeKey="/(player)/(tabs)/profile"
             contentStyle={[
                 styles.scrollContent,
-                { paddingBottom: 24 },
+                { paddingBottom: bottomChromeClearance + 24 },
             ]}
             edges={['top']}
             scrollProps={{
@@ -576,9 +584,7 @@ export default function Profile() {
                             </AppCard>
                         ) : myTeams.length > 0 ? (
                             myTeams.slice(0, 3).map(team => {
-                                const maxMembers = team.maxMembers || 0;
-                                const rawCount = team.memberUids?.length ?? team.memberCount ?? 0;
-                                const memberCount = maxMembers > 0 ? Math.min(rawCount, maxMembers) : rawCount;
+                                const { currentMembers, maxMembers } = getTeamMainDisplayRoster(team);
                                 return (
                                     <Pressable
                                         key={team.id}
@@ -592,7 +598,7 @@ export default function Profile() {
                                         <View style={styles.teamInfo}>
                                             <Text style={styles.teamName} numberOfLines={1}>{team.name}</Text>
                                             <Text style={styles.teamGame}>{(team.game || '').toUpperCase()}</Text>
-                                            <Text style={styles.teamMembers}>{memberCount} / {maxMembers} members</Text>
+                                            <Text style={styles.teamMembers}>{currentMembers} / {maxMembers} members</Text>
                                         </View>
                                         </AppCard>
                                     </Pressable>

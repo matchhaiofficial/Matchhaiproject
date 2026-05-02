@@ -15,7 +15,7 @@ export default StyleSheet.create({
     backgroundColor: COLORS.backgroundDark,
   },
   screenContent: {
-    paddingTop: 10,
+    paddingTop: 0,
     paddingBottom: 0,
   },
   container: {
@@ -25,7 +25,6 @@ export default StyleSheet.create({
     flex: 1,
   },
   headerBar: {
-    paddingTop: SPACING.xs,
     marginBottom: SPACING.sm,
   },
   verificationBanner: {

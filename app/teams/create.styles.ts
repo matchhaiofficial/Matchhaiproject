@@ -21,8 +21,15 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.xl,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        marginBottom: 0,
+    },
     scrollContent: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
     section: {
         marginBottom: SPACING.xxl,

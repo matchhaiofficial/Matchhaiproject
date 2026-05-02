@@ -30,6 +30,9 @@ export interface Team {
   maxMembers: number;
   mainRosterSize?: number;
   maxSubstitutes?: number;
+  status?: "active" | "deleted";
+  deletedAt?: number;
+  deletedByUid?: string;
   visibility?: "public" | "private";
   createdAt: any;
   updatedAt?: any;

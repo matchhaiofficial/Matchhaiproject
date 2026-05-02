@@ -15,6 +15,13 @@ function mapAuthError(error?: any): string {
     .filter(Boolean)
     .join(" | ");
 
+  if (
+    raw.includes("INVALID_EMAIL_OR_PASSWORD") ||
+    raw.toLowerCase().includes("invalid email or password") ||
+    raw.toLowerCase().includes("incorrect email or password")
+  ) {
+    return "Incorrect email or password.";
+  }
   if (raw.includes("phone number is already registered")) {
     return "This phone number is already registered.";
   }
@@ -79,6 +86,24 @@ function mapAuthError(error?: any): string {
   }
 
   return String(error?.message || statusText || "Something went wrong. Please try again.");
+}
+
+function isCombinedCredentialError(error?: any) {
+  const raw = [
+    String(error?.code || ""),
+    String(error?.message || ""),
+    String(error?.statusText || ""),
+    String(error?.error?.message || ""),
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+
+  return (
+    raw.includes("invalid_email_or_password") ||
+    raw.includes("invalid email or password") ||
+    raw.includes("incorrect email or password")
+  );
 }
 
 export type AuthResult =
@@ -401,6 +426,20 @@ export async function signInWithEmail(
       });
 
       if (error || !data?.user) {
+        if (isCombinedCredentialError(error)) {
+          const existingUser = await convex.query(api.users.getByEmail, {
+            email: trimmed,
+          });
+
+          if (existingUser) {
+            return {
+              ok: false,
+              message: "Incorrect password. Please try again.",
+              code: "auth/wrong-password",
+            };
+          }
+        }
+
         return { ok: false, message: mapAuthError(error), code: error?.code };
       }
 
@@ -452,6 +491,14 @@ export async function signInWithEmail(
     });
 
     if (error || !data?.user) {
+      if (isCombinedCredentialError(error)) {
+        return {
+          ok: false,
+          message: "Incorrect password. Please try again.",
+          code: "auth/wrong-password",
+        };
+      }
+
       return { ok: false, message: mapAuthError(error), code: error?.code };
     }
 

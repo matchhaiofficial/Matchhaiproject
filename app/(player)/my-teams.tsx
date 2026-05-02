@@ -18,6 +18,7 @@ import { getUserTeams, Team } from "../../src/services/convex/teamService";
 import { COLORS } from "../../src/theme";
 import { isPhysicalGameDisabled } from "../../constants/gameAvailability";
 import Logger from "../../src/utils/logger";
+import { getTeamMainDisplayRoster } from "../../src/utils/teamRosterDisplay";
 import styles from "./(tabs)/teams.styles"; // Reuse styles from tabs/teams
 
 const HIT_SLOP_8 = { top: 8, bottom: 8, left: 8, right: 8 } as const;
@@ -29,9 +30,7 @@ const TeamRow = React.memo(function TeamRow({
     team: Team;
     onOpenTeam: (teamId: string) => void;
 }) {
-    const maxMembers = team.maxMembers || 0;
-    const rawMemberCount = team.memberUids?.length ?? team.memberCount ?? 0;
-    const memberCount = maxMembers > 0 ? Math.min(rawMemberCount, maxMembers) : rawMemberCount;
+    const { currentMembers, maxMembers } = getTeamMainDisplayRoster(team);
 
     const handleOpen = useCallback(() => {
         if (!team.id) return;
@@ -49,7 +48,7 @@ const TeamRow = React.memo(function TeamRow({
                 <View style={styles.memberCountRow}>
                     <AppIcon name="people" size={12} color={COLORS.muted} />
                     <Text style={styles.memberCountText}>
-                        {memberCount} / {maxMembers}
+                        {currentMembers} / {maxMembers}
                     </Text>
                 </View>
             </View>
@@ -158,7 +157,7 @@ export default function MyTeams() {
 
     return (
         <Screen style={styles.screen} scroll={false}>
-            <AppHeader title="My Teams" onBack={() => router.back()} />
+            <AppHeader title="My Teams" onBack={() => router.back()} inlineTitle />
 
             {/* Search Bar */}
             <View style={styles.searchBar}>

@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import AppHeader from "../../src/components/AppHeader";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
 import { AppIcon } from "../../src/components/AppIcon";
 import { api } from "../../convex/_generated/api";
@@ -64,13 +65,14 @@ export default function CreateTeam() {
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [selectedGame, setSelectedGame] = useState<string | null>(null);
-    const [selectedSize, setSelectedSize] = useState<number | null>(null);
     const [substituteSlots, setSubstituteSlots] = useState(0);
     const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
+    const mainRosterSize = selectedGame ? getTeamMainRosterSize(selectedGame) : 0;
+    const maxSubstituteSlots = selectedGame ? getTeamMaxSubstitutes(selectedGame) : 0;
     useRouteLogger("CreateTeamScreen", {
         selectedGame,
-        selectedSize,
+        selectedSize: selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : null,
         invitedCount: selectedFriendIds.length,
     });
 
@@ -81,9 +83,11 @@ export default function CreateTeam() {
             : "skip"
     );
 
-    const mainRosterSize = selectedGame ? getTeamMainRosterSize(selectedGame) : 0;
-    const maxSubstituteSlots = selectedGame ? getTeamMaxSubstitutes(selectedGame) : 0;
-    const effectiveTeamSize = selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : selectedSize;
+    const effectiveTeamSize = selectedGame ? getTeamTotalRosterCapacity(selectedGame, substituteSlots) : null;
+    const substituteOptions = useMemo(
+        () => Array.from({ length: maxSubstituteSlots + 1 }, (_, index) => index),
+        [maxSubstituteSlots]
+    );
 
     const eligibleFriends = useMemo(
         () => (eligibleFriendsRaw ?? []).map((friend: any) => ({
@@ -104,9 +108,18 @@ export default function CreateTeam() {
     // Reset size when game changes
     const handleGameSelect = (gameKey: string) => {
         setSelectedGame(gameKey);
-        setSelectedSize(getTeamMainRosterSize(gameKey));
         setSubstituteSlots(0);
         setSelectedFriendIds([]);
+    };
+
+    const handleSubstituteSlotsSelect = (slotCount: number) => {
+        const safeSlotCount = Math.max(0, Math.min(maxSubstituteSlots, slotCount));
+        setSubstituteSlots(safeSlotCount);
+        const nextMaxInviteCount = Math.max(
+            0,
+            getTeamTotalRosterCapacity(selectedGame, safeSlotCount) - 1,
+        );
+        setSelectedFriendIds((prev) => prev.slice(0, nextMaxInviteCount));
     };
 
     const toggleFriendSelection = (friendId: string) => {
@@ -212,13 +225,12 @@ export default function CreateTeam() {
                 style={localStyles.keyboardShell}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
-                {/* Header */}
-                <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>Create Team</Text>
-                </View>
+                <AppHeader
+                    title="Create Team"
+                    onBack={() => router.back()}
+                    inlineTitle
+                    style={styles.appHeader}
+                />
 
                 <ScrollView
                     style={localStyles.flexOne}
@@ -279,37 +291,36 @@ export default function CreateTeam() {
                             </Text>
                             <View style={styles.infoBox}>
                                 <Text style={styles.infoBoxText}>
-                                    {mainRosterSize} main players required for {selectedGameLabel}.
+                                    {mainRosterSize} main player{mainRosterSize === 1 ? "" : "s"} required for {selectedGameLabel}.
                                 </Text>
                                 <Text style={styles.infoBoxSmall}>
                                     Optional substitutes: {substituteSlots}/{maxSubstituteSlots}. Total roster slots: {effectiveTeamSize}.
                                 </Text>
                             </View>
-                            {maxSubstituteSlots > 0 ? (
-                                <View style={styles.chipRow}>
-                                    {Array.from({ length: maxSubstituteSlots + 1 }, (_, count) => (
+                            <View style={styles.chipRow}>
+                                {substituteOptions.map((slotCount) => (
                                     <Pressable
-                                        key={count}
-                                        onPress={() => {
-                                            setSubstituteSlots(count);
-                                            setSelectedFriendIds((prev) => prev.slice(0, Math.max(0, mainRosterSize + count - 1)));
-                                        }}
+                                        key={`subs-${slotCount}`}
+                                        onPress={() => handleSubstituteSlotsSelect(slotCount)}
                                         style={({ pressed }) => [
                                             styles.optionChip,
-                                            substituteSlots === count && styles.optionChipActive,
+                                            substituteSlots === slotCount && styles.optionChipActive,
                                             pressed && localStyles.chipPressed,
                                         ]}
                                     >
-                                        <Text style={[
-                                            styles.optionChipText,
-                                            substituteSlots === count && styles.optionChipTextActive
-                                        ]}>
-                                            {count === 0 ? "No subs" : `${count} sub${count === 1 ? "" : "s"}`}
+                                        <Text
+                                            style={[
+                                                styles.optionChipText,
+                                                substituteSlots === slotCount && styles.optionChipTextActive,
+                                            ]}
+                                        >
+                                            {slotCount === 0
+                                                ? "No subs"
+                                                : `${slotCount} sub${slotCount === 1 ? "" : "s"}`}
                                         </Text>
                                     </Pressable>
-                                    ))}
-                                </View>
-                            ) : null}
+                                ))}
+                            </View>
                         </View>
                     )}
 

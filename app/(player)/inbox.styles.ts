@@ -30,6 +30,9 @@ export default StyleSheet.create({
     segmentTabs: {
         marginTop: SPACING.md,
     },
+    contentWrap: {
+        flex: 1,
+    },
 
     // Notification List
     listContent: {

@@ -29,6 +29,7 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { usePressScale } from "../../../src/motion/usePressScale";
 import { COLORS } from "../../../src/theme";
+import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
 import Logger from "../../../src/utils/logger";
 import styles from "./discover.styles";
 
@@ -120,17 +121,18 @@ export default function DiscoverScreen() {
   }>();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
+  const systemBottomInset = getSystemBottomInset(insets.bottom);
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
   const tabBarClearance = Math.max(
     tabBarHeight,
-    insets.bottom + CUSTOM_TAB_BAR_MIN_HEIGHT,
+    systemBottomInset + CUSTOM_TAB_BAR_MIN_HEIGHT,
   );
   const bottomPadding = HIDE_PLAYER_TAB_BAR
-    ? insets.bottom + 16
+    ? systemBottomInset + 16
     : tabBarClearance + 16;
   const fabBottom = HIDE_PLAYER_TAB_BAR
-    ? insets.bottom + 16
+    ? systemBottomInset + 16
     : tabBarClearance + 16;
 
   const [searchQuery, setSearchQuery] = useState("");

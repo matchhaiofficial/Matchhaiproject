@@ -269,7 +269,7 @@ export default function Inbox() {
         rightAction={headerRightAction}
       />
 
-      <Animated.View style={entranceStyle}>
+      <Animated.View style={[styles.contentWrap, entranceStyle]}>
         <SegmentedTabs
           items={[
             { key: "pending", label: "Pending", badge: pendingCount > 0 ? pendingCount : undefined },

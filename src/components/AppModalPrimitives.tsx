@@ -81,7 +81,16 @@ export function AppModalHeader({
   return (
     <View style={[styles.header, compact && styles.headerTight]}>
       <View style={styles.titleWrap}>
-        <Text style={styles.title}>{title}</Text>
+        <Text
+          style={styles.title}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          allowFontScaling={false}
+          adjustsFontSizeToFit
+          minimumFontScale={0.85}
+        >
+          {title}
+        </Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
       {rightAccessory}
@@ -128,15 +137,14 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
+  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
 
   return (
     <View
       style={[
         styles.footer,
         {
-          // Always leave room inside the rounded card so stacked actions do not
-          // get clipped when Android reports a zero bottom inset inside modals.
-          paddingBottom: Math.max(SPACING.md, insets.bottom),
+          paddingBottom: Math.max(SPACING.md, bottomInset),
         },
         style,
       ]}
@@ -156,8 +164,7 @@ export function AppDialog({
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const androidNavigationFallback = Platform.OS === "android" ? 48 : 0;
-  const bottomClearance = Math.max(insets.bottom, androidNavigationFallback);
+  const bottomClearance = Platform.OS === "ios" ? insets.bottom : 0;
   const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
@@ -173,7 +180,7 @@ export function AppDialog({
       transparent
       animationType={animationType}
       statusBarTranslucent={Platform.OS === "android"}
-      navigationBarTranslucent={Platform.OS === "android"}
+      navigationBarTranslucent={false}
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
       <Pressable
@@ -207,8 +214,14 @@ export function AppBottomSheet({
   contentStyle,
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
-  const maxSheetHeight = Math.floor(windowHeight * 0.75);
   const insets = useSafeAreaInsets();
+  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const maxSheetHeight = Math.floor(
+    Math.min(
+      windowHeight * 0.82,
+      windowHeight - insets.top - bottomInset - SPACING.xl,
+    ),
+  );
   const entrance = useEntrance({
     visible,
     axis: "y",
@@ -221,7 +234,7 @@ export function AppBottomSheet({
       transparent
       animationType={animationType}
       statusBarTranslucent={Platform.OS === "android"}
-      navigationBarTranslucent={Platform.OS === "android"}
+      navigationBarTranslucent={false}
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
       <View style={[StyleSheet.absoluteFillObject, styles.overlayBase, styles.sheetOverlay]}>
@@ -229,7 +242,7 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-        <View style={[styles.sheetWrap, { paddingBottom: 0 }]}>
+        <View style={styles.sheetWrap}>
           <Animated.View style={entrance.animatedStyle}>
             <View
               style={[
@@ -291,6 +304,8 @@ export function AppDrawer({
       visible={visible}
       transparent
       animationType={animationType}
+      statusBarTranslucent={Platform.OS === "android"}
+      navigationBarTranslucent={false}
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
       <View style={[styles.overlayBase, styles.drawerOverlay]}>

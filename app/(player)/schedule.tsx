@@ -193,7 +193,7 @@ export default function ScheduleScreen() {
       <SegmentedTabs
         items={[
           { key: "upcoming", label: `Upcoming (${categorizedRooms.upcoming.length})` },
-          { key: "actions", label: `Pending Actions (${actionItems.length})` },
+          { key: "actions", label: `Pending (${actionItems.length})` },
           { key: "history", label: `History (${categorizedRooms.previous.length + historyItems.length})` },
         ]}
         value={activeTab}

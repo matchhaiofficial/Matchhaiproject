@@ -138,7 +138,7 @@ export default function MyMatchrooms() {
 
     return (
         <Screen style={styles.screen} scroll={false}>
-            <AppHeader title="My Matchrooms" onBack={() => router.back()} />
+            <AppHeader title="My Matchrooms" onBack={() => router.back()} inlineTitle />
 
             {/* Tabs */}
             <View style={styles.tabContainer}>

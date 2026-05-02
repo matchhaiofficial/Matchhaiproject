@@ -1,7 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
 
-import { AppIcon } from "../../../../src/components/AppIcon";
 import { COLORS, FONTS } from "../../../../src/theme";
 import { MotionPressable } from "./MotionPressable";
 import styles from "../create.styles";
@@ -21,7 +20,6 @@ export default function BroadcastAreaSelector({
   selectedAreas,
   onToggleArea,
 }: BroadcastAreaSelectorProps) {
-  const preferredSet = new Set(preferredAreas);
   const selectedSet = new Set(selectedAreas);
   const hasAvailableAreas = availableAreas.length > 0;
   const hasPreferredAreas = preferredAreas.length > 0;
@@ -64,26 +62,19 @@ export default function BroadcastAreaSelector({
         <View style={styles.chipRow}>
           {availableAreas.map((area) => {
             const isSelected = selectedSet.has(area);
-            const isPreferred = preferredSet.has(area);
             return (
               <MotionPressable
                 key={area}
                 style={[
-                  styles.optionChip,
-                  isSelected && styles.optionChipActive,
+                  styles.broadcastAreaChip,
+                  isSelected && styles.broadcastAreaChipActive,
                 ]}
                 onPress={() => onToggleArea(area)}
               >
-                <AppIcon
-                  name={isSelected ? "check-circle" : isPreferred ? "favorite" : "place"}
-                  size={14}
-                  color={isSelected ? COLORS.accent : COLORS.muted}
-                  style={{ marginRight: 4 }}
-                />
                 <Text
                   style={[
-                    styles.optionChipText,
-                    isSelected && styles.optionChipTextActive,
+                    styles.broadcastAreaChipText,
+                    isSelected && styles.broadcastAreaChipTextActive,
                   ]}
                 >
                   {area}

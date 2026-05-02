@@ -183,6 +183,30 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontWeight: 'bold',
     },
+    broadcastAreaChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardBackground,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm - 1,
+        marginRight: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    broadcastAreaChipActive: {
+        backgroundColor: '#1e2a38',
+        borderColor: COLORS.accent,
+    },
+    broadcastAreaChipText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.label - 1,
+    },
+    broadcastAreaChipTextActive: {
+        color: COLORS.text,
+    },
     inlineChipContent: {
         flexDirection: 'row',
         alignItems: 'center',

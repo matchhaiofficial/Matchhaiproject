@@ -2,8 +2,8 @@ import { useQuery } from "convex/react";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
-    FlatList,
     Pressable,
+    ScrollView,
     Text,
     View
 } from "react-native";
@@ -82,7 +82,7 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
         }
     };
 
-    const renderFriendItem = ({ item }: { item: Friend }) => {
+    const renderFriendRow = (item: Friend) => {
         const isInvited = invitingIds.has(item.uid);
 
         return (
@@ -108,6 +108,8 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
         );
     };
 
+    const hasScrollableList = friends.length > 4;
+
     return (
         <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.content}>
             <AppModalHeader title="Invite Friends" subtitle={`to ${teamName}`} onClose={onClose} />
@@ -117,24 +119,35 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator color={COLORS.accent} />
                     </View>
-                ) : (
-                    <FlatList
-                        data={friends}
-                        renderItem={renderFriendItem}
-                        keyExtractor={(item) => item.uid}
+                ) : friends.length === 0 ? (
+                    <View style={styles.emptyContainer}>
+                        <AppIcon name="person-add" size={48} color={COLORS.muted} />
+                        <Text style={styles.emptyText}>No friends to invite.</Text>
+                        <Text style={styles.emptySubtext}>
+                            Only friends who play {game.toUpperCase()} appear here.
+                        </Text>
+                    </View>
+                ) : hasScrollableList ? (
+                    <ScrollView
                         style={styles.listScroller}
                         contentContainerStyle={styles.list}
                         keyboardShouldPersistTaps="handled"
-                        ListEmptyComponent={
-                            <View style={styles.emptyContainer}>
-                                <AppIcon name="person-add" size={48} color={COLORS.muted} />
-                                <Text style={styles.emptyText}>No friends to invite.</Text>
-                                <Text style={styles.emptySubtext}>
-                                    Only friends who play {game.toUpperCase()} appear here.
-                                </Text>
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {friends.map((friend) => (
+                            <View key={friend.uid}>
+                                {renderFriendRow(friend)}
                             </View>
-                        }
-                    />
+                        ))}
+                    </ScrollView>
+                ) : (
+                    <View style={styles.list}>
+                        {friends.map((friend) => (
+                            <View key={friend.uid}>
+                                {renderFriendRow(friend)}
+                            </View>
+                        ))}
+                    </View>
                 )}
             </AppModalBody>
 

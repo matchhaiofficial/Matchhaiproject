@@ -24,6 +24,33 @@ export default StyleSheet.create({
     scroll: {
         flex: 1,
     },
+    deletedBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: SPACING.md,
+        backgroundColor: `${COLORS.warning}14`,
+        borderWidth: 1,
+        borderColor: `${COLORS.warning}55`,
+        borderRadius: RADII.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    deletedBannerTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deletedBannerTitle: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+        marginBottom: 2,
+    },
+    deletedBannerText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -169,6 +196,10 @@ export default StyleSheet.create({
         maxWidth: 290,
         lineHeight: 21,
         marginBottom: SPACING.lg,
+    },
+    deletedPill: {
+        marginTop: SPACING.sm,
+        marginBottom: SPACING.sm,
     },
     occupancyRow: {
         flexDirection: 'row',
@@ -631,10 +662,6 @@ export default StyleSheet.create({
         paddingBottom: SPACING.md,
         gap: SPACING.sm,
     },
-    confirmationDialogCard: {
-        width: "88%",
-        backgroundColor: COLORS.surfaceHighlight,
-    },
     confirmationDialogContent: {
         paddingTop: SPACING.lg,
         paddingBottom: SPACING.md,
@@ -648,6 +675,14 @@ export default StyleSheet.create({
     confirmationActions: {
         flexDirection: "row",
         gap: SPACING.sm,
+    },
+    confirmationActionButton: {
+        flex: 1,
+        minHeight: 44,
+    },
+    confirmationCancelButton: {
+        backgroundColor: COLORS.overlayLight,
+        borderColor: COLORS.overlayLight,
     },
     dialogFooter: {
         paddingHorizontal: SPACING.xl,

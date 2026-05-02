@@ -10,10 +10,15 @@ export default StyleSheet.create({
 
     scrollContent: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
 
     header: {
-        marginBottom: SPACING.xxl,
+        marginBottom: SPACING.xl,
+    },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        marginBottom: 0,
     },
 
     title: {

@@ -130,6 +130,7 @@ export default function Login() {
   const [passwordTouched, setPasswordTouched] = useState(false);
 
   const [emailServerError, setEmailServerError] = useState("");
+  const [passwordServerError, setPasswordServerError] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -325,6 +326,8 @@ export default function Login() {
   const isLockedOut = lockoutSecondsLeft > 0;
   const emailErrorToShow =
     emailServerError || (emailTouched && !emailFocused ? emailFormatError : "");
+  const passwordErrorToShow =
+    passwordServerError || (passwordTouched && !passFocused ? passwordError : "");
 
   // Keyboard handling
   const Container = KeyboardAvoidingView;
@@ -385,6 +388,7 @@ export default function Login() {
 
     try {
       setEmailServerError("");
+      setPasswordServerError("");
       setModeHelper(null);
       setRecoveryHelper(null);
       Logger.info("Login", "Calling signInWithEmail", {
@@ -419,20 +423,24 @@ export default function Login() {
         const phoneRegex = /^(\+92|92|0)?3[0-9]{9}$/;
 
         if (res.code === "auth/user-not-found") {
+          setPasswordServerError("");
           if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
             setEmailServerError("No account found for this phone number.");
           } else {
             setEmailServerError("This email is not registered.");
           }
         } else if (res.code === "auth/invalid-email") {
+          setPasswordServerError("");
           if (phoneRegex.test(normalizedPhone) && !trimmed.includes("@")) {
             setEmailServerError("Enter a valid Pakistani mobile number.");
           } else {
             setEmailServerError("Enter a valid email address.");
           }
         } else if (res.code === "auth/wrong-password") {
-          setEmailServerError("Incorrect password. Please try again.");
+          setEmailServerError("");
+          setPasswordServerError("Incorrect password. Please try again.");
         } else {
+          setPasswordServerError("");
           setEmailServerError(res.message || "Sign in failed.");
         }
 
@@ -774,6 +782,7 @@ export default function Login() {
                   setEmailOrPhone(next);
                   hideToast();
                   if (emailServerError) setEmailServerError("");
+                  if (passwordServerError) setPasswordServerError("");
                 }}
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => {
@@ -847,6 +856,7 @@ export default function Login() {
                 onChangeText={(text) => {
                   setPassword(text);
                   hideToast();
+                  if (passwordServerError) setPasswordServerError("");
                   if (!passwordTouched) setPasswordTouched(true);
                 }}
                 onFocus={() => setPassFocused(true)}
@@ -876,8 +886,8 @@ export default function Login() {
             </View>
           </View>
 
-          {passwordTouched && passwordError ? (
-            <Text style={styles.errorText}>{passwordError}</Text>
+          {passwordErrorToShow ? (
+            <Text style={styles.errorText}>{passwordErrorToShow}</Text>
           ) : null}
 
 

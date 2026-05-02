@@ -1,6 +1,6 @@
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
 
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
@@ -260,7 +260,13 @@ export default function RegisterStep4() {
     ];
 
     return (
-      <Modal transparent animationType="fade" visible statusBarTranslucent>
+      <Modal
+        transparent
+        animationType="fade"
+        visible
+        statusBarTranslucent={Platform.OS === "android"}
+        navigationBarTranslucent={false}
+      >
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContent}>
             {phase !== "partial-fail" && phase !== "success" ? (

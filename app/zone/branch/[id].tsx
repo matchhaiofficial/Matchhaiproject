@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { AppIcon } from "../../../src/components/AppIcon";
+import AppHeader from "../../../src/components/AppHeader";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
@@ -113,14 +113,12 @@ export default function BranchDetails() {
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
             >
-                <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>
-                        {id === "primary" ? "Edit Primary Branch" : "Edit Branch"}
-                    </Text>
-                </View>
+                <AppHeader
+                    title={id === "primary" ? "Edit Primary Branch" : "Edit Branch"}
+                    onBack={() => router.back()}
+                    inlineTitle
+                    style={styles.appHeader}
+                />
 
                 <ScrollView contentContainerStyle={styles.content}>
                     {/* Branch Info Section */}

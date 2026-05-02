@@ -1,17 +1,15 @@
 import React, { useMemo, useState } from "react";
 import {
-    Dimensions,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
+    useWindowDimensions,
     View,
 } from "react-native";
-
-const SCREEN_H = Dimensions.get("window").height;
-
 import styles from "../create.styles";
 
 interface BasicFieldsProps {
@@ -23,6 +21,7 @@ interface BasicFieldsProps {
 }
 
 export default function BasicFields({ formData, onChange, selectedGame, minimumDate, dateHelperText }: BasicFieldsProps) {
+    const { height: windowHeight } = useWindowDimensions();
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [dateDraft, setDateDraft] = useState<Date | null>(null);
@@ -92,12 +91,24 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
         () => new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).getDay(),
         [monthCursor]
     );
+    const calendarRows = useMemo(
+        () => Math.ceil((firstWeekday + daysInMonth) / 7),
+        [daysInMonth, firstWeekday]
+    );
 
     const isBeforeMin = (date: Date) => date.getTime() < minDate.getTime();
     const isSameDay = (a: Date, b: Date) =>
         a.getFullYear() === b.getFullYear() &&
         a.getMonth() === b.getMonth() &&
         a.getDate() === b.getDate();
+    const pickerSheetMaxHeight = Math.floor(
+        Math.min(windowHeight * 0.9, windowHeight - 24)
+    );
+    const timePickerSheetHeight = Math.min(
+        pickerSheetMaxHeight,
+        Math.max(340, 164 + calendarRows * 40)
+    );
+    const timeColumnMaxHeight = Math.max(144, timePickerSheetHeight - 116);
 
     return (
         <>
@@ -183,107 +194,111 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 visible={showDatePicker}
                 transparent
                 animationType="slide"
+                statusBarTranslucent={Platform.OS === "android"}
+                navigationBarTranslucent={false}
                 onRequestClose={() => setShowDatePicker(false)}
             >
-                <Pressable
-                    style={pickerSharedStyles.backdrop}
-                    onPress={() => setShowDatePicker(false)}
-                />
-                <View style={[styles.pickerSheet, pickerSharedStyles.sheet]}>
-                    <View style={pickerSharedStyles.handle} />
-                    <View style={styles.pickerHeader}>
-                        <Pressable onPress={() => setShowDatePicker(false)}>
-                            <Text style={styles.pickerAction}>Cancel</Text>
-                        </Pressable>
-                        <Text style={styles.pickerTitle}>Select Date</Text>
-                        <Pressable
-                            onPress={() => {
-                                if (dateDraft) {
-                                    const day = String(dateDraft.getDate()).padStart(2, "0");
-                                    const month = String(dateDraft.getMonth() + 1).padStart(2, "0");
-                                    const year = dateDraft.getFullYear();
-                                    onChange("date", `${year}-${month}-${day}`);
-                                }
-                                setShowDatePicker(false);
-                            }}
-                        >
-                            <Text style={styles.pickerAction}>Done</Text>
-                        </Pressable>
-                    </View>
-                    <ScrollView
-                        bounces={false}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ flexGrow: 1 }}
-                    >
-                        <View style={styles.calendarContainer}>
-                            <View style={styles.calendarHeader}>
-                                <Pressable
-                                    style={styles.calendarNavButton}
-                                    onPress={() => {
-                                        const prev = new Date(monthCursor);
-                                        prev.setMonth(prev.getMonth() - 1);
-                                        const minMonth = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-                                        if (prev.getTime() >= minMonth.getTime()) {
-                                            setMonthCursor(prev);
-                                        }
-                                    }}
-                                >
-                                    <Text style={styles.calendarNavText}>{"<"}</Text>
-                                </Pressable>
-                                <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
-                                <Pressable
-                                    style={styles.calendarNavButton}
-                                    onPress={() => {
-                                        const next = new Date(monthCursor);
-                                        next.setMonth(next.getMonth() + 1);
-                                        setMonthCursor(next);
-                                    }}
-                                >
-                                    <Text style={styles.calendarNavText}>{">"}</Text>
-                                </Pressable>
-                            </View>
-                            <View style={styles.weekdayRow}>
-                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                                    <Text key={label} style={styles.weekdayLabel}>{label}</Text>
-                                ))}
-                            </View>
-                            <View style={styles.calendarGrid}>
-                                {Array.from({ length: firstWeekday }).map((_, idx) => (
-                                    <View key={`empty-${idx}`} style={styles.dayCell} />
-                                ))}
-                                {Array.from({ length: daysInMonth }).map((_, idx) => {
-                                    const dayNumber = idx + 1;
-                                    const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
-                                    const disabled = isBeforeMin(date);
-                                    const selected = dateDraft ? isSameDay(dateDraft, date) : false;
-                                    return (
-                                        <Pressable
-                                            key={`day-${dayNumber}`}
-                                            style={[
-                                                styles.dayCell,
-                                                selected && styles.dayCellSelected,
-                                                disabled && styles.dayCellDisabled,
-                                            ]}
-                                            onPress={() => {
-                                                if (disabled) return;
-                                                setDateDraft(date);
-                                            }}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.dayText,
-                                                    selected && styles.dayTextSelected,
-                                                    disabled && styles.dayTextDisabled,
-                                                ]}
-                                            >
-                                                {dayNumber}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
+                <View style={pickerSharedStyles.overlay}>
+                    <Pressable
+                        style={pickerSharedStyles.backdrop}
+                        onPress={() => setShowDatePicker(false)}
+                    />
+                    <View style={[styles.pickerSheet, pickerSharedStyles.sheet, { maxHeight: pickerSheetMaxHeight }]}>
+                        <View style={pickerSharedStyles.handle} />
+                        <View style={styles.pickerHeader}>
+                            <Pressable onPress={() => setShowDatePicker(false)}>
+                                <Text style={styles.pickerAction}>Cancel</Text>
+                            </Pressable>
+                            <Text style={styles.pickerTitle}>Select Date</Text>
+                            <Pressable
+                                onPress={() => {
+                                    if (dateDraft) {
+                                        const day = String(dateDraft.getDate()).padStart(2, "0");
+                                        const month = String(dateDraft.getMonth() + 1).padStart(2, "0");
+                                        const year = dateDraft.getFullYear();
+                                        onChange("date", `${year}-${month}-${day}`);
+                                    }
+                                    setShowDatePicker(false);
+                                }}
+                            >
+                                <Text style={styles.pickerAction}>Done</Text>
+                            </Pressable>
                         </View>
-                    </ScrollView>
+                        <ScrollView
+                            bounces={false}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ flexGrow: 1 }}
+                        >
+                            <View style={styles.calendarContainer}>
+                                <View style={styles.calendarHeader}>
+                                    <Pressable
+                                        style={styles.calendarNavButton}
+                                        onPress={() => {
+                                            const prev = new Date(monthCursor);
+                                            prev.setMonth(prev.getMonth() - 1);
+                                            const minMonth = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+                                            if (prev.getTime() >= minMonth.getTime()) {
+                                                setMonthCursor(prev);
+                                            }
+                                        }}
+                                    >
+                                        <Text style={styles.calendarNavText}>{"<"}</Text>
+                                    </Pressable>
+                                    <Text style={styles.calendarTitle}>{monthYearLabel}</Text>
+                                    <Pressable
+                                        style={styles.calendarNavButton}
+                                        onPress={() => {
+                                            const next = new Date(monthCursor);
+                                            next.setMonth(next.getMonth() + 1);
+                                            setMonthCursor(next);
+                                        }}
+                                    >
+                                        <Text style={styles.calendarNavText}>{">"}</Text>
+                                    </Pressable>
+                                </View>
+                                <View style={styles.weekdayRow}>
+                                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                                        <Text key={label} style={styles.weekdayLabel}>{label}</Text>
+                                    ))}
+                                </View>
+                                <View style={styles.calendarGrid}>
+                                    {Array.from({ length: firstWeekday }).map((_, idx) => (
+                                        <View key={`empty-${idx}`} style={styles.dayCell} />
+                                    ))}
+                                    {Array.from({ length: daysInMonth }).map((_, idx) => {
+                                        const dayNumber = idx + 1;
+                                        const date = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), dayNumber);
+                                        const disabled = isBeforeMin(date);
+                                        const selected = dateDraft ? isSameDay(dateDraft, date) : false;
+                                        return (
+                                            <Pressable
+                                                key={`day-${dayNumber}`}
+                                                style={[
+                                                    styles.dayCell,
+                                                    selected && styles.dayCellSelected,
+                                                    disabled && styles.dayCellDisabled,
+                                                ]}
+                                                onPress={() => {
+                                                    if (disabled) return;
+                                                    setDateDraft(date);
+                                                }}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.dayText,
+                                                        selected && styles.dayTextSelected,
+                                                        disabled && styles.dayTextDisabled,
+                                                    ]}
+                                                >
+                                                    {dayNumber}
+                                                </Text>
+                                            </Pressable>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        </ScrollView>
+                    </View>
                 </View>
             </Modal>
 
@@ -292,103 +307,113 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 visible={showTimePicker}
                 transparent
                 animationType="slide"
+                statusBarTranslucent={Platform.OS === "android"}
+                navigationBarTranslucent={false}
                 onRequestClose={() => setShowTimePicker(false)}
             >
-                <Pressable
-                    style={pickerSharedStyles.backdrop}
-                    onPress={() => setShowTimePicker(false)}
-                />
-                <View style={[styles.pickerSheet, pickerSharedStyles.sheet]}>
-                    <View style={pickerSharedStyles.handle} />
-                    <View style={styles.pickerHeader}>
-                        <Pressable onPress={() => setShowTimePicker(false)}>
-                            <Text style={styles.pickerAction}>Cancel</Text>
-                        </Pressable>
-                        <Text style={styles.pickerTitle}>Select Time</Text>
-                        <Pressable
-                            onPress={() => {
-                                onChange("time", draftToTimeString(timeDraft));
-                                setShowTimePicker(false);
-                            }}
-                        >
-                            <Text style={styles.pickerAction}>Done</Text>
-                        </Pressable>
-                    </View>
+                <View style={pickerSharedStyles.overlay}>
+                    <Pressable
+                        style={pickerSharedStyles.backdrop}
+                        onPress={() => setShowTimePicker(false)}
+                    />
+                    <View
+                        style={[
+                            styles.pickerSheet,
+                            pickerSharedStyles.sheet,
+                            { height: timePickerSheetHeight, maxHeight: pickerSheetMaxHeight },
+                        ]}
+                    >
+                        <View style={pickerSharedStyles.handle} />
+                        <View style={styles.pickerHeader}>
+                            <Pressable onPress={() => setShowTimePicker(false)}>
+                                <Text style={styles.pickerAction}>Cancel</Text>
+                            </Pressable>
+                            <Text style={styles.pickerTitle}>Select Time</Text>
+                            <Pressable
+                                onPress={() => {
+                                    onChange("time", draftToTimeString(timeDraft));
+                                    setShowTimePicker(false);
+                                }}
+                            >
+                                <Text style={styles.pickerAction}>Done</Text>
+                            </Pressable>
+                        </View>
 
-                    {/*
-                     * Each column gets its own ScrollView so long lists (hours = 12 rows)
-                     * never overflow the sheet. The sheet is capped at 90% screen height
-                     * just like the date picker, so both feel identical.
-                     */}
-                    <View style={styles.timePickerRow}>
-                        {/* Hours */}
-                        <ScrollView
-                            style={pickerSharedStyles.timeColumnScroll}
-                            showsVerticalScrollIndicator={false}
-                            bounces={false}
-                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
-                        >
-                            {hours12.map((h) => {
-                                const selected = timeDraft.hour === h;
-                                return (
-                                    <Pressable
-                                        key={`h-${h}`}
-                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                        onPress={() => setTimeDraft((prev) => ({ ...prev, hour: h }))}
-                                    >
-                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                            {String(h).padStart(2, "0")}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
+                        {/*
+                         * Each column gets its own ScrollView so long lists (hours = 12 rows)
+                         * never overflow the sheet. The sheet is capped by the visible window
+                         * after reserving the device navigation bar.
+                         */}
+                        <View style={[styles.timePickerRow, pickerSharedStyles.timePickerRow]}>
+                            {/* Hours */}
+                            <ScrollView
+                                style={[pickerSharedStyles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                showsVerticalScrollIndicator={false}
+                                bounces={false}
+                                contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                            >
+                                {hours12.map((h) => {
+                                    const selected = timeDraft.hour === h;
+                                    return (
+                                        <Pressable
+                                            key={`h-${h}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, hour: h }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {String(h).padStart(2, "0")}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
 
-                        {/* Minutes */}
-                        <ScrollView
-                            style={pickerSharedStyles.timeColumnScroll}
-                            showsVerticalScrollIndicator={false}
-                            bounces={false}
-                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
-                        >
-                            {minutes.map((m) => {
-                                const selected = timeDraft.minute === m;
-                                return (
-                                    <Pressable
-                                        key={`m-${m}`}
-                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                        onPress={() => setTimeDraft((prev) => ({ ...prev, minute: m }))}
-                                    >
-                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                            {String(m).padStart(2, "0")}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
+                            {/* Minutes */}
+                            <ScrollView
+                                style={[pickerSharedStyles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                showsVerticalScrollIndicator={false}
+                                bounces={false}
+                                contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                            >
+                                {minutes.map((m) => {
+                                    const selected = timeDraft.minute === m;
+                                    return (
+                                        <Pressable
+                                            key={`m-${m}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, minute: m }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {String(m).padStart(2, "0")}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
 
-                        {/* AM / PM */}
-                        <ScrollView
-                            style={pickerSharedStyles.timeColumnScroll}
-                            showsVerticalScrollIndicator={false}
-                            bounces={false}
-                            contentContainerStyle={pickerSharedStyles.timeColumnContent}
-                        >
-                            {periods.map((p) => {
-                                const selected = timeDraft.period === p;
-                                return (
-                                    <Pressable
-                                        key={`p-${p}`}
-                                        style={[styles.timeOption, selected && styles.timeOptionActive]}
-                                        onPress={() => setTimeDraft((prev) => ({ ...prev, period: p }))}
-                                    >
-                                        <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                                            {p}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
+                            {/* AM / PM */}
+                            <ScrollView
+                                style={[pickerSharedStyles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                showsVerticalScrollIndicator={false}
+                                bounces={false}
+                                contentContainerStyle={pickerSharedStyles.timeColumnContent}
+                            >
+                                {periods.map((p) => {
+                                    const selected = timeDraft.period === p;
+                                    return (
+                                        <Pressable
+                                            key={`p-${p}`}
+                                            style={[styles.timeOption, selected && styles.timeOptionActive]}
+                                            onPress={() => setTimeDraft((prev) => ({ ...prev, period: p }))}
+                                        >
+                                            <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                                                {p}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -419,12 +444,15 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
  * Both modals are visually identical: backdrop + bottom sheet capped at 90%.
  */
 const pickerSharedStyles = StyleSheet.create({
-    backdrop: {
+    overlay: {
         flex: 1,
+        justifyContent: "flex-end",
         backgroundColor: "rgba(0,0,0,0.5)",
     },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+    },
     sheet: {
-        maxHeight: "90%",
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,
         paddingBottom: 24,
@@ -445,7 +473,10 @@ const pickerSharedStyles = StyleSheet.create({
      */
     timeColumnScroll: {
         flex: 1,
-        maxHeight: SCREEN_H * 0.9 - 315,
+    },
+    timePickerRow: {
+        flex: 1,
+        minHeight: 0,
     },
     timeColumnContent: {
         gap: 8,

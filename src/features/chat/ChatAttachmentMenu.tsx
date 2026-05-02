@@ -1,5 +1,5 @@
 import React from "react";
-import { Modal, Pressable, Text, View, StyleSheet } from "react-native";
+import { Modal, Platform, Pressable, Text, View, StyleSheet } from "react-native";
 
 import { AppIcon } from "../../components/AppIcon";
 import { COLORS, FONTS, RADII, SHADOWS, SPACING } from "../../theme";
@@ -22,6 +22,8 @@ export default function ChatAttachmentMenu({
             visible={visible}
             transparent
             animationType="fade"
+            statusBarTranslucent={Platform.OS === "android"}
+            navigationBarTranslucent={false}
             onRequestClose={onClose}
         >
             <Pressable style={menuStyles.backdrop} onPress={onClose}>

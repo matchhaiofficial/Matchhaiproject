@@ -135,7 +135,6 @@ export default function ReportIssueModal({
 const styles = StyleSheet.create({
   content: {
     maxHeight: "90%",
-    minHeight: "52%",
   },
   body: {
     maxHeight: 480,
