@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
+import React, { useCallback, useContext, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -31,6 +32,7 @@ import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useEntrance } from "../../src/motion/useEntrance";
 import { usePressScale } from "../../src/motion/usePressScale";
 import { COLORS, SPACING } from "../../src/theme";
+import { getBottomChromeClearance } from "../../src/utils/bottomChrome";
 import Logger from "../../src/utils/logger";
 import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import {
@@ -111,10 +113,16 @@ export default function MatchroomDetails() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
   const { width } = useWindowDimensions();
   const [showJoinTeamSheet, setShowJoinTeamSheet] = useState(false);
   const footerHitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
-  const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
+  const bottomChromeClearance = getBottomChromeClearance({
+    bottomInset: insets.bottom,
+    tabBarHeight,
+  });
+  const ctaBottomGuard = Math.max(bottomChromeClearance + 24, 96);
+  const floatingActionBottom = bottomChromeClearance + 16;
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
   const matchroomId = String(id || "");
@@ -468,6 +476,7 @@ export default function MatchroomDetails() {
             isZoneAdmin ? styles.adminContent : null,
           ]}
           showsVerticalScrollIndicator={false}
+          scrollIndicatorInsets={{ bottom: bottomChromeClearance }}
           keyboardShouldPersistTaps="always"
           collapsable={false}
           onLayout={(event) => logDebugLayout("lobby_scroll_view", event)}
@@ -898,7 +907,7 @@ export default function MatchroomDetails() {
             pointerEvents="box-none"
             style={[
               styles.floatingActionBar,
-              { bottom: Math.max(insets.bottom + 16, 16) },
+              { bottom: floatingActionBottom },
             ]}
           >
             <Pressable

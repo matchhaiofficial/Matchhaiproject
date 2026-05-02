@@ -14,6 +14,7 @@ import {
     View
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated from "react-native-reanimated";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
@@ -34,6 +35,7 @@ import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
 import { COLORS } from "../../../src/theme";
+import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import {
     PlayerEmptyStateCard,
@@ -123,7 +125,12 @@ interface FullUserProfile {
 export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
+    const bottomChromeClearance = getBottomChromeClearance({
+        bottomInset: insets.bottom,
+        tabBarHeight,
+    });
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -341,7 +348,7 @@ export default function Profile() {
             routeKey="/(player)/(tabs)/profile"
             contentStyle={[
                 styles.scrollContent,
-                { paddingBottom: 24 },
+                { paddingBottom: bottomChromeClearance + 24 },
             ]}
             edges={['top']}
             scrollProps={{

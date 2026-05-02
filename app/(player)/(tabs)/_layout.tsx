@@ -13,6 +13,7 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS, FONTS } from "../../../src/theme";
+import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
 import {
     getDefaultSignedInRoute,
     isSuperAdminProfile,
@@ -70,7 +71,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         return true;
     });
 
-    const bottomPad = Math.max(insets.bottom, 8);
+    const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
 
     return (
         <View
@@ -193,6 +194,8 @@ const styles = StyleSheet.create({
         right: 0,
         alignItems: "center",
         pointerEvents: "box-none",
+        paddingTop: 8,
+        backgroundColor: COLORS.backgroundDark,
     },
 
     glow: {
@@ -201,13 +204,11 @@ const styles = StyleSheet.create({
         left: H_PADDING + 20,
         right: H_PADDING + 20,
         height: TAB_BAR_H + 24,
-        backgroundColor: COLORS.accent,
-        opacity: 0.06,
+        backgroundColor: "transparent",
+        opacity: 0,
         borderRadius: PILL_R + 8,
-        shadowColor: COLORS.accent,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.5,
-        shadowRadius: 20,
+        shadowOpacity: 0,
+        shadowRadius: 0,
     },
 
     pill: {
