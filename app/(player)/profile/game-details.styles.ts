@@ -29,6 +29,13 @@ export default StyleSheet.create({
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.divider,
+        marginBottom: 0,
+        backgroundColor: COLORS.backgroundDark,
+    },
     saveButton: {
         minHeight: 38,
         paddingHorizontal: SPACING.lg,
@@ -56,7 +63,7 @@ export default StyleSheet.create({
 
     scrollContent: {
         padding: SPACING.screenPadding,
-        paddingBottom: 100,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
 
     sectionTitle: {

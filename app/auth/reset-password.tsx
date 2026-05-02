@@ -40,6 +40,7 @@ export default function ResetPassword() {
         hasLower,
         hasNumber,
         hasSpecial,
+        hasMinLength,
         isPasswordValid,
         strengthLabel,
         strengthColor,
@@ -82,6 +83,7 @@ export default function ResetPassword() {
             hasLower: hasLowerRule,
             hasNumber: hasNumberRule,
             hasSpecial: hasSpecialRule,
+            hasMinLength: lengthOkRule,
             isPasswordValid: hasUpperRule && hasLowerRule && hasNumberRule && hasSpecialRule && lengthOkRule,
             strengthLabel: nextStrengthLabel,
             strengthColor: nextStrengthColor,
@@ -98,7 +100,9 @@ export default function ResetPassword() {
         return String(rawError || "").trim();
     }, [params.error]);
     const isFormValid = isPasswordValid && password === confirm;
-    const showRequirements = password.length > 0 && !(hasUpper && hasLower && hasNumber && hasSpecial);
+    const showRequirements =
+        password.length > 0 &&
+        !(hasUpper && hasLower && hasNumber && hasSpecial && hasMinLength);
 
     const handleReset = async () => {
         if (!resetToken) {
@@ -175,7 +179,7 @@ export default function ResetPassword() {
                                 color={isPasswordValid && password.length > 0 ? COLORS.accent : COLORS.muted}
                             />
                             <TextInput
-                                placeholder="Upper, lower, number, and symbol"
+                                placeholder="Password"
                                 placeholderTextColor={COLORS.muted}
                                 style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
                                 selectionColor={COLORS.accent}
@@ -239,6 +243,9 @@ export default function ResetPassword() {
                                 </Text>
                                 <Text style={[registerStyles.passwordRequirementText, hasSpecial && registerStyles.passwordRequirementTextDone]}>
                                     {hasSpecial ? "OK" : "X"} 1 special character
+                                </Text>
+                                <Text style={[registerStyles.passwordRequirementText, hasMinLength && registerStyles.passwordRequirementTextDone]}>
+                                    {hasMinLength ? "OK" : "X"} 8+ characters
                                 </Text>
                             </View>
                         </View>

@@ -30,6 +30,13 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.subheading,
         fontFamily: FONTS.heading,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.overlayLight,
+        marginBottom: 0,
+        backgroundColor: COLORS.backgroundDark,
+    },
     body: {
         flex: 1,
     },
@@ -38,6 +45,7 @@ export default StyleSheet.create({
     },
     content: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
     section: {
         marginBottom: SPACING.xl,

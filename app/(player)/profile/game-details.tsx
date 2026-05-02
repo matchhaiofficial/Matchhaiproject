@@ -15,6 +15,7 @@ import {
     FC_LEAGUES,
     TEKKEN_CHARACTERS
 } from "../../../constants/profileOptions";
+import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
@@ -513,29 +514,31 @@ export default function GameDetails() {
 
     return (
         <SafeAreaView style={styles.screen}>
-            <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.headerTitle}>{gameName}</Text>
-                <Pressable
-                    style={({ pressed }) => [
-                        styles.saveButton,
-                        saving && styles.saveButtonDisabled,
-                        pressed && !saving && styles.saveButtonPressed,
-                    ]}
-                    onPressIn={() => {
-                        if (touchDebugEnabled) {
-                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_game_save" });
-                        }
-                    }}
-                    onPress={handleSavePress}
-                    disabled={saving}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                </Pressable>
-            </View>
+            <AppHeader
+                title={gameName}
+                onBack={() => router.back()}
+                inlineTitle
+                style={styles.appHeader}
+                rightAction={
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.saveButton,
+                            saving && styles.saveButtonDisabled,
+                            pressed && !saving && styles.saveButtonPressed,
+                        ]}
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_game_save" });
+                            }
+                        }}
+                        onPress={handleSavePress}
+                        disabled={saving}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
+                    </Pressable>
+                }
+            />
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 {/* Active Toggle */}

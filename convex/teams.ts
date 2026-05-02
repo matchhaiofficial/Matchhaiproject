@@ -61,6 +61,18 @@ function getTeamRosterCapacity(team: any) {
   return getTeamMainRosterSize(team) + getTeamSubstituteSlots(team);
 }
 
+function isTeamDeleted(team: any) {
+  return Boolean(team?.deletedAt || team?.status === "deleted");
+}
+
+function isActiveTeam(team: any) {
+  return Boolean(team) && !isTeamDeleted(team);
+}
+
+function assertActiveTeam<T>(team: T | null | undefined, message = "Team not found"): asserts team is NonNullable<T> {
+  if (!isActiveTeam(team)) throw new Error(message);
+}
+
 async function getNextRosterRole(ctx: any, team: any) {
   const mainSize = getTeamMainRosterSize(team);
   const members = await ctx.db
@@ -138,7 +150,8 @@ async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string) {
 export const getById = query({
   args: { teamId: v.id("teams") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.teamId);
+    const team = await ctx.db.get(args.teamId);
+    return isActiveTeam(team) ? team : null;
   },
 });
 
@@ -162,10 +175,12 @@ export const getWithMembers = query({
 export const listByCaptain = query({
   args: { captainUid: v.id("users") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const teams = await ctx.db
       .query("teams")
       .withIndex("by_captainUid", (q) => q.eq("captainUid", args.captainUid))
       .collect();
+
+    return teams.filter(isActiveTeam);
   },
 });
 
@@ -184,7 +199,7 @@ export const listByMember = query({
       memberships.map((m) => ctx.db.get(m.teamId))
     );
 
-    return teams.filter((t) => t !== null);
+    return teams.filter(isActiveTeam);
   },
 });
 
@@ -192,10 +207,12 @@ export const listByMember = query({
 export const listByGame = query({
   args: { game: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const teams = await ctx.db
       .query("teams")
       .withIndex("by_game", (q) => q.eq("game", args.game))
-      .take(args.limit || 50);
+      .take(200);
+
+    return teams.filter(isActiveTeam).slice(0, args.limit || 50);
   },
 });
 
@@ -210,7 +227,7 @@ export const searchByName = query({
       .take(200);
 
     return allTeams
-      .filter((t) => t.nameLower.includes(searchLower))
+      .filter((t) => isActiveTeam(t) && t.nameLower.includes(searchLower))
       .slice(0, args.limit || 20);
   },
 });
@@ -224,7 +241,7 @@ export const getUserTeams = query({
       .order("desc")
       .take(200);
 
-    return allTeams.filter((t) => t.memberUids.includes(args.uid));
+    return allTeams.filter((t) => isActiveTeam(t) && t.memberUids.includes(args.uid));
   },
 });
 
@@ -237,7 +254,7 @@ export const getUserTeamsForGame = query({
       .withIndex("by_game", (q) => q.eq("game", args.game))
       .collect();
 
-    return teams.filter((t) => t.memberUids.includes(args.uid));
+    return teams.filter((t) => isActiveTeam(t) && t.memberUids.includes(args.uid));
   },
 });
 
@@ -248,8 +265,9 @@ export const getByIdString = query({
     try {
       const id = args.teamId as any;
       const team = await ctx.db.get(id);
-      if (team) {
-        return { ...team, id: team._id };
+      if (isActiveTeam(team)) {
+        const activeTeam = team as NonNullable<typeof team>;
+        return { ...activeTeam, id: activeTeam._id };
       }
     } catch {
       // Not a valid Convex ID
@@ -306,6 +324,7 @@ export const create = mutation({
         losses: 0,
         matchesPlayed: 0,
       },
+      status: "active",
       createdAt: now,
       updatedAt: now,
     });
@@ -350,6 +369,9 @@ export const update = mutation({
     if (updates.logoUrl !== undefined) updateData.logoUrl = updates.logoUrl;
     if (updates.logoStorageId !== undefined) updateData.logoStorageId = updates.logoStorageId;
 
+    const team = await ctx.db.get(teamId);
+    assertActiveTeam(team);
+
     await ctx.db.patch(teamId, updateData);
     return true;
   },
@@ -369,7 +391,7 @@ export const addMember = mutation({
     }
 
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
 
     // Check if already a member
     if (team.memberUids.includes(args.userId)) {
@@ -421,7 +443,7 @@ export const removeMember = mutation({
   },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
 
     // Can't remove captain
     if (team.captainUid === args.userId) {
@@ -490,7 +512,7 @@ export const transferCaptain = mutation({
   },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
     const previousCaptainUid = team.captainUid;
     const previousCaptainUsername = team.captainUsername || "Captain";
 
@@ -590,7 +612,7 @@ export const updateStats = mutation({
   },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
 
     const currentStats = team.stats || { wins: 0, losses: 0, matchesPlayed: 0 };
 
@@ -616,8 +638,8 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
     if (!team) throw new Error("Team not found");
+    if (isTeamDeleted(team)) return true;
 
-    // Delete all member records first
     const members = await ctx.db
       .query("teamMembers")
       .withIndex("by_teamId", (q) => q.eq("teamId", args.teamId))
@@ -646,24 +668,24 @@ export const remove = mutation({
         dedupePolicy: "versioned_new",
         teamId: args.teamId,
         teamName: team.name,
-        route: "/teams",
+        route: `/teams/${String(args.teamId)}`,
         title: "Team deleted",
         body: `${team.name} was deleted.`,
         data: {
           teamId: String(args.teamId),
           teamName: team.name,
           game: team.game,
-          href: "/teams",
+          href: `/teams/${String(args.teamId)}`,
         },
       });
     }
 
-    for (const member of members) {
-      await ctx.db.delete(member._id);
-    }
-
-    // Delete the team
-    await ctx.db.delete(args.teamId);
+    await ctx.db.patch(args.teamId, {
+      status: "deleted",
+      deletedAt: now,
+      deletedByUid: team.captainUid,
+      updatedAt: now,
+    });
     return true;
   },
 });
@@ -677,7 +699,7 @@ export const checkUserTeamLimit = query({
       .withIndex("by_game", (q) => q.eq("game", args.game))
       .collect();
 
-    const existingTeam = allTeams.find((t) => t.memberUids.includes(args.uid));
+    const existingTeam = allTeams.find((t) => isActiveTeam(t) && t.memberUids.includes(args.uid));
     if (existingTeam) {
       return { inTeam: true, teamName: existingTeam.name };
     }
@@ -689,11 +711,11 @@ export const checkUserTeamLimit = query({
 export const isNameAvailable = query({
   args: { name: v.string() },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
+    const existingTeams = await ctx.db
       .query("teams")
       .withIndex("by_nameLower", (q) => q.eq("nameLower", args.name.toLowerCase()))
-      .unique();
-    return existing === null;
+      .collect();
+    return !existingTeams.some(isActiveTeam);
   },
 });
 
@@ -706,7 +728,7 @@ export const inviteToTeam = mutation({
   },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
     if (team.captainUid !== args.fromUid) throw new Error("Only captain can invite members");
 
     // Check if already a member
@@ -836,14 +858,14 @@ export const respondToTeamInvite = mutation({
     if (!teamId) throw new Error("Team reference missing");
 
     const team = await ctx.db.get(teamId);
-    if (!team) throw new Error("Team no longer exists");
+    assertActiveTeam(team, "Team no longer exists");
 
     // Check user not already in a team for this game
     const gameTeams = await ctx.db
       .query("teams")
       .withIndex("by_game", (q) => q.eq("game", team.game))
       .collect();
-    const existingTeam = gameTeams.find((t) => t.memberUids.includes(args.userId) && t._id !== teamId);
+    const existingTeam = gameTeams.find((t) => isActiveTeam(t) && t.memberUids.includes(args.userId) && t._id !== teamId);
     if (existingTeam) {
       throw new Error(`You are already in a ${team.game} team (${existingTeam.name}). You must leave it to join a new one.`);
     }
@@ -931,7 +953,7 @@ export const respondToJoinRequest = mutation({
     if (!teamId) throw new Error("Team reference missing");
 
     const team = await ctx.db.get(teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
     if (team.captainUid !== args.captainUid) throw new Error("Only the current captain can respond");
 
     if (!args.accept) {
@@ -978,7 +1000,7 @@ export const respondToJoinRequest = mutation({
       .query("teams")
       .withIndex("by_game", (q) => q.eq("game", team.game))
       .collect();
-    const existingTeam = gameTeams.find((t) => t.memberUids.includes(requesterUid) && t._id !== teamId);
+    const existingTeam = gameTeams.find((t) => isActiveTeam(t) && t.memberUids.includes(requesterUid) && t._id !== teamId);
     if (existingTeam) {
       await ctx.db.patch(args.notificationId, { status: "rejected", updatedAt: now });
       throw new Error(`User is already in a ${team.game} team`);
@@ -1037,7 +1059,7 @@ export const leaveTeam = mutation({
   },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
 
     if (team.captainUid === args.userId) {
       throw new Error("Captains cannot leave. Delete the team instead.");
@@ -1086,7 +1108,7 @@ export const requestToJoinTeam = mutation({
     }
 
     const team = await ctx.db.get(args.teamId);
-    if (!team) throw new Error("Team not found");
+    assertActiveTeam(team);
 
     if (team.memberCount >= getTeamRosterCapacity(team)) throw new Error("Team is full");
 

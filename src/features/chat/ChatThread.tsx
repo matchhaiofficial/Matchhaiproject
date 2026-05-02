@@ -96,7 +96,14 @@ function ImagePreviewModal({
 }) {
     if (!uri) return null;
     return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <Modal
+            visible={visible}
+            transparent
+            animationType="fade"
+            statusBarTranslucent={Platform.OS === "android"}
+            navigationBarTranslucent={false}
+            onRequestClose={onClose}
+        >
             <Pressable style={styles.imagePreviewBackdrop} onPress={onClose}>
                 <Image
                     source={{ uri }}

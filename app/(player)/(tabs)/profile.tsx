@@ -34,6 +34,7 @@ import type { PsnVerificationResult } from "../../../src/services/convex/externa
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
+import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import { COLORS } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
@@ -583,9 +584,7 @@ export default function Profile() {
                             </AppCard>
                         ) : myTeams.length > 0 ? (
                             myTeams.slice(0, 3).map(team => {
-                                const maxMembers = team.maxMembers || 0;
-                                const rawCount = team.memberUids?.length ?? team.memberCount ?? 0;
-                                const memberCount = maxMembers > 0 ? Math.min(rawCount, maxMembers) : rawCount;
+                                const { currentMembers, maxMembers } = getTeamMainDisplayRoster(team);
                                 return (
                                     <Pressable
                                         key={team.id}
@@ -599,7 +598,7 @@ export default function Profile() {
                                         <View style={styles.teamInfo}>
                                             <Text style={styles.teamName} numberOfLines={1}>{team.name}</Text>
                                             <Text style={styles.teamGame}>{(team.game || '').toUpperCase()}</Text>
-                                            <Text style={styles.teamMembers}>{memberCount} / {maxMembers} members</Text>
+                                            <Text style={styles.teamMembers}>{currentMembers} / {maxMembers} members</Text>
                                         </View>
                                         </AppCard>
                                     </Pressable>

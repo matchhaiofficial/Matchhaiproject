@@ -18,11 +18,18 @@ export default StyleSheet.create({
         fontSize: 20,
         fontFamily: FONTS.heading,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.cardBorder,
+        marginBottom: 0,
+    },
     backButton: {
         marginRight: SPACING.lg,
     },
     content: {
         padding: SPACING.lg,
+        paddingBottom: SPACING.lg + SPACING.xxl,
     },
     sectionLabel: {
         color: COLORS.muted,

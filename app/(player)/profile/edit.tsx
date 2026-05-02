@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
@@ -799,31 +800,31 @@ export default function EditProfile() {
 
     return (
         <SafeAreaView style={styles.screen}>
-            {/* Header */}
-            <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
-                    <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.headerTitle}>Edit Profile</Text>
-
-                <Pressable
-                    style={({ pressed }) => [
-                        styles.saveButton,
-                        saving && styles.saveButtonDisabled,
-                        pressed && !saving && styles.saveButtonPressed,
-                    ]}
-                    onPressIn={() => {
-                        if (touchDebugEnabled) {
-                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_edit_save" });
-                        }
-                    }}
-                    onPress={handleSave}
-                    disabled={saving}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                    <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                </Pressable>
-            </View>
+            <AppHeader
+                title="Edit Profile"
+                onBack={() => router.back()}
+                inlineTitle
+                style={styles.appHeader}
+                rightAction={
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.saveButton,
+                            saving && styles.saveButtonDisabled,
+                            pressed && !saving && styles.saveButtonPressed,
+                        ]}
+                        onPressIn={() => {
+                            if (touchDebugEnabled) {
+                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_edit_save" });
+                            }
+                        }}
+                        onPress={handleSave}
+                        disabled={saving}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
+                    </Pressable>
+                }
+            />
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : undefined}

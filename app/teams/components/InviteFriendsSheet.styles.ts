@@ -14,8 +14,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderTopLeftRadius: RADII.xl,
         borderTopRightRadius: RADII.xl,
-        minHeight: '50%',
-        maxHeight: '85%',
     },
     header: {
         flexDirection: 'row',
@@ -44,17 +42,15 @@ export default StyleSheet.create({
         alignItems: 'center',
     },
     listBody: {
-        flexShrink: 1,
-        minHeight: 0,
         paddingHorizontal: SPACING.xl,
         paddingTop: SPACING.lg,
-        paddingBottom: SPACING.md,
+        paddingBottom: SPACING.sm,
     },
     listScroller: {
-        flexGrow: 0,
+        maxHeight: 300,
     },
     list: {
-        paddingBottom: SPACING.sm,
+        paddingBottom: 0,
     },
     friendItem: {
         flexDirection: 'row',
@@ -124,5 +120,7 @@ export default StyleSheet.create({
     },
     modalFooter: {
         paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.sm,
+        paddingBottom: SPACING.md,
     },
 });

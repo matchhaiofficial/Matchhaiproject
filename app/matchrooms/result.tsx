@@ -9,6 +9,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AppHeader from '../../src/components/AppHeader';
 import { AppIcon } from '../../src/components/AppIcon';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
@@ -167,13 +168,15 @@ export default function MatchResultSubmission() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <Pressable onPress={() => router.back()} style={styles.backButton}>
-                <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-            </Pressable>
+            <AppHeader
+                title="Submit Result"
+                onBack={() => router.back()}
+                inlineTitle
+                style={styles.appHeader}
+            />
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.header}>
-                    <Text style={styles.title}>Submit Match Result</Text>
                     <Text style={styles.subtitle}>
                         Select the winning team. The match result will be verified once both captains agree.
                     </Text>

@@ -77,6 +77,9 @@ const formatGameLabel = (value?: string | null) => {
 const getNotificationMatchroomId = (item: Notification) =>
   item.matchroomId || item.meta?.matchroomId;
 
+const getNotificationTeamId = (item: Notification) =>
+  item.teamId || item.meta?.teamId || item.data?.teamId;
+
 const getNotificationIntentId = (item: Notification) => item.meta?.intentId;
 
 const getNotificationGameLabel = (item: Notification) =>
@@ -275,6 +278,7 @@ export function InboxNotificationCard({
             ? "sports-esports"
             : "info";
   const matchroomId = getNotificationMatchroomId(item);
+  const teamId = getNotificationTeamId(item);
   const intentId = getNotificationIntentId(item);
 
   const handleAcceptPressIn = useCallback(() => {
@@ -360,8 +364,8 @@ export function InboxNotificationCard({
   }, [item.fromUid, openProfile]);
 
   const handleOpenTeam = useCallback(() => {
-    openTeam(item.meta?.teamId);
-  }, [item.meta?.teamId, openTeam]);
+    openTeam(teamId);
+  }, [openTeam, teamId]);
 
   const handleOpenMatchroom = useCallback(() => {
     openMatchroom(matchroomId);
@@ -427,7 +431,7 @@ export function InboxNotificationCard({
             {isTeamInvite && (
               <>
                 {" invited you to join "}
-                <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                <Text style={styles.inlineLinkText} onPress={handleOpenTeam}>
                   {item.meta?.teamName || "team"}
                 </Text>
               </>
@@ -435,7 +439,7 @@ export function InboxNotificationCard({
             {isJoinRequest && (
               <>
                 {" wants to join "}
-                <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                <Text style={styles.inlineLinkText} onPress={handleOpenTeam}>
                   {item.meta?.teamName || "team"}
                 </Text>
               </>
@@ -445,7 +449,7 @@ export function InboxNotificationCard({
                 {item.status === "accepted"
                   ? " accepted your request to join "
                   : " declined your request for "}
-                <Text style={styles.inlineLinkText} onPress={() => openTeam(item.meta?.teamId)}>
+                <Text style={styles.inlineLinkText} onPress={handleOpenTeam}>
                   {item.meta?.teamName || "team"}
                 </Text>
               </>
@@ -594,7 +598,7 @@ export function InboxNotificationCard({
               <Text style={styles.contextChipText}>Profile</Text>
             </Pressable>
           )}
-          {!!item.meta?.teamId && (
+          {!!teamId && (
             <Pressable style={styles.contextChip} onPress={handleOpenTeam}>
               <AppIcon name="groups-2" size={14} color={COLORS.accent} />
               <Text style={styles.contextChipText}>Team</Text>

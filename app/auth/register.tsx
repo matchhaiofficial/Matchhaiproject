@@ -77,6 +77,7 @@ export default function Register() {
     hasLower,
     hasNumber,
     hasSpecial,
+    hasMinLength,
     strengthLabel,
     strengthColor,
     strengthWidth,
@@ -163,6 +164,7 @@ export default function Register() {
       hasLower: hasLowerRule,
       hasNumber: hasNumberRule,
       hasSpecial: hasSpecialRule,
+      hasMinLength: lengthOkRule,
       strengthLabel: nextStrengthLabel,
       strengthColor: nextStrengthColor,
       strengthWidth: nextStrengthWidth,
@@ -181,7 +183,8 @@ export default function Register() {
   ]);
 
   const showRequirements =
-    password.length > 0 && !(hasUpper && hasLower && hasNumber && hasSpecial);
+    password.length > 0 &&
+    !(hasUpper && hasLower && hasNumber && hasSpecial && hasMinLength);
 
   const checkUsername = async (value: string) => {
     const trimmed = value.trim();
@@ -637,7 +640,7 @@ export default function Register() {
               color={isPasswordValid && password.length > 0 ? COLORS.accent : COLORS.muted}
             />
             <TextInput
-              placeholder="Create a password with upper, lower, number, and symbol"
+              placeholder="Password"
               placeholderTextColor={COLORS.muted}
               style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
               selectionColor={COLORS.accent}
@@ -718,6 +721,14 @@ export default function Register() {
                 ]}
               >
                 {hasSpecial ? "OK" : "X"} 1 special character
+              </Text>
+              <Text
+                style={[
+                  styles.passwordRequirementText,
+                  hasMinLength && styles.passwordRequirementTextDone,
+                ]}
+              >
+                {hasMinLength ? "OK" : "X"} 8+ characters
               </Text>
             </View>
           </View>

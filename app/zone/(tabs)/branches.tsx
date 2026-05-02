@@ -8,6 +8,8 @@ import {
     Text,
     View,
 } from "react-native";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
@@ -19,9 +21,17 @@ import { COLORS } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./branches.styles";
 
+const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+const CUSTOM_TAB_BAR_MIN_HEIGHT = 72;
+
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
     const router = useRouter();
+    const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
+    const bottomClearance = HIDE_ZONE_TAB_BAR
+        ? insets.bottom + 16
+        : Math.max(tabBarHeight, insets.bottom + CUSTOM_TAB_BAR_MIN_HEIGHT) + 16;
 
     // Branches are stored as an array on the zone document in Convex.
     // The zone data from useZoneData already includes branches.
@@ -62,7 +72,10 @@ export default function ZoneBranches() {
     return (
         <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
             <AppHeader title="Branches" subtitle={`${branches.length} locations`} inlineTitle />
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                contentContainerStyle={[styles.content, { paddingBottom: bottomClearance }]}
+                showsVerticalScrollIndicator={false}
+            >
                 {usingLegacyFallback && (
                     <View style={styles.noticeBox}>
                         <Text style={styles.noticeTitle}>

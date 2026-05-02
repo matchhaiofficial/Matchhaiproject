@@ -546,7 +546,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
-        minHeight: "50%",
         maxHeight: "90%",
         borderWidth: 1,
         borderColor: COLORS.cardBorder,

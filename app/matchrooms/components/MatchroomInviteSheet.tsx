@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import {
   ActivityIndicator,
-  FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -20,7 +20,6 @@ import { COLORS } from "../../../src/theme";
 const localStyles = StyleSheet.create({
   sheet: {
     minHeight: 0,
-    maxHeight: "78%",
   },
   loadingWrap: {
     paddingVertical: 32,
@@ -30,8 +29,6 @@ const localStyles = StyleSheet.create({
     color: COLORS.accent,
   },
   bodyContent: {
-    flexShrink: 1,
-    minHeight: 0,
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 14,
@@ -103,9 +100,11 @@ export function MatchroomInviteSheet({
     return item.uid || item.id || `${item.username || "friend"}-${index}`;
   }, []);
 
-  const renderItem = useCallback(({ item }: { item: any }) => {
+  const renderFriendRow = useCallback((item: any) => {
     return <InviteRow friend={item} joining={joining} styles={styles} onInvite={onInvite} />;
   }, [joining, onInvite, styles]);
+
+  const hasScrollableList = friends.length > 4;
 
   return (
     <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={[styles.modalContent, localStyles.sheet]}>
@@ -115,27 +114,38 @@ export function MatchroomInviteSheet({
           <View style={localStyles.loadingWrap}>
             <ActivityIndicator color={COLORS.accent} />
           </View>
-        ) : (
-          <FlatList
-            data={friends}
-            keyExtractor={keyExtractor}
-            ListEmptyComponent={
-              <View style={styles.friendListEmpty}>
-                <AppIcon
-                  name="person-add-disabled"
-                  size={48}
-                  color={COLORS.overlayMedium}
-                />
-                <Text style={styles.emptyModalText}>
-                  No friends found to invite.
-                </Text>
-              </View>
-            }
-            renderItem={renderItem}
+        ) : friends.length === 0 ? (
+          <View style={styles.friendListEmpty}>
+            <AppIcon
+              name="person-add-disabled"
+              size={48}
+              color={COLORS.overlayMedium}
+            />
+            <Text style={styles.emptyModalText}>
+              No friends found to invite.
+            </Text>
+          </View>
+        ) : hasScrollableList ? (
+          <ScrollView
             style={localStyles.list}
             contentContainerStyle={localStyles.listContent}
             keyboardShouldPersistTaps="handled"
-          />
+            showsVerticalScrollIndicator={false}
+          >
+            {friends.map((friend, index) => (
+              <View key={keyExtractor(friend, index)}>
+                {renderFriendRow(friend)}
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={localStyles.listContent}>
+            {friends.map((friend, index) => (
+              <View key={keyExtractor(friend, index)}>
+                {renderFriendRow(friend)}
+              </View>
+            ))}
+          </View>
         )}
       </AppModalBody>
       <AppModalFooter style={localStyles.footer}>

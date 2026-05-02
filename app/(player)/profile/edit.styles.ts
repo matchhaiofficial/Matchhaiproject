@@ -22,6 +22,12 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
     },
+    appHeader: {
+        paddingHorizontal: SPACING.screenPadding,
+        paddingBottom: SPACING.md,
+        marginBottom: 0,
+        backgroundColor: COLORS.backgroundDark,
+    },
     saveButton: {
         marginLeft: 'auto',
         minHeight: 38,
@@ -48,7 +54,7 @@ export default StyleSheet.create({
 
     scrollContent: {
         padding: SPACING.screenPadding,
-        paddingBottom: 100,
+        paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
 
     sectionTitle: {

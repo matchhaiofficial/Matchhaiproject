@@ -14,6 +14,10 @@ function isDisabledPhysicalGame(value?: string | null) {
   return DISABLED_PHYSICAL_GAME_KEYS.has(normalizeGameKey(value));
 }
 
+function isActiveTeam(row: any) {
+  return Boolean(row) && row.status !== "deleted" && !row.deletedAt;
+}
+
 function playerHasEnabledGame(player: any) {
   return !!(
     player?.playsCs2 ||
@@ -37,6 +41,11 @@ function zoneHasEnabledGame(zone: any) {
     games?.supportsFc26 ||
     games?.supportsTekken8
   );
+}
+
+function getZonePreferredBranch(zone: any) {
+  const branches = Array.isArray(zone?.branches) ? zone.branches : [];
+  return branches[0] || zone?.primaryBranch || {};
 }
 
 function getCandidateFetchLimit(limit: number, options: { min: number; max: number; multiplier?: number }) {
@@ -523,7 +532,7 @@ export const listDiscoverTeams = query({
       const captainMap = await hydrateCaptainMap(teamDocs.filter(Boolean));
 
       return teamDocs
-        .filter(Boolean)
+        .filter(isActiveTeam)
         .filter((team: any) => !isDisabledPhysicalGame(team.game))
         .filter((team: any) => args.selectedGame === "all" || normalizeGameKey(team.game) === args.selectedGame)
         .filter((team: any) => {
@@ -561,6 +570,7 @@ export const listDiscoverTeams = query({
     const captainMap = await hydrateCaptainMap(baseTeams);
 
     return baseTeams
+      .filter(isActiveTeam)
       .filter((team: any) => !isDisabledPhysicalGame(team.game))
       .filter((team: any) => !Array.isArray(team.memberUids) || !team.memberUids.includes(String(args.viewerUserId)))
       .filter((team: any) => {
@@ -659,20 +669,23 @@ export const listDiscoverZones = query({
       .filter(matchesGame)
       .filter((zone: any) => {
         if (!search) return true;
+        const branch = getZonePreferredBranch(zone);
         return (
           String(zone.venueBrandName || zone.name || "").toLowerCase().includes(search) ||
-          String(zone.primaryBranch?.city || zone.city || "").toLowerCase().includes(search) ||
-          String(zone.primaryBranch?.areaLabel || "").toLowerCase().includes(search)
+          String(branch?.city || zone.city || "").toLowerCase().includes(search) ||
+          String(branch?.areaLabel || "").toLowerCase().includes(search) ||
+          String(branch?.addressLine1 || branch?.address || zone.address || "").toLowerCase().includes(search)
         );
       })
       .filter((zone: any) => {
-        const zoneArea = String(zone.primaryBranch?.areaLabel || "").toLowerCase();
-        const zoneCity = String(zone.primaryBranch?.city || zone.city || "").toLowerCase();
+        const branch = getZonePreferredBranch(zone);
+        const zoneArea = String(branch?.areaLabel || "").toLowerCase();
+        const zoneCity = String(branch?.city || zone.city || "").toLowerCase();
         if (args.selectedProximity === "Same Area" && normalizedArea) return zoneArea.includes(normalizedArea);
         if (args.selectedProximity === "Same City" && normalizedCity) return zoneCity.includes(normalizedCity);
         return true;
       })
-      .filter((zone: any) => matchesAreaSelection(zone?.primaryBranch?.areaLabel, args.selectedArea))
+      .filter((zone: any) => matchesAreaSelection(getZonePreferredBranch(zone)?.areaLabel, args.selectedArea))
       .filter((zone: any) => matchesVenuePriceRange(zone, args.selectedPriceRange, args.selectedGame))
       .filter((zone: any) => {
         const needsPlatform = args.selectedGame === "fc26" || args.selectedGame === "tekken8";

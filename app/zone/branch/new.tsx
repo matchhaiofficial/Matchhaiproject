@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
-import { AppIcon } from "../../../src/components/AppIcon";
+import AppHeader from "../../../src/components/AppHeader";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { addBranch } from "../../../src/services/convex/zoneService";
@@ -75,12 +75,12 @@ export default function AddBranch() {
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
             >
-                <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButton}>
-                        <AppIcon name="arrow-back" size={24} color={COLORS.text} />
-                    </Pressable>
-                    <Text style={styles.headerTitle}>Add New Branch</Text>
-                </View>
+                <AppHeader
+                    title="Add New Branch"
+                    onBack={() => router.back()}
+                    inlineTitle
+                    style={styles.appHeader}
+                />
 
                 <ScrollView contentContainerStyle={styles.content}>
                     <View style={styles.inputGroup}>

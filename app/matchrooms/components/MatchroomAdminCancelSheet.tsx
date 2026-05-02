@@ -45,7 +45,7 @@ export function MatchroomAdminCancelSheet({
       visible={visible}
       onClose={onClose}
       dismissDisabled={adminProcessing === "cancel"}
-      sheetStyle={[styles.modalContent, { maxHeight: "80%" }]}
+      sheetStyle={styles.modalContent}
     >
       <AppModalHeader
         title="Force Cancel Matchroom"

@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +36,7 @@ import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes } from "../../src/constants/teamRosterRules";
 import Logger from "../../src/utils/logger";
 import { buildLegacyTeamsHref } from "../../src/navigation/routes";
+import { getTeamMainDisplayCount } from "../../src/utils/teamRosterDisplay";
 import styles from "./[id].styles";
 import InviteFriendsSheet from "./components/InviteFriendsSheet";
 import RosterSlots from "./components/RosterSlots";
@@ -122,6 +123,7 @@ export default function TeamDetails() {
     const { user, authUser } = useAuth();
     const { showToast } = useToast();
     const [submitting, setSubmitting] = useState(false);
+    const deletingTeamRef = useRef(false);
 
     // Rename States
     const [showRenameModal, setShowRenameModal] = useState(false);
@@ -187,14 +189,16 @@ export default function TeamDetails() {
         } as Team
         : null;
 
+    const isDeleted = Boolean(team?.deletedAt || (team as any)?.status === "deleted");
+
     // Determine isCaptain early so we can conditionally query pending requests
-    const isCaptain = team?.captainUid === user?._id;
+    const isCaptain = !isDeleted && team?.captainUid === user?._id;
     const isMember = team?.members?.some(m => m.uid === user?._id) || false;
 
     // Captain-only: real-time pending join requests
     const pendingRequestsRaw = useQuery(
         api.notifications.listTeamJoinRequests,
-        id && user?._id && isCaptain
+        id && user?._id && isCaptain && !isDeleted
             ? { captainUid: user._id as Id<"users">, teamId: id as Id<"teams"> }
             : "skip"
     );
@@ -224,14 +228,16 @@ export default function TeamDetails() {
         : 0;
     const maxMembers = team ? mainRosterSize + maxSubstitutes : 0;
     const memberCountDisplay = maxMembers > 0 ? Math.min(memberCount, maxMembers) : memberCount;
-    const isFull = team ? memberCountDisplay >= maxMembers : false;
+    const mainMemberCountDisplay = team ? getTeamMainDisplayCount(team) : 0;
+    const isFull = !isDeleted && team ? memberCountDisplay >= maxMembers : false;
     const isPrivate = team?.visibility === 'private';
 
     // Redirect if team not found (after loading completes)
     useEffect(() => {
         if (teamWithMembers === null) {
+            if (deletingTeamRef.current) return;
             showToast({ type: "error", title: "Error", message: "Team not found" });
-            router.back();
+            router.replace(buildLegacyTeamsHref("my") as any);
         }
     }, [router, showToast, teamWithMembers]);
 
@@ -437,15 +443,23 @@ export default function TeamDetails() {
             confirmTone: "danger",
             onConfirm: async () => {
                 setSubmitting(true);
+                deletingTeamRef.current = true;
                 try {
                     const res = await deleteTeam(id as string);
                     if (res.ok) {
                         setConfirmationDialog(null);
-                        router.back();
+                        showToast({
+                            type: "success",
+                            title: "Team deleted",
+                            message: res.message || "Team deleted successfully.",
+                        });
+                        router.replace(buildLegacyTeamsHref("my") as any);
                     } else {
+                        deletingTeamRef.current = false;
                         showToast({ type: "error", title: "Error", message: res.message || "Failed to delete team." });
                     }
                 } catch (e: any) {
+                    deletingTeamRef.current = false;
                     showToast({ type: "error", title: "Error", message: e.message });
                 } finally {
                     setSubmitting(false);
@@ -652,11 +666,13 @@ export default function TeamDetails() {
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             />
                         )}
-                        <HeaderIconButton
-                            icon="share"
-                            color={COLORS.accent}
-                            onPress={handleShare}
-                        />
+                        {!isDeleted && (
+                            <HeaderIconButton
+                                icon="share"
+                                color={COLORS.accent}
+                                onPress={handleShare}
+                            />
+                        )}
                     </View>
                 )}
             />
@@ -668,6 +684,18 @@ export default function TeamDetails() {
                     showsVerticalScrollIndicator={false}
                 >
                     <Animated.View style={contentEntranceStyle}>
+                        {isDeleted && (
+                            <View style={styles.deletedBanner}>
+                                <AppIcon name="warning" size={20} color={COLORS.warning} />
+                                <View style={styles.deletedBannerTextWrap}>
+                                    <Text style={styles.deletedBannerTitle}>Deleted Team</Text>
+                                    <Text style={styles.deletedBannerText}>
+                                        This team has been deleted. You can view its saved roster, but actions are disabled.
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
+
                         {/* Team Info Section */}
                         <AppCard variant="elevated" style={styles.teamHeader}>
                             <View pointerEvents="none" style={styles.teamHeaderAccent} />
@@ -714,6 +742,9 @@ export default function TeamDetails() {
                                 )}
                             </View>
                             <StatusPill tone="info" label={getCanonicalGameLabel(team.game)} style={styles.gamePill} />
+                            {isDeleted && (
+                                <StatusPill tone="warning" label="Deleted" caps={false} style={styles.deletedPill} />
+                            )}
                             {team.description && <Text style={styles.description}>{team.description}</Text>}
 
                             {/* Occupancy Indicator with Report Button */}
@@ -721,12 +752,12 @@ export default function TeamDetails() {
                                 <View style={styles.occupancyInfoPill}>
                                     <AppIcon name="people" size={16} color={COLORS.muted} />
                                     <Text style={styles.occupancyText}>
-                                        {memberCountDisplay} / {maxMembers}
+                                        {mainMemberCountDisplay} / {mainRosterSize}
                                     </Text>
                                     {isFull && <StatusPill tone="danger" label="Full" />}
                                 </View>
 
-                                {!isCaptain && (
+                                {!isCaptain && !isDeleted && (
                                     <View style={styles.reportActionSlot}>
                                         <ReportIconButton onPress={() => setShowReportModal(true)} />
                                     </View>
@@ -766,7 +797,7 @@ export default function TeamDetails() {
                         </DetailSectionCard>
 
                         {/* Captain's Request Section */}
-                        {isCaptain && pendingRequests.length > 0 && (
+                        {!isDeleted && isCaptain && pendingRequests.length > 0 && (
                             <DetailSectionCard title={`Join Requests (${pendingRequests.length})`} style={styles.requestSection}>
                                 {pendingRequests.map(req => (
                                     <AppCard key={req.id} style={styles.requestCard}>
@@ -806,7 +837,13 @@ export default function TeamDetails() {
                         {/* Roster Slots (Slot Grid) */}
                         <DetailSectionCard
                             title="Lineup"
-                            subtitle={isCaptain ? "Manage members, invites, and captain actions from here." : undefined}
+                            subtitle={
+                                isDeleted
+                                    ? "This deleted team is read-only."
+                                    : isCaptain
+                                        ? "Manage members, invites, and captain actions from here."
+                                        : undefined
+                            }
                             style={styles.rosterSection}
                         >
                             <RosterSlots
@@ -818,9 +855,9 @@ export default function TeamDetails() {
                                 viewerUid={user?._id}
                                 isCaptain={isCaptain}
                                 game={team.game}
-                                onEmptySlotPress={handleEmptySlotPress}
+                                onEmptySlotPress={!isDeleted ? handleEmptySlotPress : undefined}
                                 onMemberPress={(member) => {
-                                    if (isCaptain && member.uid !== user?._id) {
+                                    if (!isDeleted && isCaptain && member.uid !== user?._id) {
                                         setMemberActionTarget({ uid: member.uid, username: member.username });
                                         return;
                                     }
@@ -829,7 +866,7 @@ export default function TeamDetails() {
                             />
                         </DetailSectionCard>
                         {/* Action Bar */}
-                        {isMember && !isCaptain && (
+                        {!isDeleted && isMember && !isCaptain && (
                             <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
                                 <View style={styles.actionBarContent}>
                                     <AppButton
@@ -856,7 +893,7 @@ export default function TeamDetails() {
                         )}
 
                         {/* Action Bar (Non-Members Only) */}
-                        {!isMember && (
+                        {!isDeleted && !isMember && (
                             <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
                                 <View style={styles.actionBarContent}>
                                     {buttonState === 'eligible' && (
@@ -1047,11 +1084,10 @@ export default function TeamDetails() {
                 </AppModalBody>
             </AppDialog>
 
-            <AppDialog
+            <AppBottomSheet
                 visible={confirmationDialog !== null}
                 onClose={closeConfirmationDialog}
                 dismissDisabled={submitting}
-                cardStyle={styles.confirmationDialogCard}
             >
                 <AppModalHeader
                     title={confirmationDialog?.title ?? ""}
@@ -1063,7 +1099,15 @@ export default function TeamDetails() {
                 </AppModalBody>
                 <AppModalFooter style={styles.dialogFooter}>
                     <View style={styles.confirmationActions}>
-                        <AppButton variant="ghost" onPress={closeConfirmationDialog} disabled={submitting}>
+                        <AppButton
+                            variant="secondary"
+                            onPress={closeConfirmationDialog}
+                            disabled={submitting}
+                            style={[
+                                styles.confirmationActionButton,
+                                styles.confirmationCancelButton,
+                            ]}
+                        >
                             Cancel
                         </AppButton>
                         <AppButton
@@ -1071,12 +1115,13 @@ export default function TeamDetails() {
                             onPress={() => void confirmationDialog?.onConfirm()}
                             disabled={submitting}
                             loading={submitting}
+                            style={styles.confirmationActionButton}
                         >
                             {confirmationDialog?.confirmLabel ?? "Confirm"}
                         </AppButton>
                     </View>
                 </AppModalFooter>
-            </AppDialog>
+            </AppBottomSheet>
 
             {/* Invite Friends Sheet */}
             <InviteFriendsSheet

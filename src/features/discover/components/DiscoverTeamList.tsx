@@ -19,6 +19,7 @@ import {
 } from "../../../../src/utils/emailVerificationGate";
 import Logger from "../../../../src/utils/logger";
 import { recordPayloadMetric } from "../../../../src/utils/perfInstrumentation";
+import { getTeamMainDisplayRoster } from "../../../../src/utils/teamRosterDisplay";
 import type { TeamFilters } from "../filterConfig";
 import {
   DiscoverActionChip,
@@ -29,6 +30,9 @@ import {
   discoverSharedStyles,
 } from "./DiscoverShared";
 import styles from "../styles/teams.styles";
+
+const isActiveTeam = (team: Team) =>
+  team.status !== "deleted" && !team.deletedAt;
 
 const TeamRow = React.memo(function TeamRow({
   team,
@@ -47,10 +51,9 @@ const TeamRow = React.memo(function TeamRow({
   const isRequested = Boolean((team as any).isRequested);
   const isLoading = actionLoadingTeamId === team.id;
   const rawMemberCount = team.memberUids?.length ?? team.memberCount ?? 0;
-  const maxMembers = team.maxMembers || 0;
-  const memberCount =
-    maxMembers > 0 ? Math.min(rawMemberCount, maxMembers) : rawMemberCount;
-  const isFull = maxMembers > 0 ? memberCount >= maxMembers : false;
+  const totalMaxMembers = team.maxMembers || 0;
+  const { currentMembers, maxMembers } = getTeamMainDisplayRoster(team);
+  const isFull = totalMaxMembers > 0 ? rawMemberCount >= totalMaxMembers : false;
 
   const handlePress = useCallback(() => {
     onPressTeam(team.id || "");
@@ -64,7 +67,7 @@ const TeamRow = React.memo(function TeamRow({
     <DiscoverPressableCard style={styles.teamCard} onPress={handlePress}>
       <View style={styles.teamTopRow}>
         <Text style={styles.teamGame}>{(team.game || "???").toUpperCase()}</Text>
-        <DiscoverTag label={`${memberCount} / ${maxMembers}`} tone="neutral" />
+        <DiscoverTag label={`${currentMembers} / ${maxMembers}`} tone="neutral" />
       </View>
 
       <View style={styles.teamTitleRow}>
@@ -150,14 +153,15 @@ export default function DiscoverTeamList({
         selectedCompetitiveIntent: filters.competitiveIntent,
         limit: 200,
       });
+      const activeRows = (rows as Team[]).filter(isActiveTeam);
 
       if (filters.mode === "my") {
-        setMyTeams(rows as Team[]);
+        setMyTeams(activeRows);
       } else {
-        setPublicTeams(rows as Team[]);
+        setPublicTeams(activeRows);
       }
 
-      recordPayloadMetric("discover.teams_payload", rows, {
+      recordPayloadMetric("discover.teams_payload", activeRows, {
         game: filters.game,
         mode: filters.mode,
         query: searchQuery,
