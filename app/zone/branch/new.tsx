@@ -11,14 +11,12 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
 import registerStyles from "../../auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
-import { AppIcon } from "../../../src/components/AppIcon";
-import { AppButton } from "../../../src/components/AppPrimitives";
+import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { addBranch, updateZone } from "../../../src/services/convex/zoneService";
@@ -278,38 +276,23 @@ export default function AddBranch() {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <Screen style={styles.container} scroll={false}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
             >
-                <AppHeader
-                    title="Add New Branch"
-                    onBack={() => router.back()}
-                    inlineTitle
-                    style={styles.appHeader}
-                />
+                <AppHeader title="Add New Branch" onBack={() => router.back()} inlineTitle />
 
-                <ScrollView
-                    contentContainerStyle={[styles.content, { gap: 14 }]}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                >
-                    <View style={registerStyles.fieldGroup}>
-                        <RegistrationFieldLabel label="Branch name" required />
-                        <View style={registerStyles.inputBox}>
-                            <View style={registerStyles.inputRow}>
-                                <AppIcon name="store" size={20} style={registerStyles.prefixIcon} color={COLORS.muted} />
-                                <TextInput
-                                    style={registerStyles.input}
-                                    value={branchDisplayName}
-                                    onChangeText={setBranchDisplayName}
-                                    placeholder="e.g. Pasha's Arena - Garden"
-                                    placeholderTextColor={COLORS.muted}
-                                    selectionColor={COLORS.accent}
-                                />
-                            </View>
-                        </View>
+                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Branch Name</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={branchName}
+                            onChangeText={setBranchName}
+                            placeholder="North Nazimabad Branch"
+                            placeholderTextColor={COLORS.muted}
+                        />
                     </View>
 
                     <View style={registerStyles.fieldGroup}>
@@ -480,6 +463,6 @@ export default function AddBranch() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

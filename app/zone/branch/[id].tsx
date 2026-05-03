@@ -12,7 +12,6 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
@@ -20,6 +19,7 @@ import registerStyles from "../../auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
+import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
@@ -360,9 +360,11 @@ export default function BranchDetails() {
 
     if (loading) {
         return (
-            <View style={styles.centered}>
+            <Screen style={styles.container} scroll={false}>
+              <View style={styles.centered}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
-            </View>
+              </View>
+            </Screen>
         );
     }
 
@@ -380,7 +382,7 @@ export default function BranchDetails() {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <Screen style={styles.container} scroll={false}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
@@ -389,29 +391,32 @@ export default function BranchDetails() {
                     title={branchMatch.index === 0 || routeBranchId === "primary" ? "Edit Primary Branch" : "Edit Branch"}
                     onBack={() => router.back()}
                     inlineTitle
-                    style={styles.appHeader}
                 />
 
-                <ScrollView
-                    contentContainerStyle={[styles.content, { gap: 14 }]}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                >
-                    <View style={registerStyles.fieldGroup}>
-                        <RegistrationFieldLabel label="Branch name" required />
-                        <View style={registerStyles.inputBox}>
-                            <View style={registerStyles.inputRow}>
-                                <AppIcon name="store" size={20} style={registerStyles.prefixIcon} color={COLORS.muted} />
-                                <TextInput
-                                    style={registerStyles.input}
-                                    placeholder="e.g. Pasha's Arena - Garden"
-                                    placeholderTextColor={COLORS.muted}
-                                    value={branchDisplayName}
-                                    onChangeText={setBranchDisplayName}
-                                    selectionColor={COLORS.accent}
-                                />
-                            </View>
-                        </View>
+                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
+                    {/* Branch Info Section */}
+                    <Text style={styles.sectionLabel}>Basic Info</Text>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Branch Name</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={branchName}
+                            onChangeText={setBranchName}
+                            placeholder="Main Branch"
+                            placeholderTextColor={COLORS.muted}
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>City</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={city}
+                            onChangeText={setCity}
+                            placeholder="Karachi"
+                            placeholderTextColor={COLORS.muted}
+                        />
                     </View>
 
                     <View style={registerStyles.fieldGroup}>
@@ -582,6 +587,6 @@ export default function BranchDetails() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

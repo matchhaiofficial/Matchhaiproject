@@ -1,8 +1,6 @@
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated from "react-native-reanimated";
 
 import AppHeader from "../../../src/components/AppHeader";
@@ -26,10 +24,10 @@ import {
 } from "../../../src/features/discover/filterConfig";
 import { DiscoverSegment } from "../../../src/features/discover/types";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { usePressScale } from "../../../src/motion/usePressScale";
 import { COLORS } from "../../../src/theme";
-import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
 import Logger from "../../../src/utils/logger";
 import styles from "./discover.styles";
 
@@ -45,9 +43,6 @@ const SEGMENT_ITEMS: { key: DiscoverSegment; label: string }[] = [
   { key: "teams", label: "Teams" },
   { key: "zones", label: "Venues" },
 ];
-const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
-const CUSTOM_TAB_BAR_MIN_HEIGHT = 72;
-
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function IconButton({
@@ -119,21 +114,11 @@ export default function DiscoverScreen() {
     mode?: string;
     t?: string;
   }>();
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
-  const systemBottomInset = getSystemBottomInset(insets.bottom);
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const tabBarClearance = Math.max(
-    tabBarHeight,
-    systemBottomInset + CUSTOM_TAB_BAR_MIN_HEIGHT,
-  );
-  const bottomPadding = HIDE_PLAYER_TAB_BAR
-    ? systemBottomInset + 16
-    : tabBarClearance + 16;
-  const fabBottom = HIDE_PLAYER_TAB_BAR
-    ? systemBottomInset + 16
-    : tabBarClearance + 16;
+  const tabBarClearance = useTabBarClearance(16);
+  const bottomPadding = 16;
+  const fabBottom = tabBarClearance;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);

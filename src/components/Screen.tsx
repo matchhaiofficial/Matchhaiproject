@@ -13,6 +13,7 @@ import { usePathname, useSegments } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { COLORS, SPACING } from '../theme';
+import { useTabBarClearance } from '../hooks/useTabBarClearance';
 import { useScreenPadding } from '../hooks/useScreenPadding';
 import { Perf } from '../utils/perfInstrumentation';
 
@@ -52,8 +53,9 @@ export default function Screen({
     const { contentContainerStyle: scrollContentStyle, ...restScrollProps } = scrollProps || {};
     const scrollKeyboardShouldPersistTaps = restScrollProps.keyboardShouldPersistTaps ?? 'handled';
     const scrollKeyboardDismissMode = restScrollProps.keyboardDismissMode ?? (Platform.OS === 'ios' ? 'interactive' : 'on-drag');
+    const tabBarBottomClearance = useTabBarClearance(20);
     const presetByVariant: Record<'tabs' | 'stack' | 'fullscreen', { edges: Edge[]; bottomPadding: number }> = {
-        tabs: { edges: ['top'], bottomPadding: 0 },
+        tabs: { edges: ['top'], bottomPadding: tabBarBottomClearance },
         stack: { edges: ['top', 'bottom'], bottomPadding: SPACING.xxl },
         fullscreen: { edges: ['top', 'bottom'], bottomPadding: 0 },
     };
@@ -113,13 +115,21 @@ export default function Screen({
         }, [resolvedRouteKey]),
     );
 
-    const contentContainerStyles = [
-        styles.content,
-        { paddingHorizontal: horizontalPadding },
-        { paddingBottom: resolvedBottomPadding },
-        scrollContentStyle,
-        contentStyle,
-    ];
+    const contentContainerStyles = resolvedVariant === 'tabs'
+        ? [
+            styles.content,
+            { paddingHorizontal: horizontalPadding },
+            scrollContentStyle,
+            contentStyle,
+            { paddingBottom: resolvedBottomPadding },
+        ]
+        : [
+            styles.content,
+            { paddingHorizontal: horizontalPadding },
+            { paddingBottom: resolvedBottomPadding },
+            scrollContentStyle,
+            contentStyle,
+        ];
 
     const body = scroll ? (
         <ScrollView
@@ -135,8 +145,10 @@ export default function Screen({
             style={[
                 styles.content,
                 styles.contentView,
-                { paddingHorizontal: horizontalPadding, paddingBottom: resolvedBottomPadding },
+                { paddingHorizontal: horizontalPadding },
+                resolvedVariant !== 'tabs' && { paddingBottom: resolvedBottomPadding },
                 contentStyle,
+                resolvedVariant === 'tabs' && { paddingBottom: resolvedBottomPadding },
             ]}
         >
             {children}
@@ -166,7 +178,7 @@ export default function Screen({
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.backgroundDark,
     },
     content: {
         flexGrow: 1,

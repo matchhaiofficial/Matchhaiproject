@@ -65,6 +65,9 @@ export default StyleSheet.create({
         padding: SPACING.screenPadding,
         paddingBottom: SPACING.screenPadding + SPACING.xxl,
     },
+    scrollContentInsideScreen: {
+        paddingHorizontal: 0,
+    },
 
     sectionTitle: {
         color: COLORS.text,
