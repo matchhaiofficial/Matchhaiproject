@@ -30,6 +30,7 @@ type TabDef = { name: string; label: string; icon: string };
 const TABS: TabDef[] = [
     { name: "index", label: "Home", icon: "home" },
     { name: "branches", label: "Branches", icon: "store" },
+    { name: "profile", label: "Profile", icon: "person" },
 ];
 
 // Custom Tab Bar
@@ -136,10 +137,15 @@ export default function ZoneTabsLayout() {
                 name="branches"
                 options={{ title: "Branches" }}
             />
+            <Tabs.Screen
+                name="profile"
+                options={{ title: "Profile" }}
+            />
             {/* Hide style files from navigation — unchanged */}
             <Tabs.Screen name="_zone-dashboard.styles" options={{ href: null }} />
             <Tabs.Screen name="dashboard.styles" options={{ href: null }} />
             <Tabs.Screen name="branches.styles" options={{ href: null }} />
+            <Tabs.Screen name="profile.styles" options={{ href: null }} />
         </Tabs>
     );
 }
@@ -163,13 +169,11 @@ const styles = StyleSheet.create({
         left: H_PADDING + 20,
         right: H_PADDING + 20,
         height: TAB_BAR_H + 24,
-        backgroundColor: COLORS.accent,
-        opacity: 0.06,
+        backgroundColor: "transparent",
+        opacity: 0,
         borderRadius: PILL_R + 8,
-        shadowColor: COLORS.accent,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.5,
-        shadowRadius: 20,
+        shadowOpacity: 0,
+        shadowRadius: 0,
     },
 
     pill: {

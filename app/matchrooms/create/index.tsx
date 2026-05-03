@@ -1071,6 +1071,7 @@ export default function CreateMatchroom() {
     zoneRateOptions.find((option) => option.key === selectedZoneRateKey) || null;
   const {
     activating,
+    activeEasypaisaOrderRef,
     closeActivationPrompt,
     closeAssessment,
     closeEasypaisaPhonePrompt,
@@ -1078,9 +1079,14 @@ export default function CreateMatchroom() {
     confirmEasypaisaPayment,
     confirmActivation,
     easypaisaCheckoutPhone,
+    easypaisaCheckoutStatus,
     easypaisaPaymentAmount,
+    easypaisaPaymentPhase,
     handleEasypaisaPhoneChange,
     handleSubmit,
+    refreshEasypaisaPaymentStatus,
+    refreshingEasypaisaStatus,
+    resetEasypaisaPaymentPrompt,
     showEasypaisaPhonePrompt,
     showActivationPrompt,
     showAssessment,
@@ -1150,6 +1156,53 @@ export default function CreateMatchroom() {
     submitFeedback?.type === "success"
       ? COLORS.success
       : submitFeedback?.type === "error"
+        ? COLORS.error
+        : COLORS.warning;
+  const isEasypaisaPaymentActive = Boolean(activeEasypaisaOrderRef);
+  const isEasypaisaPaymentLocked =
+    startingEasypaisaPayment ||
+    easypaisaPaymentPhase === "payment_sent" ||
+    easypaisaPaymentPhase === "confirmed" ||
+    easypaisaPaymentPhase === "completing";
+  const easypaisaDialogTitle = isEasypaisaPaymentActive
+    ? easypaisaPaymentPhase === "failed"
+      ? "Payment Not Completed"
+      : easypaisaPaymentPhase === "expired"
+        ? "Payment Expired"
+        : easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+          ? "Payment Confirmed"
+          : "Payment Sent"
+    : "Confirm Easypaisa Number";
+  const easypaisaDialogSubtitle = isEasypaisaPaymentActive
+    ? easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+      ? "MatchHai received the payment and is finishing your matchroom."
+      : "Approve the payment in Easypaisa. MatchHai will keep checking this screen."
+    : "Use the number you want to pay with for this top-up.";
+  const easypaisaStartTimedOut = String(easypaisaCheckoutStatus?.lastError || "")
+    .toLowerCase()
+    .includes("taking too long");
+  const easypaisaStatusMessage =
+    easypaisaPaymentPhase === "confirmed"
+      ? "Payment confirmed. Completing your matchroom now..."
+      : easypaisaPaymentPhase === "completing"
+        ? "Payment confirmed. Creating your matchroom..."
+        : easypaisaPaymentPhase === "failed"
+          ? "Easypaisa did not complete this payment. You can try again with the same or another number."
+          : easypaisaPaymentPhase === "expired"
+            ? "This Easypaisa payment session expired before confirmation."
+            : easypaisaStartTimedOut
+              ? "Easypaisa is slow to reply, but the prompt may still be waiting on your phone. Approve it there, then refresh this status."
+              : "Payment request sent. Approve it in your Easypaisa app or mobile account prompt.";
+  const easypaisaStatusIcon =
+    easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+      ? "check-circle"
+      : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
+        ? "error"
+        : "hourglass-top";
+  const easypaisaStatusColor =
+    easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+      ? COLORS.success
+      : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
         ? COLORS.error
         : COLORS.warning;
   if (loading) {
@@ -2118,14 +2171,14 @@ export default function CreateMatchroom() {
       <AppDialog
         visible={showEasypaisaPhonePrompt}
         onClose={closeEasypaisaPhonePrompt}
-        dismissDisabled={startingEasypaisaPayment}
+        dismissDisabled={isEasypaisaPaymentLocked}
         cardStyle={styles.phoneDialogCard}
       >
         <AppModalHeader
-          title="Confirm Easypaisa Number"
-          subtitle="Use the number you want to pay with for this top-up."
+          title={easypaisaDialogTitle}
+          subtitle={easypaisaDialogSubtitle}
           onClose={closeEasypaisaPhonePrompt}
-          closeDisabled={startingEasypaisaPayment}
+          closeDisabled={isEasypaisaPaymentLocked}
         />
         <AppModalBody
           scroll
@@ -2135,42 +2188,107 @@ export default function CreateMatchroom() {
           <Text style={styles.phoneAmountLabel}>
             Top-up amount: {formatCurrency(Number(easypaisaPaymentAmount || 0))}
           </Text>
-          <Text style={styles.phoneSectionLabel}>Mobile Account Number</Text>
-          <TextInput
-            style={styles.phoneInput}
-            keyboardType="phone-pad"
-            value={easypaisaCheckoutPhone}
-            onChangeText={handleEasypaisaPhoneChange}
-            placeholder="03XX XXX XXXX"
-            placeholderTextColor={COLORS.textSecondary}
-            editable={!startingEasypaisaPayment}
-          />
+          {isEasypaisaPaymentActive ? (
+            <View style={styles.paymentStatusPanel}>
+              <View style={[styles.paymentStatusIcon, { borderColor: easypaisaStatusColor }]}>
+                {easypaisaPaymentPhase === "payment_sent" ? (
+                  <ActivityIndicator color={easypaisaStatusColor} />
+                ) : (
+                  <AppIcon name={easypaisaStatusIcon as any} size={34} color={easypaisaStatusColor} />
+                )}
+              </View>
+              <Text style={styles.paymentStatusTitle}>
+                {easypaisaPaymentPhase === "payment_sent"
+                  ? "Waiting for payment confirmation"
+                  : easypaisaPaymentPhase === "failed"
+                    ? "Payment was not confirmed"
+                    : easypaisaPaymentPhase === "expired"
+                      ? "Payment session expired"
+                      : "Payment confirmed"}
+              </Text>
+              <Text style={styles.paymentStatusText}>{easypaisaStatusMessage}</Text>
+              <Text style={styles.paymentStatusMeta}>
+                Order: {activeEasypaisaOrderRef}
+              </Text>
+              {easypaisaCheckoutStatus?.providerDescription ? (
+                <Text style={styles.paymentStatusMeta}>
+                  Gateway: {easypaisaCheckoutStatus.providerDescription}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <>
+              <Text style={styles.phoneSectionLabel}>Mobile Account Number</Text>
+              <TextInput
+                style={styles.phoneInput}
+                keyboardType="phone-pad"
+                value={easypaisaCheckoutPhone}
+                onChangeText={handleEasypaisaPhoneChange}
+                placeholder="03XX XXX XXXX"
+                placeholderTextColor={COLORS.textSecondary}
+                editable={!startingEasypaisaPayment}
+              />
+            </>
+          )}
         </AppModalBody>
         <AppModalFooter style={styles.phoneFooter}>
-          <View style={styles.phoneActionsRow}>
-            <AppButton
-              variant="secondary"
-              style={styles.phoneActionBtn}
-              onPress={closeEasypaisaPhonePrompt}
-              disabled={startingEasypaisaPayment}
-            >
-              Cancel
-            </AppButton>
-            <AppButton
-              style={styles.phoneActionBtn}
-              onPress={confirmEasypaisaPayment}
-              loading={startingEasypaisaPayment}
-              disabled={startingEasypaisaPayment}
-              perf={{
-                actionKey: "matchroom_create_easypaisa_phone_confirm",
-                meta: {
-                  source: "matchroom_create",
-                },
-              }}
-            >
-              Continue to Pay
-            </AppButton>
-          </View>
+          {isEasypaisaPaymentActive ? (
+            <View style={styles.phoneActionsRow}>
+              {easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired" ? (
+                <>
+                  <AppButton
+                    variant="secondary"
+                    style={styles.phoneActionBtn}
+                    onPress={closeEasypaisaPhonePrompt}
+                  >
+                    Close
+                  </AppButton>
+                  <AppButton
+                    style={styles.phoneActionBtn}
+                    onPress={resetEasypaisaPaymentPrompt}
+                  >
+                    Try Again
+                  </AppButton>
+                </>
+              ) : (
+                <AppButton
+                  style={styles.phoneActionBtn}
+                  onPress={() => refreshEasypaisaPaymentStatus("manual")}
+                  loading={refreshingEasypaisaStatus || easypaisaPaymentPhase === "completing"}
+                  disabled={refreshingEasypaisaStatus || easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"}
+                >
+                  {easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+                    ? "Completing..."
+                    : "Refresh Status"}
+                </AppButton>
+              )}
+            </View>
+          ) : (
+            <View style={styles.phoneActionsRow}>
+              <AppButton
+                variant="secondary"
+                style={styles.phoneActionBtn}
+                onPress={closeEasypaisaPhonePrompt}
+                disabled={startingEasypaisaPayment}
+              >
+                Cancel
+              </AppButton>
+              <AppButton
+                style={styles.phoneActionBtn}
+                onPress={confirmEasypaisaPayment}
+                loading={startingEasypaisaPayment}
+                disabled={startingEasypaisaPayment}
+                perf={{
+                  actionKey: "matchroom_create_easypaisa_phone_confirm",
+                  meta: {
+                    source: "matchroom_create",
+                  },
+                }}
+              >
+                Continue to Pay
+              </AppButton>
+            </View>
+          )}
         </AppModalFooter>
       </AppDialog>
     </Screen>

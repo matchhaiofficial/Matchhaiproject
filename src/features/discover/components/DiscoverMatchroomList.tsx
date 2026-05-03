@@ -24,6 +24,9 @@ import {
 } from "./DiscoverShared";
 import styles from "../styles/matchrooms.styles";
 
+const isNoPendingRequestResult = (result: { ok: boolean; message?: string }) =>
+  !result.ok && /no pending request found/i.test(result.message || "");
+
 interface DiscoverMatchroomListProps {
   filters: MatchroomFilters;
   searchQuery: string;
@@ -198,13 +201,14 @@ export default function DiscoverMatchroomList({
             cancelBookingIntent(intentId, user._id),
           )),
         ]);
-        const failed = results.find((result) => !result.ok);
+        const failed = results.find((result) => !result.ok && !isNoPendingRequestResult(result));
+        const hasSuccessfulCancellation = results.some((result) => result.ok);
 
-        if (failed) {
+        if (failed || (!hasSuccessfulCancellation && !results.every(isNoPendingRequestResult))) {
           showToast({
             type: "error",
             title: "Error",
-            message: failed.message || "Failed to cancel request.",
+            message: failed?.message || "Failed to cancel request.",
           });
           return;
         }

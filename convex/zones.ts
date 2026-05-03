@@ -173,6 +173,8 @@ export const update = mutation({
     games: v.optional(v.array(v.string())),
     branches: v.optional(v.array(v.any())),
     primaryBranch: v.optional(v.any()),
+    ownerUsername: v.optional(v.string()),
+    ownerFullName: v.optional(v.string()),
     venueBrandName: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
@@ -200,6 +202,8 @@ export const update = mutation({
     if (updates.games !== undefined) updateData.games = updates.games;
     if (updates.branches !== undefined) updateData.branches = updates.branches;
     if (updates.primaryBranch !== undefined) updateData.primaryBranch = updates.primaryBranch;
+    if (updates.ownerUsername !== undefined) updateData.ownerUsername = updates.ownerUsername;
+    if (updates.ownerFullName !== undefined) updateData.ownerFullName = updates.ownerFullName;
     if (updates.venueBrandName !== undefined) updateData.venueBrandName = updates.venueBrandName;
     if (updates.contactEmail !== undefined) updateData.contactEmail = updates.contactEmail;
     if (updates.contactPhone !== undefined) updateData.contactPhone = updates.contactPhone;

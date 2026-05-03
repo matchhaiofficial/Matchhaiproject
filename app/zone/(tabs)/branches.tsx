@@ -50,6 +50,8 @@ export default function ZoneBranches() {
         return !isZoneMigrationReady(zone) && branches.length > 0;
     }, [zone, branches.length]);
 
+    const headerLeadingSlot = <View style={styles.headerLeadingSlot} />;
+
     if (loading) {
         return (
             <View style={styles.loadingWrap}>
@@ -60,8 +62,8 @@ export default function ZoneBranches() {
 
     if (!zone) {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
-                <AppHeader title="Branches" inlineTitle />
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
+                <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
                 <View style={styles.emptyWrap}>
                     <Text style={styles.emptyTitle}>No zone found.</Text>
                 </View>
@@ -70,12 +72,14 @@ export default function ZoneBranches() {
     }
 
     return (
-        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
-            <AppHeader title="Branches" subtitle={`${branches.length} locations`} inlineTitle />
+        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
+            <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
             <ScrollView
                 contentContainerStyle={[styles.content, { paddingBottom: bottomClearance }]}
                 showsVerticalScrollIndicator={false}
             >
+                <Text style={styles.branchCountLabel}>{branches.length} locations</Text>
+
                 {usingLegacyFallback && (
                     <View style={styles.noticeBox}>
                         <Text style={styles.noticeTitle}>
@@ -113,9 +117,9 @@ export default function ZoneBranches() {
                             }}
                         >
                             <View style={styles.branchCardRow}>
-                                <View>
+                                <View style={styles.branchInfo}>
                                     <View style={styles.branchTitleRow}>
-                                        <Text style={styles.branchTitle}>
+                                        <Text style={styles.branchTitle} numberOfLines={1}>
                                             {branch.branchDisplayName || branch.name || "Main Branch"}
                                         </Text>
                                         {branch.isPrimary && (
@@ -126,14 +130,16 @@ export default function ZoneBranches() {
                                             </View>
                                         )}
                                     </View>
-                                    <Text style={styles.branchLocation}>
+                                    <Text style={styles.branchLocation} numberOfLines={1}>
                                         {branch.areaLabel}, {branch.city}
                                     </Text>
-                                    <Text style={styles.branchAddress}>
+                                    <Text style={styles.branchAddress} numberOfLines={2}>
                                         {branch.addressLine1 || branch.address}
                                     </Text>
                                 </View>
-                                <AppIcon name="chevron-right" size="lg" tone="muted" />
+                                <View style={styles.branchChevron}>
+                                    <AppIcon name="chevron-right" size="lg" tone="muted" />
+                                </View>
                             </View>
                         </Pressable>
                     ))

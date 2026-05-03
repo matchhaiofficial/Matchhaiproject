@@ -118,6 +118,9 @@ export async function migrateZoneBranchesInternal(ctx: any, zoneId: any) {
       { assetType: "pc", tier: "regular", count: toPositiveInt(pricing.pc?.regular?.count), room: "Regular PCs" },
       { assetType: "pc", tier: "premium", count: toPositiveInt(pricing.pc?.premium?.count), room: "Premium PCs" },
       { assetType: "pc", tier: "elite", count: toPositiveInt(pricing.pc?.elite?.count), room: "Elite PCs" },
+      { assetType: "console", tier: "regular", count: toPositiveInt(pricing.console?.regular?.count), room: "Regular Consoles" },
+      { assetType: "console", tier: "premium", count: toPositiveInt(pricing.console?.premium?.count), room: "Premium Consoles" },
+      { assetType: "console", tier: "elite", count: toPositiveInt(pricing.console?.elite?.count), room: "Elite Consoles" },
       { assetType: "console", tier: "ps5", count: toPositiveInt(pricing.console?.ps5?.count), room: "PS5" },
       { assetType: "console", tier: "xbox", count: toPositiveInt(pricing.console?.xbox?.count), room: "Xbox" },
     ];

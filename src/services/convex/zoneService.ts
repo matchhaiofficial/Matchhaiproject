@@ -446,8 +446,26 @@ export function deriveZoneRate(zone: Zone, gameKey: string): EffectiveRateResult
 
     case "fc26":
     case "tekken8":
+      const consoleRegular = p.console?.regular as any;
+      const consolePremium = p.console?.premium as any;
+      const consoleElite = p.console?.elite as any;
       const consolePs5 = p.console?.ps5 as any;
       const consoleXbox = p.console?.xbox as any;
+      const regularRate =
+        toPositiveNumber(consoleRegular?.price1v1)
+        || toPositiveNumber(consoleRegular?.price)
+        || toPositiveNumber(consoleRegular?.price2v2)
+        || null;
+      const premiumRate =
+        toPositiveNumber(consolePremium?.price1v1)
+        || toPositiveNumber(consolePremium?.price)
+        || toPositiveNumber(consolePremium?.price2v2)
+        || null;
+      const eliteRate =
+        toPositiveNumber(consoleElite?.price1v1)
+        || toPositiveNumber(consoleElite?.price)
+        || toPositiveNumber(consoleElite?.price2v2)
+        || null;
       const ps5Rate =
         toPositiveNumber(consolePs5?.price1v1)
         || toPositiveNumber(consolePs5?.price)
@@ -458,8 +476,12 @@ export function deriveZoneRate(zone: Zone, gameKey: string): EffectiveRateResult
         || toPositiveNumber(consoleXbox?.price)
         || toPositiveNumber(consoleXbox?.price2v2)
         || null;
-      rate = ps5Rate || xboxRate || null;
-      if (rate) label = `${rate} PKR/hr (${ps5Rate ? "PS5" : "Xbox"})`;
+      rate = regularRate || premiumRate || eliteRate || ps5Rate || xboxRate || null;
+      if (rate) {
+        label = `${rate} PKR/hr (${
+          regularRate ? "Regular" : premiumRate ? "Premium" : eliteRate ? "Elite" : ps5Rate ? "PS5" : "Xbox"
+        })`;
+      }
       break;
 
     case "futsal":
@@ -631,32 +653,74 @@ function buildPcPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
 function buildConsolePricingGroup(pricing: any): PlayerVenuePricingGroup | null {
   const rows: PlayerVenuePricingRow[] = [];
   addPricingRow(rows, {
+    label: "Regular Console 1v1",
+    price: pricing?.console?.regular?.price1v1,
+    count: pricing?.console?.regular?.count,
+    countNoun: "seat",
+    sortOrder: 10,
+  });
+  addPricingRow(rows, {
+    label: "Regular Console 2v2",
+    price: pricing?.console?.regular?.price2v2,
+    count: pricing?.console?.regular?.count,
+    countNoun: "seat",
+    sortOrder: 20,
+  });
+  addPricingRow(rows, {
+    label: "Premium Console 1v1",
+    price: pricing?.console?.premium?.price1v1,
+    count: pricing?.console?.premium?.count,
+    countNoun: "seat",
+    sortOrder: 30,
+  });
+  addPricingRow(rows, {
+    label: "Premium Console 2v2",
+    price: pricing?.console?.premium?.price2v2,
+    count: pricing?.console?.premium?.count,
+    countNoun: "seat",
+    sortOrder: 40,
+  });
+  addPricingRow(rows, {
+    label: "Elite Console 1v1",
+    price: pricing?.console?.elite?.price1v1,
+    count: pricing?.console?.elite?.count,
+    countNoun: "seat",
+    sortOrder: 50,
+  });
+  addPricingRow(rows, {
+    label: "Elite Console 2v2",
+    price: pricing?.console?.elite?.price2v2,
+    count: pricing?.console?.elite?.count,
+    countNoun: "seat",
+    sortOrder: 60,
+  });
+  addPricingRow(rows, {
     label: "PS5 1v1",
     price: pricing?.console?.ps5?.price1v1,
     count: pricing?.console?.ps5?.count,
     countNoun: "seat",
-    sortOrder: 10,
+    sortOrder: 70,
   });
   addPricingRow(rows, {
     label: "PS5 2v2",
     price: pricing?.console?.ps5?.price2v2,
     count: pricing?.console?.ps5?.count,
     countNoun: "seat",
-    sortOrder: 20,
+    sortOrder: 80,
   });
   addPricingRow(rows, {
     label: "Xbox 1v1",
     price: pricing?.console?.xbox?.price1v1,
     count: pricing?.console?.xbox?.count,
     countNoun: "seat",
-    sortOrder: 30,
+    sortOrder: 90,
   });
   addPricingRow(rows, {
     label: "Xbox 2v2",
     price: pricing?.console?.xbox?.price2v2,
     count: pricing?.console?.xbox?.count,
     countNoun: "seat",
-    sortOrder: 40,
+    sortOrder: 100,
   });
 
   return rows.length > 0

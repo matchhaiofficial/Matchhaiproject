@@ -234,6 +234,12 @@ function getZoneStartingRate(zone: any, gameKey: string) {
       pricing?.pc?.regular?.price,
       pricing?.pc?.premium?.price,
       pricing?.pc?.elite?.price,
+      pricing?.console?.regular?.price1v1,
+      pricing?.console?.regular?.price2v2,
+      pricing?.console?.premium?.price1v1,
+      pricing?.console?.premium?.price2v2,
+      pricing?.console?.elite?.price1v1,
+      pricing?.console?.elite?.price2v2,
       pricing?.console?.ps5?.price1v1,
       pricing?.console?.ps5?.price2v2,
       pricing?.console?.xbox?.price1v1,
@@ -254,6 +260,12 @@ function getZoneStartingRate(zone: any, gameKey: string) {
 
   if (canonicalGameKey === "fc26" || canonicalGameKey === "tekken8") {
     return (
+      toPositiveNumber(pricing?.console?.regular?.price1v1) ||
+      toPositiveNumber(pricing?.console?.regular?.price2v2) ||
+      toPositiveNumber(pricing?.console?.premium?.price1v1) ||
+      toPositiveNumber(pricing?.console?.premium?.price2v2) ||
+      toPositiveNumber(pricing?.console?.elite?.price1v1) ||
+      toPositiveNumber(pricing?.console?.elite?.price2v2) ||
       toPositiveNumber(pricing?.console?.ps5?.price1v1) ||
       toPositiveNumber(pricing?.console?.ps5?.price2v2) ||
       toPositiveNumber(pricing?.console?.xbox?.price1v1) ||
@@ -292,7 +304,11 @@ function matchesVenuePlatform(zone: any, platform: string) {
   if (platform === "Any") return true;
   const pricing = zone?.branches?.[0]?.pricing || zone?.pricing || {};
   const consolePlatform = String(zone?.capacity?.consolePlatform || "").toLowerCase();
-  const hasPs5 = Number(pricing?.console?.ps5?.count || 0) > 0 || consolePlatform.includes("ps5");
+  const hasTieredConsole =
+    Number(pricing?.console?.regular?.count || 0) > 0 ||
+    Number(pricing?.console?.premium?.count || 0) > 0 ||
+    Number(pricing?.console?.elite?.count || 0) > 0;
+  const hasPs5 = Number(pricing?.console?.ps5?.count || 0) > 0 || hasTieredConsole || consolePlatform.includes("ps5");
   const hasXbox = Number(pricing?.console?.xbox?.count || 0) > 0 || consolePlatform.includes("xbox");
 
   if (platform === "PS5") return hasPs5;

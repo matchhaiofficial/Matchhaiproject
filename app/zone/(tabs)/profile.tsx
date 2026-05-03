@@ -1,0 +1,263 @@
+import { useRouter } from "expo-router";
+import React, { useMemo } from "react";
+import {
+    ActivityIndicator,
+    Pressable,
+    ScrollView,
+    Text,
+    View,
+} from "react-native";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
+
+import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import Screen from "../../../src/components/Screen";
+import { useAuth } from "../../../src/context/AuthContext";
+import { useZoneData } from "../../../src/hooks/useZoneData";
+import { useEntrance } from "../../../src/motion/useEntrance";
+import { COLORS } from "../../../src/theme";
+import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
+import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
+import { getZoneStatusTone } from "../../../src/utils/statusLabels";
+import {
+    PlayerEmptyStateCard,
+    PlayerSectionHeader,
+} from "../../(player)/components/PlayerSurface";
+import styles from "./profile.styles";
+
+const toPositiveNumber = (value: unknown) => {
+    const parsed = Number(String(value ?? "").trim());
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getInitials = (value?: string | null) => {
+    const cleaned = String(value || "").trim();
+    if (!cleaned) return "?";
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return cleaned[0].toUpperCase();
+};
+
+const getBranchDisplayName = (branch: any) =>
+    branch?.branchDisplayName || branch?.name || "Branch";
+
+const getBranchLocation = (branch: any) =>
+    [branch?.areaLabel, branch?.city].filter(Boolean).join(", ") || "Location not set";
+
+const getBranchAddress = (branch: any) =>
+    branch?.addressLine1 || branch?.address || "Address not set";
+
+const getBranchInventorySummary = (branch: any) => {
+    const labels: string[] = [];
+    const pcCount =
+        toPositiveNumber(branch?.pricing?.pc?.regular?.count) +
+        toPositiveNumber(branch?.pricing?.pc?.premium?.count) +
+        toPositiveNumber(branch?.pricing?.pc?.elite?.count);
+    const consoleCount =
+        toPositiveNumber(branch?.pricing?.console?.regular?.count) +
+        toPositiveNumber(branch?.pricing?.console?.premium?.count) +
+        toPositiveNumber(branch?.pricing?.console?.elite?.count) +
+        toPositiveNumber(branch?.pricing?.console?.ps5?.count) +
+        toPositiveNumber(branch?.pricing?.console?.xbox?.count);
+
+    if (branch?.supportsCs2 || pcCount > 0) labels.push(`${pcCount || "PC"} setup${pcCount === 1 ? "" : "s"}`);
+    if (branch?.supportsFc25 || branch?.supportsFc26 || branch?.supportsTekken8 || consoleCount > 0) {
+        labels.push(`${consoleCount || "Console"} console${consoleCount === 1 ? "" : "s"}`);
+    }
+
+    return labels.length ? labels.join(" / ") : "Inventory not configured";
+};
+
+const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+
+export default function ZoneProfile() {
+    const router = useRouter();
+    const insets = useSafeAreaInsets();
+    const tabBarHeight = useBottomTabBarHeight();
+    const { user } = useAuth();
+    const { zone, loading } = useZoneData();
+    const { animatedStyle: entranceStyle } = useEntrance({
+        axis: "y",
+        distance: 10,
+        initialScale: 0.995,
+    });
+
+    const bottomChromeClearance = getBottomChromeClearance({
+        bottomInset: insets.bottom,
+        tabBarHeight: HIDE_ZONE_TAB_BAR ? 0 : tabBarHeight,
+    });
+
+    const branches = useMemo(() => {
+        if (!Array.isArray(zone?.branches)) return [];
+        return zone.branches.map((branch: any, index: number) => ({
+            id: branch?.id || `branch_${index + 1}`,
+            ...branch,
+        }));
+    }, [zone?.branches]);
+
+    const venueName = zone?.venueBrandName || "Zone Venue";
+    const ownerName = zone?.ownerFullName || user?.fullName || "Zone Admin";
+    const primaryArea = zone?.primaryBranch?.areaLabel || branches[0]?.areaLabel || "";
+    const city = zone?.primaryBranch?.city || branches[0]?.city || "";
+    const locationLabel = [primaryArea, city].filter(Boolean).join(", ");
+    const branchCountLabel = `${branches.length} branch${branches.length === 1 ? "" : "es"}`;
+
+    if (loading) {
+        return (
+            <Screen style={styles.screen} scroll={false} edges={["top"]}>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={COLORS.accent} />
+                </View>
+            </Screen>
+        );
+    }
+
+    if (!zone) {
+        return (
+            <Screen style={styles.screen} scroll={false} edges={["top"]} contentStyle={styles.scrollContent}>
+                <AppHeader title="Profile" inlineTitle />
+                <View style={styles.emptyWrap}>
+                    <PlayerEmptyStateCard
+                        title="Zone profile not found."
+                        description="We could not find a zone linked to this account yet."
+                    />
+                </View>
+            </Screen>
+        );
+    }
+
+    return (
+        <Screen
+            style={styles.screen}
+            scroll
+            routeKey="/zone/(tabs)/profile"
+            contentStyle={[
+                styles.scrollContent,
+                { paddingBottom: bottomChromeClearance + 24 },
+            ]}
+            edges={["top"]}
+            scrollProps={{ showsVerticalScrollIndicator: false }}
+        >
+            <AppHeader
+                title="Profile"
+                inlineTitle
+                rightAction={(
+                    <Pressable
+                        style={styles.headerIcon}
+                        onPress={() => router.push("/zone/profile/edit" as any)}
+                    >
+                        <AppIcon name="settings" size={24} color={COLORS.text} />
+                    </Pressable>
+                )}
+            />
+
+            <Animated.View style={entranceStyle}>
+                <AppCard style={styles.profileCard}>
+                    <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{getInitials(venueName)}</Text>
+                    </View>
+                    <Text style={styles.profileName} numberOfLines={1}>{venueName}</Text>
+                    <Text style={styles.profileUsername} numberOfLines={1}>{ownerName}</Text>
+                    {zone.contactEmail || user?.email ? (
+                        <Text style={styles.profileEmail} numberOfLines={1}>
+                            {zone.contactEmail || user?.email}
+                        </Text>
+                    ) : null}
+
+                    <View style={styles.profileMeta}>
+                        {locationLabel ? (
+                            <View style={styles.profileMetaItem}>
+                                <AppIcon name="location-on" size={14} color={COLORS.muted} />
+                                <Text style={styles.profileMetaText} numberOfLines={1}>{locationLabel}</Text>
+                            </View>
+                        ) : null}
+                        <View style={styles.profileMetaItem}>
+                            <AppIcon name="store" size={14} color={COLORS.muted} />
+                            <Text style={styles.profileMetaText}>{branchCountLabel}</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.profileStatusRow}>
+                        <StatusPill tone={getZoneStatusTone(zone.status)} label={getZoneLifecycleLabel(zone)} />
+                        <StatusPill tone="neutral" label={zone.type === "sports" ? "Sports" : zone.type === "hybrid" ? "Hybrid" : "Gaming"} />
+                    </View>
+                </AppCard>
+
+                <View style={styles.section}>
+                    <PlayerSectionHeader
+                        title="My Branches"
+                        actionLabel="Add"
+                        onPress={() => router.push("/zone/branch/new" as any)}
+                    />
+
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.branchesScrollContainer}
+                    >
+                        {branches.length > 0 ? (
+                            branches.map((branch: any) => (
+                                <Pressable
+                                    key={branch.id}
+                                    style={styles.branchCard}
+                                    onPress={() => router.push(`/zone/branch/${branch.id}` as any)}
+                                >
+                                    <AppCard style={styles.branchCardInner}>
+                                        <View style={styles.branchIcon}>
+                                            <AppIcon name="storefront" size={24} color={COLORS.accent} />
+                                        </View>
+                                        <View style={styles.branchInfo}>
+                                            <View style={styles.branchTitleRow}>
+                                                <Text style={styles.branchName} numberOfLines={1}>
+                                                    {getBranchDisplayName(branch)}
+                                                </Text>
+                                                {branch?.isPrimary ? (
+                                                    <View style={styles.primaryBadge}>
+                                                        <Text style={styles.primaryText}>Primary</Text>
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                            <View style={styles.branchDetailRow}>
+                                                <AppIcon name="location-on" size={12} color={COLORS.muted} />
+                                                <Text style={styles.branchLocation} numberOfLines={1}>
+                                                    {getBranchLocation(branch)}
+                                                </Text>
+                                            </View>
+                                            <Text style={styles.branchInventory} numberOfLines={1}>
+                                                {getBranchInventorySummary(branch)}
+                                            </Text>
+                                            <Text style={styles.branchAddress} numberOfLines={1}>
+                                                {getBranchAddress(branch)}
+                                            </Text>
+                                        </View>
+                                        <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                                    </AppCard>
+                                </Pressable>
+                            ))
+                        ) : (
+                            <Pressable
+                                style={styles.emptyBranchCard}
+                                onPress={() => router.push("/zone/branch/new" as any)}
+                            >
+                                <AppCard style={styles.emptyBranchCardInner}>
+                                    <View style={styles.branchIconInactive}>
+                                        <AppIcon name="add" size={24} color={COLORS.muted} />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.emptyBranchTitle}>Add your first branch</Text>
+                                        <Text style={styles.emptyBranchText}>Tap to create</Text>
+                                    </View>
+                                </AppCard>
+                            </Pressable>
+                        )}
+                    </ScrollView>
+                </View>
+            </Animated.View>
+        </Screen>
+    );
+}

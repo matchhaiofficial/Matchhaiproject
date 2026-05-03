@@ -155,6 +155,15 @@ export default function Login() {
   // NEW: user type (player vs zone admin)
   const [userType, setUserType] = useState<"player" | "zone">("player");
 
+  const handleUserTypeChange = (nextType: "player" | "zone") => {
+    setUserType(nextType);
+    setModeHelper(null);
+    setRecoveryHelper(null);
+    setEmailServerError("");
+    setPasswordServerError("");
+    hideToast();
+  };
+
   // DEBUG: log mount and userType changes
   useEffect(() => {
     Logger.info("Login", "Screen mounted");
@@ -538,9 +547,9 @@ export default function Login() {
           });
           setEmailServerError("This account is registered as a player account.");
           setModeHelper({
-            message: "This email belongs to a player account. Switch to Player mode and sign in again.",
+            message: "This email is registered as a Player account. Use Player mode to continue.",
             targetMode: "player",
-            cta: "Switch to Player mode",
+            cta: "Use Player",
           });
           showToast({
             type: "error",
@@ -565,9 +574,9 @@ export default function Login() {
           });
           setEmailServerError("This account is registered as a zone account.");
           setModeHelper({
-            message: "This email belongs to a zone account. Switch to Zone Admin mode and sign in again.",
+            message: "This email is registered as a Zone Admin account. Use Zone Admin mode to continue.",
             targetMode: "zone",
-            cta: "Switch to Zone mode",
+            cta: "Use Zone Admin",
           });
           showToast({
             type: "error",
@@ -693,7 +702,7 @@ export default function Login() {
         {/* Role toggle (Player / Zone Admin) */}
         <View style={styles.roleToggleRow}>
           <Pressable
-            onPress={() => setUserType("player")}
+            onPress={() => handleUserTypeChange("player")}
             style={[
               styles.roleChip,
               userType === "player" && styles.roleChipActive,
@@ -710,7 +719,7 @@ export default function Login() {
           </Pressable>
 
           <Pressable
-            onPress={() => setUserType("zone")}
+            onPress={() => handleUserTypeChange("zone")}
             style={[
               styles.roleChip,
               userType === "zone" && styles.roleChipActive,
@@ -728,15 +737,27 @@ export default function Login() {
         </View>
 
         {modeHelper ? (
-          <View style={styles.helperTextRow}>
-            <Text style={[styles.helperText, styles.helperWarning]}>{modeHelper.message}</Text>
+          <View style={styles.modeHelperCard}>
+            <View style={styles.modeHelperHeader}>
+              <View style={styles.modeHelperIcon}>
+                <AppIcon name="swap-horiz" size={20} color={COLORS.warning} />
+              </View>
+              <View style={styles.modeHelperCopy}>
+                <Text style={styles.modeHelperTitle}>Wrong login mode</Text>
+                <Text style={styles.modeHelperMessage}>{modeHelper.message}</Text>
+              </View>
+            </View>
             <Pressable
               onPress={() => {
-                setUserType(modeHelper.targetMode);
-                setModeHelper(null);
+                handleUserTypeChange(modeHelper.targetMode);
               }}
+              style={({ pressed }) => [
+                styles.modeHelperButton,
+                pressed && styles.modeHelperButtonPressed,
+              ]}
             >
-              <Text style={[styles.helperText, { color: COLORS.accent }]}>{modeHelper.cta}</Text>
+              <Text style={styles.modeHelperButtonText}>{modeHelper.cta}</Text>
+              <AppIcon name="arrow-forward" size={18} color={COLORS.text} />
             </Pressable>
           </View>
         ) : null}

@@ -6,6 +6,15 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        flex: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+    },
+    headerLeadingSlot: {
+        width: 40,
+        height: 40,
+    },
     loadingWrap: {
         flex: 1,
         alignItems: "center",
@@ -14,6 +23,13 @@ export default StyleSheet.create({
     },
     content: {
         paddingBottom: SPACING.lg,
+    },
+    branchCountLabel: {
+        color: COLORS.muted,
+        fontFamily: FONTS.subheading,
+        fontSize: TEXT_SIZES.subheading,
+        marginTop: -SPACING.sm,
+        marginBottom: SPACING.md,
     },
     noticeBox: {
         borderWidth: 1,
@@ -82,8 +98,18 @@ export default StyleSheet.create({
     },
     branchCardRow: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "flex-start",
+        gap: SPACING.sm,
+    },
+    branchInfo: {
+        flex: 1,
+        minWidth: 0,
+    },
+    branchChevron: {
+        width: 28,
+        minHeight: 28,
+        alignItems: "flex-end",
+        justifyContent: "center",
     },
     branchTitleRow: {
         flexDirection: "row",

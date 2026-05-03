@@ -88,16 +88,28 @@ export default function ZoneSettingsModule() {
                     </View>
                 </View>
 
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>System Tools</Text>
-                    <Text style={styles.cardDescription}>
-                        Migration status and repair actions now live in a separate admin/system surface.
-                    </Text>
-                    <InfoRow label="Current migration state" value={getZoneMigrationLabel(zone)} />
+                <View style={[styles.card, styles.systemToolsCard]}>
+                    <View style={styles.systemToolsHeader}>
+                        <View style={styles.systemToolsIconBadge}>
+                            <AppIcon name="construction" size={20} color={COLORS.accent} />
+                        </View>
+                        <View style={styles.systemToolsHeaderText}>
+                            <Text style={styles.cardTitle}>System Tools</Text>
+                            <Text style={styles.cardDescription}>
+                                Migration status and repair actions now live in a separate admin/system surface.
+                            </Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.migrationStateBox}>
+                        <Text style={styles.migrationStateLabel}>Current migration state</Text>
+                        <Text style={styles.migrationStateValue}>{getZoneMigrationLabel(zone)}</Text>
+                    </View>
 
                     <Pressable
                         style={({ pressed }) => [
                             styles.primaryButton,
+                            styles.systemToolsButton,
                             pressed && styles.primaryButtonPressed,
                         ]}
                         onPress={() => router.push("/zone/modules/migration-tools" as any)}
