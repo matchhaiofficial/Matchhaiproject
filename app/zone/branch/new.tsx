@@ -11,10 +11,10 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { addBranch } from "../../../src/services/convex/zoneService";
@@ -70,19 +70,14 @@ export default function AddBranch() {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <Screen style={styles.container} scroll={false}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
             >
-                <AppHeader
-                    title="Add New Branch"
-                    onBack={() => router.back()}
-                    inlineTitle
-                    style={styles.appHeader}
-                />
+                <AppHeader title="Add New Branch" onBack={() => router.back()} inlineTitle />
 
-                <ScrollView contentContainerStyle={styles.content}>
+                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
                     <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Branch Name</Text>
                         <TextInput
@@ -168,6 +163,6 @@ export default function AddBranch() {
                     </Pressable>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

@@ -23,7 +23,7 @@ export default StyleSheet.create({
         paddingBottom: 0,
     },
     zoneAdmincontainer: {
-        paddingBottom: 300,
+        paddingBottom: SPACING.lg,
     },
     loadingContainer: {
         flex: 1,

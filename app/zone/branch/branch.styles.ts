@@ -31,6 +31,10 @@ export default StyleSheet.create({
         padding: SPACING.lg,
         paddingBottom: SPACING.lg + SPACING.xxl,
     },
+    contentInsideScreen: {
+        paddingHorizontal: 0,
+        paddingTop: 0,
+    },
     sectionLabel: {
         color: COLORS.muted,
         fontSize: 14,

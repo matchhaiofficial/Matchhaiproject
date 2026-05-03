@@ -301,15 +301,15 @@ export default StyleSheet.create({
         fontWeight: 'bold',
     },
     joinedButton: {
-        backgroundColor: COLORS.success + '15',
+        backgroundColor: COLORS.overlayLight,
         paddingVertical: 14,
         borderRadius: RADII.md,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: COLORS.success + '50',
+        borderColor: COLORS.cardBorder,
     },
     joinedText: {
-        color: COLORS.success,
+        color: COLORS.text,
         fontFamily: FONTS.heading,
         fontSize: 14,
         fontWeight: 'bold',

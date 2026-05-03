@@ -1,6 +1,7 @@
 # MatchHai Canonical Audit And Flow Reference
 
-Date: 2026-04-03
+Date: 2026-05-03 (updated)
+Originally drafted: 2026-04-03
 Workspace: `D:\matchhai_app`
 Source basis:
 - `APP_UI_FLOW_STRUCTURE_ANALYSIS.md`
@@ -24,6 +25,12 @@ It is intended to be the source of truth for:
 - next-step cleanup and scaling priorities
 
 This is a code-verified audit, not a design-only or screenshot-only summary.
+
+## 1.1 Update log (this file)
+
+- 2026-05-03: refreshed route inventory to include `app/auth/reset-password.tsx` and `app/zone/modules/audit.tsx` in the main Route Inventory list.
+- 2026-05-03: added a generated per-route “Layout / wrapper map” table (route -> `_layout.tsx` chain) to make layout differences explicit.
+- 2026-05-03: updated global runtime wiring notes to include Inter font loading at app root.
 
 ## 2. Method And Confidence Boundaries
 
@@ -73,6 +80,8 @@ The app is already a real three-surface system:
 ### Root shell
 
 - `app/_layout.tsx`
+- `app/+html.tsx`
+- `app/+not-found.tsx`
 - `app/index.tsx`
 - `src/context/AuthContext.tsx`
 - `src/utils/accountRouting.ts`
@@ -81,6 +90,7 @@ The app is already a real three-surface system:
 
 - `app/auth/login.tsx`
 - `app/auth/forgot-password.tsx`
+- `app/auth/reset-password.tsx`
 - `app/auth/verification-required.tsx`
 - `app/auth/register.tsx`
 - `app/auth/register-step2.tsx`
@@ -142,6 +152,7 @@ The app is already a real three-surface system:
 - `app/zone/branch/new.tsx`
 - `app/zone/branch/[id].tsx`
 - `app/zone/modules/bookings.tsx`
+- `app/zone/modules/audit.tsx`
 - `app/zone/modules/resources.tsx`
 - `app/zone/modules/pricing.tsx`
 - `app/zone/modules/support.tsx`
@@ -162,6 +173,85 @@ The app is already a real three-surface system:
 
 - `app/debug/perf.tsx`
 
+### Layout / wrapper map (per route)
+
+Expo Router layout resolution (and the resulting visual shell differences) are driven by the nearest `_layout.tsx` up the directory tree.
+
+Notes:
+- “Public URL path” strips route groups like `(player)` and `(tabs)` (Expo Router groups are not part of the URL).
+- “Router path” shows the internal route path including groups (useful for disambiguating `/` conflicts like `app/index.tsx` vs player tabs index).
+- “Layout chain” is the ordered `_layout.tsx` chain that will wrap that page at runtime.
+
+| Public URL path | Router path (includes groups) | File | Layout chain |
+|---|---|---|---|
+| `/discover` | `/(player)/(tabs)/discover` | `app/(player)/(tabs)/discover.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` -> `app/(player)/(tabs)/_layout.tsx` |
+| `/` | `/(player)/(tabs)` | `app/(player)/(tabs)/index.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` -> `app/(player)/(tabs)/_layout.tsx` |
+| `/matchrooms` | `/(player)/(tabs)/matchrooms` | `app/(player)/(tabs)/matchrooms.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` -> `app/(player)/(tabs)/_layout.tsx` |
+| `/profile` | `/(player)/(tabs)/profile` | `app/(player)/(tabs)/profile.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` -> `app/(player)/(tabs)/_layout.tsx` |
+| `/teams` | `/(player)/(tabs)/teams` | `app/(player)/(tabs)/teams.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` -> `app/(player)/(tabs)/_layout.tsx` |
+| `/chatrooms` | `/(player)/chatrooms` | `app/(player)/chatrooms.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/friend-chat/[friendId]` | `/(player)/friend-chat/[friendId]` | `app/(player)/friend-chat/[friendId].tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/friends` | `/(player)/friends` | `app/(player)/friends.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/inbox` | `/(player)/inbox` | `app/(player)/inbox.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/my-teams` | `/(player)/my-teams` | `app/(player)/my-teams.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/profile/[uid]` | `/(player)/profile/[uid]` | `app/(player)/profile/[uid].tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/profile/edit` | `/(player)/profile/edit` | `app/(player)/profile/edit.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/profile/game-details` | `/(player)/profile/game-details` | `app/(player)/profile/game-details.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/report/[id]` | `/(player)/report/[id]` | `app/(player)/report/[id].tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/reports` | `/(player)/reports` | `app/(player)/reports.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/schedule` | `/(player)/schedule` | `app/(player)/schedule.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/wallet` | `/(player)/wallet` | `app/(player)/wallet.tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/zones/[id]` | `/(player)/zones/[id]` | `app/(player)/zones/[id].tsx` | `app/_layout.tsx` -> `app/(player)/_layout.tsx` |
+| `/+html` | `/+html` | `app/+html.tsx` | `app/_layout.tsx` |
+| `/+not-found` | `/+not-found` | `app/+not-found.tsx` | `app/_layout.tsx` |
+| `/auth/forgot-password` | `/auth/forgot-password` | `app/auth/forgot-password.tsx` | `app/_layout.tsx` |
+| `/auth/login` | `/auth/login` | `app/auth/login.tsx` | `app/_layout.tsx` |
+| `/auth/register-step2` | `/auth/register-step2` | `app/auth/register-step2.tsx` | `app/_layout.tsx` |
+| `/auth/register-step3` | `/auth/register-step3` | `app/auth/register-step3.tsx` | `app/_layout.tsx` |
+| `/auth/register-step4` | `/auth/register-step4` | `app/auth/register-step4.tsx` | `app/_layout.tsx` |
+| `/auth/register` | `/auth/register` | `app/auth/register.tsx` | `app/_layout.tsx` |
+| `/auth/reset-password` | `/auth/reset-password` | `app/auth/reset-password.tsx` | `app/_layout.tsx` |
+| `/auth/verification-required` | `/auth/verification-required` | `app/auth/verification-required.tsx` | `app/_layout.tsx` |
+| `/auth/zone-register-step2` | `/auth/zone-register-step2` | `app/auth/zone-register-step2.tsx` | `app/_layout.tsx` |
+| `/auth/zone-register-step3` | `/auth/zone-register-step3` | `app/auth/zone-register-step3.tsx` | `app/_layout.tsx` |
+| `/auth/zone-register-step4` | `/auth/zone-register-step4` | `app/auth/zone-register-step4.tsx` | `app/_layout.tsx` |
+| `/auth/zone-register` | `/auth/zone-register` | `app/auth/zone-register.tsx` | `app/_layout.tsx` |
+| `/debug/perf` | `/debug/perf` | `app/debug/perf.tsx` | `app/_layout.tsx` |
+| `/` | `/` | `app/index.tsx` | `app/_layout.tsx` |
+| `/matchrooms/[id]` | `/matchrooms/[id]` | `app/matchrooms/[id].tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/book/[id]` | `/matchrooms/book/[id]` | `app/matchrooms/book/[id].tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/book/pay/[intentId]` | `/matchrooms/book/pay/[intentId]` | `app/matchrooms/book/pay/[intentId].tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/book/status/[intentId]` | `/matchrooms/book/status/[intentId]` | `app/matchrooms/book/status/[intentId].tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/chat/[id]` | `/matchrooms/chat/[id]` | `app/matchrooms/chat/[id].tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/create` | `/matchrooms/create` | `app/matchrooms/create/index.tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/my` | `/matchrooms/my` | `app/matchrooms/my.tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/result` | `/matchrooms/result` | `app/matchrooms/result.tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/matchrooms/vote` | `/matchrooms/vote` | `app/matchrooms/vote.tsx` | `app/_layout.tsx` -> `app/matchrooms/_layout.tsx` |
+| `/super-admin` | `/super-admin/(tabs)` | `app/super-admin/(tabs)/index.tsx` | `app/_layout.tsx` -> `app/super-admin/_layout.tsx` |
+| `/super-admin/easypaisa` | `/super-admin/easypaisa` | `app/super-admin/easypaisa.tsx` | `app/_layout.tsx` -> `app/super-admin/_layout.tsx` |
+| `/super-admin/report/[id]` | `/super-admin/report/[id]` | `app/super-admin/report/[id].tsx` | `app/_layout.tsx` -> `app/super-admin/_layout.tsx` |
+| `/super-admin/request/[id]` | `/super-admin/request/[id]` | `app/super-admin/request/[id].tsx` | `app/_layout.tsx` -> `app/super-admin/_layout.tsx` |
+| `/teams/[id]` | `/teams/[id]` | `app/teams/[id].tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/teams/challenge-chat` | `/teams/challenge-chat` | `app/teams/challenge-chat.tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/teams/challenge-create` | `/teams/challenge-create` | `app/teams/challenge-create.tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/teams/challenge` | `/teams/challenge` | `app/teams/challenge.tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/teams/challenges` | `/teams/challenges` | `app/teams/challenges.tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/teams/create` | `/teams/create` | `app/teams/create.tsx` | `app/_layout.tsx` -> `app/teams/_layout.tsx` |
+| `/zone/branches` | `/zone/(tabs)/branches` | `app/zone/(tabs)/branches.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/(tabs)/_layout.tsx` |
+| `/zone` | `/zone/(tabs)` | `app/zone/(tabs)/index.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/(tabs)/_layout.tsx` |
+| `/zone/branch/[id]` | `/zone/branch/[id]` | `app/zone/branch/[id].tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` |
+| `/zone/branch/new` | `/zone/branch/new` | `app/zone/branch/new.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` |
+| `/zone/modules/audit` | `/zone/modules/audit` | `app/zone/modules/audit.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/bookings` | `/zone/modules/bookings` | `app/zone/modules/bookings.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/insights` | `/zone/modules/insights` | `app/zone/modules/insights.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/migration-tools` | `/zone/modules/migration-tools` | `app/zone/modules/migration-tools.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/notifications` | `/zone/modules/notifications` | `app/zone/modules/notifications.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/pricing` | `/zone/modules/pricing` | `app/zone/modules/pricing.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/resources` | `/zone/modules/resources` | `app/zone/modules/resources.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/settings` | `/zone/modules/settings` | `app/zone/modules/settings.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/modules/support` | `/zone/modules/support` | `app/zone/modules/support.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
+| `/zone/report/[id]` | `/zone/report/[id]` | `app/zone/report/[id].tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` |
+
 ## 5. Entry, Role Routing, And Runtime Wiring
 
 ### Root entry
@@ -178,6 +268,7 @@ The app is already a real three-surface system:
 ### Global runtime wiring
 
 - `app/_layout.tsx` loads fonts and mounts auth/runtime providers
+  - current fonts loaded at app root: Montserrat (400/500/600/700), Lora (400), Martel (400), Inter (400/500/600/700)
 - global notification deep-link handling is mounted at app scope
 - in-app and push notification bridges are globally wired
 - root provider mount order (current):

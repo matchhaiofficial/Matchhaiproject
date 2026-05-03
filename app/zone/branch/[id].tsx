@@ -10,9 +10,9 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
+import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
@@ -99,16 +99,18 @@ export default function BranchDetails() {
 
     if (loading) {
         return (
-            <View style={styles.centered}>
+            <Screen style={styles.container} scroll={false}>
+              <View style={styles.centered}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
-            </View>
+              </View>
+            </Screen>
         );
     }
 
     if (!zone) return null;
 
     return (
-        <SafeAreaView style={styles.container}>
+        <Screen style={styles.container} scroll={false}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
@@ -117,10 +119,9 @@ export default function BranchDetails() {
                     title={id === "primary" ? "Edit Primary Branch" : "Edit Branch"}
                     onBack={() => router.back()}
                     inlineTitle
-                    style={styles.appHeader}
                 />
 
-                <ScrollView contentContainerStyle={styles.content}>
+                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
                     {/* Branch Info Section */}
                     <Text style={styles.sectionLabel}>Basic Info</Text>
 
@@ -243,6 +244,6 @@ export default function BranchDetails() {
                     </Pressable>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

@@ -29,7 +29,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
     },
     scrollContent: {
-        paddingTop: 0,
+        paddingTop: 10,
     },
 
     // Profile Card

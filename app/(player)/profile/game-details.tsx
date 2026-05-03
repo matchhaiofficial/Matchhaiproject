@@ -8,7 +8,6 @@ import {
     Text,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
     FC_FORMATIONS,
@@ -18,6 +17,7 @@ import {
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
+import Screen from "../../../src/components/Screen";
 import SkillAssessmentModal from "../../../src/components/SkillAssessmentModal";
 import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
@@ -504,43 +504,42 @@ export default function GameDetails() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <AppHeader
                 title={gameName}
                 onBack={() => router.back()}
                 inlineTitle
-                style={styles.appHeader}
                 rightAction={
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.saveButton,
-                            saving && styles.saveButtonDisabled,
-                            pressed && !saving && styles.saveButtonPressed,
-                        ]}
-                        onPressIn={() => {
-                            if (touchDebugEnabled) {
-                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_game_save" });
-                            }
-                        }}
-                        onPress={handleSavePress}
-                        disabled={saving}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                        <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                    </Pressable>
+                    style={({ pressed }) => [
+                        styles.saveButton,
+                        saving && styles.saveButtonDisabled,
+                        pressed && !saving && styles.saveButtonPressed,
+                    ]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_game_save" });
+                        }
+                    }}
+                    onPress={handleSavePress}
+                    disabled={saving}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
+                </Pressable>
                 }
             />
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]} showsVerticalScrollIndicator={false}>
                 {/* Active Toggle */}
                 <View style={styles.toggleRow}>
                     <Text style={styles.toggleLabel}>Play this Game</Text>
@@ -640,7 +639,7 @@ export default function GameDetails() {
                 onSuccess={handleAssessmentSuccess}
             />
 
-        </SafeAreaView>
+        </Screen>
     );
 }
 
