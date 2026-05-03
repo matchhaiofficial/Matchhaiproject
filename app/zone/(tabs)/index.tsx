@@ -29,6 +29,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
 import { ZONE_ADMIN_MODULES } from "../../../src/features/zoneAdmin/modules";
+import { isPendingZoneAdminNotification } from "../../../src/features/zoneAdmin/notificationFilters";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
@@ -158,11 +159,14 @@ export default function ZoneDashboardHome() {
 
     const { animatedStyle: entranceStyle } = useEntrance({ axis: "y", distance: 14 });
 
-    // Use Convex query for notification count (real-time)
-    const notificationCount = useQuery(
-        api.notifications.countPendingFast,
-        user?._id ? { userId: user._id as Id<"users"> } : "skip",
-    ) ?? 0;
+    const dashboardNotifications = useQuery(
+        api.notifications.listForUser,
+        user?._id ? { userId: user._id as Id<"users">, limit: 100 } : "skip",
+    );
+    const notificationCount = useMemo(
+        () => (dashboardNotifications || []).filter(isPendingZoneAdminNotification).length,
+        [dashboardNotifications],
+    );
 
     const branchAreas = useMemo(() => {
         const areas = new Set<string>();

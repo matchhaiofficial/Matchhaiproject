@@ -50,6 +50,8 @@ export default function ZoneBranches() {
         return !isZoneMigrationReady(zone) && branches.length > 0;
     }, [zone, branches.length]);
 
+    const headerLeadingSlot = <View style={styles.headerLeadingSlot} />;
+
     if (loading) {
         return (
             <View style={styles.loadingWrap}>
@@ -60,8 +62,8 @@ export default function ZoneBranches() {
 
     if (!zone) {
         return (
-            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
-                <AppHeader title="Branches" inlineTitle />
+            <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
+                <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
                 <View style={styles.emptyWrap}>
                     <Text style={styles.emptyTitle}>No zone found.</Text>
                 </View>
@@ -70,12 +72,14 @@ export default function ZoneBranches() {
     }
 
     return (
-        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={{ paddingBottom: 0 }}>
-            <AppHeader title="Branches" subtitle={`${branches.length} locations`} inlineTitle />
+        <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
+            <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
             <ScrollView
                 contentContainerStyle={[styles.content, { paddingBottom: bottomClearance }]}
                 showsVerticalScrollIndicator={false}
             >
+                <Text style={styles.branchCountLabel}>{branches.length} locations</Text>
+
                 {usingLegacyFallback && (
                     <View style={styles.noticeBox}>
                         <Text style={styles.noticeTitle}>

@@ -85,6 +85,14 @@ export default function AdminRegisterStep3() {
 
   const toggleSupport = (field: keyof BranchData) => {
     if (!activeBranch) return;
+    if (field === "supportsFc25") {
+      const enabled = !activeBranch.supportsFc25;
+      updateActiveBranch({
+        supportsFc25: enabled,
+        supportsTekken8: enabled,
+      });
+      return;
+    }
     updateActiveBranch({ [field]: !activeBranch[field] });
   };
 
@@ -239,7 +247,6 @@ export default function AdminRegisterStep3() {
       ? [
           { label: "PC Setup", key: "supportsCs2", icon: "computer" },
           { label: "Console", key: "supportsFc25", icon: "gamepad" },
-          { label: "Tekken 8", key: "supportsTekken8", icon: "sports-mma" },
         ]
       : []),
     // Physical sports are temporarily disabled.

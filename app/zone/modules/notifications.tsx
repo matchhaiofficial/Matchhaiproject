@@ -18,6 +18,11 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
+import {
+    getZoneAdminNotificationStatus,
+    isPendingZoneAdminNotification,
+    isVisibleZoneAdminNotification,
+} from "../../../src/features/zoneAdmin/notificationFilters";
 import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
 import {
     rejectZoneBookingRequest,
@@ -39,6 +44,7 @@ type AdminNotification = {
     body?: string;
     status?: string;
     createdAt?: any;
+    isRead?: boolean;
     fromUid?: string;
     fromUsername?: string;
     toUid?: string;
@@ -86,7 +92,7 @@ const NotificationRow = memo(function NotificationRow({
     onMarkSeen: (item: AdminNotification) => void;
 }) {
     const meta = item.data || {};
-    const status = String(item.status || "new").toLowerCase();
+    const status = getZoneAdminNotificationStatus(item);
     const typeLabel = getTypeLabel(item.type);
     const isMatchRequest = String(item.type || "").toLowerCase().includes("match");
     const title = item.title || item.message || "Admin Alert";
@@ -200,7 +206,7 @@ export default function ZoneNotificationsModule() {
     });
 
     const markAsReadMutation = useMutation(api.notifications.markAsRead);
-    const markAllAsReadMutation = useMutation(api.notifications.markAllAsReadFast);
+    const markManyAsReadMutation = useMutation(api.notifications.markManyAsRead);
     const archiveManyMutation = useMutation(api.notifications.archiveMany);
 
     const rawNotifications = useQuery(
@@ -220,7 +226,8 @@ export default function ZoneNotificationsModule() {
                 title: notification.title,
                 message: notification.body || notification.title,
                 body: notification.body,
-                status: notification.status === "read" ? "seen" : notification.status,
+                status: getZoneAdminNotificationStatus(notification),
+                isRead: notification.isRead === true,
                 createdAt: notification.createdAt,
                 fromUid: notification.fromUid,
                 fromUsername: notification.fromUsername,
@@ -228,14 +235,11 @@ export default function ZoneNotificationsModule() {
                 data: notification.data || {},
                 matchroomId: notification.matchroomId,
             }))
-            .filter((item: AdminNotification) => {
-                const type = String(item.type || "").toLowerCase();
-                return type.includes("booking") || type.includes("resource") || type.includes("admin") || type.includes("match");
-            })
+            .filter(isVisibleZoneAdminNotification)
             .sort((left: AdminNotification, right: AdminNotification) => (right.createdAt || 0) - (left.createdAt || 0));
     }, [rawNotifications]);
 
-    const pendingCount = useMemo(() => items.filter((item) => item.status !== "seen").length, [items]);
+    const pendingCount = useMemo(() => items.filter(isPendingZoneAdminNotification).length, [items]);
     const seenCount = useMemo(() => items.filter((item) => item.status === "seen").length, [items]);
     const filteredItems = useMemo(
         () =>
@@ -250,7 +254,7 @@ export default function ZoneNotificationsModule() {
 
     const markSeenIfPending = useCallback(async (item: AdminNotification) => {
         try {
-            if (item.status === "pending") {
+            if (getZoneAdminNotificationStatus(item) !== "seen") {
                 await markAsReadMutation({
                     notificationId: item._id as Id<"notifications">,
                 });
@@ -295,9 +299,14 @@ export default function ZoneNotificationsModule() {
                         setClearing(true);
                         try {
                             if (hasPending) {
-                                await markAllAsReadMutation({
-                                    userId: user._id as Id<"users">,
-                                });
+                                const pendingIds = items
+                                    .filter(isPendingZoneAdminNotification)
+                                    .map((item) => item._id as Id<"notifications">);
+                                if (pendingIds.length) {
+                                    await markManyAsReadMutation({
+                                        notificationIds: pendingIds,
+                                    });
+                                }
                             } else {
                                 const seenIds = items
                                     .filter((item) => item.status === "seen")
@@ -317,7 +326,7 @@ export default function ZoneNotificationsModule() {
                 },
             ],
         );
-    }, [archiveManyMutation, items, markAllAsReadMutation, pendingCount, user?._id]);
+    }, [archiveManyMutation, items, markManyAsReadMutation, pendingCount, user?._id]);
 
     const handleAcceptRejectBooking = useCallback(async (item: AdminNotification, decision: "accept" | "reject") => {
         if (!user?._id || !item.data?.requestId) return;

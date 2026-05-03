@@ -25,6 +25,12 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import BranchInventoryPricingForm, {
+    buildZoneGamesFromBranches,
+    createEmptyBranchInventory,
+    normalizeBranchInventory,
+    validateBranchInventory,
+} from "./components/BranchInventoryPricingForm";
 import styles from "./branch.styles";
 
 type LocationSearchResult = {
@@ -92,6 +98,7 @@ export default function BranchDetails() {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [inventory, setInventory] = useState(createEmptyBranchInventory);
 
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
@@ -200,6 +207,7 @@ export default function BranchDetails() {
         setContactPhone(formatPakistaniPhone(String(branch.contactPhone || "")));
         setSearchQuery(address || name);
         setSearchResults([]);
+        setInventory(normalizeBranchInventory(branch));
     }, [branchMatch.branch]);
 
     const handleSearchChange = (text: string) => {
@@ -254,6 +262,16 @@ export default function BranchDetails() {
             return;
         }
 
+        const inventoryError = validateBranchInventory(branchDisplayName, inventory);
+        if (inventoryError) {
+            showToast({
+                type: "error",
+                title: "Complete branch setup",
+                message: inventoryError,
+            });
+            return;
+        }
+
         let finalPhone: string | undefined;
         if (contactPhone.trim()) {
             const normalizedPhone = normalizePhoneForSave(contactPhone);
@@ -281,6 +299,9 @@ export default function BranchDetails() {
             address: finalAddressLine,
             googleMapsUrl: googleMapsUrl.trim(),
             contactPhone: finalPhone,
+            ...inventory,
+            supportsFc26: inventory.supportsFc25,
+            pricing: inventory.pricing || {},
         };
 
         setSaving(true);
@@ -307,6 +328,9 @@ export default function BranchDetails() {
                 primaryBranch,
                 city: primaryBranch.city,
                 address: primaryBranch.addressLine1,
+                games: buildZoneGamesFromBranches(
+                    branchMatch.index >= 0 ? nextBranches : [updatedBranch],
+                ),
             });
 
             if (!result.ok) {
@@ -539,6 +563,12 @@ export default function BranchDetails() {
                             </View>
                         </View>
                     ) : null}
+
+                    <BranchInventoryPricingForm
+                        value={inventory}
+                        onChange={setInventory}
+                        validationError={validateBranchInventory(branchDisplayName, inventory)}
+                    />
 
                     <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
                         <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => router.back()} disabled={saving}>

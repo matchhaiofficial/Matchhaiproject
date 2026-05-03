@@ -236,6 +236,7 @@ export default function CreateTeam() {
                     style={localStyles.flexOne}
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
                 >
                     {/* Team Name */}
                     <View style={styles.section}>

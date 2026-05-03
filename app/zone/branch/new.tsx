@@ -21,9 +21,14 @@ import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { addBranch } from "../../../src/services/convex/zoneService";
+import { addBranch, updateZone } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import BranchInventoryPricingForm, {
+    buildZoneGamesFromBranches,
+    createEmptyBranchInventory,
+    validateBranchInventory,
+} from "./components/BranchInventoryPricingForm";
 import styles from "./branch.styles";
 
 type LocationSearchResult = {
@@ -72,6 +77,7 @@ export default function AddBranch() {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [inventory, setInventory] = useState(createEmptyBranchInventory);
 
     const detectAreaFromLocation = useCallback((locationText: string) => {
         const normalized = locationText.toLowerCase();
@@ -194,6 +200,16 @@ export default function AddBranch() {
             return;
         }
 
+        const inventoryError = validateBranchInventory(branchDisplayName, inventory);
+        if (inventoryError) {
+            showToast({
+                type: "error",
+                title: "Complete branch setup",
+                message: inventoryError,
+            });
+            return;
+        }
+
         let finalPhone: string | undefined;
         if (contactPhone.trim()) {
             const normalizedPhone = normalizePhoneForSave(contactPhone);
@@ -211,7 +227,7 @@ export default function AddBranch() {
 
         setSaving(true);
         try {
-            const result = await addBranch(zone.id, {
+            const branchPayload = {
                 branchDisplayName: branchDisplayName.trim(),
                 name: branchDisplayName.trim(),
                 city: city.trim(),
@@ -222,17 +238,32 @@ export default function AddBranch() {
                 contactPhone: finalPhone,
                 isPrimary: false,
                 capacity: {},
-                pricing: {},
-                supportsCs2: false,
-                supportsFc25: false,
-                supportsTekken8: false,
-                supportsFutsal: false,
-                supportsIndoorCricket: false,
-                supportsPadel: false,
-                supportsPickleball: false,
-            });
+                ...inventory,
+                supportsFc26: inventory.supportsFc25,
+                pricing: inventory.pricing || {},
+            };
+
+            const result = await addBranch(zone.id, branchPayload);
 
             if (result.ok) {
+                const nextBranches = [
+                    ...(Array.isArray(zone.branches) ? zone.branches : []),
+                    { ...branchPayload, id: result.data?.id },
+                ];
+                const gamesResult = await updateZone(zone.id, {
+                    games: buildZoneGamesFromBranches(nextBranches),
+                });
+
+                if (!gamesResult.ok) {
+                    showToast({
+                        type: "warning",
+                        title: "Branch created",
+                        message: "Branch saved, but supported games did not refresh. Reopen settings if games look outdated.",
+                    });
+                    router.back();
+                    return;
+                }
+
                 showToast({ type: "success", title: "Created", message: "Branch added successfully." });
                 router.back();
             } else {
@@ -432,6 +463,12 @@ export default function AddBranch() {
                             </View>
                         </View>
                     ) : null}
+
+                    <BranchInventoryPricingForm
+                        value={inventory}
+                        onChange={setInventory}
+                        validationError={validateBranchInventory(branchDisplayName, inventory)}
+                    />
 
                     <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
                         <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => router.back()} disabled={saving}>

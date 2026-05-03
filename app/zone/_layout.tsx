@@ -36,6 +36,7 @@ export default function ZoneLayout() {
         >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="modules" options={{ headerShown: false }} />
+            <Stack.Screen name="profile/edit" options={{ headerShown: false }} />
             <Stack.Screen name="report/[id]" options={{ presentation: "modal", headerShown: false }} />
             <Stack.Screen name="branch/[id]" options={{ headerShown: false }} />
             <Stack.Screen name="branch/new" options={{ presentation: "modal", headerShown: false }} />

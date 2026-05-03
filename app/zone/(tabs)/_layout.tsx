@@ -30,6 +30,7 @@ type TabDef = { name: string; label: string; icon: string };
 const TABS: TabDef[] = [
     { name: "index", label: "Home", icon: "home" },
     { name: "branches", label: "Branches", icon: "store" },
+    { name: "profile", label: "Profile", icon: "person" },
 ];
 
 // Custom Tab Bar
@@ -88,6 +89,8 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
                             style={styles.tabItem}
                             android_ripple={{ color: "transparent", borderless: true }}
                         >
+                            {isFocused && <View style={styles.activeChip} />}
+
                             <View style={[styles.iconRow, isFocused && styles.iconRowActive]}>
                                 <AppIcon
                                     name={icon as any}
@@ -134,10 +137,15 @@ export default function ZoneTabsLayout() {
                 name="branches"
                 options={{ title: "Branches" }}
             />
+            <Tabs.Screen
+                name="profile"
+                options={{ title: "Profile" }}
+            />
             {/* Hide style files from navigation — unchanged */}
             <Tabs.Screen name="_zone-dashboard.styles" options={{ href: null }} />
             <Tabs.Screen name="dashboard.styles" options={{ href: null }} />
             <Tabs.Screen name="branches.styles" options={{ href: null }} />
+            <Tabs.Screen name="profile.styles" options={{ href: null }} />
         </Tabs>
     );
 }
@@ -203,6 +211,18 @@ const styles = StyleSheet.create({
         paddingTop: 6,
         paddingBottom: 4,
         position: "relative",
+    },
+
+    activeChip: {
+        position: "absolute",
+        top: 6,
+        bottom: 6,
+        left: 8,
+        right: 8,
+        backgroundColor: "rgba(66,165,245,0.1)",
+        borderRadius: 14,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: "rgba(66,165,245,0.22)",
     },
 
     iconRow: {

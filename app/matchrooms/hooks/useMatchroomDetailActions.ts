@@ -26,6 +26,9 @@ import Logger from "../../../src/utils/logger";
 import { getUserProfile } from "../../../src/services/userService";
 import { useCallback, useEffect, useRef } from "react";
 
+const isNoPendingRequestResult = (result: { ok: boolean; message?: string }) =>
+  !result.ok && /no pending request found/i.test(result.message || "");
+
 type DetailActionDeps = {
   id: string;
   room: any;
@@ -432,8 +435,9 @@ export function useMatchroomDetailActions({
         cancelMatchJoinRequest(id, user._id),
         ...activeIntentIds.map((intentId) => cancelBookingIntent(intentId, user._id)),
       ])) as Array<{ ok: boolean; message?: string }>;
-      const hasFailure = results.some((result) => !result.ok);
-      if (!hasFailure) {
+      const blockingFailure = results.find((result) => !result.ok && !isNoPendingRequestResult(result));
+      const hasSuccessfulCancellation = results.some((result) => result.ok);
+      if (!blockingFailure && (hasSuccessfulCancellation || results.every(isNoPendingRequestResult))) {
         setRequestedSlots(new Map());
         setGenericRequestStatus(null);
         showToast({
@@ -442,9 +446,8 @@ export function useMatchroomDetailActions({
           type: "success",
         });
       } else {
-        const failed = results.find((result) => !result.ok);
         showToast({
-          message: failed?.message || "Failed to cancel request.",
+          message: blockingFailure?.message || "Failed to cancel request.",
           title: "Cancel failed",
           type: "error",
         });
