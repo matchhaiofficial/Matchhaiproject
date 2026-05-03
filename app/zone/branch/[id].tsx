@@ -77,7 +77,6 @@ function buildPrimaryBranch(branch: any) {
         areaLabel: branch.areaLabel || "",
         addressLine1: branch.addressLine1 || branch.address || "",
         googleMapsUrl: branch.googleMapsUrl || "",
-        contactPhone: branch.contactPhone || "",
     };
 }
 
@@ -328,6 +327,9 @@ export default function BranchDetails() {
                 primaryBranch,
                 city: primaryBranch.city,
                 address: primaryBranch.addressLine1,
+                ...((branchMatch.index === 0 || (branchMatch.index < 0 && routeBranchId === "primary"))
+                    ? { contactPhone: finalPhone }
+                    : {}),
                 games: buildZoneGamesFromBranches(
                     branchMatch.index >= 0 ? nextBranches : [updatedBranch],
                 ),

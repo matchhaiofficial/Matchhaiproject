@@ -59,6 +59,9 @@ const getBranchInventorySummary = (branch: any) => {
         toPositiveNumber(branch?.pricing?.pc?.premium?.count) +
         toPositiveNumber(branch?.pricing?.pc?.elite?.count);
     const consoleCount =
+        toPositiveNumber(branch?.pricing?.console?.regular?.count) +
+        toPositiveNumber(branch?.pricing?.console?.premium?.count) +
+        toPositiveNumber(branch?.pricing?.console?.elite?.count) +
         toPositiveNumber(branch?.pricing?.console?.ps5?.count) +
         toPositiveNumber(branch?.pricing?.console?.xbox?.count);
 

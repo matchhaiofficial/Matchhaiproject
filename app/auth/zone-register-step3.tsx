@@ -19,6 +19,8 @@ import { BranchData, useZoneOnboardingStore } from "../../src/store/zoneOnboardi
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
+const CONSOLE_TYPES = PC_TYPES;
+
 export default function AdminRegisterStep3() {
   const { step1, branches, updateBranch, setCurrentStep } = useZoneOnboardingStore();
   const { showToast } = useToast();
@@ -127,13 +129,34 @@ export default function AdminRegisterStep3() {
       }
 
       if (branch.supportsFc25 || branch.supportsTekken8) {
+        const regularCount = toPositiveNumber(branch.pricing.console?.regular?.count);
+        const premiumCount = toPositiveNumber(branch.pricing.console?.premium?.count);
+        const eliteCount = toPositiveNumber(branch.pricing.console?.elite?.count);
         const ps5Count = toPositiveNumber(branch.pricing.console?.ps5?.count);
         const xboxCount = toPositiveNumber(branch.pricing.console?.xbox?.count);
-        if (ps5Count + xboxCount === 0) {
+        if (regularCount + premiumCount + eliteCount + ps5Count + xboxCount === 0) {
           errors.push(`${branch.branchDisplayName}: add at least one console unit.`);
         }
 
         [
+          [
+            "Regular consoles",
+            regularCount,
+            toPositiveNumber(branch.pricing.console?.regular?.price1v1),
+            toPositiveNumber(branch.pricing.console?.regular?.price2v2),
+          ],
+          [
+            "Premium consoles",
+            premiumCount,
+            toPositiveNumber(branch.pricing.console?.premium?.price1v1),
+            toPositiveNumber(branch.pricing.console?.premium?.price2v2),
+          ],
+          [
+            "Elite consoles",
+            eliteCount,
+            toPositiveNumber(branch.pricing.console?.elite?.price1v1),
+            toPositiveNumber(branch.pricing.console?.elite?.price2v2),
+          ],
           [
             "PS5",
             ps5Count,
@@ -401,103 +424,57 @@ export default function AdminRegisterStep3() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Consoles</Text>
 
-          <View style={styles.fieldGroup}>
-            <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
-              PlayStation 5
-            </Text>
-            <View style={{ marginBottom: 8 }}>
-              <RegistrationFieldLabel label="Total units" required />
-              <View style={styles.inputBox}>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  placeholder="e.g. 4"
-                  placeholderTextColor={COLORS.muted}
-                  value={activeBranch.pricing.console?.ps5?.count || ""}
-                  onChangeText={(value) => updatePricing("console", "ps5", "count", value)}
-                  selectionColor={COLORS.accent}
-                />
-              </View>
-            </View>
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <RegistrationFieldLabel label="Price (1v1)" required />
+          {CONSOLE_TYPES.map((type) => (
+            <View key={type.value} style={styles.fieldGroup}>
+              <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
+                {type.label}
+              </Text>
+              <View style={{ marginBottom: 8 }}>
+                <RegistrationFieldLabel label="Total units" required />
                 <View style={styles.inputBox}>
                   <TextInput
                     style={styles.input}
                     keyboardType="numeric"
-                    placeholder="e.g. 800"
+                    placeholder="e.g. 4"
                     placeholderTextColor={COLORS.muted}
-                    value={activeBranch.pricing.console?.ps5?.price1v1 || ""}
-                    onChangeText={(value) => updatePricing("console", "ps5", "price1v1", value)}
+                    value={activeBranch.pricing.console?.[type.value as "regular" | "premium" | "elite"]?.count || ""}
+                    onChangeText={(value) => updatePricing("console", type.value, "count", value)}
                     selectionColor={COLORS.accent}
                   />
                 </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <RegistrationFieldLabel label="Price (2v2)" required />
-                <View style={styles.inputBox}>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="numeric"
-                    placeholder="e.g. 1200"
-                    placeholderTextColor={COLORS.muted}
-                    value={activeBranch.pricing.console?.ps5?.price2v2 || ""}
-                    onChangeText={(value) => updatePricing("console", "ps5", "price2v2", value)}
-                    selectionColor={COLORS.accent}
-                  />
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <RegistrationFieldLabel label="Price (1v1)" required />
+                  <View style={styles.inputBox}>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="e.g. 800"
+                      placeholderTextColor={COLORS.muted}
+                      value={activeBranch.pricing.console?.[type.value as "regular" | "premium" | "elite"]?.price1v1 || ""}
+                      onChangeText={(value) => updatePricing("console", type.value, "price1v1", value)}
+                      selectionColor={COLORS.accent}
+                    />
+                  </View>
                 </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>Xbox</Text>
-            <View style={{ marginBottom: 8 }}>
-              <RegistrationFieldLabel label="Total units" required />
-              <View style={styles.inputBox}>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  placeholder="e.g. 2"
-                  placeholderTextColor={COLORS.muted}
-                  value={activeBranch.pricing.console?.xbox?.count || ""}
-                  onChangeText={(value) => updatePricing("console", "xbox", "count", value)}
-                  selectionColor={COLORS.accent}
-                />
-              </View>
-            </View>
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <RegistrationFieldLabel label="Price (1v1)" required />
-                <View style={styles.inputBox}>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="numeric"
-                    placeholder="e.g. 700"
-                    placeholderTextColor={COLORS.muted}
-                    value={activeBranch.pricing.console?.xbox?.price1v1 || ""}
-                    onChangeText={(value) => updatePricing("console", "xbox", "price1v1", value)}
-                    selectionColor={COLORS.accent}
-                  />
-                </View>
-              </View>
-              <View style={{ flex: 1 }}>
-                <RegistrationFieldLabel label="Price (2v2)" required />
-                <View style={styles.inputBox}>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="numeric"
-                    placeholder="e.g. 1000"
-                    placeholderTextColor={COLORS.muted}
-                    value={activeBranch.pricing.console?.xbox?.price2v2 || ""}
-                    onChangeText={(value) => updatePricing("console", "xbox", "price2v2", value)}
-                    selectionColor={COLORS.accent}
-                  />
+                <View style={{ flex: 1 }}>
+                  <RegistrationFieldLabel label="Price (2v2)" required />
+                  <View style={styles.inputBox}>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="e.g. 1200"
+                      placeholderTextColor={COLORS.muted}
+                      value={activeBranch.pricing.console?.[type.value as "regular" | "premium" | "elite"]?.price2v2 || ""}
+                      onChangeText={(value) => updatePricing("console", type.value, "price2v2", value)}
+                      selectionColor={COLORS.accent}
+                    />
+                  </View>
                 </View>
               </View>
             </View>
-          </View>
+          ))}
         </View>
       ) : null}
 

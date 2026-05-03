@@ -40,6 +40,9 @@ export type BranchData = {
       elite?: { count: string; price: string };
     };
     console?: {
+      regular?: { count: string; price1v1: string; price2v2: string };
+      premium?: { count: string; price1v1: string; price2v2: string };
+      elite?: { count: string; price1v1: string; price2v2: string };
       ps5?: { count: string; price1v1: string; price2v2: string };
       xbox?: { count: string; price1v1: string; price2v2: string };
     };

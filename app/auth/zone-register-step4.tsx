@@ -63,6 +63,9 @@ export default function AdminRegisterStep4() {
         if (branch.supportsCs2 && pcTotal > 0) items.push(`${pcTotal} PC setups`);
 
         const consoleTotal =
+          Number(branch.pricing.console?.regular?.count || 0) +
+          Number(branch.pricing.console?.premium?.count || 0) +
+          Number(branch.pricing.console?.elite?.count || 0) +
           Number(branch.pricing.console?.ps5?.count || 0) +
           Number(branch.pricing.console?.xbox?.count || 0);
         if ((branch.supportsFc25 || branch.supportsTekken8) && consoleTotal > 0) {
