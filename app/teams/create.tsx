@@ -16,7 +16,6 @@ import {
 
 import AppHeader from "../../src/components/AppHeader";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
-import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import Screen from "../../src/components/Screen";
 import { api } from "../../convex/_generated/api";

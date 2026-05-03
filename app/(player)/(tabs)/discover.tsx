@@ -116,9 +116,9 @@ export default function DiscoverScreen() {
   }>();
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const tabBarClearance = useTabBarClearance(16);
+  const tabBarClearance = useTabBarClearance(0);
   const bottomPadding = 16;
-  const fabBottom = tabBarClearance;
+  const fabBottom = tabBarClearance + 8;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);

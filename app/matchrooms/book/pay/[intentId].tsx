@@ -9,12 +9,13 @@ import {
     Pressable,
     View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
 import { AppButton, AppCard, StatusPill } from "../../../../src/components/AppPrimitives";
 import { DetailKeyValueRow, DetailSectionCard } from "../../../../src/components/DetailSurface";
+import Screen from "../../../../src/components/Screen";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { useToast } from "../../../../src/hooks/useToast";
 import { convex } from "../../../../src/lib/convex";
@@ -43,14 +44,7 @@ export default function MockPaymentScreen() {
     const [processing, setProcessing] = useState(false);
     const [walletBalance, setWalletBalance] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
-    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
     const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
-
-    const logScreenTouch = (tag: string, e: any) => {
-        if (!touchDebugEnabled) return;
-        const { pageX, pageY } = e.nativeEvent;
-        Logger.debug("TouchDebug", "touch", { tag, pageX, pageY });
-    };
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -144,9 +138,12 @@ export default function MockPaymentScreen() {
     const hasEnoughWallet = walletBalance >= Number(intent.pricing?.totalCost || 0);
 
     return (
-        <SafeAreaView
+        <Screen
             style={styles.container}
-            onTouchEndCapture={(e) => logScreenTouch("booking_pay_screen", e)}
+            variant="stack"
+            scroll={false}
+            edges={["top", "bottom"]}
+            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
         >
             <AppHeader
                 title="Review & Pay"
@@ -238,11 +235,6 @@ export default function MockPaymentScreen() {
                     <View style={styles.footer}>
                 <AppButton
                     size="lg"
-                    onPressIn={() => {
-                        if (touchDebugEnabled) {
-                            Logger.debug("TouchDebug", "pressIn", { tag: "booking_pay_now" });
-                        }
-                    }}
                     onPress={handleMockPayment}
                     disabled={processing || !intent || (paymentMethod === "wallet" && !hasEnoughWallet)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -272,6 +264,6 @@ export default function MockPaymentScreen() {
                 </View>
             </ScrollView>
             </View>
-        </SafeAreaView>
+        </Screen>
     );
 }

@@ -10,12 +10,13 @@ import {
     Text,
     View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
 import { AppButton, AppCard, StatusPill } from "../../../../src/components/AppPrimitives";
 import { DetailKeyValueRow, DetailSectionCard } from "../../../../src/components/DetailSurface";
+import Screen from "../../../../src/components/Screen";
 import { BookingIntent } from "../../../../src/services/convex/bookingService";
 import { useAuth } from "../../../../src/context/AuthContext";
 import { useToast } from "../../../../src/hooks/useToast";
@@ -38,14 +39,7 @@ export default function BookingStatusScreen() {
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
-    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
     const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
-
-    const logScreenTouch = (tag: string, e: any) => {
-        if (!touchDebugEnabled) return;
-        const { pageX, pageY } = e.nativeEvent;
-        Logger.debug("TouchDebug", "touch", { tag, pageX, pageY });
-    };
 
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
@@ -172,9 +166,12 @@ export default function BookingStatusScreen() {
         );
 
     return (
-        <SafeAreaView
+        <Screen
             style={styles.container}
-            onTouchEndCapture={(e) => logScreenTouch("booking_status_screen", e)}
+            variant="stack"
+            scroll={false}
+            edges={["top", "bottom"]}
+            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
         >
             <AppHeader
                 title="Booking Status"
@@ -358,11 +355,6 @@ export default function BookingStatusScreen() {
                     {isApproved && (
                         <AppButton
                             size="lg"
-                            onPressIn={() => {
-                                if (touchDebugEnabled) {
-                                    Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_proceed_pay" });
-                                }
-                            }}
                             onPress={() => router.push({
                                 pathname: "/matchrooms/book/pay/[intentId]",
                                 params: { intentId: intentId }
@@ -377,11 +369,6 @@ export default function BookingStatusScreen() {
                     {isCompleted && (
                         <AppButton
                             size="lg"
-                            onPressIn={() => {
-                                if (touchDebugEnabled) {
-                                    Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_return_lobby" });
-                                }
-                            }}
                             onPress={() => router.replace(`/matchrooms/${intent.matchroomId}`)}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
@@ -396,11 +383,6 @@ export default function BookingStatusScreen() {
                             {!isRejected && (
                                 <AppButton
                                     variant="danger"
-                                    onPressIn={() => {
-                                        if (touchDebugEnabled) {
-                                            Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_cancel" });
-                                        }
-                                    }}
                                     onPress={handleCancel}
                                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                     style={styles.secondaryAction}
@@ -412,11 +394,6 @@ export default function BookingStatusScreen() {
                             {/* Dashboard Button */}
                             <AppButton
                                 variant="secondary"
-                                onPressIn={() => {
-                                    if (touchDebugEnabled) {
-                                        Logger.debug("TouchDebug", "pressIn", { tag: "booking_status_dashboard" });
-                                    }
-                                }}
                                 onPress={() => router.replace(buildLegacyMatchroomsHref() as any)}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 style={styles.secondaryAction}
@@ -429,6 +406,6 @@ export default function BookingStatusScreen() {
                 </View>
             </ScrollView>
             </View>
-        </SafeAreaView>
+        </Screen>
     );
 }

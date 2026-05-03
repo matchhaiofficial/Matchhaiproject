@@ -53,7 +53,7 @@ export default function Screen({
     const { contentContainerStyle: scrollContentStyle, ...restScrollProps } = scrollProps || {};
     const scrollKeyboardShouldPersistTaps = restScrollProps.keyboardShouldPersistTaps ?? 'handled';
     const scrollKeyboardDismissMode = restScrollProps.keyboardDismissMode ?? (Platform.OS === 'ios' ? 'interactive' : 'on-drag');
-    const tabBarBottomClearance = useTabBarClearance(20);
+    const tabBarBottomClearance = useTabBarClearance(0);
     const presetByVariant: Record<'tabs' | 'stack' | 'fullscreen', { edges: Edge[]; bottomPadding: number }> = {
         tabs: { edges: ['top'], bottomPadding: tabBarBottomClearance },
         stack: { edges: ['top', 'bottom'], bottomPadding: SPACING.xxl },
@@ -62,6 +62,8 @@ export default function Screen({
     const resolvedPreset = presetByVariant[resolvedVariant];
     const resolvedEdges: Edge[] = edges ?? resolvedPreset.edges;
     const resolvedBottomPadding = resolvedPreset.bottomPadding;
+    const resolvedTopPadding =
+        resolvedVariant === 'tabs' ? 0 : resolvedVariant === 'fullscreen' ? 0 : SPACING.lg;
     const resolvedRouteKey = routeKey ?? debugTag ?? pathname;
     const navMarkConsumedRef = useRef(false);
     const navMarkRef = useRef<ReturnType<typeof Perf.consumeNavMark> | null>(null);
@@ -119,6 +121,7 @@ export default function Screen({
         ? [
             styles.content,
             { paddingHorizontal: horizontalPadding },
+            { paddingTop: resolvedTopPadding },
             scrollContentStyle,
             contentStyle,
             { paddingBottom: resolvedBottomPadding },
@@ -126,6 +129,7 @@ export default function Screen({
         : [
             styles.content,
             { paddingHorizontal: horizontalPadding },
+            { paddingTop: resolvedTopPadding },
             { paddingBottom: resolvedBottomPadding },
             scrollContentStyle,
             contentStyle,
@@ -146,6 +150,7 @@ export default function Screen({
                 styles.content,
                 styles.contentView,
                 { paddingHorizontal: horizontalPadding },
+                { paddingTop: resolvedTopPadding },
                 resolvedVariant !== 'tabs' && { paddingBottom: resolvedBottomPadding },
                 contentStyle,
                 resolvedVariant === 'tabs' && { paddingBottom: resolvedBottomPadding },
@@ -182,7 +187,6 @@ const styles = StyleSheet.create({
     },
     content: {
         flexGrow: 1,
-        paddingTop: SPACING.lg,
     },
     contentView: {
         flex: 1,
