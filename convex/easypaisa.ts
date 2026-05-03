@@ -250,6 +250,18 @@ function isTerminalStatus(status: PaymentStatus) {
   return status === "paid" || status === "expired" || status === "cancelled" || status === "failed";
 }
 
+function isRecoverableCheckoutStartError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("taking too long")
+    || lower.includes("timeout")
+    || lower.includes("timed out")
+    || lower.includes("signal timed out")
+    || lower.includes("aborted due to timeout")
+  );
+}
+
 function buildPaymentStatusForReturn(status: PaymentStatus) {
   if (status === "paid") return "success";
   if (status === "pending" || status === "created") return "pending";
@@ -566,6 +578,43 @@ export const markCheckoutFailed = internalMutation({
   },
 });
 
+export const markCheckoutPendingAfterInitiateTimeout = internalMutation({
+  args: {
+    transactionId: v.id("paymentTransactions"),
+    flow: v.string(),
+    endpointPath: v.string(),
+    requestPayload: v.any(),
+    message: v.string(),
+    actionRequired: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.transactionId);
+    if (!existing) return;
+    if (existing.processedAt || isTerminalStatus(existing.status as PaymentStatus)) return;
+
+    await ctx.db.patch(args.transactionId, {
+      status: "pending",
+      providerDescription: "Waiting for Easypaisa confirmation.",
+      lastError: args.message,
+      providerPayload: {
+        ...(existing.providerPayload || {}),
+        flow: args.flow,
+        rest: {
+          ...((existing.providerPayload || {}).rest || {}),
+          initiate: {
+            endpointPath: args.endpointPath,
+            request: sanitizeForDebug(args.requestPayload || {}),
+            error: args.message,
+            actionRequired: args.actionRequired,
+            timedOutAfterRequest: true,
+          },
+        },
+      },
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const getTransactionByOrderRef = internalQuery({
   args: {
     orderRefNum: v.string(),
@@ -748,6 +797,31 @@ export const startCheckout = action({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initiate Easypaisa payment.";
+      if (isRecoverableCheckoutStartError(error)) {
+        await ctx.runMutation((internal as any).easypaisa.markCheckoutPendingAfterInitiateTimeout, {
+          transactionId,
+          flow,
+          endpointPath,
+          requestPayload,
+          message,
+          actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
+        });
+
+        return {
+          transactionId,
+          orderRefNum,
+          checkoutUrl: EASYPAISA_HOSTED_FALLBACK_ENABLED ? checkoutUrl : null,
+          expiresAt,
+          status: "pending",
+          transactionType,
+          hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
+          actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
+          paymentToken: responseBody?.paymentToken || null,
+          paymentTokenExpiryDateTime: responseBody?.paymentTokenExpiryDateTime || null,
+          startTimedOut: true,
+        };
+      }
+
       await ctx.runMutation((internal as any).easypaisa.markCheckoutFailed, {
         transactionId,
         flow,

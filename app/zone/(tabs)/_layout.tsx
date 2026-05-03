@@ -88,8 +88,6 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
                             style={styles.tabItem}
                             android_ripple={{ color: "transparent", borderless: true }}
                         >
-                            {isFocused && <View style={styles.activeChip} />}
-
                             <View style={[styles.iconRow, isFocused && styles.iconRowActive]}>
                                 <AppIcon
                                     name={icon as any}
@@ -163,13 +161,11 @@ const styles = StyleSheet.create({
         left: H_PADDING + 20,
         right: H_PADDING + 20,
         height: TAB_BAR_H + 24,
-        backgroundColor: COLORS.accent,
-        opacity: 0.06,
+        backgroundColor: "transparent",
+        opacity: 0,
         borderRadius: PILL_R + 8,
-        shadowColor: COLORS.accent,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.5,
-        shadowRadius: 20,
+        shadowOpacity: 0,
+        shadowRadius: 0,
     },
 
     pill: {
@@ -207,18 +203,6 @@ const styles = StyleSheet.create({
         paddingTop: 6,
         paddingBottom: 4,
         position: "relative",
-    },
-
-    activeChip: {
-        position: "absolute",
-        top: 6,
-        bottom: 6,
-        left: 8,
-        right: 8,
-        backgroundColor: "rgba(66,165,245,0.1)",
-        borderRadius: 14,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: "rgba(66,165,245,0.22)",
     },
 
     iconRow: {

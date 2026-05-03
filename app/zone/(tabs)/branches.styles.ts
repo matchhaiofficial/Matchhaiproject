@@ -82,8 +82,18 @@ export default StyleSheet.create({
     },
     branchCardRow: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "flex-start",
+        gap: SPACING.sm,
+    },
+    branchInfo: {
+        flex: 1,
+        minWidth: 0,
+    },
+    branchChevron: {
+        width: 28,
+        minHeight: 28,
+        alignItems: "flex-end",
+        justifyContent: "center",
     },
     branchTitleRow: {
         flexDirection: "row",

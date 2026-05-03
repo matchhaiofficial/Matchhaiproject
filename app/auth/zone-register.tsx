@@ -479,7 +479,7 @@ export default function AdminRegisterStep1() {
             />
             <TextInput
               ref={passRef}
-              placeholder="Create a password with upper, lower, number, and symbol"
+              placeholder="Password"
               placeholderTextColor={COLORS.muted}
               style={styles.input}
               selectionColor={COLORS.accent}

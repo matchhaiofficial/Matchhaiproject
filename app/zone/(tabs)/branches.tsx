@@ -113,9 +113,9 @@ export default function ZoneBranches() {
                             }}
                         >
                             <View style={styles.branchCardRow}>
-                                <View>
+                                <View style={styles.branchInfo}>
                                     <View style={styles.branchTitleRow}>
-                                        <Text style={styles.branchTitle}>
+                                        <Text style={styles.branchTitle} numberOfLines={1}>
                                             {branch.branchDisplayName || branch.name || "Main Branch"}
                                         </Text>
                                         {branch.isPrimary && (
@@ -126,14 +126,16 @@ export default function ZoneBranches() {
                                             </View>
                                         )}
                                     </View>
-                                    <Text style={styles.branchLocation}>
+                                    <Text style={styles.branchLocation} numberOfLines={1}>
                                         {branch.areaLabel}, {branch.city}
                                     </Text>
-                                    <Text style={styles.branchAddress}>
+                                    <Text style={styles.branchAddress} numberOfLines={2}>
                                         {branch.addressLine1 || branch.address}
                                     </Text>
                                 </View>
-                                <AppIcon name="chevron-right" size="lg" tone="muted" />
+                                <View style={styles.branchChevron}>
+                                    <AppIcon name="chevron-right" size="lg" tone="muted" />
+                                </View>
                             </View>
                         </Pressable>
                     ))
