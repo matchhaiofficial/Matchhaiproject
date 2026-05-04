@@ -22,6 +22,7 @@ import { AppImage } from "../../../src/components/AppImage";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { usePressScale } from "../../../src/motion/usePressScale";
 
@@ -35,7 +36,7 @@ import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
 import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import {
@@ -132,6 +133,8 @@ export default function Profile() {
         bottomInset: insets.bottom,
         tabBarHeight,
     });
+    const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
+    const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -345,17 +348,10 @@ export default function Profile() {
     return (
         <Screen
             style={styles.screen}
-            scroll
+            scroll={false}
             routeKey="/(player)/(tabs)/profile"
-            contentStyle={[
-                styles.scrollContent,
-                { paddingBottom: bottomChromeClearance + 24 },
-            ]}
+            contentStyle={styles.screenContent}
             edges={['top']}
-            scrollProps={{
-                showsVerticalScrollIndicator: false,
-                refreshControl: <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />,
-            }}
         >
             <AppHeader
                 title="Profile"
@@ -374,7 +370,16 @@ export default function Profile() {
                 )}
             />
 
-            <Animated.View style={entranceStyle}>
+            <Animated.View style={[styles.contentWrap, entranceStyle]}>
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        { paddingBottom: profileBottomPadding },
+                    ]}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
+                >
             {/* Profile Card */}
             <AppCard style={styles.profileCard}>
                     <View style={styles.avatar}>
@@ -648,6 +653,7 @@ export default function Profile() {
                     <AppIcon name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>
                 </AppButton>
+                </ScrollView>
             </Animated.View>
         </Screen>
     );

@@ -12,10 +12,16 @@ import {
     View,
 } from "react-native";
 
-import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import {
+    DEFAULT_CITY,
+    KARACHI_AREAS,
+    normalizeKarachiAreaLabel,
+} from "../../../constants/profileOptions";
 import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
 import registerStyles from "../../auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
+import { AppIcon } from "../../../src/components/AppIcon";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
@@ -25,6 +31,7 @@ import Logger from "../../../src/utils/logger";
 import BranchInventoryPricingForm, {
     buildZoneGamesFromBranches,
     createEmptyBranchInventory,
+    sanitizeBranchInventory,
     validateBranchInventory,
 } from "./components/BranchInventoryPricingForm";
 import styles from "./branch.styles";
@@ -67,7 +74,6 @@ export default function AddBranch() {
     const [saving, setSaving] = useState(false);
 
     const [branchDisplayName, setBranchDisplayName] = useState("");
-    const [city, setCity] = useState("Karachi");
     const [areaLabel, setAreaLabel] = useState<string>(KARACHI_AREAS[0]);
     const [addressLine1, setAddressLine1] = useState("");
     const [googleMapsUrl, setGoogleMapsUrl] = useState("");
@@ -80,29 +86,25 @@ export default function AddBranch() {
     const detectAreaFromLocation = useCallback((locationText: string) => {
         const normalized = locationText.toLowerCase();
         const areaAliases: Record<string, string[]> = {
-            "DHA Karachi": ["dha", "defence housing authority", "defence"],
-            Clifton: ["clifton"],
-            Saddar: ["saddar"],
+            "Defence Housing Authority Karachi": ["dha", "defence housing authority", "defence"],
+            "Clifton Karachi": ["clifton"],
             "Gulshan-e-Iqbal": ["gulshan", "gulshan-e-iqbal", "gulshan e iqbal"],
             "Gulistan-e-Johar": ["johar", "gulistan-e-johar", "gulistan e johar"],
             Nazimabad: ["nazimabad"],
             "North Nazimabad": ["north nazimabad"],
             "North Karachi": ["north karachi"],
-            "Federal B Area": ["federal b area", "fb area", "f.b area"],
-            PECHS: ["pechs"],
-            Korangi: ["korangi"],
-            Landhi: ["landhi"],
-            Malir: ["malir", "cantt", "cantonment", "malir cantt"],
-            "Scheme 33": ["scheme 33", "scheme-33"],
-            Garden: ["garden", "soldier bazaar", "soldier bazar"],
-            "Shahrah-e-Faisal": ["shahrah-e-faisal", "shahrah e faisal"],
+            "Federal B. Area": ["federal b area", "fb area", "f.b area"],
+            "P.E.C.H.S Block 2": ["pechs", "p.e.c.h.s"],
+            Dastagir: ["dastagir"],
+            "Tariq Road": ["tariq road"],
             Bahadurabad: ["bahadurabad"],
+            Karsaz: ["karsaz"],
         };
 
         for (const area of KARACHI_AREAS) {
             const aliases = areaAliases[area] || [area];
             if (aliases.some((alias) => normalized.includes(alias.toLowerCase()))) {
-                return area;
+                return normalizeKarachiAreaLabel(area);
             }
         }
         return null;
@@ -225,20 +227,21 @@ export default function AddBranch() {
 
         setSaving(true);
         try {
+            const sanitizedInventory = sanitizeBranchInventory(inventory);
             const branchPayload = {
                 branchDisplayName: branchDisplayName.trim(),
                 name: branchDisplayName.trim(),
-                city: city.trim(),
-                areaLabel: areaLabel.trim(),
+                city: DEFAULT_CITY,
+                areaLabel: normalizeKarachiAreaLabel(areaLabel),
                 addressLine1: finalAddressLine,
                 address: finalAddressLine,
                 googleMapsUrl: googleMapsUrl.trim(),
                 contactPhone: finalPhone,
                 isPrimary: false,
                 capacity: {},
-                ...inventory,
-                supportsFc26: inventory.supportsFc25,
-                pricing: inventory.pricing || {},
+                ...sanitizedInventory,
+                supportsFc26: sanitizedInventory.supportsFc25,
+                pricing: sanitizedInventory.pricing || {},
             };
 
             const result = await addBranch(zone.id, branchPayload);
@@ -288,27 +291,11 @@ export default function AddBranch() {
                         <Text style={styles.inputLabel}>Branch Name</Text>
                         <TextInput
                             style={styles.input}
-                            value={branchName}
-                            onChangeText={setBranchName}
+                            value={branchDisplayName}
+                            onChangeText={setBranchDisplayName}
                             placeholder="North Nazimabad Branch"
                             placeholderTextColor={COLORS.muted}
                         />
-                    </View>
-
-                    <View style={registerStyles.fieldGroup}>
-                        <RegistrationFieldLabel label="City" required />
-                        <View style={registerStyles.inputBox}>
-                            <Picker
-                                selectedValue={city}
-                                onValueChange={setCity}
-                                style={{ color: COLORS.text }}
-                                dropdownIconColor={COLORS.muted}
-                            >
-                                {CITY_OPTIONS.map((option) => (
-                                    <Picker.Item key={option} label={option} value={option} />
-                                ))}
-                            </Picker>
-                        </View>
                     </View>
 
                     <View style={registerStyles.fieldGroup}>

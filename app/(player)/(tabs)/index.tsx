@@ -14,13 +14,14 @@ import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { Matchroom } from "../../../src/services/convex/matchService";
 import { Team } from "../../../src/services/convex/teamService";
 import { Zone } from "../../../src/services/convex/zoneService";
 import { signOutUser } from "../../../src/services/convex/authService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import {
   EMAIL_VERIFICATION_DASHBOARD_DETAIL_MESSAGE,
   hasVerifiedEmail,
@@ -261,6 +262,7 @@ export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
   const { user, authUser, refreshSession } = useAuth();
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
     distance: 10,
@@ -519,7 +521,10 @@ export default function PlayerDashboard() {
       <Animated.View style={[styles.contentWrap, entranceStyle]}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: bottomContentPadding },
+          ]}
           showsVerticalScrollIndicator={false}
         >
           {!emailVerified ? (

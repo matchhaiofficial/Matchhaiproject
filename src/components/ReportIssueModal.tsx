@@ -26,6 +26,10 @@ type ReportIssueModalProps = {
   submitLabel?: string;
   descriptionPlaceholder?: string;
   maxDescriptionLength?: number;
+  targetLabel?: string;
+  targetOptions?: Array<{ value: string; label: string; description?: string }>;
+  targetValue?: string;
+  onChangeTarget?: (value: string) => void;
 };
 
 export default function ReportIssueModal({
@@ -43,7 +47,13 @@ export default function ReportIssueModal({
   submitLabel = "Submit Report",
   descriptionPlaceholder = "Provide more context to help our moderators...",
   maxDescriptionLength = 1000,
+  targetLabel,
+  targetOptions,
+  targetValue,
+  onChangeTarget,
 }: ReportIssueModalProps) {
+  const showTargetSelector = Boolean(targetLabel && targetOptions?.length && onChangeTarget);
+
   return (
     <AppBottomSheet
       visible={visible}
@@ -63,6 +73,35 @@ export default function ReportIssueModal({
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
       >
+        {showTargetSelector ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionLabel}>{targetLabel}</Text>
+            <Text style={styles.sectionHint}>Choose the specific branch this report is about.</Text>
+            <View style={styles.reasonWrap}>
+              {targetOptions!.map((item) => {
+                const active = targetValue === item.value;
+                return (
+                  <Pressable
+                    key={item.value}
+                    onPress={() => onChangeTarget!(item.value)}
+                    style={[styles.targetChip, active && styles.targetChipActive]}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.reasonText, active && styles.reasonTextActive]}>
+                      {item.label}
+                    </Text>
+                    {item.description ? (
+                      <Text style={[styles.targetDescription, active && styles.targetDescriptionActive]}>
+                        {item.description}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.sectionCard}>
           <Text style={styles.sectionLabel}>Reason</Text>
           <Text style={styles.sectionHint}>Choose the issue that best matches what happened.</Text>
@@ -187,6 +226,28 @@ const styles = StyleSheet.create({
   reasonChipActive: {
     backgroundColor: "rgba(239,83,80,0.16)",
     borderColor: "rgba(239,83,80,0.55)",
+  },
+  targetChip: {
+    maxWidth: "100%",
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.overlayLight,
+    gap: 2,
+  },
+  targetChipActive: {
+    backgroundColor: "rgba(239,83,80,0.16)",
+    borderColor: "rgba(239,83,80,0.55)",
+  },
+  targetDescription: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interRegular,
+    fontSize: 11,
+  },
+  targetDescriptionActive: {
+    color: COLORS.text,
   },
   reasonText: {
     color: COLORS.textSecondary,

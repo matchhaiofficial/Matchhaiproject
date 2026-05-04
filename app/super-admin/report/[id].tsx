@@ -156,6 +156,7 @@ export default function SuperAdminReportDetail() {
             <Text style={styles.meta}>Reporter: {report.reporterName}</Text>
             {report.reportedUserName ? <Text style={styles.meta}>Reported User: {report.reportedUserName}</Text> : null}
             {report.zoneName ? <Text style={styles.meta}>Zone: {report.zoneName}</Text> : null}
+            {report.branchLabel ? <Text style={styles.meta}>Branch: {report.branchLabel}</Text> : null}
             {report.matchroomTitle ? <Text style={styles.meta}>Matchroom: {report.matchroomTitle}</Text> : null}
             {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
             {report.reviewedByName ? (

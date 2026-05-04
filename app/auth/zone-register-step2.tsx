@@ -4,7 +4,11 @@ import debounce from "lodash.debounce";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
-import { CITY_OPTIONS, KARACHI_AREAS } from "../../constants/profileOptions";
+import {
+  DEFAULT_CITY,
+  KARACHI_AREAS,
+  normalizeKarachiAreaLabel,
+} from "../../constants/profileOptions";
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
@@ -38,7 +42,6 @@ export default function AdminRegisterStep2() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
   const [branchDisplayName, setBranchDisplayName] = useState("");
-  const [city, setCity] = useState("Karachi");
   const [areaLabel, setAreaLabel] = useState<string>(KARACHI_AREAS[0]);
   const [addressLine1, setAddressLine1] = useState("");
   const [googleMapsUrl, setGoogleMapsUrl] = useState("");
@@ -88,34 +91,25 @@ export default function AdminRegisterStep2() {
   const detectAreaFromLocation = (locationText: string) => {
     const normalized = locationText.toLowerCase();
     const areaAliases: Record<string, string[]> = {
-      DHA: ["dha", "defence housing authority", "defence"],
-      Clifton: ["clifton"],
-      Saddar: ["saddar"],
-      Gulshan: ["gulshan", "gulshan-e-iqbal", "gulshan e iqbal"],
-      Johar: ["johar", "gulistan-e-johar", "gulistan e johar"],
-      Nazimabad: ["nazimabad", "north nazimabad"],
+      "Defence Housing Authority Karachi": ["dha", "defence housing authority", "defence"],
+      "Clifton Karachi": ["clifton"],
+      "Gulshan-e-Iqbal": ["gulshan", "gulshan-e-iqbal", "gulshan e iqbal"],
+      "Gulistan-e-Johar": ["johar", "gulistan-e-johar", "gulistan e johar"],
+      "North Nazimabad": ["north nazimabad"],
+      Nazimabad: ["nazimabad"],
       "North Karachi": ["north karachi"],
-      "Federal B Area": ["federal b area", "fb area", "f.b area"],
-      PECHS: ["pechs"],
-      "Korangi / Landhi": ["korangi", "landhi"],
-      "Malir / Cantt": ["malir", "cantt", "cantonment", "malir cantt"],
-      Liaquatabad: ["liaquatabad"],
-      "Buffer Zone": ["buffer zone"],
-      Gulberg: ["gulberg"],
-      "Scheme 33": ["scheme 33", "scheme-33"],
-      "Garden / Soldier Bazaar": ["garden", "soldier bazaar", "soldier bazar"],
+      "Federal B. Area": ["federal b area", "fb area", "f.b area"],
+      "P.E.C.H.S Block 2": ["pechs", "p.e.c.h.s"],
+      Dastagir: ["dastagir"],
       "Tariq Road": ["tariq road"],
-      "Shahrah-e-Faisal": ["shahrah-e-faisal", "shahrah e faisal"],
-      "Bahadurabad": ["bahadurabad"],
-      "Karsaz": ["karsaz"],
-      "Orangi / Baldia": ["orangi", "baldia"],
-      "Surjani / New Karachi": ["surjani", "new karachi"],
+      Bahadurabad: ["bahadurabad"],
+      Karsaz: ["karsaz"],
     };
 
     for (const area of KARACHI_AREAS) {
       const aliases = areaAliases[area] || [area];
       if (aliases.some((alias) => normalized.includes(alias.toLowerCase()))) {
-        return area;
+        return normalizeKarachiAreaLabel(area);
       }
     }
 
@@ -188,7 +182,6 @@ export default function AdminRegisterStep2() {
 
   const resetForm = () => {
     setBranchDisplayName("");
-    setCity("Karachi");
     setAreaLabel(KARACHI_AREAS[0]);
     setAddressLine1("");
     setGoogleMapsUrl("");
@@ -252,8 +245,7 @@ export default function AdminRegisterStep2() {
   const handleEditBranch = (branch: BranchData) => {
     setEditingBranchId(branch.id);
     setBranchDisplayName(branch.branchDisplayName);
-    setCity(branch.city);
-    setAreaLabel(branch.areaLabel);
+    setAreaLabel(normalizeKarachiAreaLabel(branch.areaLabel) || KARACHI_AREAS[0]);
     setAddressLine1(branch.addressLine1);
     setGoogleMapsUrl(branch.googleMapsUrl);
     setContactPhone(branch.contactPhone || "");
@@ -288,8 +280,8 @@ export default function AdminRegisterStep2() {
     if (editingBranchId) {
       updateBranch(editingBranchId, {
         branchDisplayName: branchDisplayName.trim(),
-        city,
-        areaLabel,
+        city: DEFAULT_CITY,
+        areaLabel: normalizeKarachiAreaLabel(areaLabel),
         addressLine1: addressLine1.trim(),
         googleMapsUrl: googleMapsUrl.trim(),
         contactPhone: finalPhone,
@@ -303,8 +295,8 @@ export default function AdminRegisterStep2() {
       const newBranch: BranchData = {
         id: Math.random().toString(36).substring(7),
         branchDisplayName: branchDisplayName.trim(),
-        city,
-        areaLabel,
+        city: DEFAULT_CITY,
+        areaLabel: normalizeKarachiAreaLabel(areaLabel),
         addressLine1: addressLine1.trim(),
         googleMapsUrl: googleMapsUrl.trim(),
         contactPhone: finalPhone,
@@ -366,17 +358,15 @@ export default function AdminRegisterStep2() {
     >
       <RegistrationStepHeader
         title="Branch Setup"
-        subtitle="Add the locations that belong to this zone account before configuring inventory."
+        subtitle="Add your Karachi branches."
         stepTitle="Step 2 of 4"
         stepSubtitle="Branches and locations"
         progress="50%"
         onBack={() => router.replace("/auth/zone-register")}
       />
 
-      <Text style={styles.heading}>Add every branch you want to manage</Text>
-      <Text style={styles.sub}>
-        Each branch gets its own location, inventory, pricing, and moderation state.
-      </Text>
+      <Text style={styles.heading}>Add branches</Text>
+      <Text style={styles.sub}>Each branch gets its own location, inventory, and pricing.</Text>
 
       <View style={styles.reviewSectionCard}>
         <View style={styles.reviewSectionHeaderRow}>
@@ -402,7 +392,7 @@ export default function AdminRegisterStep2() {
                   <View style={{ flex: 1, marginRight: 12 }}>
                     <Text style={styles.reviewSectionTitle}>{branch.branchDisplayName}</Text>
                     <Text style={styles.reviewValue}>
-                      {[branch.areaLabel, branch.city].filter(Boolean).join(", ")}
+                      {[normalizeKarachiAreaLabel(branch.areaLabel), DEFAULT_CITY].filter(Boolean).join(", ")}
                     </Text>
                     <Text style={[styles.reviewValue, { marginTop: 4 }]} numberOfLines={2}>
                       {branch.addressLine1}
@@ -494,22 +484,6 @@ export default function AdminRegisterStep2() {
                   selectionColor={COLORS.accent}
                 />
               </View>
-            </View>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <RegistrationFieldLabel label="City" required />
-            <View style={styles.inputBox}>
-              <Picker
-                selectedValue={city}
-                onValueChange={setCity}
-                style={{ color: COLORS.text }}
-                dropdownIconColor={COLORS.muted}
-              >
-                {CITY_OPTIONS.map((option) => (
-                  <Picker.Item key={option} label={option} value={option} />
-                ))}
-              </Picker>
             </View>
           </View>
 

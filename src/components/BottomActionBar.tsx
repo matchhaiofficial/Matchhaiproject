@@ -3,12 +3,14 @@ import {
     Platform,
     StyleSheet,
     View,
+    useWindowDimensions,
     type LayoutChangeEvent,
     type StyleProp,
     type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SPACING } from "../theme";
+import { useScreenPadding } from "../hooks/useScreenPadding";
 
 type BottomActionBarProps = {
     children: React.ReactNode;
@@ -26,8 +28,10 @@ export default function BottomActionBar({
     onLayout,
 }: BottomActionBarProps) {
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const horizontalPadding = useScreenPadding();
     const resolvedMinBottomInset =
-        minBottomInset ?? (Platform.OS === "android" ? SPACING.lg : SPACING.sm);
+        minBottomInset ?? (Platform.OS === "android" ? SPACING.md : SPACING.sm);
 
     return (
         <View
@@ -35,12 +39,22 @@ export default function BottomActionBar({
             style={[
                 styles.container,
                 {
+                    alignSelf: "center",
+                    width: windowWidth,
                     paddingBottom: Math.max(insets.bottom, resolvedMinBottomInset),
                 },
                 style,
             ]}
         >
-            <View style={[styles.content, contentStyle]}>{children}</View>
+            <View
+                style={[
+                    styles.content,
+                    { paddingHorizontal: horizontalPadding },
+                    contentStyle,
+                ]}
+            >
+                {children}
+            </View>
         </View>
     );
 }
@@ -48,7 +62,6 @@ export default function BottomActionBar({
 const styles = StyleSheet.create({
     container: {
         flexShrink: 0,
-        width: "100%",
         position: "relative",
         zIndex: 40,
         elevation: 24,
@@ -61,7 +74,6 @@ const styles = StyleSheet.create({
         width: "100%",
         alignSelf: "stretch",
         paddingTop: SPACING.md,
-        padding: SPACING.screenPadding,
         paddingBottom: 0,
     },
 });

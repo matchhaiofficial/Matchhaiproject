@@ -14,7 +14,13 @@ import {
     View
 } from "react-native";
 
-import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import {
+    AGE_RANGES,
+    DEFAULT_CITY,
+    KARACHI_AREAS,
+    normalizeKarachiAreaLabel,
+    normalizeKarachiAreaList,
+} from "../../../constants/profileOptions";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
@@ -120,7 +126,6 @@ export default function EditProfile() {
     const [fullName, setFullName] = useState("");
     const [username, setUsername] = useState("");
     const [originalUsername, setOriginalUsername] = useState("");
-    const [city, setCity] = useState("Karachi");
     const [ageRange, setAgeRange] = useState("");
     const [email, setEmail] = useState(""); // Store full email now
     const [originalEmail, setOriginalEmail] = useState("");
@@ -244,7 +249,6 @@ export default function EditProfile() {
                     setFullName((data as any).fullName || "");
                     setUsername((data as any).username || "");
                     setOriginalUsername((data as any).username || "");
-                    setCity((data as any).city || "Karachi");
                     setAgeRange((data as any).ageRange || "");
                     // Store full email as-is
                     const session = await authClient.getSession();
@@ -254,7 +258,7 @@ export default function EditProfile() {
                     setPhone((data as any).phone || "");
                     setOriginalPhone((data as any).phone || "");
                     setPhoneVerified(Boolean((data as any).phoneValidated));
-                    setSelectedAreas((data as any).areasPreferred || []);
+                    setSelectedAreas(normalizeKarachiAreaList((data as any).areasPreferred || []));
 
                     // Load pending email if exists
                     setPendingEmail((data as any).pendingEmail || "");
@@ -415,13 +419,17 @@ export default function EditProfile() {
 
     // Area validation
     const toggleArea = (area: string) => {
+        const canonicalArea = normalizeKarachiAreaLabel(area);
         setSelectedAreas((prev) => {
-            if (prev.includes(area)) return prev.filter(a => a !== area);
-            if (prev.length >= 5) {
+            const normalizedPrev = normalizeKarachiAreaList(prev);
+            if (normalizedPrev.includes(canonicalArea)) {
+                return normalizedPrev.filter(a => a !== canonicalArea);
+            }
+            if (normalizedPrev.length >= 5) {
                 showToast({ type: "warning", title: "Limit reached", message: "Max 5 areas." });
                 return prev;
             }
-            return [...prev, area];
+            return normalizeKarachiAreaList([...normalizedPrev, canonicalArea]);
         });
     };
 
@@ -694,10 +702,10 @@ export default function EditProfile() {
         try {
             const updates: any = {
                 fullName: fullName.trim(),
-                city,
+                city: DEFAULT_CITY,
                 ageRange,
                 phone: phone.trim(),
-                areasPreferred: selectedAreas,
+                areasPreferred: normalizeKarachiAreaList(selectedAreas),
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
                 psnOnlineId: psnOnlineId.trim() || null,
@@ -867,17 +875,6 @@ export default function EditProfile() {
                             />
                         </View>
                         <Text style={styles.mutedHelperText}>Usernames are permanent and cannot be changed</Text>
-                    </View>
-
-                    {/* City & Age */}
-                    <View style={styles.marginBottomLg}>
-                        <CustomSingleSelect
-                            label="City"
-                            value={city}
-                            options={CITY_OPTIONS}
-                            onChange={setCity}
-                            icon="location-city"
-                        />
                     </View>
 
                     <CustomSingleSelect

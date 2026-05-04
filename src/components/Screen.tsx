@@ -13,7 +13,6 @@ import { usePathname, useSegments } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { COLORS, SPACING } from '../theme';
-import { useTabBarClearance } from '../hooks/useTabBarClearance';
 import { useScreenPadding } from '../hooks/useScreenPadding';
 import { Perf } from '../utils/perfInstrumentation';
 
@@ -53,9 +52,8 @@ export default function Screen({
     const { contentContainerStyle: scrollContentStyle, ...restScrollProps } = scrollProps || {};
     const scrollKeyboardShouldPersistTaps = restScrollProps.keyboardShouldPersistTaps ?? 'handled';
     const scrollKeyboardDismissMode = restScrollProps.keyboardDismissMode ?? (Platform.OS === 'ios' ? 'interactive' : 'on-drag');
-    const tabBarBottomClearance = useTabBarClearance(0);
     const presetByVariant: Record<'tabs' | 'stack' | 'fullscreen', { edges: Edge[]; bottomPadding: number }> = {
-        tabs: { edges: ['top'], bottomPadding: tabBarBottomClearance },
+        tabs: { edges: ['top'], bottomPadding: 0 },
         stack: { edges: ['top', 'bottom'], bottomPadding: SPACING.xxl },
         fullscreen: { edges: ['top', 'bottom'], bottomPadding: 0 },
     };

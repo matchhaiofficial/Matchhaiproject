@@ -1,6 +1,6 @@
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
@@ -51,7 +51,6 @@ export default function AdminRegisterStep1() {
   }, [setCurrentStep]);
 
   const {
-    isBusinessTypeValid,
     isNameValid,
     isBrandValid,
     isEmailValid,
@@ -65,7 +64,6 @@ export default function AdminRegisterStep1() {
     strengthColor,
     strengthWidth,
   } = useMemo(() => {
-    const businessTypeValid = ["gaming"].includes(String(step1.type || ""));
     const nameValid = ownerFullName.trim().length >= 3;
     const brandValid = venueBrandName.trim().length >= 3;
     const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
@@ -111,7 +109,6 @@ export default function AdminRegisterStep1() {
     }
 
     return {
-      isBusinessTypeValid: businessTypeValid,
       isNameValid: nameValid,
       isBrandValid: brandValid,
       isEmailValid: emailValid,
@@ -130,7 +127,7 @@ export default function AdminRegisterStep1() {
       strengthColor: nextStrengthColor,
       strengthWidth: nextStrengthWidth,
     };
-  }, [contactEmail, contactPhone, ownerFullName, password, step1.type, venueBrandName]);
+  }, [contactEmail, contactPhone, ownerFullName, password, venueBrandName]);
 
   const emailOk =
     isEmailValid && emailStatus !== "checking" && emailStatus !== "taken";
@@ -138,7 +135,6 @@ export default function AdminRegisterStep1() {
     isPhoneFormatValid && phoneStatus !== "checking" && phoneStatus !== "taken";
   const isFormValid =
     isNameValid &&
-    isBusinessTypeValid &&
     isBrandValid &&
     emailOk &&
     phoneOk &&
@@ -246,6 +242,7 @@ export default function AdminRegisterStep1() {
             contactEmail: contactEmail.trim(),
             contactPhone: phoneE164 || contactPhone.trim(),
             password,
+            type: "gaming",
           });
           setCurrentStep(1);
           setSubmitting(false);
@@ -254,7 +251,7 @@ export default function AdminRegisterStep1() {
         {
           cid,
           actionKey: "zone_register_step1_continue",
-          meta: { businessType: step1.type },
+          meta: { businessType: "gaming" },
         },
       ),
     );
@@ -275,50 +272,16 @@ export default function AdminRegisterStep1() {
       }}
     >
       <RegistrationStepHeader
-        title="Zone Admin Setup"
-        subtitle="Create the admin account that manages your branches and review flow."
+        title="Zone Setup"
+        subtitle="Create your zone admin account."
         stepTitle="Step 1 of 4"
         stepSubtitle="Admin details"
         progress="25%"
         onBack={() => router.back()}
       />
 
-      <Text style={styles.heading}>Set up the admin account</Text>
-      <Text style={styles.sub}>
-        This account will own the zone profile, moderation status, payouts, and support contact.
-      </Text>
-
-      <View style={styles.fieldGroup}>
-        <RegistrationFieldLabel label="Business Type" required />
-        <View style={styles.chipRow}>
-          {[
-            { label: "Zone", value: "gaming" },
-            // Physical sports are temporarily disabled.
-            // { label: "Court", value: "sports" },
-            // { label: "Both", value: "hybrid" },
-          ].map((option) => (
-            <Pressable
-              key={option.value}
-              onPress={() => setStep1({ type: option.value as any })}
-              style={({ pressed }) => [
-                styles.optionChip,
-                step1.type === option.value && styles.optionChipActive,
-                pressed && { opacity: 0.9 },
-                { flex: 1, alignItems: "center", justifyContent: "center" },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.optionChipText,
-                  step1.type === option.value && styles.optionChipTextActive,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
+      <Text style={styles.heading}>Admin account</Text>
+      <Text style={styles.sub}>Add the contact details used for zone access and support.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Owner / primary contact" required />

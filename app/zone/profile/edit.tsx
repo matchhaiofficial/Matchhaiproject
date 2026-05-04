@@ -12,12 +12,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { CITY_OPTIONS } from "../../../constants/profileOptions";
+import { DEFAULT_CITY } from "../../../constants/profileOptions";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
-import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
 import { useToast } from "../../../src/hooks/useToast";
@@ -94,7 +93,6 @@ export default function ZoneEditProfile() {
     const [venueBrandName, setVenueBrandName] = useState("");
     const [ownerFullName, setOwnerFullName] = useState("");
     const [username, setUsername] = useState("");
-    const [city, setCity] = useState("Karachi");
     const [email, setEmail] = useState("");
     const [phone, setPhone] = useState("");
     const [originalPhone, setOriginalPhone] = useState("");
@@ -252,7 +250,6 @@ export default function ZoneEditProfile() {
                 setOwnerFullName(zone.ownerFullName || (profile as any)?.fullName || "");
                 setUsername(resolvedUsername);
                 setShouldPersistDerivedUsername(!rawUsername || isGeneratedUsername(rawUsername));
-                setCity(zone.primaryBranch?.city || (profile as any)?.city || "Karachi");
                 setEmail(sessionEmail);
                 setPhone(resolvedPhone);
                 setOriginalPhone(resolvedPhone);
@@ -469,14 +466,14 @@ export default function ZoneEditProfile() {
                 userId: user._id as Id<"users">,
                 updates: {
                     fullName: trimmedOwnerName,
-                    city,
+                    city: DEFAULT_CITY,
                     phone: trimmedPhone,
                     updatedAt: Date.now(),
                 },
             });
 
             const nextPrimaryBranch = zone.primaryBranch
-                ? { ...zone.primaryBranch, city }
+                ? { ...zone.primaryBranch, city: DEFAULT_CITY }
                 : undefined;
 
             const result = await updateZone(zone.id, {
@@ -484,7 +481,7 @@ export default function ZoneEditProfile() {
                 venueBrandName: trimmedVenueName,
                 ownerFullName: trimmedOwnerName,
                 ownerUsername: resolvedUsername,
-                city,
+                city: DEFAULT_CITY,
                 phone: trimmedPhone,
                 contactPhone: trimmedPhone,
                 ...(nextPrimaryBranch ? { primaryBranch: nextPrimaryBranch } : {}),
@@ -589,16 +586,6 @@ export default function ZoneEditProfile() {
                             />
                         </View>
                         <Text style={styles.mutedHelperText}>Usernames are permanent and cannot be changed</Text>
-                    </View>
-
-                    <View style={styles.marginBottomLg}>
-                        <CustomSingleSelect
-                            label="City"
-                            value={city}
-                            options={CITY_OPTIONS}
-                            onChange={setCity}
-                            icon="location-city"
-                        />
                     </View>
 
                     <View style={styles.fieldGroup}>

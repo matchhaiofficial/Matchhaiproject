@@ -6,6 +6,16 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingTop: 10,
+        paddingBottom: 0,
+    },
+    contentWrap: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -29,7 +39,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
     },
     scrollContent: {
-        paddingTop: 10,
+        paddingTop: 0,
     },
 
     // Profile Card

@@ -7,6 +7,15 @@ import registerStyles from "../../../auth/register.styles";
 import { AppIcon, type AppIconName } from "../../../../src/components/AppIcon";
 import { COLORS } from "../../../../src/theme";
 
+export type PcTierSpecs = {
+    cpu?: string;
+    gpu?: string;
+    monitorRefreshRate?: string;
+    mouse?: string;
+    keyboard?: string;
+    headset?: string;
+};
+
 export type BranchPricing = {
     pc?: {
         regular?: { count?: unknown; price?: unknown };
@@ -36,6 +45,11 @@ export type BranchInventoryFields = {
     supportsPadel: boolean;
     supportsPickleball: boolean;
     pricing: BranchPricing;
+    pcSpecs?: {
+        regular?: PcTierSpecs;
+        premium?: PcTierSpecs;
+        elite?: PcTierSpecs;
+    };
 };
 
 type BranchInventoryPricingFormProps = {
@@ -50,6 +64,14 @@ const inventoryOptions = [
 ] as const;
 
 const CONSOLE_TYPES = PC_TYPES;
+const PC_SPEC_FIELDS = [
+    { key: "cpu", label: "Processor / CPU", placeholder: "e.g. Ryzen 5 5600" },
+    { key: "gpu", label: "Graphics Card / GPU", placeholder: "e.g. RTX 3060" },
+    { key: "monitorRefreshRate", label: "Monitor Refresh Rate", placeholder: "e.g. 144Hz" },
+    { key: "mouse", label: "Mouse", placeholder: "e.g. Logitech G Pro" },
+    { key: "keyboard", label: "Keyboard", placeholder: "e.g. Mechanical keyboard" },
+    { key: "headset", label: "Headset", placeholder: "e.g. HyperX Cloud" },
+] as const;
 
 const toInputValue = (value: unknown) => (value === undefined || value === null ? "" : String(value));
 
@@ -68,6 +90,7 @@ export const createEmptyBranchInventory = (): BranchInventoryFields => ({
     supportsPadel: false,
     supportsPickleball: false,
     pricing: {},
+    pcSpecs: {},
 });
 
 export const normalizeBranchInventory = (branch?: any): BranchInventoryFields => ({
@@ -80,7 +103,34 @@ export const normalizeBranchInventory = (branch?: any): BranchInventoryFields =>
     supportsPadel: Boolean(branch?.supportsPadel),
     supportsPickleball: Boolean(branch?.supportsPickleball),
     pricing: branch?.pricing || {},
+    pcSpecs: branch?.pcSpecs || {},
 });
+
+const sanitizeSpecs = (specs?: PcTierSpecs) => {
+    const cleaned: PcTierSpecs = {};
+    PC_SPEC_FIELDS.forEach((field) => {
+        const value = String(specs?.[field.key] || "").trim();
+        if (value) cleaned[field.key] = value;
+    });
+    return Object.keys(cleaned).length ? cleaned : undefined;
+};
+
+export const sanitizeBranchInventory = (inventory: BranchInventoryFields): BranchInventoryFields => {
+    const pcSpecs: BranchInventoryFields["pcSpecs"] = {};
+
+    PC_TYPES.forEach((type) => {
+        const tier = type.value;
+        const count = toPositiveNumber(inventory.pricing.pc?.[tier]?.count);
+        const price = toPositiveNumber(inventory.pricing.pc?.[tier]?.price);
+        const cleaned = count > 0 && price > 0 ? sanitizeSpecs(inventory.pcSpecs?.[tier]) : undefined;
+        if (cleaned) pcSpecs[tier] = cleaned;
+    });
+
+    return {
+        ...inventory,
+        pcSpecs: Object.keys(pcSpecs).length ? pcSpecs : {},
+    };
+};
 
 export const validateBranchInventory = (
     branchName: string,
@@ -209,6 +259,23 @@ export default function BranchInventoryPricingForm({
         });
     };
 
+    const updatePcSpec = (
+        tier: "regular" | "premium" | "elite",
+        field: keyof PcTierSpecs,
+        nextValue: string,
+    ) => {
+        onChange({
+            ...value,
+            pcSpecs: {
+                ...(value.pcSpecs || {}),
+                [tier]: {
+                    ...(value.pcSpecs?.[tier] || {}),
+                    [field]: nextValue,
+                },
+            },
+        });
+    };
+
     const toggleSupport = (field: keyof BranchInventoryFields) => {
         const nextEnabled = !value[field];
         onChange({
@@ -258,43 +325,70 @@ export default function BranchInventoryPricingForm({
             {value.supportsCs2 ? (
                 <View style={registerStyles.card}>
                     <Text style={registerStyles.cardTitle}>PC setups</Text>
-                    {PC_TYPES.map((type) => (
-                        <View key={type.value} style={registerStyles.fieldGroup}>
-                            <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
-                                {type.label}
-                            </Text>
-                            <View style={registerStyles.row}>
-                                <View style={{ flex: 1 }}>
-                                    <RegistrationFieldLabel label="Count" required />
-                                    <View style={registerStyles.inputBox}>
-                                        <TextInput
-                                            style={registerStyles.input}
-                                            keyboardType="numeric"
-                                            placeholder="e.g. 10"
-                                            placeholderTextColor={COLORS.muted}
-                                            value={toInputValue(value.pricing.pc?.[type.value]?.count)}
-                                            onChangeText={(text) => updatePricing("pc", type.value, "count", text)}
-                                            selectionColor={COLORS.accent}
-                                        />
+                    {PC_TYPES.map((type) => {
+                        const tier = type.value;
+                        const showSpecs =
+                            toPositiveNumber(value.pricing.pc?.[tier]?.count) > 0 &&
+                            toPositiveNumber(value.pricing.pc?.[tier]?.price) > 0;
+
+                        return (
+                            <View key={tier} style={registerStyles.fieldGroup}>
+                                    <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
+                                        {type.label}
+                                    </Text>
+                                    <View style={registerStyles.row}>
+                                        <View style={{ flex: 1 }}>
+                                            <RegistrationFieldLabel label="Count" required />
+                                            <View style={registerStyles.inputBox}>
+                                                <TextInput
+                                                    style={registerStyles.input}
+                                                    keyboardType="numeric"
+                                                    placeholder="e.g. 10"
+                                                    placeholderTextColor={COLORS.muted}
+                                                    value={toInputValue(value.pricing.pc?.[tier]?.count)}
+                                                    onChangeText={(text) => updatePricing("pc", tier, "count", text)}
+                                                    selectionColor={COLORS.accent}
+                                                />
+                                            </View>
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <RegistrationFieldLabel label="Price / hour" required />
+                                            <View style={registerStyles.inputBox}>
+                                                <TextInput
+                                                    style={registerStyles.input}
+                                                    keyboardType="numeric"
+                                                    placeholder="e.g. 250"
+                                                    placeholderTextColor={COLORS.muted}
+                                                    value={toInputValue(value.pricing.pc?.[tier]?.price)}
+                                                    onChangeText={(text) => updatePricing("pc", tier, "price", text)}
+                                                    selectionColor={COLORS.accent}
+                                                />
+                                            </View>
+                                        </View>
                                     </View>
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <RegistrationFieldLabel label="Price / hour" required />
-                                    <View style={registerStyles.inputBox}>
-                                        <TextInput
-                                            style={registerStyles.input}
-                                            keyboardType="numeric"
-                                            placeholder="e.g. 250"
-                                            placeholderTextColor={COLORS.muted}
-                                            value={toInputValue(value.pricing.pc?.[type.value]?.price)}
-                                            onChangeText={(text) => updatePricing("pc", type.value, "price", text)}
-                                            selectionColor={COLORS.accent}
-                                        />
-                                    </View>
-                                </View>
+                                    {showSpecs ? (
+                                        <View style={[registerStyles.reviewSectionCard, { marginTop: 10 }]}>
+                                            <Text style={registerStyles.reviewSectionTitle}>Optional specs</Text>
+                                            {PC_SPEC_FIELDS.map((field) => (
+                                                <View key={field.key} style={{ marginTop: 10 }}>
+                                                    <RegistrationFieldLabel label={field.label} />
+                                                    <View style={registerStyles.inputBox}>
+                                                        <TextInput
+                                                            style={registerStyles.input}
+                                                            placeholder={field.placeholder}
+                                                            placeholderTextColor={COLORS.muted}
+                                                            value={toInputValue(value.pcSpecs?.[tier]?.[field.key])}
+                                                            onChangeText={(text) => updatePcSpec(tier, field.key, text)}
+                                                            selectionColor={COLORS.accent}
+                                                        />
+                                                    </View>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    ) : null}
                             </View>
-                        </View>
-                    ))}
+                        );
+                    })}
                 </View>
             ) : null}
 

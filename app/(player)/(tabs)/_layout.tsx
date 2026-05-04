@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
         right: 0,
         alignItems: "center",
         pointerEvents: "box-none",
-        paddingTop: 8,
+        paddingTop: 0,
         backgroundColor: COLORS.backgroundDark,
     },
 

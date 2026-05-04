@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
+import BottomActionBar from "../../src/components/BottomActionBar";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
 import { AppIcon } from "../../src/components/AppIcon";
 import Screen from "../../src/components/Screen";
@@ -229,7 +230,11 @@ export default function CreateTeam() {
 
                 <ScrollView
                     style={localStyles.flexOne}
-                    contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]}
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        styles.scrollContentInsideScreen,
+                        styles.scrollContentWithBottomAction,
+                    ]}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                 >
@@ -412,8 +417,7 @@ export default function CreateTeam() {
                     )}
                 </ScrollView>
 
-                {/* Submit Button */}
-                <View style={styles.buttonWrapper}>
+                <BottomActionBar>
                     <Pressable
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -441,7 +445,7 @@ export default function CreateTeam() {
                             </Text>
                         )}
                     </Pressable>
-                </View>
+                </BottomActionBar>
             </KeyboardAvoidingView>
         </Screen>
     );

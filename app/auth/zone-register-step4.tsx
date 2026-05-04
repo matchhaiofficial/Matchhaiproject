@@ -16,6 +16,10 @@ import { COLORS } from "../../src/theme";
 import { useToast } from "../../src/hooks/useToast";
 import styles from "./register.styles";
 import { Modal } from "react-native";
+import {
+  DEFAULT_CITY,
+  normalizeKarachiAreaLabel,
+} from "../../constants/profileOptions";
 
 export default function AdminRegisterStep4() {
   const { step1, branches, step4, setStep4, setCurrentStep, resetAll } = useZoneOnboardingStore();
@@ -84,7 +88,7 @@ export default function AdminRegisterStep4() {
         return {
           id: branch.id,
           branchDisplayName: branch.branchDisplayName,
-          location: [branch.areaLabel, branch.city].filter(Boolean).join(", "),
+          location: [normalizeKarachiAreaLabel(branch.areaLabel), DEFAULT_CITY].filter(Boolean).join(", "),
           addressLine1: branch.addressLine1,
           items,
         };
@@ -310,7 +314,7 @@ export default function AdminRegisterStep4() {
     >
       <RegistrationStepHeader
         title="Review and Confirm"
-        subtitle="Check your zone account, branches, and submission approvals before sending it for review."
+        subtitle="Review your zone setup."
         stepTitle="Step 4 of 4"
         stepSubtitle="Final review"
         progress="100%"
@@ -341,14 +345,6 @@ export default function AdminRegisterStep4() {
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Venue brand</Text>
             <Text style={styles.reviewValue}>{step1.venueBrandName || "Not set"}</Text>
-          </View>
-          <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>Business type</Text>
-            <Text style={styles.reviewValue}>
-              {step1.type === "gaming"
-                ? "Zone (Gaming)"
-                : "Zone (Gaming)"}
-            </Text>
           </View>
           <View style={styles.reviewRow}>
             <Text style={styles.reviewLabel}>Contact email</Text>

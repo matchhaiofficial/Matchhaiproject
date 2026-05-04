@@ -1,46 +1,95 @@
 // src/constants/profileOptions.ts
 
-export const CITY_OPTIONS = [
-  "Karachi",
-  "Lahore",
-  "Islamabad",
-  "Rawalpindi",
-  "Faisalabad",
-  "Multan",
-  "Peshawar",
-  "Quetta",
-  "Hyderabad",
-  "Other",
-] as const;
+export const DEFAULT_CITY = "Karachi";
+
+export const CITY_OPTIONS = [DEFAULT_CITY] as const;
 
 // --- Karachi Areas ---
-// You can keep adding more here later.
 export const KARACHI_AREAS = [
-  "DHA Karachi",
-  "Clifton",
+  "Federal B. Area",
+  "Dastagir",
   "Gulshan-e-Iqbal",
   "Gulistan-e-Johar",
   "Bahadurabad",
-  "PECHS",
-  "Federal B Area",
-  "Nazimabad",
+  "Tariq Road",
+  "P.E.C.H.S Block 2",
+  "Defence Housing Authority Karachi",
+  "Clifton Karachi",
   "North Nazimabad",
   "North Karachi",
-  "Korangi",
-  "Landhi",
-  "Malir",
-  "Scheme 33",
-  "Saddar",
-  "Lyari",
-  "Surjani Town",
-  "Orangi Town",
-  "Shah Faisal Colony",
-  "Garden",
-  "Defence View",
-  "Kharadar",
-  "Shahrah-e-Faisal",
-  "Other (Karachi)",
+  "Nazimabad",
+  "Karsaz",
 ] as const;
+
+export type KarachiArea = (typeof KARACHI_AREAS)[number];
+
+const AREA_ALIAS_MAP: Record<string, KarachiArea> = {
+  "bahadurabad": "Bahadurabad",
+  "clifton": "Clifton Karachi",
+  "clifton karachi": "Clifton Karachi",
+  "dastagir": "Dastagir",
+  "defence": "Defence Housing Authority Karachi",
+  "defence housing authority": "Defence Housing Authority Karachi",
+  "defence housing authority karachi": "Defence Housing Authority Karachi",
+  "defense": "Defence Housing Authority Karachi",
+  "defense housing authority": "Defence Housing Authority Karachi",
+  "dha": "Defence Housing Authority Karachi",
+  "dha karachi": "Defence Housing Authority Karachi",
+  "f b area": "Federal B. Area",
+  "federal b area": "Federal B. Area",
+  "federal b area karachi": "Federal B. Area",
+  "fb area": "Federal B. Area",
+  "gulistan e johar": "Gulistan-e-Johar",
+  "gulistan johar": "Gulistan-e-Johar",
+  "gulistan-e-johar": "Gulistan-e-Johar",
+  "gulshan e iqbal": "Gulshan-e-Iqbal",
+  "gulshan iqbal": "Gulshan-e-Iqbal",
+  "gulshan-e-iqbal": "Gulshan-e-Iqbal",
+  "johar": "Gulistan-e-Johar",
+  "karsaz": "Karsaz",
+  "nazimabad": "Nazimabad",
+  "north karachi": "North Karachi",
+  "north nazimabad": "North Nazimabad",
+  "p e c h s": "P.E.C.H.S Block 2",
+  "p e c h s block 2": "P.E.C.H.S Block 2",
+  "pechs": "P.E.C.H.S Block 2",
+  "pechs block 2": "P.E.C.H.S Block 2",
+  "tariq road": "Tariq Road",
+};
+
+const normalizeAreaKey = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[.\-]/g, " ")
+    .replace(/\s+/g, " ");
+
+export const normalizeKarachiAreaLabel = (value?: string | null): string => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+
+  const exact = KARACHI_AREAS.find((area) => area === trimmed);
+  if (exact) return exact;
+
+  const normalizedKey = normalizeAreaKey(trimmed);
+  return AREA_ALIAS_MAP[normalizedKey] || trimmed;
+};
+
+export const normalizeKarachiAreaList = (
+  values?: readonly (string | null | undefined)[] | null,
+): string[] => {
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  (values || []).forEach((value) => {
+    const normalized = normalizeKarachiAreaLabel(value);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    next.push(normalized);
+  });
+
+  return next;
+};
 
 // --- User Demographics ---
 export const AGE_RANGES = [

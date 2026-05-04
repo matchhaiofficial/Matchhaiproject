@@ -292,7 +292,7 @@ export default function RegisterStep3() {
     >
       <RegistrationStepHeader
         title="Platform Links"
-        subtitle="Optional verification improves calibration and profile trust."
+        subtitle="Link accounts if you want."
         stepTitle="Step 3 of 4"
         stepSubtitle="Optional account links"
         progress="75%"

@@ -50,6 +50,8 @@ export function useMatchroomDetailState({ id }: Params) {
   const [playerRatings, setPlayerRatings] = useState<Record<string, GameSkillScore | null>>({});
   const [bookingRequestId, setBookingRequestId] = useState<string | null>(null);
   const isFetchingRef = useRef(false);
+  const refreshSessionRef = useRef(refreshSession);
+  refreshSessionRef.current = refreshSession;
 
   const currentIdentityValues = useMemo(
     () => [user?._id, authUser?.id],
@@ -149,8 +151,8 @@ export function useMatchroomDetailState({ id }: Params) {
 
   useFocusEffect(
     useCallback(() => {
-      refreshSession();
-    }, [refreshSession]),
+      void refreshSessionRef.current();
+    }, []),
   );
 
   useEffect(() => {

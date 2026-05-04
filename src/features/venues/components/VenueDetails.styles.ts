@@ -18,6 +18,9 @@ export default StyleSheet.create({
     paddingBottom: SPACING.xl,
     gap: SPACING.xl,
   },
+  scrollContentWithBottomAction: {
+    paddingBottom: 120,
+  },
   loadingWrap: {
     flex: 1,
     justifyContent: "center",
@@ -131,6 +134,58 @@ export default StyleSheet.create({
     color: COLORS.textSecondary,
     fontFamily: FONTS.interRegular,
     fontSize: 12,
+  },
+  branchSelectorWrap: {
+    gap: SPACING.sm,
+  },
+  branchSelectorLabel: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  branchPillRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: SPACING.sm,
+    paddingRight: SPACING.sm,
+  },
+  branchPill: {
+    maxWidth: 220,
+    minHeight: 48,
+    borderRadius: RADII.pill,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.overlayLight,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 0,
+    justifyContent: "center",
+  },
+  branchPillActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: "rgba(66, 165, 245, 0.16)",
+  },
+  branchPillPressed: {
+    opacity: 0.9,
+  },
+  branchPillText: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 13,
+    flexShrink: 0,
+  },
+  branchPillTextActive: {
+    color: COLORS.text,
+  },
+  branchPillMeta: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interRegular,
+    fontSize: 11,
+    flexShrink: 1,
+  },
+  branchPillMetaActive: {
+    color: COLORS.accent,
   },
   addressRow: {
     flexDirection: "row",
@@ -258,6 +313,25 @@ export default StyleSheet.create({
     color: COLORS.textSecondary,
     fontFamily: FONTS.interRegular,
     fontSize: 12,
+  },
+  pcSpecsWrap: {
+    marginTop: SPACING.xs,
+    gap: 4,
+  },
+  pcSpecRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  pcSpecLabel: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interMedium,
+    fontSize: 11,
+  },
+  pcSpecValue: {
+    color: COLORS.text,
+    fontFamily: FONTS.interRegular,
+    fontSize: 11,
   },
   pricingValue: {
     color: COLORS.successBright,

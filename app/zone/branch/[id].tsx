@@ -12,8 +12,13 @@ import {
     TextInput,
     View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
+import {
+    DEFAULT_CITY,
+    KARACHI_AREAS,
+    normalizeKarachiAreaLabel,
+} from "../../../constants/profileOptions";
 import RegistrationFieldLabel from "../../auth/components/RegistrationFieldLabel";
 import registerStyles from "../../auth/register.styles";
 import AppHeader from "../../../src/components/AppHeader";
@@ -29,6 +34,7 @@ import BranchInventoryPricingForm, {
     buildZoneGamesFromBranches,
     createEmptyBranchInventory,
     normalizeBranchInventory,
+    sanitizeBranchInventory,
     validateBranchInventory,
 } from "./components/BranchInventoryPricingForm";
 import styles from "./branch.styles";
@@ -73,8 +79,8 @@ const formatPakistaniPhone = (value: string) => {
 function buildPrimaryBranch(branch: any) {
     return {
         branchDisplayName: branch.branchDisplayName || branch.name || "",
-        city: branch.city || "Karachi",
-        areaLabel: branch.areaLabel || "",
+        city: DEFAULT_CITY,
+        areaLabel: normalizeKarachiAreaLabel(branch.areaLabel) || "",
         addressLine1: branch.addressLine1 || branch.address || "",
         googleMapsUrl: branch.googleMapsUrl || "",
     };
@@ -89,7 +95,6 @@ export default function BranchDetails() {
 
     const [saving, setSaving] = useState(false);
     const [branchDisplayName, setBranchDisplayName] = useState("");
-    const [city, setCity] = useState("Karachi");
     const [areaLabel, setAreaLabel] = useState<string>(KARACHI_AREAS[0]);
     const [addressLine1, setAddressLine1] = useState("");
     const [googleMapsUrl, setGoogleMapsUrl] = useState("");
@@ -129,29 +134,25 @@ export default function BranchDetails() {
     const detectAreaFromLocation = useCallback((locationText: string) => {
         const normalized = locationText.toLowerCase();
         const areaAliases: Record<string, string[]> = {
-            "DHA Karachi": ["dha", "defence housing authority", "defence"],
-            Clifton: ["clifton"],
-            Saddar: ["saddar"],
+            "Defence Housing Authority Karachi": ["dha", "defence housing authority", "defence"],
+            "Clifton Karachi": ["clifton"],
             "Gulshan-e-Iqbal": ["gulshan", "gulshan-e-iqbal", "gulshan e iqbal"],
             "Gulistan-e-Johar": ["johar", "gulistan-e-johar", "gulistan e johar"],
             Nazimabad: ["nazimabad"],
             "North Nazimabad": ["north nazimabad"],
             "North Karachi": ["north karachi"],
-            "Federal B Area": ["federal b area", "fb area", "f.b area"],
-            PECHS: ["pechs"],
-            Korangi: ["korangi"],
-            Landhi: ["landhi"],
-            Malir: ["malir", "cantt", "cantonment", "malir cantt"],
-            "Scheme 33": ["scheme 33", "scheme-33"],
-            Garden: ["garden", "soldier bazaar", "soldier bazar"],
-            "Shahrah-e-Faisal": ["shahrah-e-faisal", "shahrah e faisal"],
+            "Federal B. Area": ["federal b area", "fb area", "f.b area"],
+            "P.E.C.H.S Block 2": ["pechs", "p.e.c.h.s"],
+            Dastagir: ["dastagir"],
+            "Tariq Road": ["tariq road"],
             Bahadurabad: ["bahadurabad"],
+            Karsaz: ["karsaz"],
         };
 
         for (const area of KARACHI_AREAS) {
             const aliases = areaAliases[area] || [area];
             if (aliases.some((alias) => normalized.includes(alias.toLowerCase()))) {
-                return area;
+                return normalizeKarachiAreaLabel(area);
             }
         }
         return null;
@@ -199,8 +200,7 @@ export default function BranchDetails() {
         const name = String(branch.branchDisplayName || branch.name || "");
         const address = String(branch.addressLine1 || branch.address || "");
         setBranchDisplayName(name);
-        setCity(String(branch.city || "Karachi"));
-        setAreaLabel(String(branch.areaLabel || KARACHI_AREAS[0]));
+        setAreaLabel(normalizeKarachiAreaLabel(branch.areaLabel) || KARACHI_AREAS[0]);
         setAddressLine1(address);
         setGoogleMapsUrl(String(branch.googleMapsUrl || ""));
         setContactPhone(formatPakistaniPhone(String(branch.contactPhone || "")));
@@ -286,21 +286,22 @@ export default function BranchDetails() {
             finalPhone = normalizedPhone;
         }
 
+        const sanitizedInventory = sanitizeBranchInventory(inventory);
         const existingBranch = branchMatch.branch || {};
         const updatedBranch = {
             ...existingBranch,
             id: getBranchEffectiveId(existingBranch, Math.max(branchMatch.index, 0)),
             branchDisplayName: branchDisplayName.trim(),
             name: branchDisplayName.trim(),
-            city,
-            areaLabel,
+            city: DEFAULT_CITY,
+            areaLabel: normalizeKarachiAreaLabel(areaLabel),
             addressLine1: finalAddressLine,
             address: finalAddressLine,
             googleMapsUrl: googleMapsUrl.trim(),
             contactPhone: finalPhone,
-            ...inventory,
-            supportsFc26: inventory.supportsFc25,
-            pricing: inventory.pricing || {},
+            ...sanitizedInventory,
+            supportsFc26: sanitizedInventory.supportsFc25,
+            pricing: sanitizedInventory.pricing || {},
         };
 
         setSaving(true);
@@ -401,38 +402,11 @@ export default function BranchDetails() {
                         <Text style={styles.inputLabel}>Branch Name</Text>
                         <TextInput
                             style={styles.input}
-                            value={branchName}
-                            onChangeText={setBranchName}
+                            value={branchDisplayName}
+                            onChangeText={setBranchDisplayName}
                             placeholder="Main Branch"
                             placeholderTextColor={COLORS.muted}
                         />
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>City</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={city}
-                            onChangeText={setCity}
-                            placeholder="Karachi"
-                            placeholderTextColor={COLORS.muted}
-                        />
-                    </View>
-
-                    <View style={registerStyles.fieldGroup}>
-                        <RegistrationFieldLabel label="City" required />
-                        <View style={registerStyles.inputBox}>
-                            <Picker
-                                selectedValue={city}
-                                onValueChange={setCity}
-                                style={{ color: COLORS.text }}
-                                dropdownIconColor={COLORS.muted}
-                            >
-                                {CITY_OPTIONS.map((option) => (
-                                    <Picker.Item key={option} label={option} value={option} />
-                                ))}
-                            </Picker>
-                        </View>
                     </View>
 
                     <View style={registerStyles.fieldGroup}>

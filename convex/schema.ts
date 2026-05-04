@@ -223,6 +223,10 @@ export default defineSchema({
     steamTekken8Hours :v.optional(v.union(v.any(),v.null())),
     faceitStats: v.optional(v.any()),
     psnStats: v.optional(v.any()),
+    lastExternalSyncAt: v.optional(v.number()),
+    steamLastSyncedAt: v.optional(v.number()),
+    faceitLastSyncedAt: v.optional(v.number()),
+    psnLastSyncedAt: v.optional(v.number()),
 
     // Skill scores (embedded)
     skillScores: v.optional(
@@ -1372,6 +1376,8 @@ export default defineSchema({
     matchroomId: v.optional(v.id("matchrooms")),
     reportedUserId: v.optional(v.id("users")),
     zoneId: v.optional(v.id("zones")),
+    branchId: v.optional(v.string()),
+    branchLabel: v.optional(v.string()),
 
     // Details
     game: v.optional(v.string()),
@@ -1394,6 +1400,7 @@ export default defineSchema({
     .index("by_dedupeKey", ["dedupeKey"])
     .index("by_matchroomId", ["matchroomId"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_zoneId_branchId", ["zoneId", "branchId"])
     .index("by_reportedUserId", ["reportedUserId"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_status_updatedAt", ["status", "updatedAt"]),

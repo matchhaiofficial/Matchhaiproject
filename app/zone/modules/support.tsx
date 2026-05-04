@@ -145,6 +145,7 @@ export default function ZoneSupportModule() {
                   {formatType(report.type)} • {formatDate(report.createdAt)}
                 </Text>
                 {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
+                {report.branchLabel ? <Text style={styles.meta}>Branch: {report.branchLabel}</Text> : null}
                 {report.matchroomTitle ? (
                   <Text style={styles.meta}>Matchroom: {report.matchroomTitle}</Text>
                 ) : report.matchroomId ? (

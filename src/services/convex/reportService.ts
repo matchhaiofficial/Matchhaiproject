@@ -19,6 +19,8 @@ export interface AppReport {
   reportedUserName?: string | null;
   zoneId?: string;
   zoneName?: string | null;
+  branchId?: string | null;
+  branchLabel?: string | null;
   game?: string;
   reason: string;
   description?: string;
@@ -46,6 +48,8 @@ export interface UserReportInput {
 
 export interface ZoneComplaintInput {
   zoneId: string;
+  branchId?: string;
+  branchLabel?: string;
   reason: string;
   description?: string;
 }
@@ -64,6 +68,8 @@ const toAppReport = (value: any): AppReport => ({
   reportedUserName: value.reportedUserName,
   zoneId: value.zoneId,
   zoneName: value.zoneName,
+  branchId: value.branchId,
+  branchLabel: value.branchLabel,
   game: value.game,
   reason: value.reason,
   description: value.description,
@@ -156,6 +162,8 @@ export async function submitZoneComplaint(
     const reporterUid = await getReporterUid();
     const result: any = await convex.mutation(api.reports.createZoneComplaint, {
       zoneId: input.zoneId as Id<"zones">,
+      branchId: input.branchId,
+      branchLabel: input.branchLabel,
       reason: input.reason,
       description: input.description,
       reporterUid,

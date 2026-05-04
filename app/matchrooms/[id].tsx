@@ -1,6 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
-import React, { useCallback, useContext, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,9 +9,9 @@ import {
   View,
 } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import BottomActionBar from "../../src/components/BottomActionBar";
 import ReportIssueModal from "../../src/components/ReportIssueModal";
 import Screen from "../../src/components/Screen";
 import { AppButton } from "../../src/components/AppPrimitives";
@@ -32,7 +31,6 @@ import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useEntrance } from "../../src/motion/useEntrance";
 import { usePressScale } from "../../src/motion/usePressScale";
 import { COLORS, SPACING } from "../../src/theme";
-import { getBottomChromeClearance } from "../../src/utils/bottomChrome";
 import Logger from "../../src/utils/logger";
 import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import {
@@ -112,17 +110,9 @@ function HeaderIconButton({
 export default function MatchroomDetails() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
   const { width } = useWindowDimensions();
   const [showJoinTeamSheet, setShowJoinTeamSheet] = useState(false);
   const footerHitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
-  const bottomChromeClearance = getBottomChromeClearance({
-    bottomInset: insets.bottom,
-    tabBarHeight,
-  });
-  const ctaBottomGuard = Math.max(bottomChromeClearance + 24, 96);
-  const floatingActionBottom = bottomChromeClearance + 16;
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
   const matchroomId = String(id || "");
@@ -363,6 +353,7 @@ export default function MatchroomDetails() {
     !isLocked &&
     !isFull &&
     hasOpenTeamSlot;
+  const showStickyLobbyActions = showFloatingRequestJoin || (!isZoneAdmin && isJoined);
 
   if (loading) {
     return (
@@ -469,9 +460,9 @@ export default function MatchroomDetails() {
           contentContainerStyle={[
             styles.content,
             isZoneAdmin ? styles.adminContent : null,
+            showStickyLobbyActions ? styles.contentWithBottomAction : null,
           ]}
           showsVerticalScrollIndicator={false}
-          scrollIndicatorInsets={{ bottom: bottomChromeClearance }}
           keyboardShouldPersistTaps="always"
           collapsable={false}
           onLayout={(event) => logDebugLayout("lobby_scroll_view", event)}
@@ -596,14 +587,15 @@ export default function MatchroomDetails() {
               </DetailSectionCard>
             )}
             {/* Footer Actions */}
-            <View
-              style={[
-                styles.buttonWrapper,
-                { marginBottom: ctaBottomGuard },
-              ]}
-              collapsable={false}
-              onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
-            >
+            {!showStickyLobbyActions ? (
+              <View
+                style={[
+                  styles.buttonWrapper,
+                  { marginBottom: SPACING.lg },
+                ]}
+                collapsable={false}
+                onLayout={(event) => logDebugLayout("lobby_footer_container", event)}
+              >
               <View style={styles.buttonContent}>
                 {isZoneAdmin ? (
                   <View style={{ gap: SPACING.sm }}>
@@ -894,47 +886,120 @@ export default function MatchroomDetails() {
                   </AppButton>
                 )}
               </View>
-            </View>
+              </View>
+            ) : null}
           </Animated.View>
         </ScrollView>
-        {showFloatingRequestJoin && (
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.floatingActionBar,
-              { bottom: floatingActionBottom },
-            ]}
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: joining }}
-              testID="matchroom-floating-request-join-button"
-              onPress={handleFooterRequestJoinPress}
-              disabled={joining}
-              hitSlop={footerHitSlop}
-              unstable_pressDelay={0}
-              pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
-              onPressIn={() => {
-                if (touchDebugEnabled) {
-                  Logger.debug("TouchDebug", "pressIn", {
-                    tag: "lobby_floating_request_join",
-                  });
-                }
-              }}
-              style={({ pressed }) => [
-                styles.getRequestButton,
-                pressed && styles.footerButtonPressed,
-                joining && { opacity: 0.6 },
-              ]}
-            >
-              {joining ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.getRequestButtonText}>Request to Join</Text>
-              )}
-            </Pressable>
-          </View>
-        )}
+        {showStickyLobbyActions ? (
+          <BottomActionBar>
+            {showFloatingRequestJoin ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: joining }}
+                testID="matchroom-request-join-bottom-button"
+                onPress={handleFooterRequestJoinPress}
+                disabled={joining}
+                hitSlop={footerHitSlop}
+                unstable_pressDelay={0}
+                pressRetentionOffset={{ top: 24, bottom: 24, left: 24, right: 24 }}
+                onPressIn={() => {
+                  if (touchDebugEnabled) {
+                    Logger.debug("TouchDebug", "pressIn", {
+                      tag: "lobby_floating_request_join",
+                    });
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.getRequestButton,
+                  pressed && styles.footerButtonPressed,
+                  joining && { opacity: 0.6 },
+                ]}
+              >
+                {joining ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.getRequestButtonText}>Request to Join</Text>
+                )}
+              </Pressable>
+            ) : isExpired ? (
+              <View style={[styles.fullButton, styles.expiredBanner]}>
+                <Text style={styles.fullText}>Matchroom Expired</Text>
+              </View>
+            ) : room.status !== "in-progress" && room.status !== "completed" ? (
+              <View style={styles.footerRow}>
+                <View style={[styles.joinedButton, { flex: 1.5 }]}>
+                  <Text style={styles.joinedText}>
+                    {isHost ? "Waiting for kickoff..." : "You are in!"}
+                  </Text>
+                </View>
+                {!isHost && (
+                  <AppButton
+                    variant="danger"
+                    size="lg"
+                    onPress={() => {
+                      if (touchDebugEnabled) {
+                        Logger.debug("TouchDebug", "press", {
+                          tag: "lobby_leave",
+                        });
+                      }
+                      handleLeaveAction();
+                    }}
+                    onPressIn={() => {
+                      if (touchDebugEnabled) {
+                        Logger.debug("TouchDebug", "pressIn", {
+                          tag: "lobby_leave",
+                        });
+                      }
+                    }}
+                    disabled={joining}
+                    style={styles.footerAction}
+                    hitSlop={footerHitSlop}
+                  >
+                    {joining ? (
+                      <ActivityIndicator color={COLORS.error} />
+                    ) : (
+                      <Text style={styles.secondaryButtonText}>Leave</Text>
+                    )}
+                  </AppButton>
+                )}
+              </View>
+            ) : (
+              <View style={{ gap: SPACING.sm }}>
+                <View style={styles.statusBanner}>
+                  <Text style={styles.statusText}>
+                    Status:{" "}
+                    {room.status === "in-progress"
+                      ? "In Progress"
+                      : "Verifying Results"}
+                  </Text>
+                </View>
+                {(room.status === "in-progress" ||
+                  room.resultVerification?.status === "pending") && (
+                  <AppButton
+                    variant="ghost"
+                    size="lg"
+                    onPress={handleResultSubmissionAction}
+                    style={styles.warningActionButton}
+                    hitSlop={footerHitSlop}
+                  >
+                    <Text style={styles.warningActionText}>Report Result</Text>
+                  </AppButton>
+                )}
+                {room.resultVerification?.status === "participant_vote" && (
+                  <AppButton
+                    variant="danger"
+                    size="lg"
+                    onPress={handleVoteAction}
+                    style={styles.forceCancelButton}
+                    hitSlop={footerHitSlop}
+                  >
+                    <Text style={styles.secondaryButtonText}>Vote on Dispute</Text>
+                  </AppButton>
+                )}
+              </View>
+            )}
+          </BottomActionBar>
+        ) : null}
       </View>
 
       <MatchroomJoinTeamSheet

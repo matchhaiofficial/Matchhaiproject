@@ -62,6 +62,8 @@ export type SuperAdminReport = {
   reporterName: string;
   reportedUserName?: string | null;
   zoneName?: string | null;
+  branchId?: string | null;
+  branchLabel?: string | null;
   matchroomId?: string | null;
   matchroomTitle?: string | null;
   reviewedByUid?: string | null;

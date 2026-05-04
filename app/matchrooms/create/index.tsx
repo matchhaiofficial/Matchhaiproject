@@ -9,9 +9,9 @@ import {
   View,
 } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
+import BottomActionBar from "../../../src/components/BottomActionBar";
 import {
   AppDialog,
   AppModalBody,
@@ -188,7 +188,6 @@ export default function CreateMatchroom() {
   useRouteLogger("CreateMatchroomScreen");
   const { user, authUser } = useAuth();
   const { showToast } = useToast();
-  const insets = useSafeAreaInsets();
   const { zone: adminZone } = useZoneData();
   const params = useLocalSearchParams<{
     zoneId?: string;
@@ -1151,7 +1150,6 @@ export default function CreateMatchroom() {
     walkInSeries,
     formData.overs,
   );
-  const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
   const submitFeedbackColor =
     submitFeedback?.type === "success"
       ? COLORS.success
@@ -1219,13 +1217,9 @@ export default function CreateMatchroom() {
     return (
       <Screen
         style={styles.screen}
-        scroll
+        scroll={false}
         keyboardAvoiding
-        contentStyle={styles.scrollContent}
-        scrollProps={{
-          showsVerticalScrollIndicator: false,
-          keyboardShouldPersistTaps: "always",
-        }}
+        contentStyle={styles.createNonScrollContent}
       >
         <AppHeader
           title="Create Matchroom"
@@ -1234,15 +1228,20 @@ export default function CreateMatchroom() {
           inlineTitle
         />
 
-        <GameSelector
-          selectedGame={selectedGame}
-          onSelectGame={handleGameSelect}
-          userProfile={userProfile}
-          allowAllGames
-          allowedGameKeys={walkInSupportedGameKeys}
-        />
+        <Animated.ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+        >
+          <GameSelector
+            selectedGame={selectedGame}
+            onSelectGame={handleGameSelect}
+            userProfile={userProfile}
+            allowAllGames
+            allowedGameKeys={walkInSupportedGameKeys}
+          />
 
-        {selectedGame && (
+        {selectedGame ? (
           <>
             <BasicFields
               formData={formData}
@@ -1431,7 +1430,12 @@ export default function CreateMatchroom() {
               </Text>
             </View>
 
-            <View style={[styles.buttonWrapper, { marginBottom: ctaBottomGuard }]}>
+          </>
+        ) : null}
+        </Animated.ScrollView>
+
+        {selectedGame ? (
+          <BottomActionBar>
               <Pressable
                 style={({ pressed }) => [
                   styles.primaryButton,
@@ -1478,9 +1482,8 @@ export default function CreateMatchroom() {
                   {submitFeedback.title}: {submitFeedback.message}
                 </Text>
               ) : null}
-            </View>
-          </>
-        )}
+          </BottomActionBar>
+        ) : null}
       </Screen>
     );
   }
@@ -1488,13 +1491,9 @@ export default function CreateMatchroom() {
   return (
     <Screen
       style={styles.screen}
-      scroll
+      scroll={false}
       keyboardAvoiding
-      contentStyle={styles.scrollContent}
-      scrollProps={{
-        showsVerticalScrollIndicator: false,
-        keyboardShouldPersistTaps: "always",
-      }}
+      contentStyle={styles.createNonScrollContent}
     >
       <AppHeader
         title="Create Matchroom"
@@ -1503,13 +1502,18 @@ export default function CreateMatchroom() {
         inlineTitle
       />
 
-      {/* Game Selector */}
-      <GameSelector
-        selectedGame={selectedGame}
-        onSelectGame={handleGameSelect}
-        userProfile={userProfile}
-        allowedGameKeys={venueAllowedGameKeys}
-      />
+      <Animated.ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
+      >
+        {/* Game Selector */}
+        <GameSelector
+          selectedGame={selectedGame}
+          onSelectGame={handleGameSelect}
+          userProfile={userProfile}
+          allowedGameKeys={venueAllowedGameKeys}
+        />
 
       {selectedGame && (
         <Animated.View style={contentEntranceStyle}>
@@ -2086,8 +2090,10 @@ export default function CreateMatchroom() {
           </View>
         </Animated.View>
       )}
+      </Animated.ScrollView>
+
       {selectedGame ? (
-        <View style={[styles.buttonWrapper, { marginBottom: ctaBottomGuard }]}>
+        <BottomActionBar>
           <Pressable
             onPressIn={onSubmitPressIn}
             onPressOut={onSubmitPressOut}
@@ -2149,7 +2155,7 @@ export default function CreateMatchroom() {
               {submitFeedback.title}: {submitFeedback.message}
             </Text>
           ) : null}
-        </View>
+        </BottomActionBar>
       ) : null}
 
       <GameActivationPromptModal

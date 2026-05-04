@@ -546,6 +546,15 @@ export default StyleSheet.create({
     actionBarContent: {
         width: '100%',
     },
+    footerActionRow: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        gap: SPACING.sm,
+    },
+    footerActionButton: {
+        flex: 1,
+        marginBottom: 0,
+    },
     actionButton: {
         ...CTA.primaryButton,
     },
@@ -630,6 +639,9 @@ export default StyleSheet.create({
     scrollContent: {
         paddingHorizontal: SPACING.screenPadding,
         paddingBottom: SPACING.xl,
+    },
+    scrollContentWithBottomAction: {
+        paddingBottom: 112,
     },
     renameDialogCard: {
         width: "85%",

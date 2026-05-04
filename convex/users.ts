@@ -521,11 +521,21 @@ export const updatePlatformLinks = mutation({
     userId: v.id("users"),
     steamId: v.optional(v.string()),
     steamStats: v.optional(v.any()),
+    steamPersonaName: v.optional(v.union(v.string(), v.null())),
+    steamCs2Hours: v.optional(v.union(v.number(), v.null())),
+    steamLastSyncedAt: v.optional(v.number()),
     faceitId: v.optional(v.string()),
     faceitStats: v.optional(v.any()),
+    faceitElo: v.optional(v.union(v.number(), v.null())),
+    faceitSkillLevel: v.optional(v.union(v.number(), v.null())),
+    faceitNickname: v.optional(v.union(v.string(), v.null())),
+    faceitGame: v.optional(v.union(v.string(), v.null())),
+    faceitLastSyncedAt: v.optional(v.number()),
     psnAccountId: v.optional(v.string()),
     psnOnlineId: v.optional(v.string()),
     psnStats: v.optional(v.any()),
+    lastExternalSyncAt: v.optional(v.number()),
+    psnLastSyncedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
@@ -535,14 +545,114 @@ export const updatePlatformLinks = mutation({
 
     if (updates.steamId !== undefined) updateData.steamId = updates.steamId;
     if (updates.steamStats !== undefined) updateData.steamStats = updates.steamStats;
+    if (updates.steamPersonaName !== undefined) updateData.steamPersonaName = updates.steamPersonaName;
+    if (updates.steamCs2Hours !== undefined) updateData.steamCs2Hours = updates.steamCs2Hours;
+    if (updates.steamLastSyncedAt !== undefined) updateData.steamLastSyncedAt = updates.steamLastSyncedAt;
     if (updates.faceitId !== undefined) updateData.faceitId = updates.faceitId;
     if (updates.faceitStats !== undefined) updateData.faceitStats = updates.faceitStats;
+    if (updates.faceitElo !== undefined) updateData.faceitElo = updates.faceitElo;
+    if (updates.faceitSkillLevel !== undefined) updateData.faceitSkillLevel = updates.faceitSkillLevel;
+    if (updates.faceitNickname !== undefined) updateData.faceitNickname = updates.faceitNickname;
+    if (updates.faceitGame !== undefined) updateData.faceitGame = updates.faceitGame;
+    if (updates.faceitLastSyncedAt !== undefined) updateData.faceitLastSyncedAt = updates.faceitLastSyncedAt;
     if (updates.psnAccountId !== undefined) updateData.psnAccountId = updates.psnAccountId;
     if (updates.psnOnlineId !== undefined) updateData.psnOnlineId = updates.psnOnlineId;
     if (updates.psnStats !== undefined) updateData.psnStats = updates.psnStats;
+    if (updates.lastExternalSyncAt !== undefined) updateData.lastExternalSyncAt = updates.lastExternalSyncAt;
+    if (updates.psnLastSyncedAt !== undefined) updateData.psnLastSyncedAt = updates.psnLastSyncedAt;
 
     await ctx.db.patch(userId, updateData);
     return true;
+  },
+});
+
+const EXTERNAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+
+export const refreshExternalStats = action({
+  args: {
+    userId: v.id("users"),
+    force: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<{
+    refreshed: string[];
+    throttled: boolean;
+    errors: Array<{ platform: string; message: string }>;
+    updates: Record<string, unknown>;
+  }> => {
+    const user = await ctx.runQuery(api.users.getById, { userId: args.userId });
+    if (!user) throw new Error("User not found");
+
+    const now = Date.now();
+    const lastSync = Number((user as any).lastExternalSyncAt || 0);
+    if (!args.force && lastSync && now - lastSync < EXTERNAL_SYNC_COOLDOWN_MS) {
+      return {
+        refreshed: [],
+        throttled: true,
+        errors: [],
+        updates: {},
+      };
+    }
+
+    const updates: Record<string, unknown> = {};
+    const refreshed: string[] = [];
+    const errors: Array<{ platform: string; message: string }> = [];
+
+    const steamLookup = String((user as any).steamProfileUrl || (user as any).steamId || "").trim();
+    if (steamLookup) {
+      try {
+        const steamRes: any = await ctx.runAction(api.externalApis.fetchSteamProfile, {
+          url: steamLookup,
+        });
+        if (steamRes) {
+          updates.steamStats = steamRes;
+          if (steamRes.personaName !== undefined) updates.steamPersonaName = steamRes.personaName || null;
+          if (steamRes.cs2Hours !== undefined) updates.steamCs2Hours = steamRes.cs2Hours ?? null;
+          updates.steamLastSyncedAt = now;
+          refreshed.push("Steam");
+        }
+      } catch (error: any) {
+        errors.push({ platform: "Steam", message: error?.message || "Steam refresh failed" });
+      }
+    }
+
+    const faceitLookup = String(
+      (user as any).faceitProfileUrl || (user as any).faceitNickname || "",
+    ).trim();
+    if (faceitLookup) {
+      try {
+        const faceitRes: any = await ctx.runAction(api.externalApis.fetchFaceitProfile, {
+          value: faceitLookup,
+          game: (user as any).faceitGame || "cs2",
+        });
+        if (faceitRes) {
+          updates.faceitStats = faceitRes;
+          if (faceitRes.faceitId !== undefined) updates.faceitId = faceitRes.faceitId;
+          if (faceitRes.elo !== undefined) updates.faceitElo = faceitRes.elo ?? null;
+          if (faceitRes.skillLevel !== undefined) updates.faceitSkillLevel = faceitRes.skillLevel ?? null;
+          if (faceitRes.nickname !== undefined) updates.faceitNickname = faceitRes.nickname || null;
+          if (faceitRes.game !== undefined) updates.faceitGame = faceitRes.game || "cs2";
+          updates.faceitLastSyncedAt = now;
+          refreshed.push("FACEIT");
+        }
+      } catch (error: any) {
+        errors.push({ platform: "FACEIT", message: error?.message || "FACEIT refresh failed" });
+      }
+    }
+
+    if (refreshed.length > 0) {
+      updates.lastExternalSyncAt = now;
+      await ctx.runMutation(api.users.updatePlatformLinks, {
+        userId: args.userId,
+        ...updates,
+      });
+    }
+
+    return {
+      refreshed,
+      throttled: false,
+      errors,
+      updates,
+    };
   },
 });
 

@@ -1,9 +1,10 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppButton, AppCard } from "../../../src/components/AppPrimitives";
+import BottomActionBar from "../../../src/components/BottomActionBar";
 import { AppIcon } from "../../../src/components/AppIcon";
 import ReportIssueModal from "../../../src/components/ReportIssueModal";
 import Screen from "../../../src/components/Screen";
@@ -37,7 +38,7 @@ const REPORT_REASONS = [
 ];
 
 export default function PlayerVenueDetailsScreen() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, branchId } = useLocalSearchParams<{ id?: string; branchId?: string }>();
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -47,7 +48,9 @@ export default function PlayerVenueDetailsScreen() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportDescription, setReportDescription] = useState("");
+  const [reportBranchKey, setReportBranchKey] = useState("");
   const [reporting, setReporting] = useState(false);
+  const [selectedBranchKey, setSelectedBranchKey] = useState("");
 
   const loadVenue = useCallback(async () => {
     if (!id) {
@@ -69,12 +72,33 @@ export default function PlayerVenueDetailsScreen() {
     }
 
     setVenue(result.data);
+    const requestedBranchId = String(branchId || "").trim();
+    const requestedBranch = requestedBranchId
+      ? result.data.branches.find(
+          (branch) => branch.id === requestedBranchId || branch.uiKey === requestedBranchId,
+        )
+      : null;
+    setSelectedBranchKey((requestedBranch || result.data.selectedBranch).uiKey);
     setLoading(false);
-  }, [id]);
+  }, [branchId, id]);
 
   useEffect(() => {
     void loadVenue();
   }, [loadVenue]);
+
+  const selectedBranch = useMemo(() => {
+    if (!venue) return null;
+    return venue.branches.find((branch) => branch.uiKey === selectedBranchKey) || venue.selectedBranch;
+  }, [selectedBranchKey, venue]);
+
+  const selectedInfoItems = useMemo(() => {
+    if (!venue || !selectedBranch) return [];
+    return venue.infoItems.map((item) =>
+      item.key === "location"
+        ? { ...item, value: selectedBranch.locationSummary }
+        : item,
+    );
+  }, [selectedBranch, venue]);
 
   const withToastFeedback = useCallback(async (
     action: () => Promise<{ ok: true } | { ok: false; message: string }>,
@@ -99,10 +123,10 @@ export default function PlayerVenueDetailsScreen() {
   }, [showToast]);
 
   const onOpenMaps = useCallback(async () => {
-    if (!venue) return;
+    if (!selectedBranch) return;
     const result = await handleOpenGoogleMaps({
-      mapUrl: venue.selectedBranch.googleMapsUrl,
-      address: venue.selectedBranch.formattedAddress,
+      mapUrl: selectedBranch.googleMapsUrl,
+      address: selectedBranch.formattedAddress,
     });
     if (!result.ok) {
       showToast({
@@ -111,20 +135,20 @@ export default function PlayerVenueDetailsScreen() {
         message: result.message,
       });
     }
-  }, [showToast, venue]);
+  }, [selectedBranch, showToast]);
 
   const onCopyAddress = useCallback(async () => {
-    if (!venue) return;
+    if (!selectedBranch) return;
     await withToastFeedback(
-      () => handleCopyAddress(venue.selectedBranch.formattedAddress),
+      () => handleCopyAddress(selectedBranch.formattedAddress),
       "The venue address is now on your clipboard.",
       "Address copied",
     );
-  }, [venue, withToastFeedback]);
+  }, [selectedBranch, withToastFeedback]);
 
   const onCallVenue = useCallback(async () => {
-    if (!venue) return;
-    const result = await handleCallVenue(venue.selectedBranch.phone);
+    if (!selectedBranch) return;
+    const result = await handleCallVenue(selectedBranch.phone);
     if (!result.ok) {
       showToast({
         type: "warning",
@@ -132,22 +156,32 @@ export default function PlayerVenueDetailsScreen() {
         message: result.message,
       });
     }
-  }, [showToast, venue]);
+  }, [selectedBranch, showToast]);
 
   const onCreateMatchroom = useCallback(() => {
-    if (!venue) return;
+    if (!selectedBranch) return;
     router.push({
       pathname: "/matchrooms/create",
-      params: venue.createMatchroomParams,
+      params: selectedBranch.createMatchroomParams,
     });
-  }, [router, venue]);
+  }, [router, selectedBranch]);
+
+  const openReportModal = useCallback(() => {
+    if (!selectedBranch) return;
+    setReportBranchKey(selectedBranch.uiKey);
+    setShowReportModal(true);
+  }, [selectedBranch]);
 
   const onSubmitReport = useCallback(async () => {
-    if (!venue?.id || !reportReason) return;
+    if (!venue?.id || !reportReason || !selectedBranch) return;
+    const reportBranch =
+      venue.branches.find((branch) => branch.uiKey === reportBranchKey) || selectedBranch;
     setReporting(true);
 
     const result = await submitZoneComplaint({
       zoneId: venue.id,
+      branchId: reportBranch.id,
+      branchLabel: reportBranch.displayName,
       reason: reportReason,
       description: reportDescription,
     });
@@ -171,7 +205,7 @@ export default function PlayerVenueDetailsScreen() {
     setShowReportModal(false);
     setReportReason("");
     setReportDescription("");
-  }, [reportDescription, reportReason, showToast, venue?.id]);
+  }, [reportBranchKey, reportDescription, reportReason, selectedBranch, showToast, venue]);
 
   return (
     <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent} edges={["top", "bottom"]}>
@@ -200,13 +234,13 @@ export default function PlayerVenueDetailsScreen() {
             </AppButton>
           </AppCard>
         </View>
-      ) : (
+      ) : selectedBranch ? (
         <>
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: 28 },
+              styles.scrollContentWithBottomAction,
             ]}
           >
             <VenueHeroCard
@@ -221,12 +255,15 @@ export default function PlayerVenueDetailsScreen() {
             />
 
             <VenueBranchCard
-              branchName={venue.selectedBranch.displayName}
-              address={venue.selectedBranch.formattedAddress}
-              areaCityLabel={venue.selectedBranch.areaCityLabel}
+              branchName={selectedBranch.displayName}
+              address={selectedBranch.formattedAddress}
+              areaCityLabel={selectedBranch.areaCityLabel}
               branchCountLabel={venue.branchCountLabel}
-              hasMap={venue.selectedBranch.hasMap}
-              hasPhone={venue.selectedBranch.hasPhone}
+              hasMap={selectedBranch.hasMap}
+              hasPhone={selectedBranch.hasPhone}
+              branches={venue.branches}
+              selectedBranchKey={selectedBranch.uiKey}
+              onSelectBranch={setSelectedBranchKey}
               onOpenMaps={() => void onOpenMaps()}
               onCopyAddress={() => void onCopyAddress()}
               onCallVenue={() => void onCallVenue()}
@@ -234,26 +271,26 @@ export default function PlayerVenueDetailsScreen() {
 
             <VenueGamesResourcesSection
               gameLabels={venue.supportedGameLabels}
-              resources={venue.resources}
+              resources={selectedBranch.resources}
             />
 
             <VenuePricingSection
-              startingPriceLabel={venue.startingPriceLabel}
-              pricingGroups={venue.pricingGroups}
+              startingPriceLabel={selectedBranch.startingPriceLabel}
+              pricingGroups={selectedBranch.pricingGroups}
             />
 
             <VenueInfoSection
-              infoItems={venue.infoItems}
+              infoItems={selectedInfoItems}
               hasContactInfo={venue.hasContactInfo}
-              onReportVenue={() => setShowReportModal(true)}
-            />
-
-            <VenuePrimaryActionBar
-              onCreateMatchroom={onCreateMatchroom}
+              onReportVenue={openReportModal}
             />
           </ScrollView>
+
+          <BottomActionBar>
+            <VenuePrimaryActionBar onCreateMatchroom={onCreateMatchroom} />
+          </BottomActionBar>
         </>
-      )}
+      ) : null}
 
       <ReportIssueModal
         visible={showReportModal}
@@ -264,6 +301,14 @@ export default function PlayerVenueDetailsScreen() {
         description={reportDescription}
         onChangeReason={setReportReason}
         onChangeDescription={setReportDescription}
+        targetLabel="Branch"
+        targetOptions={(venue?.branches || []).map((branch) => ({
+          value: branch.uiKey,
+          label: branch.displayName,
+          description: branch.areaCityLabel,
+        }))}
+        targetValue={reportBranchKey}
+        onChangeTarget={setReportBranchKey}
         onSubmit={() => void onSubmitReport()}
         onClose={() => setShowReportModal(false)}
         loading={reporting}

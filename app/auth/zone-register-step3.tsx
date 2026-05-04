@@ -20,6 +20,19 @@ import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 
 const CONSOLE_TYPES = PC_TYPES;
+const PC_SPEC_FIELDS = [
+  { key: "cpu", label: "Processor / CPU", placeholder: "e.g. Ryzen 5 5600" },
+  { key: "gpu", label: "Graphics Card / GPU", placeholder: "e.g. RTX 3060" },
+  { key: "monitorRefreshRate", label: "Monitor Refresh Rate", placeholder: "e.g. 144Hz" },
+  { key: "mouse", label: "Mouse", placeholder: "e.g. Logitech G Pro" },
+  { key: "keyboard", label: "Keyboard", placeholder: "e.g. Mechanical keyboard" },
+  { key: "headset", label: "Headset", placeholder: "e.g. HyperX Cloud" },
+] as const;
+
+const toPositiveNumber = (value: unknown) => {
+  const parsed = Number(String(value ?? "").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
 
 export default function AdminRegisterStep3() {
   const { step1, branches, updateBranch, setCurrentStep } = useZoneOnboardingStore();
@@ -85,6 +98,24 @@ export default function AdminRegisterStep3() {
     });
   };
 
+  const updatePcSpec = (
+    tier: "regular" | "premium" | "elite",
+    field: "cpu" | "gpu" | "monitorRefreshRate" | "mouse" | "keyboard" | "headset",
+    value: string,
+  ) => {
+    if (!activeBranch) return;
+
+    updateActiveBranch({
+      pcSpecs: {
+        ...(activeBranch.pcSpecs || {}),
+        [tier]: {
+          ...(activeBranch.pcSpecs?.[tier] || {}),
+          [field]: value,
+        },
+      },
+    });
+  };
+
   const toggleSupport = (field: keyof BranchData) => {
     if (!activeBranch) return;
     if (field === "supportsFc25") {
@@ -99,11 +130,6 @@ export default function AdminRegisterStep3() {
   };
 
   const validation = useMemo(() => {
-    const toPositiveNumber = (value: unknown) => {
-      const parsed = Number(String(value ?? "").trim());
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    };
-
     const branchErrors = branches.flatMap((branch) => {
       const errors: string[] = [];
 
@@ -249,7 +275,7 @@ export default function AdminRegisterStep3() {
       <Screen style={styles.screen} contentStyle={styles.container}>
         <RegistrationStepHeader
           title="Inventory and Pricing"
-          subtitle="No branches are available to configure yet."
+          subtitle="Add a branch before pricing."
           stepTitle="Step 3 of 4"
           stepSubtitle="Inventory and pricing"
           progress="75%"
@@ -297,7 +323,7 @@ export default function AdminRegisterStep3() {
     >
       <RegistrationStepHeader
         title="Inventory and Pricing"
-        subtitle="Configure each branch so booking and pricing surfaces can open with valid data."
+        subtitle="Set inventory and pricing per branch."
         stepTitle="Step 3 of 4"
         stepSubtitle="Inventory and pricing"
         progress="75%"
@@ -380,43 +406,71 @@ export default function AdminRegisterStep3() {
       {activeBranch.supportsCs2 ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>PC setups</Text>
-          {PC_TYPES.map((type) => (
-            <View key={type.value} style={styles.fieldGroup}>
-              <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
-                {type.label}
-              </Text>
-              <View style={styles.row}>
-                <View style={{ flex: 1 }}>
-                  <RegistrationFieldLabel label="Count" required />
-                  <View style={styles.inputBox}>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      placeholder="e.g. 10"
-                      placeholderTextColor={COLORS.muted}
-                      value={activeBranch.pricing.pc?.[type.value as "regular" | "premium" | "elite"]?.count || ""}
-                      onChangeText={(value) => updatePricing("pc", type.value, "count", value)}
-                      selectionColor={COLORS.accent}
-                    />
+          {PC_TYPES.map((type) => {
+            const tier = type.value as "regular" | "premium" | "elite";
+            const showSpecs =
+              toPositiveNumber(activeBranch.pricing.pc?.[tier]?.count) > 0 &&
+              toPositiveNumber(activeBranch.pricing.pc?.[tier]?.price) > 0;
+
+            return (
+              <View key={tier} style={styles.fieldGroup}>
+                <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
+                  {type.label}
+                </Text>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <RegistrationFieldLabel label="Count" required />
+                    <View style={styles.inputBox}>
+                      <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        placeholder="e.g. 10"
+                        placeholderTextColor={COLORS.muted}
+                        value={activeBranch.pricing.pc?.[tier]?.count || ""}
+                        onChangeText={(value) => updatePricing("pc", tier, "count", value)}
+                        selectionColor={COLORS.accent}
+                      />
+                    </View>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <RegistrationFieldLabel label="Price / hour" required />
+                    <View style={styles.inputBox}>
+                      <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        placeholder="e.g. 250"
+                        placeholderTextColor={COLORS.muted}
+                        value={activeBranch.pricing.pc?.[tier]?.price || ""}
+                        onChangeText={(value) => updatePricing("pc", tier, "price", value)}
+                        selectionColor={COLORS.accent}
+                      />
+                    </View>
                   </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <RegistrationFieldLabel label="Price / hour" required />
-                  <View style={styles.inputBox}>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      placeholder="e.g. 250"
-                      placeholderTextColor={COLORS.muted}
-                      value={activeBranch.pricing.pc?.[type.value as "regular" | "premium" | "elite"]?.price || ""}
-                      onChangeText={(value) => updatePricing("pc", type.value, "price", value)}
-                      selectionColor={COLORS.accent}
-                    />
+
+                {showSpecs ? (
+                  <View style={[styles.reviewSectionCard, { marginTop: 10 }]}>
+                    <Text style={styles.reviewSectionTitle}>Optional specs</Text>
+                    {PC_SPEC_FIELDS.map((field) => (
+                      <View key={field.key} style={{ marginTop: 10 }}>
+                        <RegistrationFieldLabel label={field.label} />
+                        <View style={styles.inputBox}>
+                          <TextInput
+                            style={styles.input}
+                            placeholder={field.placeholder}
+                            placeholderTextColor={COLORS.muted}
+                            value={activeBranch.pcSpecs?.[tier]?.[field.key] || ""}
+                            onChangeText={(value) => updatePcSpec(tier, field.key, value)}
+                            selectionColor={COLORS.accent}
+                          />
+                        </View>
+                      </View>
+                    ))}
                   </View>
-                </View>
+                ) : null}
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : null}
 
