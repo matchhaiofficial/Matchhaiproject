@@ -282,25 +282,37 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       });
     } else if (selectedGame === "fc26" || selectedGame === "tekken8") {
       const console = getPricingBucket("console");
-      const ps5 = console.ps5 || {};
-      const xbox = console.xbox || {};
-      const ps5Price = getFirstPositivePrice(
-        ps5?.[priceKey],
-        ps5?.[otherPriceKey],
-        ps5?.price,
+      const regular = console.regular || {};
+      const premium = console.premium || {};
+      const elite = console.elite || {};
+
+      const regularPrice = getFirstPositivePrice(
+        regular?.[priceKey],
+        regular?.[otherPriceKey],
+        regular?.price,
       );
-      const xboxPrice = getFirstPositivePrice(
-        xbox?.[priceKey],
-        xbox?.[otherPriceKey],
-        xbox?.price,
+      const premiumPrice = getFirstPositivePrice(
+        premium?.[priceKey],
+        premium?.[otherPriceKey],
+        premium?.price,
       );
-      addOption("console:ps5", `PS5 (${formatLabel})`, ps5Price, {
+      const elitePrice = getFirstPositivePrice(
+        elite?.[priceKey],
+        elite?.[otherPriceKey],
+        elite?.price,
+      );
+
+      addOption("console:regular", `Regular (${formatLabel})`, regularPrice, {
         assetType: "console",
-        tier: "ps5",
+        tier: "regular",
       });
-      addOption("console:xbox", `Xbox (${formatLabel})`, xboxPrice, {
+      addOption("console:premium", `Premium (${formatLabel})`, premiumPrice, {
         assetType: "console",
-        tier: "xbox",
+        tier: "premium",
+      });
+      addOption("console:elite", `Elite (${formatLabel})`, elitePrice, {
+        assetType: "console",
+        tier: "elite",
       });
     } else if (selectedGame === "futsal") {
       const futsal = getPricingBucket("futsal");

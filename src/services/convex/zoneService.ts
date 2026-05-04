@@ -547,6 +547,9 @@ function getConsoleSeatCount(zone: Zone): number {
   return getZonePricingSources(zone).reduce((sum, pricing) => {
     const consolePricing = pricing?.console || {};
     return sum
+      + Number(consolePricing?.regular?.count || 0)
+      + Number(consolePricing?.premium?.count || 0)
+      + Number(consolePricing?.elite?.count || 0)
       + Number(consolePricing?.ps5?.count || 0)
       + Number(consolePricing?.xbox?.count || 0);
   }, 0);
