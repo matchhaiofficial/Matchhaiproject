@@ -378,12 +378,7 @@ export default function MatchroomDetails() {
 
   return (
     <Screen
-      style={[
-        styles.screen,
-        touchDebugEnabled
-          ? { borderWidth: 1, borderColor: "rgba(0, 230, 118, 0.35)" }
-          : null,
-      ]}
+      style={styles.screen}
       scroll={false}
       contentStyle={styles.screenContent}
       debugTag="matchroom_detail_screen"

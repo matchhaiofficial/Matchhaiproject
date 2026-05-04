@@ -13,13 +13,13 @@ import {
     TextInput,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AGE_RANGES, CITY_OPTIONS, KARACHI_AREAS } from "../../../constants/profileOptions";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
+import Screen from "../../../src/components/Screen";
 import { authClient } from "../../../src/lib/auth-client";
 import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
@@ -790,39 +790,38 @@ export default function EditProfile() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.screen}>
+            <Screen style={styles.screen} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <AppHeader
                 title="Edit Profile"
                 onBack={() => router.back()}
                 inlineTitle
-                style={styles.appHeader}
                 rightAction={
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.saveButton,
-                            saving && styles.saveButtonDisabled,
-                            pressed && !saving && styles.saveButtonPressed,
-                        ]}
-                        onPressIn={() => {
-                            if (touchDebugEnabled) {
-                                Logger.debug("TouchDebug", "pressIn", { tag: "profile_edit_save" });
-                            }
-                        }}
-                        onPress={handleSave}
-                        disabled={saving}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                        <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
-                    </Pressable>
+                    style={({ pressed }) => [
+                        styles.saveButton,
+                        saving && styles.saveButtonDisabled,
+                        pressed && !saving && styles.saveButtonPressed,
+                    ]}
+                    onPressIn={() => {
+                        if (touchDebugEnabled) {
+                            Logger.debug("TouchDebug", "pressIn", { tag: "profile_edit_save" });
+                        }
+                    }}
+                    onPress={handleSave}
+                    disabled={saving}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                    <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save"}</Text>
+                </Pressable>
                 }
             />
 
@@ -832,7 +831,7 @@ export default function EditProfile() {
             >
                 <ScrollView
                     ref={scrollRef}
-                    contentContainerStyle={styles.scrollContent}
+                    contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
@@ -1452,6 +1451,6 @@ export default function EditProfile() {
                     <ActivityIndicator size="large" color={COLORS.accent} />
                 </View>
             )}
-        </SafeAreaView>
+        </Screen>
     );
 }

@@ -8,9 +8,9 @@ import {
     Text,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AppHeader from '../../src/components/AppHeader';
 import { AppIcon } from '../../src/components/AppIcon';
+import Screen from '../../src/components/Screen';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitParticipantVote } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
@@ -118,34 +118,34 @@ export default function ParticipantVoting() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                     <Text style={styles.loadingText}>Loading voting data...</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.errorContainer}>
                     <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>{error}</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     if (!voteData) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.errorContainer}>
                     <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>Match not found</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
@@ -160,15 +160,10 @@ export default function ParticipantVoting() {
     const team2CaptainChoice = voteData.resultVerification.captainReports.team2Captain?.result;
 
     return (
-        <SafeAreaView style={styles.container}>
-            <AppHeader
-                title="Vote on Result"
-                onBack={() => router.back()}
-                inlineTitle
-                style={styles.appHeader}
-            />
+        <Screen style={styles.container} scroll={false}>
+            <AppHeader title="Vote on Match Result" onBack={() => router.back()} inlineTitle />
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]}>
                 <View style={styles.header}>
                     <Text style={styles.subtitle}>
                         Captains disagreed on the result. Your vote will help determine the winner.
@@ -316,7 +311,7 @@ export default function ParticipantVoting() {
                     </Text>
                 </View>
             </ScrollView>
-        </SafeAreaView>
+        </Screen>
     );
 }
 

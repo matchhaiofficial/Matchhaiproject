@@ -8,9 +8,9 @@ import {
     Text,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AppHeader from '../../src/components/AppHeader';
 import { AppIcon } from '../../src/components/AppIcon';
+import Screen from '../../src/components/Screen';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
 import { COLORS } from '../../src/theme';
@@ -111,34 +111,34 @@ export default function MatchResultSubmission() {
 
     if (loading) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                     <Text style={styles.loadingText}>Loading match data...</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.errorContainer}>
                     <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>{error}</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     if (!matchData) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.errorContainer}>
                     <AppIcon name="error-outline" size={48} color={COLORS.error} />
                     <Text style={styles.errorText}>Match not found</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
@@ -157,25 +157,20 @@ export default function MatchResultSubmission() {
 
     if (!isCaptain) {
         return (
-            <SafeAreaView style={styles.container}>
+            <Screen style={styles.container} scroll={false}>
                 <View style={styles.errorContainer}>
                     <AppIcon name="block" size={48} color={COLORS.warning} />
                     <Text style={styles.errorText}>Only team captains can submit match results</Text>
                 </View>
-            </SafeAreaView>
+            </Screen>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <AppHeader
-                title="Submit Result"
-                onBack={() => router.back()}
-                inlineTitle
-                style={styles.appHeader}
-            />
+        <Screen style={styles.container} scroll={false}>
+            <AppHeader title="Submit Match Result" onBack={() => router.back()} inlineTitle />
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]}>
                 <View style={styles.header}>
                     <Text style={styles.subtitle}>
                         Select the winning team. The match result will be verified once both captains agree.
@@ -314,7 +309,7 @@ export default function MatchResultSubmission() {
                     </View>
                 )}
             </ScrollView>
-        </SafeAreaView>
+        </Screen>
     );
 }
 

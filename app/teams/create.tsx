@@ -13,11 +13,12 @@ import {
     TextInput,
     View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import AppHeader from "../../src/components/AppHeader";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../src/constants/teamRosterRules";
+import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import Screen from "../../src/components/Screen";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../../src/context/AuthContext";
@@ -219,22 +220,17 @@ export default function CreateTeam() {
     const canSubmit = !!user && !!name.trim() && !!selectedGame && !!effectiveTeamSize && !submitting;
 
     return (
-        <SafeAreaView style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
                 style={localStyles.keyboardShell}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
-                <AppHeader
-                    title="Create Team"
-                    onBack={() => router.back()}
-                    inlineTitle
-                    style={styles.appHeader}
-                />
+                <AppHeader title="Create Team" onBack={() => router.back()} inlineTitle />
 
                 <ScrollView
                     style={localStyles.flexOne}
-                    contentContainerStyle={styles.scrollContent}
+                    contentContainerStyle={[styles.scrollContent, styles.scrollContentInsideScreen]}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                 >
@@ -448,6 +444,6 @@ export default function CreateTeam() {
                     </Pressable>
                 </View>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </Screen>
     );
 }

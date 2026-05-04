@@ -2,8 +2,6 @@ import { router, useFocusEffect } from "expo-router";
 import { useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated from "react-native-reanimated";
 
 import { api } from "../../../convex/_generated/api";
@@ -263,8 +261,6 @@ export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
   const { user, authUser, refreshSession } = useAuth();
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
     distance: 10,
@@ -523,15 +519,7 @@ export default function PlayerDashboard() {
       <Animated.View style={[styles.contentWrap, entranceStyle]}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={[
-            styles.container,
-            {
-              paddingBottom:
-                process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1"
-                  ? insets.bottom + 20
-                  : tabBarHeight + 20,
-            },
-          ]}
+          contentContainerStyle={styles.container}
           showsVerticalScrollIndicator={false}
         >
           {!emailVerified ? (
