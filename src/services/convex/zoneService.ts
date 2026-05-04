@@ -6,6 +6,10 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { ZoneLifecycleStatus, ZoneMigrationState } from "../../utils/zoneLifecycle";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
+import {
+  DEFAULT_CITY,
+  normalizeKarachiAreaLabel,
+} from "../../../constants/profileOptions";
 
 export interface EffectiveRateResult {
   rate: number | null;
@@ -128,6 +132,12 @@ export type PlayerVenuePricingRow = {
   countLabel?: string;
   sortOrder: number;
   priceValue: number;
+  specs?: PlayerVenuePcSpecItem[];
+};
+
+export type PlayerVenuePcSpecItem = {
+  label: string;
+  value: string;
 };
 
 export type PlayerVenuePricingGroup = {
@@ -148,6 +158,27 @@ export type PlayerVenueInfoItem = {
     | "location-on";
 };
 
+export interface PlayerVenueBranchViewModel {
+  id?: string;
+  uiKey: string;
+  displayName: string;
+  formattedAddress: string;
+  areaCityLabel: string;
+  addressLine1?: string;
+  areaLabel?: string;
+  city?: string;
+  googleMapsUrl?: string | null;
+  phone?: string | null;
+  hasMap: boolean;
+  hasPhone: boolean;
+  resources: PlayerVenueResourceItem[];
+  pricingGroups: PlayerVenuePricingGroup[];
+  hasPricing: boolean;
+  startingPriceLabel?: string;
+  locationSummary: string;
+  createMatchroomParams: PlayerVenueActionParams;
+}
+
 export interface PlayerVenueViewModel {
   id: string;
   venueBrandName: string;
@@ -162,19 +193,8 @@ export interface PlayerVenueViewModel {
   showStatus: boolean;
   supportedGameKeys: string[];
   supportedGameLabels: string[];
-  selectedBranch: {
-    id?: string;
-    displayName: string;
-    formattedAddress: string;
-    areaCityLabel: string;
-    addressLine1?: string;
-    areaLabel?: string;
-    city?: string;
-    googleMapsUrl?: string | null;
-    phone?: string | null;
-    hasMap: boolean;
-    hasPhone: boolean;
-  };
+  branches: PlayerVenueBranchViewModel[];
+  selectedBranch: PlayerVenueBranchViewModel;
   resources: PlayerVenueResourceItem[];
   pricingGroups: PlayerVenuePricingGroup[];
   hasPricing: boolean;
@@ -191,9 +211,45 @@ type SuccessResult<T> = { ok: true; data?: T; message?: string };
 type ErrorResult = { ok: false; message: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
 
+const PC_SPEC_FIELDS = [
+  { key: "cpu", label: "Processor / CPU" },
+  { key: "gpu", label: "Graphics Card / GPU" },
+  { key: "monitorRefreshRate", label: "Monitor Refresh Rate" },
+  { key: "mouse", label: "Mouse" },
+  { key: "keyboard", label: "Keyboard" },
+  { key: "headset", label: "Headset" },
+] as const;
+
 function toPositiveNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizePcSpecs(specs?: any, pricing?: any) {
+  const result: Record<string, Record<string, string>> = {};
+
+  (["regular", "premium", "elite"] as const).forEach((tier) => {
+    const count = toPositiveNumber(pricing?.pc?.[tier]?.count);
+    const price = toPositiveNumber(pricing?.pc?.[tier]?.price);
+    if (!count || !price) return;
+
+    const tierSpecs: Record<string, string> = {};
+    PC_SPEC_FIELDS.forEach((field) => {
+      const value = String(specs?.[tier]?.[field.key] || "").trim();
+      if (value) tierSpecs[field.key] = value;
+    });
+    if (Object.keys(tierSpecs).length) result[tier] = tierSpecs;
+  });
+
+  return Object.keys(result).length ? result : {};
+}
+
+function buildPcSpecItems(specs?: any, tier?: string): PlayerVenuePcSpecItem[] {
+  if (!tier) return [];
+  return PC_SPEC_FIELDS.flatMap((field) => {
+    const value = String(specs?.[tier]?.[field.key] || "").trim();
+    return value ? [{ label: field.label, value }] : [];
+  });
 }
 
 const PKR_FORMATTER = new Intl.NumberFormat("en-PK");
@@ -275,6 +331,19 @@ function getPreferredBranch(zone: Zone) {
   return zone.primaryBranch || null;
 }
 
+function getVenueBranches(zone: Zone) {
+  const branches = Array.isArray(zone.branches) ? zone.branches.filter(Boolean) : [];
+  if (branches.length > 0) return branches;
+  return zone.primaryBranch ? [zone.primaryBranch] : [{}];
+}
+
+function getBranchUiKey(branch: any, index: number) {
+  const explicitId = String(branch?.id || branch?.branchId || "").trim();
+  if (explicitId) return explicitId;
+  const label = String(branch?.branchDisplayName || branch?.name || branch?.areaLabel || "").trim();
+  return label ? `branch-${index}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : `branch-${index}`;
+}
+
 function getBranchDisplayName(branch: any) {
   const label = String(
     branch?.branchDisplayName
@@ -346,6 +415,52 @@ function getAreaCityLabel(branch: { areaLabel?: string | null; city?: string | n
   const city = String(branch.city || "").trim();
   if (area && city) return `${area}, ${city}`;
   return area || city || "Location details available on open";
+}
+
+function toPlayerVenueBranchViewModel(
+  zone: Zone,
+  branch: any,
+  index: number,
+  supportedGameKeys: string[],
+): PlayerVenueBranchViewModel {
+  const displayName = getBranchDisplayName(branch);
+  const rawFormattedAddress = formatBranchAddress(branch);
+  const hasLocationText = Boolean(
+    rawFormattedAddress
+    || String(branch?.areaLabel || "").trim()
+    || String(branch?.city || "").trim(),
+  );
+  const areaCityLabel = getAreaCityLabel(branch);
+  const emptyAddressLabel = "Address hasn't been added yet.";
+  const formattedAddress = rawFormattedAddress || (hasLocationText ? areaCityLabel : emptyAddressLabel);
+  const pricing = resolveSelectedBranchPricing(zone, branch);
+  const pricingGroups = buildPricingGroups(pricing, branch?.pcSpecs);
+  const locationSummary = formattedAddress !== emptyAddressLabel
+    ? formattedAddress
+    : areaCityLabel;
+  const branchPhone = String(branch?.contactPhone || branch?.phone || zone.contactPhone || "").trim() || null;
+  const explicitId = String(branch?.id || branch?.branchId || "").trim();
+
+  return {
+    id: explicitId || undefined,
+    uiKey: getBranchUiKey(branch, index),
+    displayName,
+    formattedAddress,
+    areaCityLabel,
+    addressLine1: branch?.addressLine1 || branch?.address || undefined,
+    areaLabel: branch?.areaLabel || undefined,
+    city: branch?.city || undefined,
+    googleMapsUrl: branch?.googleMapsUrl || null,
+    phone: branchPhone,
+    hasMap: Boolean(String(branch?.googleMapsUrl || "").trim() || hasLocationText),
+    hasPhone: Boolean(branchPhone),
+    resources: buildResourceSummary(zone, pricing),
+    pricingGroups,
+    hasPricing: hasAnyPricing(pricingGroups),
+    startingPriceLabel: getStartingPrice(pricingGroups),
+    locationSummary,
+    createMatchroomParams: buildCreateMatchroomParams(zone, branch, supportedGameKeys),
+  };
 }
 
 function getZonePricingSources(zone: Zone): any[] {
@@ -605,6 +720,7 @@ function addPricingRow(
     count?: unknown;
     countNoun?: string;
     sortOrder: number;
+    specs?: PlayerVenuePcSpecItem[];
   },
 ) {
   const priceValue = toPositiveNumber(input.price);
@@ -617,10 +733,11 @@ function addPricingRow(
     priceLabel: formatPkrPerHour(priceValue),
     countLabel: countValue > 0 ? pluralize(countValue, input.countNoun || "unit") : undefined,
     sortOrder: input.sortOrder,
+    specs: input.specs?.length ? input.specs : undefined,
   });
 }
 
-function buildPcPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
+function buildPcPricingGroup(pricing: any, pcSpecs?: any): PlayerVenuePricingGroup | null {
   const rows: PlayerVenuePricingRow[] = [];
   addPricingRow(rows, {
     label: "Regular PCs",
@@ -628,6 +745,7 @@ function buildPcPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
     count: pricing?.pc?.regular?.count,
     countNoun: "seat",
     sortOrder: 10,
+    specs: buildPcSpecItems(pcSpecs, "regular"),
   });
   addPricingRow(rows, {
     label: "Premium PCs",
@@ -635,6 +753,7 @@ function buildPcPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
     count: pricing?.pc?.premium?.count,
     countNoun: "seat",
     sortOrder: 20,
+    specs: buildPcSpecItems(pcSpecs, "premium"),
   });
   addPricingRow(rows, {
     label: "Elite PCs",
@@ -642,6 +761,7 @@ function buildPcPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
     count: pricing?.pc?.elite?.count,
     countNoun: "seat",
     sortOrder: 30,
+    specs: buildPcSpecItems(pcSpecs, "elite"),
   });
 
   return rows.length > 0
@@ -765,9 +885,9 @@ function buildSportsPricingGroup(pricing: any): PlayerVenuePricingGroup | null {
   return null;
 }
 
-function buildPricingGroups(pricing: any): PlayerVenuePricingGroup[] {
+function buildPricingGroups(pricing: any, pcSpecs?: any): PlayerVenuePricingGroup[] {
   return [
-    buildPcPricingGroup(pricing),
+    buildPcPricingGroup(pricing, pcSpecs),
     buildConsolePricingGroup(pricing),
     buildSportsPricingGroup(pricing),
   ].filter(Boolean) as PlayerVenuePricingGroup[];
@@ -847,7 +967,7 @@ function buildVenueInfoItems(input: {
   return items;
 }
 
-export function toPlayerVenueViewModel(zone: Zone): PlayerVenueViewModel {
+function toPlayerVenueViewModelLegacy(zone: Zone): any {
   const branch = getPreferredBranch(zone) || {};
   const branchCount = Math.max(Array.isArray(zone.branches) ? zone.branches.length : 0, zone.primaryBranch ? 1 : 0);
   const typeLabel = formatVenueTypeLabel(zone.type);
@@ -863,7 +983,7 @@ export function toPlayerVenueViewModel(zone: Zone): PlayerVenueViewModel {
   const areaCityLabel = getAreaCityLabel(branch);
   const formattedAddress = rawFormattedAddress || (hasLocationText ? areaCityLabel : "Address hasn’t been added yet.");
   const pricing = resolveSelectedBranchPricing(zone, branch);
-  const pricingGroups = buildPricingGroups(pricing);
+  const pricingGroups = buildPricingGroups(pricing, branch?.pcSpecs);
   const locationSummary = formattedAddress !== "Address hasn’t been added yet."
     ? formattedAddress
     : areaCityLabel;
@@ -913,6 +1033,56 @@ export function toPlayerVenueViewModel(zone: Zone): PlayerVenueViewModel {
     contactPhone,
     hasContactInfo: Boolean(zone.contactEmail || contactPhone),
     createMatchroomParams: buildCreateMatchroomParams(zone, branch, supportedGames.map((game) => game.key)),
+  };
+}
+
+export function toPlayerVenueViewModel(zone: Zone): PlayerVenueViewModel {
+  const rawBranches = getVenueBranches(zone);
+  const branchCount = Math.max(Array.isArray(zone.branches) ? zone.branches.length : 0, zone.primaryBranch ? 1 : 0);
+  const typeLabel = formatVenueTypeLabel(zone.type);
+  const statusLabel = formatVenueStatusLabel(zone.status);
+  const supportedGames = formatSupportedGameLabels(zone.games);
+  const supportedGameKeys = supportedGames.map((game) => game.key);
+  const branches = rawBranches.map((branch, index) =>
+    toPlayerVenueBranchViewModel(zone, branch, index, supportedGameKeys),
+  );
+  const selectedBranch = branches[0];
+  const selectedBranchDisplayName = selectedBranch.displayName;
+  const contactPhone = String(zone.contactPhone || selectedBranch.phone || "").trim() || null;
+  const infoItems = buildVenueInfoItems({
+    statusLabel,
+    contactEmail: zone.contactEmail,
+    contactPhone,
+    branchCount,
+    locationSummary: selectedBranch.locationSummary,
+  });
+
+  return {
+    id: zone.id,
+    venueBrandName: zone.venueBrandName,
+    branchCount,
+    branchCountLabel: pluralize(branchCount, "branch"),
+    subtitle: selectedBranchDisplayName,
+    subtitleFallbackLabel: selectedBranchDisplayName,
+    subtitleIsFallback: selectedBranchDisplayName === "Primary Branch",
+    typeLabel,
+    statusLabel,
+    statusTone: getVenueStatusTone(zone.status),
+    showStatus: zone.status === "active" || zone.status === "approved_pending_migration",
+    supportedGameKeys,
+    supportedGameLabels: supportedGames.map((game) => game.label),
+    branches,
+    selectedBranch,
+    resources: selectedBranch.resources,
+    pricingGroups: selectedBranch.pricingGroups,
+    hasPricing: selectedBranch.hasPricing,
+    startingPriceLabel: selectedBranch.startingPriceLabel,
+    infoItems,
+    locationSummary: selectedBranch.locationSummary,
+    contactEmail: zone.contactEmail,
+    contactPhone,
+    hasContactInfo: Boolean(zone.contactEmail || contactPhone),
+    createMatchroomParams: selectedBranch.createMatchroomParams,
   };
 }
 
@@ -1067,6 +1237,7 @@ export async function addBranch(
       branch: {
         ...branch,
         id: branch.id || Math.random().toString(36).substring(7),
+        pcSpecs: normalizePcSpecs(branch.pcSpecs, branch.pricing),
       },
     });
 
@@ -1086,7 +1257,13 @@ export async function saveZoneRegistration(data: {
 }): Promise<Result> {
   try {
     const { step1, branches } = data;
-    const primaryBranch = branches[0];
+    const normalizedBranches = branches.map((branch) => ({
+      ...branch,
+      city: DEFAULT_CITY,
+      areaLabel: normalizeKarachiAreaLabel(branch.areaLabel),
+      pcSpecs: normalizePcSpecs(branch.pcSpecs, branch.pricing),
+    }));
+    const primaryBranch = normalizedBranches[0];
 
     // Get current user
     const { authClient } = await import("../../lib/auth-client");
@@ -1112,12 +1289,12 @@ export async function saveZoneRegistration(data: {
 
     // Create games object
     const games = {
-      supportsCs2: branches.some((b) => b.supportsCs2),
-      supportsCs16: branches.some((b) => b.supportsCs16),
-      supportsValorant: branches.some((b) => b.supportsValorant),
-      supportsFc25: branches.some((b) => b.supportsFc25),
-      supportsFc26: branches.some((b) => b.supportsFc26 || b.supportsFc25),
-      supportsTekken8: branches.some((b) => b.supportsTekken8),
+      supportsCs2: normalizedBranches.some((b) => b.supportsCs2),
+      supportsCs16: normalizedBranches.some((b) => b.supportsCs16),
+      supportsValorant: normalizedBranches.some((b) => b.supportsValorant),
+      supportsFc25: normalizedBranches.some((b) => b.supportsFc25),
+      supportsFc26: normalizedBranches.some((b) => b.supportsFc26 || b.supportsFc25),
+      supportsTekken8: normalizedBranches.some((b) => b.supportsTekken8),
       // Physical sports are temporarily disabled.
       supportsFutsal: false,
       supportsIndoorCricket: false,
@@ -1142,11 +1319,11 @@ export async function saveZoneRegistration(data: {
       venueBrandName: step1.venueBrandName,
       contactEmail: step1.contactEmail,
       contactPhone: step1.contactPhone,
-      type: step1.type,
+      type: step1.type || "gaming",
       city: primaryBranch?.city,
       phone: step1.contactPhone,
       games: gamesArray,
-      branches: branches.map((b) => ({
+      branches: normalizedBranches.map((b) => ({
         ...b,
         id: b.id || Math.random().toString(36).substring(7),
         isActive: true,

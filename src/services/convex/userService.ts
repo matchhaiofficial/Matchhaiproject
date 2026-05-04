@@ -365,77 +365,20 @@ export async function refreshUserStats(
   | { ok: false; message: string }
 > {
   try {
-    const user = await convex.query(api.users.getById, { userId });
+    const result: any = await convex.action(api.users.refreshExternalStats, {
+      userId,
+    });
 
-    if (!user) {
-      return { ok: false, message: "User not found." };
+    if (result?.throttled) {
+      return { ok: false, message: "Stats were refreshed recently. Try again in a few minutes." };
     }
 
-    const updates: Record<string, any> = {};
-    const refreshedData: Partial<UserProfile> = {};
-
-    // 1. Refresh Steam if linked
-    if ((user as any).steamProfileUrl) {
-      try {
-        const steamRes = await convex.action(api.externalApis.fetchSteamProfile, {
-          url: (user as any).steamProfileUrl,
-        });
-        if (steamRes) {
-          updates.steamStats = steamRes;
-          refreshedData.steamStats = steamRes as any;
-        }
-      } catch (e) {
-        console.log("[refreshUserStats] Steam refresh failed", e);
-      }
+    if (!result?.refreshed?.length) {
+      const message = result?.errors?.[0]?.message || "No linked Steam or FACEIT stats could be refreshed.";
+      return { ok: false, message };
     }
 
-    // 2. Refresh FACEIT if linked
-    if ((user as any).faceitProfileUrl) {
-      try {
-        const faceitRes = await convex.action(api.externalApis.fetchFaceitProfile, {
-          value: (user as any).faceitProfileUrl,
-          game: "cs2",
-        });
-        if (faceitRes) {
-          updates.faceitStats = faceitRes;
-          refreshedData.faceitStats = faceitRes as any;
-        }
-      } catch (e) {
-        console.log("[refreshUserStats] FACEIT refresh failed", e);
-      }
-    }
-
-    // 3. Refresh PSN if linked
-    if (user.psnOnlineId) {
-      try {
-        const wantsTekken = !!(user as any).playsTekken;
-        const wantsFc = !!(user as any).playsFc;
-
-        if (wantsTekken || wantsFc) {
-          const psnRes = await convex.action(api.externalApis.verifyPsnProfile, {
-            psnOnlineId: user.psnOnlineId,
-            wantsTekken,
-            wantsFc,
-          });
-          if (psnRes) {
-            updates.psnStats = psnRes;
-            refreshedData.psnStats = psnRes as any;
-          }
-        }
-      } catch (e) {
-        console.log("[refreshUserStats] PSN refresh failed", e);
-      }
-    }
-
-    // Save updates if any
-    if (Object.keys(updates).length > 0) {
-      await convex.mutation(api.users.updatePlatformLinks, {
-        userId,
-        ...updates,
-      });
-    }
-
-    return { ok: true, data: refreshedData };
+    return { ok: true, data: (result.updates || {}) as Partial<UserProfile> };
   } catch (e) {
     console.log("[refreshUserStats] error", e);
     return { ok: false, message: "Failed to refresh stats." };

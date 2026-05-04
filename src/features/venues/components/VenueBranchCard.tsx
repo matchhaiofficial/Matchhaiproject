@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { AppButton, AppCard, StatusPill } from "../../../components/AppPrimitives";
 import { AppIcon } from "../../../components/AppIcon";
@@ -15,6 +15,9 @@ export default function VenueBranchCard({
   onOpenMaps,
   onCopyAddress,
   onCallVenue,
+  branches,
+  selectedBranchKey,
+  onSelectBranch,
 }: {
   branchName: string;
   address: string;
@@ -25,7 +28,12 @@ export default function VenueBranchCard({
   onOpenMaps: () => void;
   onCopyAddress: () => void;
   onCallVenue: () => void;
+  branches?: Array<{ uiKey: string; displayName: string; areaCityLabel?: string }>;
+  selectedBranchKey?: string;
+  onSelectBranch?: (branchKey: string) => void;
 }) {
+  const showBranchSelector = Boolean(branches && branches.length > 1 && onSelectBranch);
+
   return (
     <AppCard style={styles.branchCard}>
       <View style={styles.branchHeaderRow}>
@@ -36,6 +44,40 @@ export default function VenueBranchCard({
         </View>
         <StatusPill tone="neutral" label={branchCountLabel} caps={false} />
       </View>
+
+      {showBranchSelector ? (
+        <View style={styles.branchSelectorWrap}>
+          <Text style={styles.branchSelectorLabel}>Switch branch</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.branchPillRow}
+          >
+            {branches!.map((branch) => {
+              const active = selectedBranchKey === branch.uiKey;
+              return (
+                <Pressable
+                  key={branch.uiKey}
+                  onPress={() => onSelectBranch!(branch.uiKey)}
+                  style={({ pressed }) => [
+                    styles.branchPill,
+                    active && styles.branchPillActive,
+                    pressed && styles.branchPillPressed,
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    style={[styles.branchPillText, active && styles.branchPillTextActive]}
+                  >
+                    {branch.displayName}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
 
       <View style={styles.addressRow}>
         <AppIcon name="location-on" size="md" tone="muted" />

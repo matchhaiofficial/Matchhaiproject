@@ -123,7 +123,7 @@ export const OVERS_OPTIONS = ["Any", "5", "6"];
 
 export const LOCATION_OPTIONS = [
   "Any",
-  ...KARACHI_AREAS.filter((area) => area !== "Other (Karachi)"),
+  ...KARACHI_AREAS,
 ];
 
 export const PLAYER_AVAILABILITY_OPTIONS = ["Any", "Online Now"];

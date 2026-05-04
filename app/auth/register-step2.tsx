@@ -5,6 +5,7 @@ import { Pressable, Text, View } from "react-native";
 import {
   GAME_OPTIONS,
   KARACHI_AREAS,
+  normalizeKarachiAreaList,
   PLAY_TIME_OPTIONS,
   SPORT_OPTIONS,
 } from "../../constants/profileOptions";
@@ -21,7 +22,9 @@ export default function RegisterStep2() {
   const { step1, step2, setStep2, setCurrentStep } = useOnboardingStore();
   const { showToast } = useToast();
 
-  const [selectedAreas, setSelectedAreas] = useState<string[]>(step2.selectedAreas || []);
+  const [selectedAreas, setSelectedAreas] = useState<string[]>(
+    normalizeKarachiAreaList(step2.selectedAreas || []),
+  );
   const [playTimes, setPlayTimes] = useState<string[]>(step2.playTimes || []);
   const [playsCs2, setPlaysCs2] = useState<boolean>(step2.playsCs2);
   const [playsCs16, setPlaysCs16] = useState<boolean>((step2 as any).playsCs16 ?? false);
@@ -94,7 +97,7 @@ export default function RegisterStep2() {
         });
         return prev;
       }
-      return [...prev, area];
+      return normalizeKarachiAreaList([...prev, area]);
     });
   };
 
@@ -130,7 +133,7 @@ export default function RegisterStep2() {
     }
 
     setStep2({
-      selectedAreas,
+      selectedAreas: normalizeKarachiAreaList(selectedAreas),
       playTimes,
       playsCs2,
       playsCs16,
@@ -170,17 +173,15 @@ export default function RegisterStep2() {
     >
       <RegistrationStepHeader
         title="Play Preferences"
-        subtitle="Set the places and formats you want to see first."
+        subtitle="Choose your areas and games."
         stepTitle="Step 2 of 4"
         stepSubtitle="Location and interests"
         progress="50%"
         onBack={() => router.replace("/auth/register")}
       />
 
-      <Text style={styles.heading}>Choose where and what you play</Text>
-      <Text style={styles.sub}>
-        These choices shape discovery and onboarding defaults. You can refine the details later.
-      </Text>
+      <Text style={styles.heading}>Areas and games</Text>
+      <Text style={styles.sub}>Pick up to 5 Karachi areas and your main games.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Your areas in Karachi (up to 5)" required />

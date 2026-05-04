@@ -646,6 +646,7 @@ function ReportsTab({
           <View style={styles.infoStack}>
             <AdminInfoLine label="Type" value={report.type.replaceAll("_", " ")} />
             {report.zoneName ? <AdminInfoLine label="Zone" value={report.zoneName} /> : null}
+            {report.branchLabel ? <AdminInfoLine label="Branch" value={report.branchLabel} /> : null}
             {report.reportedUserName ? <AdminInfoLine label="User" value={report.reportedUserName} /> : null}
             {report.description ? <AdminInfoLine label="Detail" value={report.description} /> : null}
             {report.reviewerNote ? <AdminInfoLine label="Review note" value={report.reviewerNote} /> : null}

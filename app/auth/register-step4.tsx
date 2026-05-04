@@ -19,6 +19,7 @@ import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import styles from "./register.styles";
 import { Modal } from "react-native";
+import { DEFAULT_CITY, normalizeKarachiAreaList } from "../../constants/profileOptions";
 
 export default function RegisterStep4() {
   const { step1, step2, step3, step4, setStep4, resetAll, setCurrentStep } =
@@ -127,7 +128,7 @@ export default function RegisterStep4() {
       return;
     }
 
-    const { fullName, username, email, phone, password, city, ageRange } = step1;
+    const { fullName, username, email, phone, password, ageRange } = step1;
     if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
       showToast({
         type: "error",
@@ -153,7 +154,7 @@ export default function RegisterStep4() {
           username.trim(),
           phone.trim(),
           "player",
-          city?.trim() || "Karachi",
+          DEFAULT_CITY,
           ageRange?.trim() || undefined,
         );
         if (!signUpResult || !signUpResult.ok) {
@@ -170,7 +171,7 @@ export default function RegisterStep4() {
       if (currentSubStep <= 1) {
         setCurrentSubStep(2);
         const saveStep2Result = await saveOnboardingStep2(userId as any, {
-          areasPreferred: step2.selectedAreas,
+          areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
           playsCs2: step2.playsCs2,
           cs2Role: step2.cs2Role,
           playsCs16: (step2 as any).playsCs16 ?? false,
@@ -385,7 +386,7 @@ export default function RegisterStep4() {
     >
       <RegistrationStepHeader
         title="Review and Confirm"
-        subtitle="Check the essentials before creating your player profile."
+        subtitle="Review your details."
         stepTitle="Step 4 of 4"
         stepSubtitle="Final review"
         progress="100%"

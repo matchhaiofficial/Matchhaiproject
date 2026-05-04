@@ -122,11 +122,14 @@ export default StyleSheet.create({
   fabWrapper: {
     position: "absolute",
     right: 24,
-    width: 58,
-    height: 58,
+    width: 74,
+    height: 74,
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 10000,
     elevation: 30,
     pointerEvents: "auto",
+    overflow: "visible",
   },
   fab: {
     ...CTA.fabButton,

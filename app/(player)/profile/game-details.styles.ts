@@ -94,6 +94,7 @@ export default StyleSheet.create({
     statsHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: SPACING.md,
     },
     statsLabel: {
@@ -122,6 +123,25 @@ export default StyleSheet.create({
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
+    },
+    refreshStatsButton: {
+        minHeight: 34,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: SPACING.md,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.accent + '55',
+        backgroundColor: COLORS.accent + '12',
+    },
+    refreshStatsButtonDisabled: {
+        opacity: 0.65,
+    },
+    refreshStatsText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.bold,
+        fontSize: TEXT_SIZES.caption,
     },
     faceitLevelIcon: {
         width: 48,

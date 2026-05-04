@@ -18,6 +18,7 @@ export default function VenuePricingSection({
       label: string;
       priceLabel: string;
       countLabel?: string;
+      specs?: Array<{ label: string; value: string }>;
     }>;
   }>;
 }) {
@@ -45,6 +46,16 @@ export default function VenuePricingSection({
                 <View style={styles.pricingRowLabelWrap}>
                   <Text style={styles.pricingRowLabel}>{row.label}</Text>
                   {row.countLabel ? <Text style={styles.pricingRowMeta}>{row.countLabel}</Text> : null}
+                  {row.specs?.length ? (
+                    <View style={styles.pcSpecsWrap}>
+                      {row.specs.map((spec) => (
+                        <View key={`${row.label}-${spec.label}`} style={styles.pcSpecRow}>
+                          <Text style={styles.pcSpecLabel}>{spec.label}</Text>
+                          <Text style={styles.pcSpecValue}>{spec.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
                 <Text style={styles.pricingValue}>{row.priceLabel}</Text>
               </View>

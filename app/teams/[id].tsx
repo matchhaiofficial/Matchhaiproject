@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppImage } from "../../src/components/AppImage";
+import BottomActionBar from "../../src/components/BottomActionBar";
 import { AppBottomSheet, AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import { DetailSectionCard } from "../../src/components/DetailSurface";
@@ -149,7 +150,6 @@ export default function TeamDetails() {
 
     useRouteLogger("TeamDetailsScreen", { teamId: id, userId: user?._id });
     const touchDebugEnabled = false;
-    const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
     const roleRequiredSheetBottomOffset = Platform.OS === "android"
         ? Math.max(insets.bottom, 48)
         : 0;
@@ -631,6 +631,11 @@ export default function TeamDetails() {
         );
     }
 
+    const canChallengeTeam = !isMember && buttonState === 'eligible' && captainedTeams.some(
+        (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+    );
+    const showBottomActionBar = !isDeleted && ((isMember && !isCaptain) || !isMember);
+
     return (
         <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent} debugTag="team_detail_screen">
             <AppHeader
@@ -680,7 +685,10 @@ export default function TeamDetails() {
             <View style={styles.body}>
                 <ScrollView
                     style={styles.scroll}
-                    contentContainerStyle={styles.scrollContent}
+                    contentContainerStyle={[
+                        styles.scrollContent,
+                        showBottomActionBar && styles.scrollContentWithBottomAction,
+                    ]}
                     showsVerticalScrollIndicator={false}
                 >
                     <Animated.View style={contentEntranceStyle}>
@@ -865,52 +873,47 @@ export default function TeamDetails() {
                                 }}
                             />
                         </DetailSectionCard>
-                        {/* Action Bar */}
-                        {!isDeleted && isMember && !isCaptain && (
-                            <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
-                                <View style={styles.actionBarContent}>
-                                    <AppButton
-                                        variant="danger"
-                                        size="lg"
-                                        onPressIn={() => {
-                                            if (touchDebugEnabled) {
-                                                Logger.debug("TouchDebug", "pressIn", { tag: "team_leave" });
-                                            }
-                                        }}
-                                        onPress={handleLeaveTeam}
-                                        disabled={submitting}
-                                        style={styles.leaveButton}
-                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                    >
-                                        {submitting ? (
-                                            <ActivityIndicator size="small" color="#FFF" />
-                                        ) : (
-                                            <Text style={styles.leaveButtonText}>Leave Team</Text>
-                                        )}
-                                    </AppButton>
-                                </View>
-                            </View>
-                        )}
+                    </Animated.View>
+                </ScrollView>
+                {showBottomActionBar ? (
+                    <BottomActionBar>
+                        {isMember && !isCaptain ? (
+                            <AppButton
+                                variant="danger"
+                                size="lg"
+                                onPressIn={() => {
+                                    if (touchDebugEnabled) {
+                                        Logger.debug("TouchDebug", "pressIn", { tag: "team_leave" });
+                                    }
+                                }}
+                                onPress={handleLeaveTeam}
+                                disabled={submitting}
+                                style={styles.leaveButton}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                {submitting ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <Text style={styles.leaveButtonText}>Leave Team</Text>
+                                )}
+                            </AppButton>
+                        ) : null}
 
-                        {/* Action Bar (Non-Members Only) */}
-                        {!isDeleted && !isMember && (
-                            <View style={[styles.actionBar, styles.actionBarSpacing, { marginBottom: ctaBottomGuard }]}>
-                                <View style={styles.actionBarContent}>
-                                    {buttonState === 'eligible' && (
-                                        <>
-                                            {captainedTeams.some(
-                                                (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
-                                            ) ? (
-                                                <AppButton
-                                                    variant="success"
-                                                    size="lg"
-                                                    onPress={handleChallenge}
-                                                    disabled={submitting}
-                                                    style={styles.challengeButton}
-                                                >
-                                                    <Text style={styles.challengeButtonText}>Challenge Team</Text>
-                                                </AppButton>
-                                            ) : null}
+                        {!isMember ? (
+                            <View style={styles.actionBarContent}>
+                                {buttonState === 'eligible' && (
+                                    <>
+                                        {canChallengeTeam ? (
+                                          <View style={styles.footerActionRow}>
+                                            <AppButton
+                                                variant="success"
+                                                size="lg"
+                                                onPress={handleChallenge}
+                                                disabled={submitting}
+                                                style={[styles.challengeButton, styles.footerActionButton]}
+                                            >
+                                                <Text style={styles.challengeButtonText}>Challenge Team</Text>
+                                            </AppButton>
                                             <AppButton
                                                 size="lg"
                                                 onPressIn={() => {
@@ -920,44 +923,50 @@ export default function TeamDetails() {
                                                 }}
                                                 onPress={handleJoinRequest}
                                                 disabled={submitting}
-                                                style={styles.actionButton}
+                                                style={[styles.actionButton, styles.footerActionButton]}
                                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                             >
-                                                <Text style={styles.actionButtonText}>Request to Join</Text>
+                                                <Text style={styles.actionButtonText}>Request</Text>
                                             </AppButton>
-                                            <Text style={styles.helperText}>Captain approval required. You'll see updates in Inbox.</Text>
-                                        </>
-                                    )}
-                                    {buttonState === 'requested' && (
-                                        <>
-                                            <AppCard style={styles.actionButtonDisabled}>
-                                                <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
-                                                <Text style={styles.actionButtonTextDisabled}>Requested</Text>
-                                            </AppCard>
-                                            <Text style={styles.helperText}>Waiting for captain approval</Text>
-                                        </>
-                                    )}
-                                    {buttonState === 'full' && (
-                                        <>
-                                            <AppCard style={styles.actionButtonDisabled}>
-                                                <Text style={styles.actionButtonTextDisabled}>Full</Text>
-                                            </AppCard>
-                                            <Text style={styles.helperText}>This lineup is complete.</Text>
-                                        </>
-                                    )}
-                                    {buttonState === 'private' && (
-                                        <>
-                                            <AppCard style={styles.actionButtonDisabled}>
-                                                <Text style={styles.actionButtonTextDisabled}>Invite Only</Text>
-                                            </AppCard>
-                                            <Text style={styles.helperText}>This team requires an invite.</Text>
-                                        </>
-                                    )}
-                                </View>
+                                          </View>
+                                        ) : (
+                                          <AppButton
+                                              size="lg"
+                                              onPressIn={() => {
+                                                  if (touchDebugEnabled) {
+                                                      Logger.debug("TouchDebug", "pressIn", { tag: "team_request_join" });
+                                                  }
+                                              }}
+                                              onPress={handleJoinRequest}
+                                              disabled={submitting}
+                                              style={styles.actionButton}
+                                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                          >
+                                              <Text style={styles.actionButtonText}>Request to Join</Text>
+                                          </AppButton>
+                                        )}
+                                    </>
+                                )}
+                                {buttonState === 'requested' && (
+                                    <AppCard style={styles.actionButtonDisabled}>
+                                        <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
+                                        <Text style={styles.actionButtonTextDisabled}>Requested</Text>
+                                    </AppCard>
+                                )}
+                                {buttonState === 'full' && (
+                                    <AppCard style={styles.actionButtonDisabled}>
+                                        <Text style={styles.actionButtonTextDisabled}>Full</Text>
+                                    </AppCard>
+                                )}
+                                {buttonState === 'private' && (
+                                    <AppCard style={styles.actionButtonDisabled}>
+                                        <Text style={styles.actionButtonTextDisabled}>Invite Only</Text>
+                                    </AppCard>
+                                )}
                             </View>
-                        )}
-                    </Animated.View>
-                </ScrollView>
+                        ) : null}
+                    </BottomActionBar>
+                ) : null}
             </View>
 
             <AppDialog

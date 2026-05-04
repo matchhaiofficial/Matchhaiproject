@@ -2,7 +2,7 @@ import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
-import { AGE_RANGES, CITY_OPTIONS } from "../../constants/profileOptions";
+import { AGE_RANGES, DEFAULT_CITY } from "../../constants/profileOptions";
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
@@ -40,7 +40,6 @@ export default function Register() {
 
   const [fullName, setFullName] = useState(step1.fullName);
   const [username, setUsername] = useState(step1.username);
-  const [city, setCity] = useState(step1.city || "Karachi");
   const [ageRange, setAgeRange] = useState(step1.ageRange || AGE_RANGES[1]);
   const [email, setEmail] = useState(step1.email || "");
   const [phone, setPhone] = useState(step1.phone);
@@ -83,7 +82,7 @@ export default function Register() {
     strengthWidth,
   } = useMemo(() => {
     const nameValid = fullName.trim().length >= 3;
-    const cityValid = city.length > 0;
+    const cityValid = DEFAULT_CITY.length > 0;
     const ageValid = ageRange.length > 0;
     const usernameTrimmed = username.trim();
     const usernameFormatValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameTrimmed);
@@ -171,7 +170,6 @@ export default function Register() {
     };
   }, [
     ageRange,
-    city,
     email,
     emailStatus,
     fullName,
@@ -314,7 +312,7 @@ export default function Register() {
             email: email.trim(),
             phone: phoneE164,
             password,
-            city,
+            city: DEFAULT_CITY,
             ageRange,
           });
           router.replace("/auth/register-step2");
@@ -322,7 +320,7 @@ export default function Register() {
         {
           cid,
           actionKey: "player_register_step1_continue",
-          meta: { city, ageRange },
+          meta: { city: DEFAULT_CITY, ageRange },
         },
       ),
     );
@@ -387,17 +385,15 @@ export default function Register() {
     >
       <RegistrationStepHeader
         title="Create Account"
-        subtitle="Set up your player profile in four short steps."
+        subtitle="Create your player account."
         stepTitle="Step 1 of 4"
         stepSubtitle="Account details"
         progress="25%"
         onBack={() => router.back()}
       />
 
-      <Text style={styles.heading}>Start with the essentials</Text>
-      <Text style={styles.sub}>
-        Add your account details now. Play preferences and optional platform links come next.
-      </Text>
+      <Text style={styles.heading}>Account details</Text>
+      <Text style={styles.sub}>Play preferences and optional platform links come next.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Full Name" required />
@@ -426,15 +422,6 @@ export default function Register() {
 
       <View style={styles.twoColumnRow}>
         <View style={{ flex: 1 }}>
-          <CustomSingleSelect
-            label={<RegistrationFieldLabel label="City" required />}
-            value={city}
-            options={CITY_OPTIONS}
-            onChange={setCity}
-            icon="location-city"
-          />
-        </View>
-        <View style={{ flex: 0.8 }}>
           <CustomSingleSelect
             label={<RegistrationFieldLabel label="Age Range" required />}
             value={ageRange}

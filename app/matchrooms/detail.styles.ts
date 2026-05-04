@@ -29,6 +29,9 @@ export default StyleSheet.create({
     content: {
         paddingBottom: 0,
     },
+    contentWithBottomAction: {
+        paddingBottom: 140,
+    },
     adminContent: {
         paddingBottom: 0,
     },

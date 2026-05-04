@@ -20,6 +20,11 @@ function normalizeDescription(value?: string | null) {
   return trimmed.slice(0, MAX_DESCRIPTION_LENGTH);
 }
 
+function normalizeOptionalString(value?: string | null) {
+  const trimmed = String(value || "").trim();
+  return trimmed || undefined;
+}
+
 function buildReportDedupeKey(args: {
   reporterUid: Id<"users">;
   type: "matchroom_complaint" | "user_report" | "zone_complaint";
@@ -27,6 +32,8 @@ function buildReportDedupeKey(args: {
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
+  branchId?: string;
+  branchLabel?: string;
 }) {
   return [
     String(args.reporterUid),
@@ -35,6 +42,9 @@ function buildReportDedupeKey(args: {
     args.matchroomId ? `matchroom:${String(args.matchroomId)}` : "",
     args.reportedUserId ? `user:${String(args.reportedUserId)}` : "",
     args.zoneId ? `zone:${String(args.zoneId)}` : "",
+    args.zoneId && (args.branchId || args.branchLabel)
+      ? `branch:${String(args.branchId || args.branchLabel).trim().toLowerCase()}`
+      : "",
   ]
     .filter(Boolean)
     .join("|");
@@ -107,6 +117,8 @@ async function findRecentDuplicate(ctx: any, args: {
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
+  branchId?: string;
+  branchLabel?: string;
 }) {
   const dedupeKey = buildReportDedupeKey(args);
   const duplicateCandidates = await ctx.db
@@ -131,6 +143,11 @@ async function findRecentDuplicate(ctx: any, args: {
     if (args.matchroomId && String(report.matchroomId || "") !== String(args.matchroomId)) return false;
     if (args.reportedUserId && String(report.reportedUserId || "") !== String(args.reportedUserId)) return false;
     if (args.zoneId && String(report.zoneId || "") !== String(args.zoneId)) return false;
+    if (args.zoneId) {
+      const expectedBranch = String(args.branchId || args.branchLabel || "").trim().toLowerCase();
+      const reportBranch = String(report.branchId || report.branchLabel || "").trim().toLowerCase();
+      if (expectedBranch !== reportBranch) return false;
+    }
     return now - Number(report.createdAt || 0) <= DUPLICATE_WINDOW_MS;
   });
 }
@@ -141,6 +158,8 @@ async function insertReport(ctx: any, args: {
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
+  branchId?: string;
+  branchLabel?: string;
   game?: string;
   reason: string;
   description?: string;
@@ -162,6 +181,8 @@ async function insertReport(ctx: any, args: {
     matchroomId: args.matchroomId,
     reportedUserId: args.reportedUserId,
     zoneId: args.zoneId,
+    branchId: args.branchId,
+    branchLabel: args.branchLabel,
     game: args.game,
     reason: args.reason,
     dedupeKey: buildReportDedupeKey(args),
@@ -247,6 +268,8 @@ async function createMatchroomComplaintInternal(ctx: any, args: {
   reason: string;
   description?: string;
   reporterUid?: Id<"users">;
+  branchId?: string;
+  branchLabel?: string;
 }) {
   const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
   const room = await ctx.db.get(args.matchroomId);
@@ -288,6 +311,8 @@ async function createUserReportInternal(ctx: any, args: {
   reason: string;
   description?: string;
   reporterUid?: Id<"users">;
+  branchId?: string;
+  branchLabel?: string;
 }) {
   const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
   if (String(user._id) === String(args.reportedUserId)) {
@@ -318,6 +343,8 @@ async function createZoneComplaintInternal(ctx: any, args: {
   reason: string;
   description?: string;
   reporterUid?: Id<"users">;
+  branchId?: string;
+  branchLabel?: string;
 }) {
   const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
   const zone = await ctx.db.get(args.zoneId);
@@ -334,6 +361,8 @@ async function createZoneComplaintInternal(ctx: any, args: {
     reporterUid: user._id,
     type: "zone_complaint",
     zoneId: args.zoneId,
+    branchId: normalizeOptionalString(args.branchId),
+    branchLabel: normalizeOptionalString(args.branchLabel),
     reason,
     description: normalizeDescription(args.description),
   });
@@ -374,6 +403,7 @@ async function enrichReportForReporter(ctx: any, report: any) {
   return {
     ...report,
     zoneName: zone?.venueBrandName || zone?.name || null,
+    branchLabel: report.branchLabel || null,
     matchroomTitle: matchroom?.title || null,
     reportedUserName: reportedUser?.fullName || reportedUser?.username || null,
   };
@@ -517,6 +547,8 @@ export const createZoneComplaint = mutation({
     reason: v.string(),
     description: v.optional(v.string()),
     reporterUid: v.optional(v.id("users")),
+    branchId: v.optional(v.string()),
+    branchLabel: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await createZoneComplaintInternal(ctx, args);
@@ -533,6 +565,8 @@ export const create = mutation({
     matchroomId: v.optional(v.id("matchrooms")),
     reportedUserId: v.optional(v.id("users")),
     zoneId: v.optional(v.id("zones")),
+    branchId: v.optional(v.string()),
+    branchLabel: v.optional(v.string()),
     reason: v.string(),
     description: v.optional(v.string()),
     reporterUid: v.optional(v.id("users")),
@@ -564,6 +598,8 @@ export const create = mutation({
       reason: args.reason,
       description: args.description,
       reporterUid: args.reporterUid,
+      branchId: args.branchId,
+      branchLabel: args.branchLabel,
     });
   },
 });

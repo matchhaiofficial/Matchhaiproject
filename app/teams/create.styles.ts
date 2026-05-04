@@ -35,6 +35,9 @@ export default StyleSheet.create({
         paddingHorizontal: 0,
         paddingTop: 0,
     },
+    scrollContentWithBottomAction: {
+        paddingBottom: 140,
+    },
     section: {
         marginBottom: SPACING.xxl,
     },

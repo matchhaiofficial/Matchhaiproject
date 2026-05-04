@@ -1,6 +1,6 @@
 # MatchHai Canonical Audit And Flow Reference
 
-Date: 2026-05-03 (updated)
+Date: 2026-05-04 (updated)
 Originally drafted: 2026-04-03
 Workspace: `D:\matchhai_app`
 Source basis:
@@ -31,6 +31,9 @@ This is a code-verified audit, not a design-only or screenshot-only summary.
 - 2026-05-03: refreshed route inventory to include `app/auth/reset-password.tsx` and `app/zone/modules/audit.tsx` in the main Route Inventory list.
 - 2026-05-03: added a generated per-route “Layout / wrapper map” table (route -> `_layout.tsx` chain) to make layout differences explicit.
 - 2026-05-03: updated global runtime wiring notes to include Inter font loading at app root.
+- 2026-05-04: unified player tab screen wrapper behavior via `src/components/Screen.tsx` (tabs: no implicit top padding; bottom clearance matches tab bar height without extra “blank” space).
+- 2026-05-04: adjusted the Discover FAB placement to stay inside the page wrapper above the bottom navigation (`app/(player)/(tabs)/discover.tsx`).
+- 2026-05-04: booking flow screens now use the shared `Screen` wrapper for consistent safe-area + background handling (`app/matchrooms/book/[id].tsx`, `app/matchrooms/book/pay/[intentId].tsx`, `app/matchrooms/book/status/[intentId].tsx`).
 
 ## 2. Method And Confidence Boundaries
 
@@ -181,6 +184,8 @@ Notes:
 - “Public URL path” strips route groups like `(player)` and `(tabs)` (Expo Router groups are not part of the URL).
 - “Router path” shows the internal route path including groups (useful for disambiguating `/` conflicts like `app/index.tsx` vs player tabs index).
 - “Layout chain” is the ordered `_layout.tsx` chain that will wrap that page at runtime.
+- **UI wrapper** (inside the page file) is typically `src/components/Screen.tsx`, which standardizes Safe Area edges, background, horizontal padding, and tab-bar clearance for scroll/content.
+  - As of 2026-05-04: `Screen` in `tabs` variant uses **no implicit top padding** (headers align consistently across Dashboard / Discover / Profile) and uses **tab bar height only** for bottom clearance (removes the “extra blank strip” above the bottom navigation).
 
 | Public URL path | Router path (includes groups) | File | Layout chain |
 |---|---|---|---|
@@ -251,6 +256,25 @@ Notes:
 | `/zone/modules/settings` | `/zone/modules/settings` | `app/zone/modules/settings.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
 | `/zone/modules/support` | `/zone/modules/support` | `app/zone/modules/support.tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` -> `app/zone/modules/_layout.tsx` |
 | `/zone/report/[id]` | `/zone/report/[id]` | `app/zone/report/[id].tsx` | `app/_layout.tsx` -> `app/zone/_layout.tsx` |
+
+### UI wrapper map (in-page wrapper)
+
+This complements the `_layout.tsx` chain table above by calling out the *in-page* wrapper used for consistent spacing / safe-area / background.
+
+Most screens render inside `src/components/Screen.tsx` (directly or indirectly via a feature component like `src/features/chat/ChatThread.tsx`).
+
+| Public URL path | File | In-page wrapper |
+|---|---|---|
+| `/` | `app/(player)/(tabs)/index.tsx` | `Screen` |
+| `/discover` | `app/(player)/(tabs)/discover.tsx` | `Screen` |
+| `/profile` | `app/(player)/(tabs)/profile.tsx` | `Screen` |
+| `/matchrooms` | `app/(player)/(tabs)/matchrooms.tsx` | `Redirect` (to legacy matchrooms index) |
+| `/teams` | `app/(player)/(tabs)/teams.tsx` | `Redirect` (to legacy teams index) |
+| `/matchrooms/[id]` | `app/matchrooms/[id].tsx` | `Screen` |
+| `/matchrooms/book/[id]` | `app/matchrooms/book/[id].tsx` | `Screen` |
+| `/matchrooms/book/pay/[intentId]` | `app/matchrooms/book/pay/[intentId].tsx` | `Screen` |
+| `/matchrooms/book/status/[intentId]` | `app/matchrooms/book/status/[intentId].tsx` | `Screen` |
+| `/friend-chat/[friendId]` | `app/(player)/friend-chat/[friendId].tsx` | `ChatThread` (internally uses `Screen`) |
 
 ## 5. Entry, Role Routing, And Runtime Wiring
 

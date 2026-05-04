@@ -60,8 +60,22 @@ export type BranchData = {
     };
   };
 
+  pcSpecs?: {
+    regular?: PcTierSpecs;
+    premium?: PcTierSpecs;
+    elite?: PcTierSpecs;
+  };
   specs?: string;
   notes: string;
+};
+
+export type PcTierSpecs = {
+  cpu?: string;
+  gpu?: string;
+  monitorRefreshRate?: string;
+  mouse?: string;
+  keyboard?: string;
+  headset?: string;
 };
 
 // STEP 4 – agreements

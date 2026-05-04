@@ -15,7 +15,7 @@ export default StyleSheet.create({
     backgroundColor: COLORS.backgroundDark,
   },
   screenContent: {
-    paddingTop: 0,
+    paddingTop: 10,
     paddingBottom: 0,
   },
   container: {

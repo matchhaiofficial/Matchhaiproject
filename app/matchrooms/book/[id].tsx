@@ -7,10 +7,11 @@ import {
     Text,
     View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
+import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { createBookingIntentDetailed } from "../../../src/services/convex/bookingService";
@@ -46,12 +47,6 @@ export default function BookSlotsScreen() {
     // Friend Picker State
     const [showFriendPicker, setShowFriendPicker] = useState(false);
     const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
-
-    const logScreenTouch = (tag: string, e: any) => {
-        if (!touchDebugEnabled) return;
-        const { pageX, pageY } = e.nativeEvent;
-        Logger.debug("TouchDebug", "touch", { tag, pageX, pageY });
-    };
 
     useEffect(() => {
         const fetchRoom = async () => {
@@ -240,9 +235,12 @@ export default function BookSlotsScreen() {
     const totalPrice = perPlayerPrice * selectionList.length;
 
     return (
-        <SafeAreaView
+        <Screen
             style={styles.container}
-            onTouchEndCapture={(e) => logScreenTouch("book_slots_screen", e)}
+            variant="stack"
+            scroll={false}
+            edges={["top", "bottom"]}
+            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
         >
             <AppHeader
                 title="Select Teammates"
@@ -252,10 +250,10 @@ export default function BookSlotsScreen() {
             />
 
             <View style={styles.body}>
-            <ScrollView
-                style={styles.scroll}
-                contentContainerStyle={styles.content}
-            >
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={styles.content}
+                >
                 {/* Side Selection */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Pick Your Side</Text>
@@ -405,7 +403,7 @@ export default function BookSlotsScreen() {
                 </Pressable>
                     </View>
                 </View>
-            </ScrollView>
+                </ScrollView>
             </View>
 
             <FriendPicker
@@ -414,6 +412,6 @@ export default function BookSlotsScreen() {
                 onSelect={handleFriendSelect}
                 game={room.game}
             />
-        </SafeAreaView>
+        </Screen>
     );
 }
