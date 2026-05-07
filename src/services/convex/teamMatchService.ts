@@ -93,37 +93,87 @@ const getSeriesHours = (gameKey: string, seriesType?: string | null) => {
     return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
 };
 
-const getZoneRateForChallenge = (zoneData: any, gameKey: string) => {
-    const pricing: any = zoneData?.pricing || zoneData?.branches?.[0]?.pricing || {};
+const toPositiveNumber = (value: unknown) => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getZonePricingSourcesForChallenge = (zoneData: any) => {
+    const branchPricing = Array.isArray(zoneData?.branches)
+        ? zoneData.branches.map((branch: any) => branch?.pricing)
+        : [];
+    return [...branchPricing, zoneData?.pricing].filter(Boolean);
+};
+
+const getFirstPositivePrice = (...values: unknown[]) => {
+    for (const value of values) {
+        const parsed = toPositiveNumber(value);
+        if (parsed) return parsed;
+    }
+    return 0;
+};
+
+const getPreferredConsolePrice = (tier: any, maxPlayers: number) => {
+    const preferredKey = maxPlayers > 2 ? "price2v2" : "price1v1";
+    const fallbackKey = preferredKey === "price2v2" ? "price1v1" : "price2v2";
+    return getFirstPositivePrice(tier?.[preferredKey], tier?.[fallbackKey], tier?.price);
+};
+
+const getZoneRateForChallenge = (zoneData: any, gameKey: string, maxPlayers: number) => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2" || game === "cs16" || game === "valorant") {
-        const rates = [pricing?.pc?.regular?.price, pricing?.pc?.premium?.price, pricing?.pc?.elite?.price]
-            .filter((n: any) => typeof n === "number" && n > 0);
-        return rates.length ? Math.min(...rates) : 0;
+    const normalizedGame = game === "fc25" ? "fc26" : game;
+    const pricingSources = getZonePricingSourcesForChallenge(zoneData);
+    const rates: number[] = [];
+
+    const addRate = (value: unknown) => {
+        const parsed = toPositiveNumber(value);
+        if (parsed) rates.push(parsed);
+    };
+
+    for (const pricing of pricingSources) {
+        if (normalizedGame === "cs2" || normalizedGame === "cs16" || normalizedGame === "valorant") {
+            addRate(pricing?.pc?.regular?.price);
+            addRate(pricing?.pc?.premium?.price);
+            addRate(pricing?.pc?.elite?.price);
+            continue;
+        }
+
+        if (normalizedGame === "fc26" || normalizedGame === "tekken8") {
+            const consolePricing = pricing?.console || {};
+            addRate(getPreferredConsolePrice(consolePricing?.regular, maxPlayers));
+            addRate(getPreferredConsolePrice(consolePricing?.premium, maxPlayers));
+            addRate(getPreferredConsolePrice(consolePricing?.elite, maxPlayers));
+            addRate(getPreferredConsolePrice(consolePricing?.ps5, maxPlayers));
+            addRate(getPreferredConsolePrice(consolePricing?.xbox, maxPlayers));
+            continue;
+        }
+
+        const sportMap =
+            normalizedGame === "indoor_cricket"
+                ? (pricing?.indoorCricket || pricing?.indoor_cricket || {})
+                : (pricing?.[normalizedGame] || {});
+        Object.values(sportMap).forEach((entry: any) => addRate(entry?.price));
     }
-    if (game === "fc26" || game === "fc25" || game === "tekken8") {
-        const rates = [
-            pricing?.console?.regular?.price1v1,
-            pricing?.console?.regular?.price2v2,
-            // pricing?.console?.ps5?.price2v2,
-            // pricing?.console?.ps5?.price1v1,
-            // pricing?.console?.xbox?.price2v2,
-            // pricing?.console?.xbox?.price1v1,
-            pricing?.console?.premium?.price1v1,
-            pricing?.console?.premium?.price2v2,
-            pricing?.console?.elite?.price1v1,
-            pricing?.console?.elite?.price2v2,
-        ].filter((n: any) => typeof n === "number" && n > 0);
-        return rates.length ? Math.min(...rates) : 0;
+
+    return rates.length ? Math.min(...rates) : 0;
+};
+
+const getZoneForChallenge = async (zoneId: string) => {
+    try {
+        const zone = await convex.query(api.zones.getById, { zoneId: zoneId as Id<"zones"> });
+        if (zone) return zone;
+    } catch {
+        // Fall back to the string-compatible query below.
     }
-    const sportMap =
-        game === "indoor_cricket"
-            ? (pricing?.indoorCricket || pricing?.indoor_cricket || {})
-            : (pricing?.[game] || {});
-    const sportRates = Object.values(sportMap)
-        .map((entry: any) => entry?.price)
-        .filter((n: any) => typeof n === "number" && n > 0);
-    return sportRates.length ? Math.min(...sportRates) : 0;
+
+    const getByIdString = (api.zones as any).getByIdString;
+    if (!getByIdString) return null;
+
+    try {
+        return await convex.query(getByIdString, { zoneId });
+    } catch {
+        return null;
+    }
 };
 
 const computeChallengePricePerPlayer = async (input: {
@@ -133,14 +183,9 @@ const computeChallengePricePerPlayer = async (input: {
     maxPlayers: number;
 }) => {
     try {
-        // Try primary query first, fallback to string variant if available
-        const zone = await convex.query(api.zones.getById, { zoneId: input.zoneId as Id<"zones"> })
-            || await (api.zones as any).getByIdString 
-                ? await convex.query((api.zones as any).getByIdString, { zoneId: input.zoneId })
-                : null;
-
+        const zone = await getZoneForChallenge(input.zoneId);
         if (!zone) return 0;
-        const baseRate = getZoneRateForChallenge(zone, input.gameKey);
+        const baseRate = getZoneRateForChallenge(zone, input.gameKey, input.maxPlayers);
         if (!baseRate) return 0;
         const hours = getSeriesHours(input.gameKey, input.seriesType);
         const totalCost = baseRate * hours;
@@ -338,6 +383,7 @@ export const acceptTeamMatchChallenge = async (input: {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: true,
             lineupB,
+            actorUid: me.convexId,
         });
 
         // Create chat
@@ -375,6 +421,7 @@ export const rejectTeamMatchChallenge = async (input: {
         await convex.mutation(api.teamChallenges.respond, {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: false,
+            actorUid: me.convexId,
         });
 
         return { ok: true, challengeId: input.challengeId };
@@ -404,6 +451,7 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
         // Update challenge message with alternative zone info
         await convex.mutation(api.teamChallenges.update, {
             challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
             message: `Alternative venue proposed: ${input.venueName}`,
             alternativeVenueByCaptainB: {
                 zoneId: input.zoneId,
@@ -486,6 +534,7 @@ export const proposeTeamChallengeVenue = async (input: {
             zoneName: input.venueName,
             areaLabel: input.areaLabel || null,
             scheduledAt: Date.now(),
+            actorUid: me.convexId,
         });
 
         if (result?.confirmedVenue) {
@@ -560,6 +609,7 @@ export const proposeTeamChallengeVenue = async (input: {
 
             await convex.mutation(api.teamChallenges.update, {
                 challengeId: input.challengeId as Id<"teamChallenges">,
+                actorUid: me.convexId,
                 status: "venue_confirmed",
                 confirmedVenue: result.confirmedVenue,
                 matchroomId: matchroom.id as Id<"matchrooms">,

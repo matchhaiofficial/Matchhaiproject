@@ -1006,6 +1006,7 @@ export default defineSchema({
         supportsCs16: v.optional(v.boolean()),
         supportsValorant: v.optional(v.boolean()),
         supportsFc25: v.optional(v.boolean()),
+        supportsFc26: v.optional(v.boolean()),
         supportsTekken8: v.optional(v.boolean()),
         supportsFutsal: v.optional(v.boolean()),
         supportsIndoorCricket: v.optional(v.boolean()),

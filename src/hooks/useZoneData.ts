@@ -4,6 +4,35 @@ import { api } from "../../convex/_generated/api";
 import { useAuth } from "../context/AuthContext";
 import { Id } from "../../convex/_generated/dataModel";
 
+const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
+
+function normalizeGameKey(value: unknown) {
+    const normalized = String(value || "").trim().toLowerCase();
+    const compact = normalized.replace(/[\s._-]+/g, "");
+    if (compact === "fc25" || compact === "fc26") return "fc26";
+    if (compact === "cs2" || compact === "cs16" || compact === "counterstrike16") return compact === "cs2" ? "cs2" : "cs16";
+    if (compact === "valorant" || compact === "tekken8") return compact;
+    return normalized;
+}
+
+function buildGameFlagsFromArray(games: unknown[]) {
+    const gameSet = new Set(games.map(normalizeGameKey).filter(Boolean));
+    const hasPcSetup = PC_SETUP_GAME_KEYS.some((key) => gameSet.has(key));
+
+    return {
+        supportsCs2: hasPcSetup,
+        supportsCs16: hasPcSetup,
+        supportsValorant: hasPcSetup,
+        supportsFc25: gameSet.has("fc26"),
+        supportsFc26: gameSet.has("fc26"),
+        supportsTekken8: gameSet.has("tekken8"),
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
+    };
+}
+
 /**
  * Transform Convex zone document to the shape expected by zone admin screens.
  */
@@ -15,17 +44,7 @@ function transformZone(zone: any): any {
     // Handle games array vs object format
     let gamesObj = zone.games;
     if (Array.isArray(zone.games)) {
-        gamesObj = {
-            supportsCs2: zone.games.includes("cs2"),
-            supportsCs16: zone.games.includes("cs16"),
-            supportsValorant: zone.games.includes("valorant"),
-            supportsFc25: zone.games.includes("fc25") || zone.games.includes("fc26"),
-            supportsTekken8: zone.games.includes("tekken8"),
-            supportsFutsal: false,
-            supportsIndoorCricket: false,
-            supportsPadel: false,
-            supportsPickleball: false,
-        };
+        gamesObj = buildGameFlagsFromArray(zone.games);
     }
 
     return {

@@ -253,6 +253,38 @@ function buildPcSpecItems(specs?: any, tier?: string): PlayerVenuePcSpecItem[] {
 }
 
 const PKR_FORMATTER = new Intl.NumberFormat("en-PK");
+const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
+
+function normalizeGameKey(value: unknown) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const compact = normalized.replace(/[\s._-]+/g, "");
+  if (compact === "fc25" || compact === "fc26") return "fc26";
+  if (compact === "cs2" || compact === "cs16" || compact === "counterstrike16") return compact === "cs2" ? "cs2" : "cs16";
+  if (compact === "valorant" || compact === "tekken8") return compact;
+  return normalized;
+}
+
+function getGameSet(games: unknown[]) {
+  return new Set(games.map(normalizeGameKey).filter(Boolean));
+}
+
+function buildGameFlagsFromArray(games: unknown[]) {
+  const gameSet = getGameSet(games);
+  const hasPcSetup = PC_SETUP_GAME_KEYS.some((key) => gameSet.has(key));
+
+  return {
+    supportsCs2: hasPcSetup,
+    supportsCs16: hasPcSetup,
+    supportsValorant: hasPcSetup,
+    supportsFc25: gameSet.has("fc26"),
+    supportsFc26: gameSet.has("fc26"),
+    supportsTekken8: gameSet.has("tekken8"),
+    supportsFutsal: false,
+    supportsIndoorCricket: false,
+    supportsPadel: false,
+    supportsPickleball: false,
+  };
+}
 
 function formatPkrPerHour(value: number) {
   return `PKR ${PKR_FORMATTER.format(value)}/hr`;
@@ -278,18 +310,7 @@ function transformZone(zone: any): Zone {
   // Handle games array vs object format
   let gamesObj = zone.games;
   if (Array.isArray(zone.games)) {
-    gamesObj = {
-      supportsCs2: zone.games.includes("cs2"),
-      supportsCs16: zone.games.includes("cs16"),
-      supportsValorant: zone.games.includes("valorant"),
-      supportsFc25: zone.games.includes("fc25") || zone.games.includes("fc26"),
-      supportsFc26: zone.games.includes("fc26") || zone.games.includes("fc25"),
-      supportsTekken8: zone.games.includes("tekken8"),
-      supportsFutsal: false,
-      supportsIndoorCricket: false,
-      supportsPadel: false,
-      supportsPickleball: false,
-    };
+    gamesObj = buildGameFlagsFromArray(zone.games);
   }
 
   return {
@@ -484,18 +505,7 @@ export function formatSupportedGameLabels(games?: Zone["games"]) {
   if (!games) return [];
 
   const flags = Array.isArray(games)
-    ? {
-        supportsCs2: games.includes("cs2"),
-        supportsCs16: games.includes("cs16"),
-        supportsValorant: games.includes("valorant"),
-        supportsFc25: games.includes("fc25") || games.includes("fc26"),
-        supportsFc26: games.includes("fc26") || games.includes("fc25"),
-        supportsTekken8: games.includes("tekken8"),
-        supportsFutsal: false,
-        supportsIndoorCricket: false,
-        supportsPadel: false,
-        supportsPickleball: false,
-      }
+    ? buildGameFlagsFromArray(games)
     : games;
 
   const entries = [
@@ -1097,7 +1107,7 @@ export async function getActiveZones(
       return { ok: true, data: [] };
     }
 
-    const rawZones = await convex.query(api.zones.listActive, { limit: 200 });
+    const rawZones = await convex.query(api.zones.listActive, { limit: 500 });
     let zones = rawZones.map(transformZone);
 
     // Filter by game if specified
@@ -1288,10 +1298,14 @@ export async function saveZoneRegistration(data: {
     }
 
     // Create games object
+    const hasPcSetup = normalizedBranches.some(
+      (b) => b.supportsCs2 || b.supportsCs16 || b.supportsValorant,
+    );
+
     const games = {
-      supportsCs2: normalizedBranches.some((b) => b.supportsCs2),
-      supportsCs16: normalizedBranches.some((b) => b.supportsCs16),
-      supportsValorant: normalizedBranches.some((b) => b.supportsValorant),
+      supportsCs2: hasPcSetup,
+      supportsCs16: hasPcSetup,
+      supportsValorant: hasPcSetup,
       supportsFc25: normalizedBranches.some((b) => b.supportsFc25),
       supportsFc26: normalizedBranches.some((b) => b.supportsFc26 || b.supportsFc25),
       supportsTekken8: normalizedBranches.some((b) => b.supportsTekken8),

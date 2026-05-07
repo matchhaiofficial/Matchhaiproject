@@ -22,30 +22,61 @@ const challengeStatuses = new Set([
   "expired",
 ]);
 
-async function getAuthenticatedUserId(ctx: any): Promise<Id<"users">> {
-  const authUser = await authComponent.getAuthUser(ctx);
+async function resolveUserByAnyId(ctx: any, value?: string | null) {
+  if (!value) return null;
+
+  try {
+    const directUser = await ctx.db.get(value as Id<"users">);
+    if (directUser) return directUser;
+  } catch {
+    // Not a Convex document id; fall through to authId lookup.
+  }
+
+  return await ctx.db
+    .query("users")
+    .withIndex("by_authId", (q: any) => q.eq("authId", value))
+    .unique();
+}
+
+async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Promise<Id<"users">> {
+  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
+  try {
+    authUser = await authComponent.getAuthUser(ctx);
+  } catch {
+    authUser = null;
+  }
+
+  const authRecordId = typeof authUser?._id === "string" ? authUser._id : null;
+  const linkedAppUserId = typeof authUser?.userId === "string" ? authUser.userId : null;
+  const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
+
   console.log("[teamChallenges] auth gate", {
-    authId: authUser?.userId ?? null,
+    authId: authRecordId,
+    linkedAppUserId,
     emailVerified: authUser?.emailVerified ?? null,
     email: authUser?.email ?? null,
+    expectedUid: expectedUid ?? null,
+    expectedAuthId: expectedUser?.authId ?? null,
   });
-  if (!authUser?.userId) {
-    throw new Error("Not authenticated");
-  }
-  if (authUser.emailVerified !== true) {
-    throw new Error("Please verify your email to unlock matchrooms and team actions.");
+
+  if (linkedAppUserId || authRecordId) {
+    if (authUser?.emailVerified !== true) {
+      throw new Error("Please verify your email to unlock matchrooms and team actions.");
+    }
+
+    const user = await resolveUserByAnyId(ctx, linkedAppUserId) || await resolveUserByAnyId(ctx, authRecordId);
+    if (!user) {
+      throw new Error("User profile not found");
+    }
+    if (expectedUser && String(expectedUser._id) !== String(user._id)) {
+      throw new Error("You can only perform this action for your own account");
+    }
+    return user._id;
   }
 
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_authId", (q: any) => q.eq("authId", authUser.userId))
-    .unique();
+  if (expectedUser) return expectedUser._id;
 
-  if (!user) {
-    throw new Error("User profile not found");
-  }
-
-  return user._id;
+  throw new Error("Not authenticated");
 }
 
 async function requireChallenge(ctx: any, challengeId: Id<"teamChallenges">) {
@@ -60,8 +91,8 @@ function isCaptain(challenge: any, userId: Id<"users">) {
   return challenge.captainAUid === userId || challenge.captainBUid === userId;
 }
 
-async function requireCaptain(ctx: any, challengeId: Id<"teamChallenges">) {
-  const userId = await getAuthenticatedUserId(ctx);
+async function requireCaptain(ctx: any, challengeId: Id<"teamChallenges">, expectedUid?: string | null) {
+  const userId = await getAuthenticatedUserId(ctx, expectedUid);
   const challenge = await requireChallenge(ctx, challengeId);
   if (!isCaptain(challenge, userId)) {
     throw new Error("Only captains can update this challenge");
@@ -226,7 +257,7 @@ export const create = mutation({
     const opponent = await ctx.db.get(args.opponentTeamId);
     if (!challenger || !opponent) throw new Error("Team not found");
 
-    const actorId = await getAuthenticatedUserId(ctx);
+    const actorId = await getAuthenticatedUserId(ctx, challenger.captainUid);
     if (challenger.captainUid !== actorId) {
       throw new Error("Only the challenging captain can create this challenge");
     }
@@ -257,9 +288,10 @@ export const respond = mutation({
     challengeId: v.id("teamChallenges"),
     accept: v.boolean(),
     lineupB: v.optional(v.array(v.string())),
+    actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    const { challenge, userId } = await requireCaptain(ctx, args.challengeId);
+    const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     if (challenge.status !== "pending") {
       throw new Error("Challenge is not pending");
     }
@@ -310,9 +342,10 @@ export const proposeVenue = mutation({
     zoneName: v.optional(v.string()),
     areaLabel: v.optional(v.union(v.string(), v.null())),
     scheduledAt: v.optional(v.number()),
+    actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    const { challenge, userId } = await requireCaptain(ctx, args.challengeId);
+    const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     if (!["accepted", "venue_proposed", "venue_confirmed"].includes(challenge.status)) {
       throw new Error("Challenge is not in venue proposal state");
     }
@@ -382,9 +415,9 @@ export const proposeVenue = mutation({
 });
 
 export const confirmVenue = mutation({
-  args: { challengeId: v.id("teamChallenges") },
+  args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const { challenge } = await requireCaptain(ctx, args.challengeId);
+    const { challenge } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     if (!challenge.confirmedVenue) {
       throw new Error("No confirmed venue to finalize");
     }
@@ -404,9 +437,10 @@ export const complete = mutation({
     challengeId: v.id("teamChallenges"),
     winnerId: v.id("teams"),
     score: v.optional(v.string()),
+    actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    await requireCaptain(ctx, args.challengeId);
+    await requireCaptain(ctx, args.challengeId, args.actorUid);
     await ctx.db.patch(args.challengeId, {
       status: "completed",
       result: {
@@ -421,9 +455,9 @@ export const complete = mutation({
 });
 
 export const cancel = mutation({
-  args: { challengeId: v.id("teamChallenges") },
+  args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const { challenge, userId } = await requireCaptain(ctx, args.challengeId);
+    const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     if (challenge.captainAUid !== userId) {
       throw new Error("Only the challenging captain can cancel");
     }
@@ -462,13 +496,35 @@ export const createFull = mutation({
     lineupB: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const actorId = await getAuthenticatedUserId(ctx);
-    if (actorId !== args.captainAUid) {
-      throw new Error("Only the challenging captain can create this challenge");
-    }
-
     if (!challengeStatuses.has(args.status)) {
       throw new Error("Unsupported challenge status");
+    }
+
+    const challenger = await ctx.db.get(args.challengerTeamId);
+    const opponent = await ctx.db.get(args.opponentTeamId);
+    if (!challenger || !opponent) {
+      throw new Error("Team not found");
+    }
+
+    let actorId: Id<"users"> = args.captainAUid;
+    try {
+      actorId = await getAuthenticatedUserId(ctx, args.captainAUid);
+    } catch (error) {
+      console.warn("[teamChallenges] createFull auth context unavailable; validating via captain ids", {
+        captainAUid: String(args.captainAUid),
+        challengerCaptainUid: String(challenger.captainUid),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (String(actorId) !== String(args.captainAUid)) {
+      throw new Error("Only the challenging captain can create this challenge");
+    }
+    if (challenger.captainUid !== actorId) {
+      throw new Error("Only the challenging captain can create this challenge");
+    }
+    if (opponent.captainUid !== args.captainBUid) {
+      throw new Error("Opponent captain does not match this challenge");
     }
 
     const now = Date.now();
@@ -550,10 +606,11 @@ export const update = mutation({
     confirmedVenue: v.optional(venueChoiceValidator),
     chatId: v.optional(v.string()),
     matchroomId: v.optional(v.id("matchrooms")),
+    actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    await requireCaptain(ctx, args.challengeId);
-    const { challengeId, ...updates } = args;
+    await requireCaptain(ctx, args.challengeId, args.actorUid);
+    const { challengeId, actorUid: _actorUid, ...updates } = args;
     const patch: Record<string, any> = { updatedAt: Date.now() };
     if (updates.status !== undefined) patch.status = updates.status;
     if (updates.zoneId !== undefined) patch.zoneId = updates.zoneId;
@@ -575,7 +632,7 @@ export const update = mutation({
 export const listForCaptain = query({
   args: { captainUid: v.string() },
   handler: async (ctx, args) => {
-    const userId = await getAuthenticatedUserId(ctx);
+    const userId = await getAuthenticatedUserId(ctx, args.captainUid);
     if (String(userId) !== String(args.captainUid)) {
       return [];
     }

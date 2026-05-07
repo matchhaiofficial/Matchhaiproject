@@ -61,30 +61,76 @@ const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent
     return Math.max(2, Number(challenger?.maxMembers || 0) + Number(opponent?.maxMembers || 0));
 };
 
-const getBaseZoneRate = (zone: Zone | null, gameKey: string) => {
+type ZoneRateOption = {
+    key: string;
+    label: string;
+    price: number;
+};
+
+const toPositiveNumber = (value: any) => {
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const getZonePricingSources = (zone: Zone | null) => {
+    if (!zone) return [];
+    const sources = [
+        ...(Array.isArray(zone.branches) ? zone.branches.map((branch: any) => branch?.pricing) : []),
+        zone.pricing,
+    ];
+    return sources.filter(Boolean);
+};
+
+const getPreferredConsolePrice = (tier: any, estimatedPlayers: number) => {
+    const preferred = estimatedPlayers > 2 ? tier?.price2v2 : tier?.price1v1;
+    return toPositiveNumber(preferred) || toPositiveNumber(tier?.price1v1) || toPositiveNumber(tier?.price2v2) || toPositiveNumber(tier?.price);
+};
+
+const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlayers: number): ZoneRateOption[] => {
+    const game = String(gameKey || "").toLowerCase();
+    const pricingSources = getZonePricingSources(zone);
+    const options = new Map<string, ZoneRateOption>();
+
+    const addOption = (key: string, label: string, price: number) => {
+        if (price > 0 && !options.has(key)) {
+            options.set(key, { key, label, price });
+        }
+    };
+
+    for (const pricing of pricingSources) {
+        if (game === "cs2" || game === "cs16" || game === "valorant") {
+            addOption("pc-regular", "Regular", toPositiveNumber(pricing?.pc?.regular?.price));
+            addOption("pc-premium", "Premium", toPositiveNumber(pricing?.pc?.premium?.price));
+            addOption("pc-elite", "Elite", toPositiveNumber(pricing?.pc?.elite?.price));
+        }
+
+        if (game === "fc26" || game === "fc25" || game === "tekken8") {
+            const formatLabel = estimatedPlayers > 2 ? "2v2" : "1v1";
+            addOption("console-regular", `Regular (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.regular, estimatedPlayers));
+            addOption("console-premium", `Premium (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.premium, estimatedPlayers));
+            addOption("console-elite", `Elite (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.elite, estimatedPlayers));
+            addOption("console-ps5", `PS5 (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.ps5, estimatedPlayers));
+            addOption("console-xbox", `Xbox (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.xbox, estimatedPlayers));
+        }
+    }
+
+    return Array.from(options.values());
+};
+
+const getBaseZoneRate = (zone: Zone | null, gameKey: string, estimatedPlayers = 2) => {
     if (!zone) return 0;
     if (typeof zone.effectiveRate === "number" && zone.effectiveRate > 0) {
         return zone.effectiveRate;
     }
-    const pricing: any = zone.pricing || zone.branches?.[0]?.pricing || {};
     const game = String(gameKey || "").toLowerCase();
 
     if (game === "cs2" || game === "cs16" || game === "valorant") {
-        const rates = [
-            pricing?.pc?.regular?.price,
-            pricing?.pc?.premium?.price,
-            pricing?.pc?.elite?.price,
-        ].filter((value: any) => typeof value === "number" && value > 0);
+        const rates = buildZoneRateOptions(zone, game, estimatedPlayers).map((option) => option.price);
         return rates.length > 0 ? Math.min(...rates) : 0;
     }
 
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
-        const rates = [
-            pricing?.console?.ps5?.price2v2,
-            pricing?.console?.ps5?.price1v1,
-            pricing?.console?.xbox?.price2v2,
-            pricing?.console?.xbox?.price1v1,
-        ].filter((value: any) => typeof value === "number" && value > 0);
+        const rates = buildZoneRateOptions(zone, game, estimatedPlayers).map((option) => option.price);
         return rates.length > 0 ? Math.min(...rates) : 0;
     }
 
@@ -105,6 +151,7 @@ export default function TeamChallengeCreateScreen() {
     const [captainedTeams, setCaptainedTeams] = useState<Team[]>([]);
     const [challengerTeamId, setChallengerTeamId] = useState<string>("");
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
+    const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
     const [seriesType, setSeriesType] = useState<(typeof SERIES_OPTIONS)[number]>("BO1");
     const [pricePerPlayer, setPricePerPlayer] = useState(0);
     const [formData, setFormData] = useState({
@@ -183,24 +230,48 @@ export default function TeamChallengeCreateScreen() {
     };
 
     const areBothTeamsFilled = isTeamFilled(challengerTeam) && isTeamFilled(opponentTeam);
+    const challengeGameKey = String(opponentTeam?.game || "").toLowerCase();
 
     const estimatedPlayers = useMemo(
-        () => getEstimatedPlayers(String(opponentTeam?.game || ""), challengerTeam, opponentTeam),
-        [challengerTeam, opponentTeam],
+        () => getEstimatedPlayers(challengeGameKey, challengerTeam, opponentTeam),
+        [challengeGameKey, challengerTeam, opponentTeam],
+    );
+
+    const zoneRateOptions = useMemo(
+        () => buildZoneRateOptions(selectedZone, challengeGameKey, estimatedPlayers),
+        [selectedZone, challengeGameKey, estimatedPlayers],
+    );
+
+    const selectedZoneRate = useMemo(
+        () => zoneRateOptions.find((option) => option.key === selectedZoneRateKey) || zoneRateOptions[0] || null,
+        [zoneRateOptions, selectedZoneRateKey],
     );
 
     useEffect(() => {
-        const game = String(opponentTeam?.game || "");
-        const baseRate = getBaseZoneRate(selectedZone, game);
+        if (zoneRateOptions.length === 0) {
+            setSelectedZoneRateKey(null);
+            return;
+        }
+        if (!selectedZoneRateKey || !zoneRateOptions.some((option) => option.key === selectedZoneRateKey)) {
+            setSelectedZoneRateKey(zoneRateOptions[0].key);
+        }
+    }, [selectedZoneRateKey, zoneRateOptions]);
+
+    useEffect(() => {
+        setSelectedZoneRateKey(null);
+    }, [selectedZone?.id, challengeGameKey, estimatedPlayers]);
+
+    useEffect(() => {
+        const baseRate = selectedZoneRate?.price || getBaseZoneRate(selectedZone, challengeGameKey, estimatedPlayers);
         if (!baseRate) {
             setPricePerPlayer(0);
             return;
         }
-        const hours = getSeriesHours(game, seriesType);
+        const hours = getSeriesHours(challengeGameKey, seriesType);
         const totalCost = baseRate * hours;
         const perPlayer = estimatedPlayers > 0 ? Math.ceil(totalCost / estimatedPlayers) : 0;
         setPricePerPlayer(perPlayer);
-    }, [opponentTeam?.game, selectedZone, seriesType, estimatedPlayers]);
+    }, [challengeGameKey, selectedZone, selectedZoneRate, seriesType, estimatedPlayers]);
 
     const canSubmit = !!challengerTeam &&
         !!opponentTeam &&
@@ -298,7 +369,7 @@ export default function TeamChallengeCreateScreen() {
         );
     }
 
-    const gameKey = String(opponentTeam.game || "").toLowerCase();
+    const gameKey = challengeGameKey;
     const gameLabel = getCanonicalGameLabel(opponentTeam.game);
 
     return (
@@ -406,6 +477,25 @@ export default function TeamChallengeCreateScreen() {
                         selectedZoneId={selectedZone?.id || null}
                         onZoneSelect={setSelectedZone}
                     />
+
+                    {selectedZone && zoneRateOptions.length > 0 ? (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionLabel}>Category<Text style={styles.requiredAsterisk}>*</Text></Text>
+                            <View style={styles.chipRow}>
+                                {zoneRateOptions.map((option) => (
+                                    <Pressable
+                                        key={option.key}
+                                        style={[styles.optionChip, selectedZoneRate?.key === option.key && styles.optionChipActive]}
+                                        onPress={() => setSelectedZoneRateKey(option.key)}
+                                    >
+                                        <Text style={[styles.optionChipText, selectedZoneRate?.key === option.key && styles.optionChipTextActive]}>
+                                            {option.label} · PKR {option.price}/hr
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        </View>
+                    ) : null}
 
                     <View style={styles.section}>
                         <Text style={styles.sectionLabel}>Price Per Player (PKR)</Text>

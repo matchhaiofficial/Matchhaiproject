@@ -226,7 +226,11 @@ export const buildZoneGamesFromBranches = (branches: any[]) => {
     const games = new Set<string>();
 
     branches.forEach((branch) => {
-        if (branch?.supportsCs2) games.add("cs2");
+        if (branch?.supportsCs2 || branch?.supportsCs16 || branch?.supportsValorant) {
+            games.add("cs2");
+            games.add("cs16");
+            games.add("valorant");
+        }
         if (branch?.supportsFc25 || branch?.supportsFc26) games.add("fc26");
         if (branch?.supportsTekken8) games.add("tekken8");
     });
