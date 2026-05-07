@@ -11,7 +11,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import ChatThread from "../../src/features/chat/ChatThread";
 import type { ChatThreadMessage } from "../../src/features/chat/types";
-import { formatVoiceDuration } from "../../src/features/chat/utils";
+import { formatChatPresenceLabel, formatVoiceDuration, useRelativeNow } from "../../src/features/chat/utils";
 import { useAuth } from "../../src/context/AuthContext";
 import { useChatTyping } from "../../src/hooks/useChatTyping";
 import { usePresenceHeartbeat } from "../../src/hooks/usePresenceHeartbeat";
@@ -38,6 +38,7 @@ export default function TeamChallengeChatScreen() {
 
     const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
     const recorderState = useAudioRecorderState(recorder, 250);
+    const nowMs = useRelativeNow(60_000);
 
     const accessState = useQuery(
         api.teamChallengeChat.getAccess,
@@ -184,15 +185,8 @@ export default function TeamChallengeChatScreen() {
     }, [captainUsers, user?._id]);
 
     const presenceLabel = useMemo(() => {
-        if (!otherCaptainUser?.lastActiveAt) return null;
-        const diffMs = Date.now() - otherCaptainUser.lastActiveAt;
-        if (diffMs < 60_000) return "Active now";
-        const minutes = Math.floor(diffMs / 60_000);
-        if (minutes < 60) return `Active ${minutes}m ago`;
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `Active ${hours}h ago`;
-        return null;
-    }, [otherCaptainUser?.lastActiveAt]);
+        return formatChatPresenceLabel(otherCaptainUser?.lastActiveAt, otherCaptainUser?.isOnline, nowMs);
+    }, [nowMs, otherCaptainUser?.isOnline, otherCaptainUser?.lastActiveAt]);
 
     const isCaptain = useMemo(() => {
         if (!user?._id || !challengeData) return false;
@@ -237,14 +231,18 @@ export default function TeamChallengeChatScreen() {
         [captainPhotoByUid, challengeData?.captainAName, challengeData?.captainAUid, challengeData?.captainBName, challengeData?.captainBUid, chatData?.participantUids, senderNameMap, user?._id]
     );
 
-    const seenNamesByMessageId = useMemo(() => {
-        const result: Record<string, string[]> = {};
+    const seenReceiptsByMessageId = useMemo(() => {
+        const result: Record<string, Array<{ uid: string; name: string; readAt: number }>> = {};
         const lastReadBy = (chatData?.lastReadBy || {}) as Record<string, number>;
         messages.forEach((message) => {
             if (message.senderUid !== user?._id) return;
             result[message.id] = Object.entries(lastReadBy)
                 .filter(([uid, timestamp]) => uid !== user?._id && Number(timestamp) >= message.createdAt)
-                .map(([uid]) => senderNameMap[uid] || "Captain");
+                .map(([uid, timestamp]) => ({
+                    uid,
+                    name: senderNameMap[uid] || "Captain",
+                    readAt: Number(timestamp),
+                }));
         });
         return result;
     }, [chatData?.lastReadBy, messages, senderNameMap, user?._id]);
@@ -605,7 +603,7 @@ export default function TeamChallengeChatScreen() {
             onToggleReaction={handleToggleReaction}
             replyTo={replyTo}
             onClearReply={() => setReplyTo(null)}
-            seenNamesByMessageId={seenNamesByMessageId}
+            seenReceiptsByMessageId={seenReceiptsByMessageId}
             contextCard={contextCard}
             emptyTitle="No captain messages yet"
             emptySubtitle="Start coordinating the challenge details here."

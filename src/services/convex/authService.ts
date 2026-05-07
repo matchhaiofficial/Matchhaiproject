@@ -3,6 +3,7 @@
 // Maintains the same interface as the Firebase auth service
 
 import { authClient, AuthSession, AuthUser } from "../../lib/auth-client";
+import { clearCachedAuthSession } from "../../lib/authSessionCache";
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
@@ -86,6 +87,29 @@ function mapAuthError(error?: any): string {
   }
 
   return String(error?.message || statusText || "Something went wrong. Please try again.");
+}
+
+async function markAuthUserOffline(authId?: string | null) {
+  if (!authId) return;
+  try {
+    const profile = await convex.query(api.users.getByAuthId, { authId });
+    if (!profile?._id) return;
+    await convex.mutation(api.users.updateOnlineStatus, {
+      userId: profile._id as Id<"users">,
+      isOnline: false,
+    });
+  } catch {
+    // Presence is best-effort; auth should not fail because this write failed.
+  }
+}
+
+async function getCurrentSessionAuthId() {
+  try {
+    const { data } = await authClient.getSession();
+    return data?.user?.id || null;
+  } catch {
+    return null;
+  }
 }
 
 function isCombinedCredentialError(error?: any) {
@@ -416,6 +440,7 @@ export async function signInWithEmail(
   password: string
 ): Promise<AuthResult> {
   try {
+    const previousAuthId = await getCurrentSessionAuthId();
     const trimmed = emailOrPhone.trim();
 
     // If it looks like an email, sign in directly
@@ -449,6 +474,10 @@ export async function signInWithEmail(
       const user = await convex.query(api.users.getByAuthId, { authId: authUserData.id });
       if (!user) {
         return { ok: false, message: "User profile not found." };
+      }
+
+      if (previousAuthId && previousAuthId !== authUserData.id) {
+        await markAuthUserOffline(previousAuthId);
       }
 
       return { ok: true, user: authUserData, userId: user._id };
@@ -502,7 +531,12 @@ export async function signInWithEmail(
       return { ok: false, message: mapAuthError(error), code: error?.code };
     }
 
-    return { ok: true, user: data.user as AuthUser, userId: user._id };
+    const authUserData = data.user as AuthUser;
+    if (previousAuthId && previousAuthId !== authUserData.id) {
+      await markAuthUserOffline(previousAuthId);
+    }
+
+    return { ok: true, user: authUserData, userId: user._id };
   } catch (e: any) {
     console.error("[authService] signInWithEmail error", e);
     return { ok: false, message: mapAuthError(e), code: e?.code };
@@ -642,7 +676,10 @@ export async function resetPasswordWithToken(
 /** Sign out current user */
 export async function signOutUser(): Promise<SimpleResult> {
   try {
+    await markAuthUserOffline(await getCurrentSessionAuthId());
+    await clearCachedAuthSession();
     await authClient.signOut();
+    await clearCachedAuthSession();
     return { ok: true };
   } catch (e: any) {
     return { ok: false, message: mapAuthError(e), code: e?.code };

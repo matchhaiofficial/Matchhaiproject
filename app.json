@@ -35,7 +35,7 @@
       "edgeToEdgeEnabled": false,
       "navigationBarColor": "#000000",
       "predictiveBackGestureEnabled": false,
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "bundler": "metro",

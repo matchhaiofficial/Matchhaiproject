@@ -48,8 +48,19 @@ export default function ZonePicker({
 
             // Sort zones: Preferred areas first, then alphabetical
             const sortedZones = uniqueZones.sort((a, b) => {
-                const aPreferred = userPreferredAreas.some(area => a.primaryBranch?.areaLabel?.includes(area));
-                const bPreferred = userPreferredAreas.some(area => b.primaryBranch?.areaLabel?.includes(area));
+                const normalizeArea = (value: unknown) =>
+                    String(value || "")
+                        .trim()
+                        .toLowerCase()
+                        // remove spaces and punctuation so "Bahadur Abad" ~= "bahadurabad"
+                        .replace(/[^a-z0-9]+/g, "");
+
+                const aArea = normalizeArea(a.primaryBranch?.areaLabel);
+                const bArea = normalizeArea(b.primaryBranch?.areaLabel);
+                const prefAreas = userPreferredAreas.map(normalizeArea).filter(Boolean);
+
+                const aPreferred = prefAreas.some((area) => aArea.includes(area) || area.includes(aArea));
+                const bPreferred = prefAreas.some((area) => bArea.includes(area) || area.includes(bArea));
                 if (aPreferred && !bPreferred) return -1;
                 if (!aPreferred && bPreferred) return 1;
                 return a.venueBrandName.localeCompare(b.venueBrandName);
@@ -96,9 +107,21 @@ export default function ZonePicker({
             });
         } else if (gameKey === 'fc26' || gameKey === 'tekken8' || gameKey === 'fc25') {
             const consolePricing: any = pricing.console || {};
+            const regular: any = consolePricing.regular || null;
+            const premium: any = consolePricing.premium || null;
+            const elite: any = consolePricing.elite || null;
             const ps5: any = consolePricing.ps5 || null;
             const xbox: any = consolePricing.xbox || null;
-            [ps5?.price1v1, ps5?.price2v2, xbox?.price1v1, xbox?.price2v2].forEach((price) => {
+
+            // Console pricing can be defined either by tier (regular/premium/elite) or by platform (ps5/xbox),
+            // depending on when the zone was registered/updated. Consider both.
+            [
+                regular?.price1v1, regular?.price, regular?.price2v2,
+                premium?.price1v1, premium?.price, premium?.price2v2,
+                elite?.price1v1, elite?.price, elite?.price2v2,
+                ps5?.price1v1, ps5?.price, ps5?.price2v2,
+                xbox?.price1v1, xbox?.price, xbox?.price2v2,
+            ].forEach((price) => {
                 const parsed = toPositiveNumber(price);
                 if (parsed) prices.push(parsed);
             });

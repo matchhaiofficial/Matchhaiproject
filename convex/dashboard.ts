@@ -135,7 +135,7 @@ export const getPlayerHomeSummary = query({
     const presenceNow = Date.now();
     const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
     const friendOnlineCount = friendDocs.filter(
-      (friend) => friend?.lastActiveAt && (presenceNow - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS
+      (friend) => friend?.isOnline && friend.lastActiveAt && (presenceNow - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS
     ).length;
 
     const walletStats = bookingIntents.reduce(

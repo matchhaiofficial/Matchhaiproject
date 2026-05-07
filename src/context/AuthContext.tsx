@@ -81,6 +81,27 @@ export default function AuthProvider({ children }: { children: any }) {
     }
   }, []);
 
+  const recheckBeforeClearing = useCallback(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const { data } = await authClient.getSession();
+    const liveSession = (data as AuthSession | null) ?? null;
+    if (liveSession?.user) {
+      await applySessionState(liveSession);
+      await fetchUserProfile(liveSession.user.id);
+      return;
+    }
+
+    const cachedSession = await loadCachedAuthSession();
+    if (cachedSession?.user) {
+      await applySessionState(cachedSession, false);
+      void fetchUserProfile(cachedSession.user.id);
+      return;
+    }
+
+    clearAuthState(false);
+  }, [applySessionState, clearAuthState, fetchUserProfile]);
+
   // Refresh user profile
   const refreshUser = useCallback(async () => {
     if (authUser?.id) {
@@ -124,7 +145,7 @@ export default function AuthProvider({ children }: { children: any }) {
         return true;
       }
 
-      // Don't clear if we already have a session — network may just be slow
+      // Don't clear if we already have a session -- network may just be slow
       if (existingSession?.user) {
         return true;
       }
@@ -134,7 +155,7 @@ export default function AuthProvider({ children }: { children: any }) {
       return false;
     } catch (error) {
       console.error("[AuthContext] refreshSession failed:", error);
-      // Never clear on error — a network hiccup should never log the user out
+      // Never clear on error -- a network hiccup should never log the user out
       return existingSession?.user ? true : false;
     }
   }, [applySessionState, clearAuthState, fetchUserProfile, session]);
@@ -184,8 +205,10 @@ export default function AuthProvider({ children }: { children: any }) {
         if (newSession?.user) {
           void applySessionState(newSession as AuthSession);
           void fetchUserProfile(newSession.user.id);
+          return;
         }
-        // Do nothing if no user — don't clear, it may just be mid-refresh
+
+        void recheckBeforeClearing();
       });
     }
 
@@ -193,23 +216,23 @@ export default function AuthProvider({ children }: { children: any }) {
       isMounted = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [applySessionState, clearAuthState, fetchUserProfile]);
+  }, [applySessionState, clearAuthState, fetchUserProfile, recheckBeforeClearing]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
 
-      // Silently try to refresh — never clear session on failure
+      // Silently try to refresh -- never clear session on failure
       authClient.getSession()
         .then(({ data }) => {
           if (data?.user) {
             void applySessionState(data as AuthSession);
             void fetchUserProfile(data.user.id);
+            return;
           }
-          // No session returned? Do nothing — keep existing state
         })
         .catch(() => {
-          // Network error? Do nothing — keep existing state
+          // Network error? Do nothing -- keep existing state
         });
     });
     return () => subscription.remove();

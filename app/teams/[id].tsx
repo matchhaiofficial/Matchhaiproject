@@ -631,7 +631,7 @@ export default function TeamDetails() {
         );
     }
 
-    const canChallengeTeam = !isMember && buttonState === 'eligible' && captainedTeams.some(
+    const canChallengeTeam = !isMember && (buttonState === 'eligible' || buttonState === 'full') && captainedTeams.some(
         (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
     );
     const showBottomActionBar = !isDeleted && ((isMember && !isCaptain) || !isMember);
@@ -954,9 +954,21 @@ export default function TeamDetails() {
                                     </AppCard>
                                 )}
                                 {buttonState === 'full' && (
-                                    <AppCard style={styles.actionButtonDisabled}>
-                                        <Text style={styles.actionButtonTextDisabled}>Full</Text>
-                                    </AppCard>
+                                    canChallengeTeam ? (
+                                        <AppButton
+                                            variant="success"
+                                            size="lg"
+                                            onPress={handleChallenge}
+                                            disabled={submitting}
+                                            style={styles.challengeButton}
+                                        >
+                                            <Text style={styles.challengeButtonText}>Challenge Team</Text>
+                                        </AppButton>
+                                    ) : (
+                                        <AppCard style={styles.actionButtonDisabled}>
+                                            <Text style={styles.actionButtonTextDisabled}>Full</Text>
+                                        </AppCard>
+                                    )
                                 )}
                                 {buttonState === 'private' && (
                                     <AppCard style={styles.actionButtonDisabled}>

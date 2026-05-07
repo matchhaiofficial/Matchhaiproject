@@ -47,6 +47,9 @@ export function usePresenceHeartbeat(enabled: boolean = true) {
         const subscription = AppState.addEventListener("change", handleAppState);
 
         return () => {
+            // If the user logs out or the screen tree unmounts while still active,
+            // mark the current user offline so presence doesn't get stuck.
+            offline();
             subscription.remove();
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);

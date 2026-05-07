@@ -14,6 +14,12 @@ export type ChatReaction = {
     createdAt: number;
 };
 
+export type ChatSeenReceipt = {
+    uid: string;
+    name: string;
+    readAt: number;
+};
+
 export type ChatThreadMessage = {
     id: string;
     text: string;

@@ -221,7 +221,7 @@ export default function FriendsScreen() {
         <AppIcon name="chevron-right" size={22} tone="muted" />
       </Pressable>
     );
-  }, [openFriendChat, openFriendProfile]);
+  }, [dmUnreadCounts, openFriendChat, openFriendProfile]);
 
   const listHeader = useMemo(() => {
     return (

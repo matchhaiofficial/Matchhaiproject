@@ -103,10 +103,16 @@ const getZoneRateForChallenge = (zoneData: any, gameKey: string) => {
     }
     if (game === "fc26" || game === "fc25" || game === "tekken8") {
         const rates = [
-            pricing?.console?.ps5?.price2v2,
-            pricing?.console?.ps5?.price1v1,
-            pricing?.console?.xbox?.price2v2,
-            pricing?.console?.xbox?.price1v1,
+            pricing?.console?.regular?.price1v1,
+            pricing?.console?.regular?.price2v2,
+            // pricing?.console?.ps5?.price2v2,
+            // pricing?.console?.ps5?.price1v1,
+            // pricing?.console?.xbox?.price2v2,
+            // pricing?.console?.xbox?.price1v1,
+            pricing?.console?.premium?.price1v1,
+            pricing?.console?.premium?.price2v2,
+            pricing?.console?.elite?.price1v1,
+            pricing?.console?.elite?.price2v2,
         ].filter((n: any) => typeof n === "number" && n > 0);
         return rates.length ? Math.min(...rates) : 0;
     }
@@ -127,8 +133,12 @@ const computeChallengePricePerPlayer = async (input: {
     maxPlayers: number;
 }) => {
     try {
-        // Try to get zone from Convex
-        const zone = await convex.query(api.zones.getByIdString, { zoneId: input.zoneId });
+        // Try primary query first, fallback to string variant if available
+        const zone = await convex.query(api.zones.getById, { zoneId: input.zoneId as Id<"zones"> })
+            || await (api.zones as any).getByIdString 
+                ? await convex.query((api.zones as any).getByIdString, { zoneId: input.zoneId })
+                : null;
+
         if (!zone) return 0;
         const baseRate = getZoneRateForChallenge(zone, input.gameKey);
         if (!baseRate) return 0;

@@ -66,6 +66,13 @@ const faceitLevelIcons: Record<number, any> = {
     10: require("../../../assets/images/faceit-levels/Level 10.png"),
 };
 
+const normalizeSelectableAreas = (values?: readonly (string | null | undefined)[] | null) => {
+    const allowedAreas = new Set<string>(KARACHI_AREAS);
+    return normalizeKarachiAreaList(values)
+        .filter((area) => allowedAreas.has(area))
+        .slice(0, 5);
+};
+
 // Pakistani phone formatter (same as register.tsx)
 const formatPakistaniPhone = (value: string) => {
     const numeric = value.replace(/\D/g, "");
@@ -153,6 +160,8 @@ export default function EditProfile() {
     const [hideAreasPublicly, setHideAreasPublicly] = useState(false);
     const [hidePlatformsPublicly, setHidePlatformsPublicly] = useState(false);
     const [restrictInvitesToFriends, setRestrictInvitesToFriends] = useState(false);
+    const selectedDisplayAreas = useMemo(() => normalizeSelectableAreas(selectedAreas), [selectedAreas]);
+    const selectedDisplayAreaSet = useMemo(() => new Set(selectedDisplayAreas), [selectedDisplayAreas]);
 
     // Verification State
     const [steamProfile, setSteamProfile] = useState<SteamProfileSummary | null>(null);
@@ -258,7 +267,7 @@ export default function EditProfile() {
                     setPhone((data as any).phone || "");
                     setOriginalPhone((data as any).phone || "");
                     setPhoneVerified(Boolean((data as any).phoneValidated));
-                    setSelectedAreas(normalizeKarachiAreaList((data as any).areasPreferred || []));
+                    setSelectedAreas(normalizeSelectableAreas((data as any).areasPreferred || []));
 
                     // Load pending email if exists
                     setPendingEmail((data as any).pendingEmail || "");
@@ -421,15 +430,15 @@ export default function EditProfile() {
     const toggleArea = (area: string) => {
         const canonicalArea = normalizeKarachiAreaLabel(area);
         setSelectedAreas((prev) => {
-            const normalizedPrev = normalizeKarachiAreaList(prev);
+            const normalizedPrev = normalizeSelectableAreas(prev);
             if (normalizedPrev.includes(canonicalArea)) {
                 return normalizedPrev.filter(a => a !== canonicalArea);
             }
             if (normalizedPrev.length >= 5) {
                 showToast({ type: "warning", title: "Limit reached", message: "Max 5 areas." });
-                return prev;
+                return normalizedPrev;
             }
-            return normalizeKarachiAreaList([...normalizedPrev, canonicalArea]);
+            return normalizeSelectableAreas([...normalizedPrev, canonicalArea]);
         });
     };
 
@@ -691,7 +700,7 @@ export default function EditProfile() {
             }
         }
 
-        if (selectedAreas.length === 0) {
+        if (selectedDisplayAreas.length === 0) {
             showToast({ type: "error", title: "Areas Required", message: "Select at least 1 area." });
             return;
         }
@@ -705,7 +714,7 @@ export default function EditProfile() {
                 city: DEFAULT_CITY,
                 ageRange,
                 phone: phone.trim(),
-                areasPreferred: normalizeKarachiAreaList(selectedAreas),
+                areasPreferred: selectedDisplayAreas,
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
                 psnOnlineId: psnOnlineId.trim() || null,
@@ -1179,14 +1188,14 @@ export default function EditProfile() {
                             <Text style={styles.labelNoMargin}>Preferred Areas</Text>
                             <Text style={[
                                 styles.selectedCountText,
-                                selectedAreas.length >= 5 && styles.warningText
+                                selectedDisplayAreas.length >= 5 && styles.warningText
                             ]}>
-                                {selectedAreas.length}/5 Selected
+                                {selectedDisplayAreas.length}/5 Selected
                             </Text>
                         </View>
                         <View style={styles.flexWrapRow}>
                             {KARACHI_AREAS.map(area => {
-                                const selected = selectedAreas.includes(area);
+                                const selected = selectedDisplayAreaSet.has(area);
                                 return (
                                     <Pressable
                                         key={area}
@@ -1200,7 +1209,7 @@ export default function EditProfile() {
                                 );
                             })}
                         </View>
-                        {selectedAreas.length === 0 && (
+                        {selectedDisplayAreas.length === 0 && (
                             <Text style={[styles.helperText, styles.helperError]}>Select at least one area.</Text>
                         )}
                     </View>

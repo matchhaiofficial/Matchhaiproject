@@ -117,6 +117,7 @@ const sanitizeSpecs = (specs?: PcTierSpecs) => {
 
 export const sanitizeBranchInventory = (inventory: BranchInventoryFields): BranchInventoryFields => {
     const pcSpecs: BranchInventoryFields["pcSpecs"] = {};
+    const supportsConsole = Boolean(inventory.supportsFc25 || inventory.supportsFc26 || inventory.supportsTekken8);
 
     PC_TYPES.forEach((type) => {
         const tier = type.value;
@@ -128,6 +129,9 @@ export const sanitizeBranchInventory = (inventory: BranchInventoryFields): Branc
 
     return {
         ...inventory,
+        supportsFc25: supportsConsole,
+        supportsFc26: supportsConsole,
+        supportsTekken8: supportsConsole,
         pcSpecs: Object.keys(pcSpecs).length ? pcSpecs : {},
     };
 };

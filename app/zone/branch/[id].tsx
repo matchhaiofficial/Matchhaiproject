@@ -300,7 +300,6 @@ export default function BranchDetails() {
             googleMapsUrl: googleMapsUrl.trim(),
             contactPhone: finalPhone,
             ...sanitizedInventory,
-            supportsFc26: sanitizedInventory.supportsFc25,
             pricing: sanitizedInventory.pricing || {},
         };
 

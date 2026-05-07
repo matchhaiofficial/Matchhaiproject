@@ -355,6 +355,10 @@ export const listDiscoverPlayers = query({
         .map((row: any) => String(row.toUid))
     );
     const search = args.searchQuery.trim().toLowerCase();
+    const presenceNow = Date.now();
+    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
+    const isPlayerOnline = (player: any) =>
+      !!(player?.isOnline && player.lastActiveAt && (presenceNow - player.lastActiveAt) < PRESENCE_TIMEOUT_MS);
 
     return players
       .filter((player: any) => String(player._id) !== String(args.viewerUserId))
@@ -369,8 +373,8 @@ export const listDiscoverPlayers = query({
       .filter((player: any) => matchesPlayerSkill(player, args.selectedGame, args.selectedSkill))
       .filter((player: any) => {
         if (args.selectedAvailability === "Any") return true;
-        if (args.selectedAvailability === "Online Now") return !!player.isOnline;
-        if (args.selectedAvailability === "Offline") return !player.isOnline;
+        if (args.selectedAvailability === "Online Now") return isPlayerOnline(player);
+        if (args.selectedAvailability === "Offline") return !isPlayerOnline(player);
         return true;
       })
       .filter((player: any) => matchesAreaSelection(player?.areasPreferred, args.selectedArea))
@@ -384,7 +388,7 @@ export const listDiscoverPlayers = query({
         _id: player._id,
         uid: String(player._id),
         username: player.username || "Unknown",
-        isOnline: !!player.isOnline,
+        isOnline: isPlayerOnline(player),
         primaryGames: player.primaryGames || [],
         faceitElo: player.faceitElo,
         faceitSkillLevel: player.faceitSkillLevel,

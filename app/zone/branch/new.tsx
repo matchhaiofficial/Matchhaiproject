@@ -240,7 +240,6 @@ export default function AddBranch() {
                 isPrimary: false,
                 capacity: {},
                 ...sanitizedInventory,
-                supportsFc26: sanitizedInventory.supportsFc25,
                 pricing: sanitizedInventory.pricing || {},
             };
 
