@@ -3,6 +3,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
     ActivityIndicator,
     FlatList,
+    InteractionManager,
+    Keyboard,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -24,7 +26,7 @@ import ChatPinnedBanner from "./ChatPinnedBanner";
 import { ChatReactionPicker, ChatReactionRow } from "./ChatReactionRow";
 import SwipeableMessageRow from "./SwipeableMessageRow";
 import styles from "./chatThread.styles";
-import type { ChatParticipant, ChatThreadMessage } from "./types";
+import type { ChatParticipant, ChatSeenReceipt, ChatThreadMessage } from "./types";
 import {
     buildSeenLabel,
     formatRelativeChatTime,
@@ -54,7 +56,7 @@ type ChatThreadProps = {
     onToggleReaction?: (messageId: string, emoji: string) => void;
     replyTo?: ChatThreadMessage | null;
     onClearReply?: () => void;
-    seenNamesByMessageId?: Record<string, string[]>;
+    seenReceiptsByMessageId?: Record<string, ChatSeenReceipt[]>;
     showComposer?: boolean;
     onPickImage?: () => void;
     onPickFile?: () => void;
@@ -197,7 +199,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     todayLabel,
     currentUserId,
     latestOutgoingMessageId,
-    seenNames,
+    seenReceipts,
     otherParticipantCount,
     onMessageLongPress,
     onToggleReaction,
@@ -212,7 +214,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     todayLabel: string;
     currentUserId: string | null | undefined;
     latestOutgoingMessageId: string | null;
-    seenNames: string[];
+    seenReceipts: ChatSeenReceipt[];
     otherParticipantCount: number;
     onMessageLongPress?: (message: ChatThreadMessage) => void;
     onToggleReaction?: (messageId: string, emoji: string) => void;
@@ -232,7 +234,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
     const showReactionPicker = activeReactionMessageId === item.id;
     const hasOpenReactionPicker = !!activeReactionMessageId;
 
-    const seenLabel = buildSeenLabel(seenNames, otherParticipantCount);
+    const seenLabel = buildSeenLabel(seenReceipts, otherParticipantCount);
     const statusLabel =
         mine && !isDeletedForMe && latestOutgoingMessageId === item.id
             ? seenLabel || "Sent"
@@ -450,7 +452,7 @@ export default function ChatThread({
     onToggleReaction,
     replyTo,
     onClearReply,
-    seenNamesByMessageId = {},
+    seenReceiptsByMessageId = {},
     showComposer = true,
     onPickImage,
     onPickFile,
@@ -470,6 +472,9 @@ export default function ChatThread({
     const hasInitialScrollRef = useRef(false);
     const shouldAutoScrollRef = useRef(false);
     const previousMessageCountRef = useRef(messages.length);
+    const didInitialLayoutScrollRef = useRef(false);
+    const initialScrollScheduledRef = useRef(false);
+    const initialScrollSettledRef = useRef(false);
     const nowMs = useRelativeNow(60_000);
 
     const [emojiOpen, setEmojiOpen] = useState(false);
@@ -576,11 +581,53 @@ export default function ChatThread({
         });
     }, []);
 
-    const handleContentSizeChange = useCallback(() => {
-        if (!hasInitialScrollRef.current) {
+    const ensureInitialScrollToLatest = useCallback(() => {
+        if (initialScrollSettledRef.current || initialScrollScheduledRef.current) return;
+        if (groupedMessages.length === 0) return;
+
+        const run = () => {
+            initialScrollScheduledRef.current = false;
             hasInitialScrollRef.current = true;
             shouldAutoScrollRef.current = false;
             maybeScrollToBottom(false);
+            setTimeout(() => maybeScrollToBottom(false), 40);
+            setTimeout(() => maybeScrollToBottom(false), 140);
+            setTimeout(() => maybeScrollToBottom(false), 300);
+            setTimeout(() => {
+                maybeScrollToBottom(false);
+                initialScrollSettledRef.current = true;
+            }, 600);
+        };
+
+        initialScrollScheduledRef.current = true;
+        InteractionManager.runAfterInteractions(run);
+    }, [groupedMessages.length, maybeScrollToBottom]);
+
+    useEffect(() => {
+        ensureInitialScrollToLatest();
+    }, [ensureInitialScrollToLatest]);
+
+    useEffect(() => {
+        const onKeyboardShow = () => {
+            // Keep the latest messages visible above the composer.
+            if (isNearBottomRef.current) {
+                maybeScrollToBottom(true);
+            }
+        };
+
+        const subShow = Keyboard.addListener(
+            Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+            onKeyboardShow
+        );
+
+        return () => {
+            subShow.remove();
+        };
+    }, [maybeScrollToBottom]);
+
+    const handleContentSizeChange = useCallback(() => {
+        if (!initialScrollSettledRef.current) {
+            ensureInitialScrollToLatest();
             return;
         }
 
@@ -588,7 +635,13 @@ export default function ChatThread({
             shouldAutoScrollRef.current = false;
             maybeScrollToBottom(true);
         }
-    }, [maybeScrollToBottom]);
+    }, [ensureInitialScrollToLatest, maybeScrollToBottom]);
+
+    const handleListLayout = useCallback(() => {
+        if (didInitialLayoutScrollRef.current) return;
+        didInitialLayoutScrollRef.current = true;
+        ensureInitialScrollToLatest();
+    }, [ensureInitialScrollToLatest]);
 
     const handleScroll = useCallback((event: any) => {
         if (activeReactionMessageId) {
@@ -609,7 +662,7 @@ export default function ChatThread({
                 todayLabel={todayLabel}
                 currentUserId={currentUserId}
                 latestOutgoingMessageId={latestOutgoingMessageId}
-                seenNames={seenNamesByMessageId[item.id] || []}
+                seenReceipts={seenReceiptsByMessageId[item.id] || []}
                 otherParticipantCount={otherParticipantCount}
                 onMessageLongPress={onMessageLongPress}
                 onToggleReaction={onToggleReaction}
@@ -632,7 +685,7 @@ export default function ChatThread({
         dismissReactionPicker,
         openPreviewImage,
         otherParticipantCount,
-        seenNamesByMessageId,
+        seenReceiptsByMessageId,
         todayLabel,
         toggleReactionPicker,
     ]);
@@ -671,14 +724,13 @@ export default function ChatThread({
                         </View>
 
                         {/*
-                         * The keyboard should affect only the composer area, not the whole
-                         * screen. The message list stays in place and the composer is the
-                         * only section that avoids the keyboard.
+                         * Android uses the native resize mode from app.json. Pairing that with
+                         * KeyboardAvoidingView height/pan causes the full chat surface to jump.
                          */}
                         <KeyboardAvoidingView
                             style={styles.keyboardShell}
-                            behavior={Platform.OS === "ios" ? "padding" : "height"}
-                            keyboardVerticalOffset={Platform.OS === "ios" ? 84 : 0}
+                            behavior={Platform.OS === "ios" ? "padding" : undefined}
+                            keyboardVerticalOffset={Platform.OS === "ios" ? 84 : undefined}
                         >
                             <View style={styles.threadContent}>
                                 {pinnedMessages.length > 0 ? (
@@ -707,6 +759,7 @@ export default function ChatThread({
                                             keyboardShouldPersistTaps="always"
                                             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                                             onContentSizeChange={handleContentSizeChange}
+                                            onLayout={handleListLayout}
                                             onScroll={handleScroll}
                                             scrollEventThrottle={16}
                                             renderItem={renderItem}
@@ -725,129 +778,7 @@ export default function ChatThread({
                                 )}
                             </View>
 
-                            {/* Composer isolated so it does not push the entire screen upward */}
-                            {/* {showComposer ? (
-                                Platform.OS === "ios" ? (
-                                    <KeyboardAvoidingView
-                                        behavior="padding"
-                                        keyboardVerticalOffset={84}
-                                    >
-                                        <View
-                                            style={[
-                                                styles.composerShell,
-                                                { paddingBottom: composerBottomPadding },
-                                            ]}
-                                        >
-                                            <View style={styles.composerContent}>
-                                                {editingMessage ? (
-                                                    <View style={styles.composerEditBanner}>
-                                                        <AppIcon name="edit" size={14} color={COLORS.accent} />
-                                                        <View style={styles.flex1}>
-                                                            <Text style={styles.composerReplyTitle}>Editing message</Text>
-                                                            <Text style={styles.composerReplyText} numberOfLines={1}>
-                                                                {editingMessage.text}
-                                                            </Text>
-                                                        </View>
-                                                        <Pressable onPress={onClearEdit} style={styles.headerAction} hitSlop={8}>
-                                                            <AppIcon name="close" size={16} color={COLORS.textSecondary} />
-                                                        </Pressable>
-                                                    </View>
-                                                ) : replyTo ? (
-                                                    <View style={styles.composerReply}>
-                                                        <View style={styles.flex1}>
-                                                            <Text style={styles.composerReplyTitle}>Replying to {replyTo.senderName}</Text>
-                                                            <Text style={styles.composerReplyText} numberOfLines={1}>
-                                                                {replyTo.type === "voice" ? "Voice message" : replyTo.text}
-                                                            </Text>
-                                                        </View>
-                                                        <Pressable onPress={onClearReply} style={styles.headerAction} hitSlop={8}>
-                                                            <AppIcon name="close" size={16} color={COLORS.textSecondary} />
-                                                        </Pressable>
-                                                    </View>
-                                                ) : null}
-
-                                                {recording ? (
-                                                    <View style={styles.recordingPill}>
-                                                        <Text style={styles.recordingText}>
-                                                            Recording... {recordingDurationLabel}
-                                                        </Text>
-                                                    </View>
-                                                ) : null}
-
-                                                <View style={styles.composerRow}>
-                                                    {(onPickImage || onPickFile) ? (
-                                                        <Pressable
-                                                            onPress={() => setAttachmentMenuOpen(true)}
-                                                            style={styles.composerIconAction}
-                                                            accessibilityRole="button"
-                                                            accessibilityLabel="Attach file"
-                                                        >
-                                                            <AppIcon name="add" size={22} color={COLORS.accent} />
-                                                        </Pressable>
-                                                    ) : null}
-
-                                                    <View style={styles.composerInputWrap}>
-                                                        <TextInput
-                                                            value={input}
-                                                            onChangeText={onInputChange}
-                                                            style={styles.composerInput}
-                                                            placeholder="Type message..."
-                                                            placeholderTextColor={COLORS.textSecondary}
-                                                            multiline
-                                                        />
-                                                        <Pressable
-                                                            onPress={() => setEmojiOpen(true)}
-                                                            style={styles.composerEmojiAction}
-                                                            accessibilityRole="button"
-                                                            accessibilityLabel="Emoji picker"
-                                                        >
-                                                            <AppIcon name="mood" size={22} color={COLORS.textSecondary} />
-                                                        </Pressable>
-                                                    </View>
-
-                                                    <Pressable
-                                                        onPress={handleTrailingActionPress}
-                                                        disabled={trailingActionDisabled}
-                                                        style={({ pressed }) => [
-                                                            styles.composerSendAction,
-                                                            trailingAction === "send" && styles.composerSendActionActive,
-                                                            trailingAction === "mic" && recording && styles.recordActive,
-                                                            trailingActionDisabled && styles.composerSendActionDisabled,
-                                                            pressed && { opacity: 0.88 },
-                                                        ]}
-                                                        accessibilityRole="button"
-                                                        accessibilityLabel={
-                                                            trailingAction === "send"
-                                                                ? "Send message"
-                                                                : recording
-                                                                    ? "Stop recording"
-                                                                    : "Record voice message"
-                                                        }
-                                                    >
-                                                        {sending ? (
-                                                            <ActivityIndicator
-                                                                color={trailingAction === "send" ? "#fff" : COLORS.accent}
-                                                            />
-                                                        ) : (
-                                                            <AppIcon
-                                                                name={trailingAction === "send" ? "send" : "keyboard-voice"}
-                                                                size={20}
-                                                                color={
-                                                                    trailingAction === "send"
-                                                                        ? "#fff"
-                                                                        : recording
-                                                                            ? COLORS.error
-                                                                            : COLORS.accent
-                                                                }
-                                                            />
-                                                        )}
-                                                    </Pressable>
-                                                </View>
-                                            </View>
-                                        </View>
-                                    </KeyboardAvoidingView>
-                                ) : 
-                                ( */}
+                            {showComposer ? (
                                     <View
                                         style={[
                                             styles.composerShell,
@@ -912,7 +843,10 @@ export default function ChatThread({
                                                         style={styles.composerInput}
                                                         placeholder="Type message..."
                                                         placeholderTextColor={COLORS.textSecondary}
-                                                        onFocus={dismissReactionPicker}
+                                                        onFocus={() => {
+                                                            dismissReactionPicker();
+                                                            maybeScrollToBottom(true);
+                                                        }}
                                                         multiline
                                                     />
                                                     <Pressable
@@ -968,6 +902,7 @@ export default function ChatThread({
                                             </View>
                                         </View>
                                     </View>
+                            ) : null}
                         </KeyboardAvoidingView>
                     </View>
                 </View>

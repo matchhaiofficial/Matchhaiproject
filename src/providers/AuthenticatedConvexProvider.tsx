@@ -61,8 +61,11 @@ function useBetterAuthConvexAuth() {
           setSessionSnapshot(nextSession as AuthSession);
           void saveCachedAuthSession(nextSession as AuthSession);
         } else {
-          setSessionSnapshot(null);
-          void saveCachedAuthSession(null);
+          void (async () => {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const cachedSession = await loadCachedAuthSession();
+            setSessionSnapshot(cachedSession);
+          })();
         }
       });
     }

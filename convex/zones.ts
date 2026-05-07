@@ -3,6 +3,75 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { recordZoneAuditEvent } from "./zoneAudit";
 
+function toPositiveNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function buildPrimaryBranch(branch: any, fallbackCity?: string) {
+  if (!branch) return undefined;
+  return {
+    branchDisplayName: branch.branchDisplayName || branch.name,
+    city: branch.city || fallbackCity,
+    areaLabel: branch.areaLabel,
+    addressLine1: branch.addressLine1 || branch.address,
+    googleMapsUrl: branch.googleMapsUrl,
+  };
+}
+
+function getBranchCapacity(branch: any) {
+  const pricing = branch?.pricing || {};
+  const pc = pricing.pc || {};
+  const consolePricing = pricing.console || {};
+  const pcSeats =
+    toPositiveNumber(pc.regular?.count) +
+    toPositiveNumber(pc.premium?.count) +
+    toPositiveNumber(pc.elite?.count);
+  const ps5Seats = toPositiveNumber(consolePricing.ps5?.count);
+  const xboxSeats = toPositiveNumber(consolePricing.xbox?.count);
+  const tieredConsoleSeats =
+    toPositiveNumber(consolePricing.regular?.count) +
+    toPositiveNumber(consolePricing.premium?.count) +
+    toPositiveNumber(consolePricing.elite?.count);
+  const consoleSeats = tieredConsoleSeats + ps5Seats + xboxSeats;
+
+  return {
+    pcSeats,
+    consoleSeats,
+    consolePlatform:
+      ps5Seats > 0 && xboxSeats > 0
+        ? "ps5+xbox"
+        : ps5Seats > 0
+          ? "ps5"
+          : xboxSeats > 0
+            ? "xbox"
+            : undefined,
+  };
+}
+
+function buildAggregateCapacity(branches: any[]) {
+  const totals = (branches || []).reduce(
+    (acc, branch) => {
+      const next = getBranchCapacity(branch);
+      acc.pcSeats += next.pcSeats;
+      acc.consoleSeats += next.consoleSeats;
+      if (next.consolePlatform === "ps5+xbox") acc.consolePlatform = "ps5+xbox";
+      else if (!acc.consolePlatform && next.consolePlatform) acc.consolePlatform = next.consolePlatform;
+      else if (acc.consolePlatform && next.consolePlatform && acc.consolePlatform !== next.consolePlatform) {
+        acc.consolePlatform = "ps5+xbox";
+      }
+      return acc;
+    },
+    { pcSeats: 0, consoleSeats: 0, consolePlatform: undefined as string | undefined }
+  );
+
+  return {
+    pcSeats: totals.pcSeats,
+    consoleSeats: totals.consoleSeats,
+    ...(totals.consolePlatform ? { consolePlatform: totals.consolePlatform } : {}),
+  };
+}
+
 // ============================================
 // ZONE QUERIES
 // ============================================
@@ -46,6 +115,7 @@ export const listActive = query({
     return await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "active"))
+      .order("desc")
       .take(args.limit || 50);
   },
 });
@@ -91,6 +161,9 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const primaryBranch = buildPrimaryBranch(args.branches[0], args.city);
+    const capacity = buildAggregateCapacity(args.branches);
+    const firstBranchPricing = args.branches[0]?.pricing;
 
     const zoneId = await ctx.db.insert("zones", {
       ownerUid: args.ownerUid,
@@ -108,6 +181,9 @@ export const create = mutation({
       phone: args.phone,
       games: args.games,
       branches: args.branches,
+      primaryBranch,
+      capacity,
+      pricing: firstBranchPricing,
       defaultPricing: args.defaultPricing,
       createdAt: now,
       updatedAt: now,
@@ -200,7 +276,18 @@ export const update = mutation({
     if (updates.city !== undefined) updateData.city = updates.city;
     if (updates.phone !== undefined) updateData.phone = updates.phone;
     if (updates.games !== undefined) updateData.games = updates.games;
-    if (updates.branches !== undefined) updateData.branches = updates.branches;
+    if (updates.branches !== undefined) {
+      updateData.branches = updates.branches;
+      if (updates.primaryBranch === undefined) {
+        updateData.primaryBranch = buildPrimaryBranch(updates.branches[0], updates.city);
+      }
+      if (updates.capacity === undefined) {
+        updateData.capacity = buildAggregateCapacity(updates.branches);
+      }
+      if (updates.pricing === undefined) {
+        updateData.pricing = updates.branches[0]?.pricing;
+      }
+    }
     if (updates.primaryBranch !== undefined) updateData.primaryBranch = updates.primaryBranch;
     if (updates.ownerUsername !== undefined) updateData.ownerUsername = updates.ownerUsername;
     if (updates.ownerFullName !== undefined) updateData.ownerFullName = updates.ownerFullName;
@@ -242,6 +329,8 @@ export const addBranch = mutation({
         addressLine1: branch.addressLine1 || branch.address,
         googleMapsUrl: branch.googleMapsUrl,
       },
+      capacity: buildAggregateCapacity(branches),
+      pricing: (branches[0] as any)?.pricing,
       updatedAt: Date.now(),
     });
 
@@ -276,6 +365,8 @@ export const updateBranch = mutation({
             googleMapsUrl: primary.googleMapsUrl,
           }
         : undefined,
+      capacity: buildAggregateCapacity(branches),
+      pricing: (branches[0] as any)?.pricing,
       updatedAt: Date.now(),
     });
 
@@ -306,6 +397,8 @@ export const deleteBranch = mutation({
             googleMapsUrl: primary.googleMapsUrl,
           }
         : undefined,
+      capacity: buildAggregateCapacity(branches),
+      pricing: (branches[0] as any)?.pricing,
       updatedAt: Date.now(),
     });
 

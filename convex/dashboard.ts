@@ -119,7 +119,7 @@ export const getPlayerHomeSummary = query({
       ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", args.userId)).collect(),
       ctx.db.query("bookingIntents").withIndex("by_createdByUid", (q) => q.eq("createdByUid", args.userId)).collect(),
       ctx.db.query("bookingRequests").withIndex("by_userId", (q) => q.eq("userId", args.userId)).collect(),
-      ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).take(3),
+      ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).order("desc").take(3),
       ctx.db.query("teamMembers").withIndex("by_userId", (q) => q.eq("odxerId", args.userId)).take(HOME_TEAM_MEMBERSHIP_LIMIT),
       ctx.db.query("matchrooms").withIndex("by_hostUid", (q) => q.eq("hostUid", String(args.userId))).order("desc").take(HOME_HOSTED_ROOM_LIMIT),
       ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(HOME_RECENT_ROOM_LIMIT),
@@ -135,7 +135,7 @@ export const getPlayerHomeSummary = query({
     const presenceNow = Date.now();
     const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
     const friendOnlineCount = friendDocs.filter(
-      (friend) => friend?.lastActiveAt && (presenceNow - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS
+      (friend) => friend?.isOnline && friend.lastActiveAt && (presenceNow - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS
     ).length;
 
     const walletStats = bookingIntents.reduce(

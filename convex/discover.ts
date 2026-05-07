@@ -5,13 +5,28 @@ import { isUserHiddenFromPublic } from "./userVisibility";
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
 const ACTIVE_TEAM_JOIN_REQUEST_TYPES = new Set(["team_join_request", "team.join_request"]);
 const DISABLED_PHYSICAL_GAME_KEYS = new Set(["futsal", "indoor_cricket", "padel", "pickleball"]);
+const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
 
 function normalizeGameKey(value?: string | null) {
-  return String(value || "").trim().toLowerCase();
+  const normalized = String(value || "").trim().toLowerCase();
+  const compact = normalized.replace(/[\s._-]+/g, "");
+  if (compact === "fc25" || compact === "fc26") return "fc26";
+  if (compact === "cs2" || compact === "cs16" || compact === "counterstrike16") return compact === "cs2" ? "cs2" : "cs16";
+  if (compact === "valorant" || compact === "tekken8") return compact;
+  return normalized;
 }
 
 function isDisabledPhysicalGame(value?: string | null) {
   return DISABLED_PHYSICAL_GAME_KEYS.has(normalizeGameKey(value));
+}
+
+function isPcSetupGame(value?: string | null) {
+  const gameKey = normalizeGameKey(value);
+  return PC_SETUP_GAME_KEYS.some((key) => key === gameKey);
+}
+
+function getGameSet(games: unknown[]) {
+  return new Set(games.map((value) => normalizeGameKey(String(value || ""))).filter(Boolean));
 }
 
 function isActiveTeam(row: any) {
@@ -355,6 +370,10 @@ export const listDiscoverPlayers = query({
         .map((row: any) => String(row.toUid))
     );
     const search = args.searchQuery.trim().toLowerCase();
+    const presenceNow = Date.now();
+    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
+    const isPlayerOnline = (player: any) =>
+      !!(player?.isOnline && player.lastActiveAt && (presenceNow - player.lastActiveAt) < PRESENCE_TIMEOUT_MS);
 
     return players
       .filter((player: any) => String(player._id) !== String(args.viewerUserId))
@@ -369,8 +388,8 @@ export const listDiscoverPlayers = query({
       .filter((player: any) => matchesPlayerSkill(player, args.selectedGame, args.selectedSkill))
       .filter((player: any) => {
         if (args.selectedAvailability === "Any") return true;
-        if (args.selectedAvailability === "Online Now") return !!player.isOnline;
-        if (args.selectedAvailability === "Offline") return !player.isOnline;
+        if (args.selectedAvailability === "Online Now") return isPlayerOnline(player);
+        if (args.selectedAvailability === "Offline") return !isPlayerOnline(player);
         return true;
       })
       .filter((player: any) => matchesAreaSelection(player?.areasPreferred, args.selectedArea))
@@ -384,7 +403,7 @@ export const listDiscoverPlayers = query({
         _id: player._id,
         uid: String(player._id),
         username: player.username || "Unknown",
-        isOnline: !!player.isOnline,
+        isOnline: isPlayerOnline(player),
         primaryGames: player.primaryGames || [],
         faceitElo: player.faceitElo,
         faceitSkillLevel: player.faceitSkillLevel,
@@ -647,7 +666,11 @@ export const listDiscoverZones = query({
     }
 
     const zoneFetchLimit = getCandidateFetchLimit(limit, { min: 40, max: 100, multiplier: 2 });
-    const zones = await ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).take(zoneFetchLimit);
+    const zones = await ctx.db
+      .query("zones")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .order("desc")
+      .take(zoneFetchLimit);
     const search = args.searchQuery.trim().toLowerCase();
     const normalizedArea = String(args.userArea || "").trim().toLowerCase();
     const normalizedCity = String(args.userCity || "").trim().toLowerCase();
@@ -656,22 +679,26 @@ export const listDiscoverZones = query({
       if (args.selectedGame === "all") return zoneHasEnabledGame(zone);
       const games = zone.games;
       if (Array.isArray(games)) {
-        return games.includes(args.selectedGame) || (args.selectedGame === "fc26" && games.includes("fc25"));
+        const gameSet = getGameSet(games);
+        if (isPcSetupGame(args.selectedGame)) {
+          return PC_SETUP_GAME_KEYS.some((key) => gameSet.has(key));
+        }
+        return gameSet.has(normalizeGameKey(args.selectedGame));
       }
-      const gameFieldMap: Record<string, string> = {
-        cs2: "supportsCs2",
-        cs16: "supportsCs16",
-        valorant: "supportsValorant",
-        fc26: "supportsFc25",
-        tekken8: "supportsTekken8",
-        // Physical sports are temporarily disabled.
-        // futsal: "supportsFutsal",
-        // indoor_cricket: "supportsIndoorCricket",
-        // padel: "supportsPadel",
-        // pickleball: "supportsPickleball",
-      };
-      const key = gameFieldMap[args.selectedGame];
-      return key ? games?.[key] === true : true;
+
+      const flags = games || {};
+      switch (normalizeGameKey(args.selectedGame)) {
+        case "cs2":
+        case "cs16":
+        case "valorant":
+          return flags.supportsCs2 === true || flags.supportsCs16 === true || flags.supportsValorant === true;
+        case "fc26":
+          return flags.supportsFc26 === true || flags.supportsFc25 === true;
+        case "tekken8":
+          return flags.supportsTekken8 === true;
+        default:
+          return true;
+      }
     };
 
     return zones

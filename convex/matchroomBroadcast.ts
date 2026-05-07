@@ -5,6 +5,7 @@ import { v } from "convex/values";
 
 export const BROADCAST_ZONE_RESPONSE_WINDOW_MS = 2 * 60 * 60 * 1000;
 export const BROADCAST_COUNTER_RESPONSE_WINDOW_MS = 30 * 60 * 1000;
+const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
 
 function normalizeStringList(values: unknown[]) {
   return Array.from(
@@ -18,8 +19,16 @@ function normalizeStringList(values: unknown[]) {
 
 function normalizeGameKey(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "fc25") return "fc26";
+  const compact = normalized.replace(/[\s._-]+/g, "");
+  if (compact === "fc25" || compact === "fc26") return "fc26";
+  if (compact === "cs2" || compact === "cs16" || compact === "counterstrike16") return compact === "cs2" ? "cs2" : "cs16";
+  if (compact === "valorant" || compact === "tekken8") return compact;
   return normalized;
+}
+
+function isPcSetupGame(value?: string | null) {
+  const gameKey = normalizeGameKey(value);
+  return PC_SETUP_GAME_KEYS.some((key) => key === gameKey);
 }
 
 function zoneSupportsGame(zone: any, rawGameKey?: string | null) {
@@ -27,20 +36,21 @@ function zoneSupportsGame(zone: any, rawGameKey?: string | null) {
   if (!gameKey) return true;
 
   if (Array.isArray(zone?.games)) {
-    const normalized = zone.games.map((value: unknown) =>
+    const normalized = new Set(zone.games.map((value: unknown) =>
       normalizeGameKey(String(value || "")),
-    );
-    return normalized.includes(gameKey);
+    ));
+    if (isPcSetupGame(gameKey)) {
+      return PC_SETUP_GAME_KEYS.some((key) => normalized.has(key));
+    }
+    return normalized.has(gameKey);
   }
 
   const flags = zone?.games || {};
   switch (gameKey) {
     case "cs2":
-      return flags.supportsCs2 === true;
     case "cs16":
-      return flags.supportsCs16 === true;
     case "valorant":
-      return flags.supportsValorant === true;
+      return flags.supportsCs2 === true || flags.supportsCs16 === true || flags.supportsValorant === true;
     case "fc26":
       return flags.supportsFc26 === true || flags.supportsFc25 === true;
     case "tekken8":

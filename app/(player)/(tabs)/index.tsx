@@ -19,7 +19,7 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { Matchroom } from "../../../src/services/convex/matchService";
 import { Team } from "../../../src/services/convex/teamService";
-import { Zone } from "../../../src/services/convex/zoneService";
+import { formatSupportedGameLabels, Zone } from "../../../src/services/convex/zoneService";
 import { signOutUser } from "../../../src/services/convex/authService";
 import { COLORS, SPACING } from "../../../src/theme";
 import {
@@ -161,7 +161,12 @@ const getZoneLocationLabel = (zone: Zone) => {
 };
 
 const getZoneGameLabels = (zone: Zone) =>
-  ZONE_GAME_TAGS.filter((item) => zone.games?.[item.key]).map((item) => item.label);
+  formatSupportedGameLabels(zone.games).map((item) => item.label);
+
+const getZonePricingSources = (zone: Zone) => [
+  zone.pricing,
+  ...(Array.isArray(zone.branches) ? zone.branches.map((branch: any) => branch?.pricing) : []),
+].filter(Boolean);
 
 const sumCountMap = (value?: Record<string, { count: number; price: number }>) =>
   value
@@ -176,21 +181,38 @@ const getZoneCapacityLabel = (zone: Zone) => {
   const pcSeats = Number(zone.capacity?.pcSeats || 0);
   const consoleSeats = Number(zone.capacity?.consoleSeats || 0);
   const consolePlatform = (zone.capacity?.consolePlatform || "").toLowerCase();
+  const pricingSources = getZonePricingSources(zone);
+  const branchPcSeats = pricingSources.reduce((sum, pricing: any) => {
+    const pc = pricing?.pc || {};
+    return sum
+      + Number(pc?.regular?.count || 0)
+      + Number(pc?.premium?.count || 0)
+      + Number(pc?.elite?.count || 0);
+  }, 0);
+  const branchConsoleSeats = pricingSources.reduce((sum, pricing: any) => {
+    const consolePricing = pricing?.console || {};
+    return sum
+      + Number(consolePricing?.regular?.count || 0)
+      + Number(consolePricing?.premium?.count || 0)
+      + Number(consolePricing?.elite?.count || 0)
+      + Number(consolePricing?.ps5?.count || 0)
+      + Number(consolePricing?.xbox?.count || 0);
+  }, 0);
   // Physical sports are temporarily disabled.
   // const futsalCourts = sumCountMap(zone.pricing?.futsal);
   // const indoorCricketNets = sumCountMap((zone.pricing as any)?.indoorCricket);
   // const padelCourts = sumCountMap(zone.pricing?.padel);
   // const pickleballCourts = sumCountMap(zone.pricing?.pickleball);
 
-  if (pcSeats > 0) chunks.push(`${pcSeats} PCs`);
-  if (consoleSeats > 0) {
+  if (Math.max(pcSeats, branchPcSeats) > 0) chunks.push(`${Math.max(pcSeats, branchPcSeats)} PCs`);
+  if (Math.max(consoleSeats, branchConsoleSeats) > 0) {
     const label =
       consolePlatform === "ps5"
         ? "PS5"
         : consolePlatform === "xbox"
           ? "Xbox"
           : "Consoles";
-    chunks.push(`${consoleSeats} ${label}`);
+    chunks.push(`${Math.max(consoleSeats, branchConsoleSeats)} ${label}`);
   }
   // Physical sports are temporarily disabled.
   // if (futsalCourts > 0) chunks.push(`${futsalCourts} Futsal courts`);
@@ -216,6 +238,21 @@ const collectPositiveRates = (zone: Zone) => {
   pushRate(zone.pricing?.console?.ps5?.price2v2);
   pushRate(zone.pricing?.console?.xbox?.price1v1);
   pushRate(zone.pricing?.console?.xbox?.price2v2);
+  getZonePricingSources(zone).forEach((pricing: any) => {
+    pushRate(pricing?.pc?.regular?.price);
+    pushRate(pricing?.pc?.premium?.price);
+    pushRate(pricing?.pc?.elite?.price);
+    pushRate(pricing?.console?.regular?.price1v1);
+    pushRate(pricing?.console?.regular?.price2v2);
+    pushRate(pricing?.console?.premium?.price1v1);
+    pushRate(pricing?.console?.premium?.price2v2);
+    pushRate(pricing?.console?.elite?.price1v1);
+    pushRate(pricing?.console?.elite?.price2v2);
+    pushRate(pricing?.console?.ps5?.price1v1);
+    pushRate(pricing?.console?.ps5?.price2v2);
+    pushRate(pricing?.console?.xbox?.price1v1);
+    pushRate(pricing?.console?.xbox?.price2v2);
+  });
 
   // Physical sports are temporarily disabled.
   // [zone.pricing?.futsal, (zone.pricing as any)?.indoorCricket, zone.pricing?.padel, zone.pricing?.pickleball]

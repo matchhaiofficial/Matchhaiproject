@@ -245,7 +245,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     return await new Promise<"paid" | "cancel" | "easypaisa">((resolve) => {
       Alert.alert(
         "Wallet Payment Required",
-        `To continue, pay from your MatchHai wallet.\n\nAmount: PKR ${amountDue}\n\nPay now with Easypaisa, or use your wallet balance if you already have funds.\n\n${FEATURE_READINESS.payments.card.walletOnlyInfo}`,
+        `Amount: PKR ${amountDue}\n\nPay with wallet for instant payment, or tap Pay Now to continue with Easypaisa.`,
         [
           { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
           { text: "Pay Now", onPress: () => resolve("easypaisa") },

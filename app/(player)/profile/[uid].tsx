@@ -19,6 +19,7 @@ import { usePressScale } from "../../../src/motion/usePressScale";
 import { respondFriendRequestDecision, sendFriendRequestToUser } from "../../../src/services/convex/socialService";
 import { submitUserReport } from "../../../src/services/convex/reportService";
 import { getPublicUserProfile, isProfileGameEnabled, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { formatChatPresenceLabel, isChatUserOnline, useRelativeNow } from "../../../src/features/chat/utils";
 import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -134,6 +135,15 @@ export default function PlayerProfile() {
         distance: 10,
         initialScale: 0.995,
     });
+    const nowMs = useRelativeNow(60_000);
+    const isProfileOnline = useMemo(
+        () => isChatUserOnline(profile?.lastActiveAt, profile?.isOnline, nowMs),
+        [nowMs, profile?.isOnline, profile?.lastActiveAt],
+    );
+    const profilePresenceLabel = useMemo(
+        () => formatChatPresenceLabel(profile?.lastActiveAt, profile?.isOnline, nowMs),
+        [nowMs, profile?.isOnline, profile?.lastActiveAt],
+    );
 
     // --- Derived Logic Helpers ---
 
@@ -160,8 +170,10 @@ export default function PlayerProfile() {
         if (lastUpdated && typeof lastUpdated === 'number') {
             const date = new Date(lastUpdated);
             status = `Played ${formatDistanceToNow(date)} ago`;
-        } else if (profile.isOnline) {
+        } else if (isProfileOnline) {
             status = 'Online Now';
+        } else if (profilePresenceLabel) {
+            status = profilePresenceLabel;
         }
 
         // 4. Trend
@@ -174,7 +186,7 @@ export default function PlayerProfile() {
         }
 
         return { winRate: wr, confidence: conf, activityStatus: status, trend: tr };
-    }, [profile, selectedGame]);
+    }, [isProfileOnline, profile, profilePresenceLabel, selectedGame]);
 
     const mutualContext = useMemo(() => {
         if (!user || !profile) return [];
@@ -467,7 +479,7 @@ export default function PlayerProfile() {
                 <View style={styles.profileHeaderRow}>
                     <View style={styles.avatar}>
                         <AppImage source={{ uri: avatarUrl }} containerStyle={styles.avatarImage} />
-                        {profile.isOnline && <View style={styles.onlineBadge} />}
+                        {isProfileOnline && <View style={styles.onlineBadge} />}
                     </View>
 
                     <View style={styles.profileHeaderContent}>
@@ -487,10 +499,10 @@ export default function PlayerProfile() {
                                     {trustLabel}
                                 </Text>
                             </View>
-                            <View style={[styles.summaryBadge, profile.isOnline ? styles.summaryBadgeSuccess : styles.summaryBadgeNeutral]}>
-                                <AppIcon name={profile.isOnline ? "radio-button-checked" : "access-time"} size={12} color={profile.isOnline ? COLORS.success : COLORS.textSecondary} />
+                            <View style={[styles.summaryBadge, isProfileOnline ? styles.summaryBadgeSuccess : styles.summaryBadgeNeutral]}>
+                                <AppIcon name={isProfileOnline ? "radio-button-checked" : "access-time"} size={12} color={isProfileOnline ? COLORS.success : COLORS.textSecondary} />
                                 <Text style={styles.summaryBadgeText} numberOfLines={1}>
-                                    {profile.isOnline ? 'Online now' : 'Offline'}
+                                    {isProfileOnline ? 'Online now' : 'Offline'}
                                 </Text>
                             </View>
                         </View>
@@ -526,7 +538,7 @@ export default function PlayerProfile() {
                             <AppIcon
                                 name="access-time"
                                 size={14}
-                                color={activityStatus.includes('ago') || activityStatus === 'Online Now' ? COLORS.success : COLORS.muted}
+                                color={activityStatus.includes('ago') || isProfileOnline ? COLORS.success : COLORS.muted}
                             />
                             <Text style={styles.summaryMetricValue} numberOfLines={1} ellipsizeMode="tail">
                                 {activityStatus}

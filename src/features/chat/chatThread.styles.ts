@@ -136,7 +136,7 @@ export default StyleSheet.create({
         fontStyle: "italic",
     },
     headerPresenceSubtitle: {
-        color: COLORS.success,
+        color: COLORS.textSecondary,
         fontFamily: FONTS.body,
         fontSize: 11,
         marginTop: 2,
@@ -158,6 +158,7 @@ export default StyleSheet.create({
         flex: 1,
     },
     listContent: {
+        flexGrow: 1,
         paddingHorizontal: SPACING.lg,
         paddingVertical: SPACING.md,
         gap: SPACING.md,

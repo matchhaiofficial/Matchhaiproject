@@ -11,7 +11,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import ChatThread from "../../../src/features/chat/ChatThread";
 import type { ChatThreadMessage } from "../../../src/features/chat/types";
-import { formatVoiceDuration } from "../../../src/features/chat/utils";
+import { formatChatPresenceLabel, formatVoiceDuration, useRelativeNow } from "../../../src/features/chat/utils";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useChatTyping } from "../../../src/hooks/useChatTyping";
 import { usePresenceHeartbeat } from "../../../src/hooks/usePresenceHeartbeat";
@@ -37,6 +37,7 @@ export default function FriendChatScreen() {
 
     const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
     const recorderState = useAudioRecorderState(recorder, 250);
+    const nowMs = useRelativeNow(60_000);
 
     const rawFriendId = typeof friendId === "string" ? friendId : "";
 
@@ -97,6 +98,10 @@ export default function FriendChatScreen() {
     usePresenceHeartbeat(Boolean(user?._id));
 
     const friendName = friendProfile?.fullName || friendProfile?.username || "Friend";
+    const presenceLabel = useMemo(
+        () => formatChatPresenceLabel(friendProfile?.lastActiveAt, friendProfile?.isOnline, nowMs),
+        [friendProfile?.isOnline, friendProfile?.lastActiveAt, nowMs]
+    );
 
     const messages = useMemo<ChatThreadMessage[]>(() => {
         const mapped = [...(rawMessages || [])]
@@ -172,15 +177,19 @@ export default function FriendChatScreen() {
         onInputActivity();
     }, [onInputActivity]);
 
-    const seenNamesByMessageId = useMemo(() => {
+    const seenReceiptsByMessageId = useMemo(() => {
         if (!chatroomId || !chatroom) return {};
-        const result: Record<string, string[]> = {};
+        const result: Record<string, Array<{ uid: string; name: string; readAt: number }>> = {};
         const lastReadBy = (chatroom.lastReadBy || {}) as Record<string, number>;
         messages.forEach((message) => {
             if (message.senderUid !== user?._id) return;
             result[message.id] = Object.entries(lastReadBy)
                 .filter(([uid, timestamp]) => uid !== user?._id && Number(timestamp) >= message.createdAt)
-                .map(() => friendName);
+                .map(([uid, timestamp]) => ({
+                    uid,
+                    name: friendName,
+                    readAt: Number(timestamp),
+                }));
         });
         return result;
     }, [chatroomId, chatroom, friendName, messages, user?._id]);
@@ -443,13 +452,14 @@ export default function FriendChatScreen() {
             onToggleReaction={handleToggleReaction}
             replyTo={replyTo}
             onClearReply={() => setReplyTo(null)}
-            seenNamesByMessageId={seenNamesByMessageId}
+            seenReceiptsByMessageId={seenReceiptsByMessageId}
             emptyTitle="No messages yet"
             emptySubtitle={`Start a conversation with ${friendName}!`}
             showComposer={Boolean(chatroomId)}
             onPickImage={handlePickImage}
             onPickFile={handlePickFile}
             typingNames={typingNames}
+            presenceLabel={presenceLabel}
             onSwipeReply={handleSwipeReply}
             editingMessage={editingMessage}
             onClearEdit={() => { setEditingMessage(null); setInput(""); }}

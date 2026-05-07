@@ -284,14 +284,18 @@ export default function MatchroomChatScreen() {
         onInputActivity();
     }, [onInputActivity]);
 
-    const seenNamesByMessageId = useMemo(() => {
-        const result: Record<string, string[]> = {};
+    const seenReceiptsByMessageId = useMemo(() => {
+        const result: Record<string, Array<{ uid: string; name: string; readAt: number }>> = {};
         const lastReadBy = (chatroom?.lastReadBy || {}) as Record<string, number>;
         messages.forEach((message) => {
             if (message.senderUid !== user?._id) return;
             result[message.id] = Object.entries(lastReadBy)
                 .filter(([uid, timestamp]) => uid !== user?._id && Number(timestamp) >= message.createdAt)
-                .map(([uid]) => participantNameMap[uid] || "Player");
+                .map(([uid, timestamp]) => ({
+                    uid,
+                    name: participantNameMap[uid] || "Player",
+                    readAt: Number(timestamp),
+                }));
         });
         return result;
     }, [chatroom?.lastReadBy, messages, participantNameMap, user?._id]);
@@ -669,7 +673,7 @@ export default function MatchroomChatScreen() {
             onToggleReaction={handleToggleReaction}
             replyTo={replyTo}
             onClearReply={() => setReplyTo(null)}
-            seenNamesByMessageId={seenNamesByMessageId}
+            seenReceiptsByMessageId={seenReceiptsByMessageId}
             contextCard={contextCard}
             emptyTitle="No messages yet"
             emptySubtitle="Use the chat to coordinate arrivals, setup, and updates."

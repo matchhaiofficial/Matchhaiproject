@@ -117,6 +117,7 @@ const sanitizeSpecs = (specs?: PcTierSpecs) => {
 
 export const sanitizeBranchInventory = (inventory: BranchInventoryFields): BranchInventoryFields => {
     const pcSpecs: BranchInventoryFields["pcSpecs"] = {};
+    const supportsConsole = Boolean(inventory.supportsFc25 || inventory.supportsFc26 || inventory.supportsTekken8);
 
     PC_TYPES.forEach((type) => {
         const tier = type.value;
@@ -128,6 +129,9 @@ export const sanitizeBranchInventory = (inventory: BranchInventoryFields): Branc
 
     return {
         ...inventory,
+        supportsFc25: supportsConsole,
+        supportsFc26: supportsConsole,
+        supportsTekken8: supportsConsole,
         pcSpecs: Object.keys(pcSpecs).length ? pcSpecs : {},
     };
 };
@@ -222,7 +226,11 @@ export const buildZoneGamesFromBranches = (branches: any[]) => {
     const games = new Set<string>();
 
     branches.forEach((branch) => {
-        if (branch?.supportsCs2) games.add("cs2");
+        if (branch?.supportsCs2 || branch?.supportsCs16 || branch?.supportsValorant) {
+            games.add("cs2");
+            games.add("cs16");
+            games.add("valorant");
+        }
         if (branch?.supportsFc25 || branch?.supportsFc26) games.add("fc26");
         if (branch?.supportsTekken8) games.add("tekken8");
     });
