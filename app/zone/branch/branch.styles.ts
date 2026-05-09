@@ -28,12 +28,16 @@ export default StyleSheet.create({
         marginRight: SPACING.lg,
     },
     content: {
-        padding: SPACING.lg,
+        paddingHorizontal: 0,
+        paddingTop: SPACING.lg,
         paddingBottom: SPACING.lg + SPACING.xxl,
+        width: "100%",
     },
     contentInsideScreen: {
-        paddingHorizontal: 0,
         paddingTop: 0,
+    },
+    contentWithFooter: {
+        paddingBottom: 132,
     },
     sectionLabel: {
         color: COLORS.muted,
@@ -108,5 +112,21 @@ export default StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         backgroundColor: COLORS.backgroundDark,
+    },
+    footerContainer: {
+        borderTopWidth: 1,
+        borderTopColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardDark,
+        marginHorizontal: -SPACING.screenPadding,
+        paddingHorizontal: SPACING.screenPadding,
+        paddingTop: SPACING.md,
+    },
+    footerRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.md,
+    },
+    footerAction: {
+        flex: 1,
     },
 });

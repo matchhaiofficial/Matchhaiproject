@@ -13,16 +13,16 @@ import Animated from "react-native-reanimated";
 import AppHeader from "../../../src/components/AppHeader";
 import {
     AdminEmptyStateCard,
-    AdminMetricCard,
     AdminQuickActionCard,
     AdminSectionHeader,
 } from "../../../src/components/AdminSurface";
-import { AppIcon } from "../../../src/components/AppIcon";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { useToast } from "../../../src/hooks/useToast";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import MatchroomCard from "../../matchrooms/components/MatchroomCard";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
@@ -50,48 +50,32 @@ import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
 import styles from "./dashboard.styles";
 
-const MODULE_COLORS = [
-    {
-        cardStyle: { backgroundColor: "rgba(66,165,245,0.14)", borderColor: "rgba(66,165,245,0.45)" },
-        iconStyle: { borderColor: "rgba(66,165,245,0.45)" },
-        iconColor: "#64B5F6",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(0,230,118,0.12)", borderColor: "rgba(0,230,118,0.4)" },
-        iconStyle: { borderColor: "rgba(0,230,118,0.4)" },
-        iconColor: "#00E676",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(255,193,7,0.14)", borderColor: "rgba(255,193,7,0.45)" },
-        iconStyle: { borderColor: "rgba(255,193,7,0.45)" },
-        iconColor: "#FFCA28",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(239,83,80,0.12)", borderColor: "rgba(239,83,80,0.45)" },
-        iconStyle: { borderColor: "rgba(239,83,80,0.45)" },
-        iconColor: "#EF5350",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(171,71,188,0.15)", borderColor: "rgba(171,71,188,0.45)" },
-        iconStyle: { borderColor: "rgba(171,71,188,0.45)" },
-        iconColor: "#BA68C8",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(38,198,218,0.14)", borderColor: "rgba(38,198,218,0.45)" },
-        iconStyle: { borderColor: "rgba(38,198,218,0.45)" },
-        iconColor: "#4DD0E1",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(255,112,67,0.14)", borderColor: "rgba(255,112,67,0.45)" },
-        iconStyle: { borderColor: "rgba(255,112,67,0.45)" },
-        iconColor: "#FF8A65",
-    },
-    {
-        cardStyle: { backgroundColor: "rgba(124,179,66,0.14)", borderColor: "rgba(124,179,66,0.45)" },
-        iconStyle: { borderColor: "rgba(124,179,66,0.45)" },
-        iconColor: "#9CCC65",
-    },
+const MODULE_ICON_COLORS = [
+    COLORS.accent,
+    COLORS.successBright,
+    COLORS.warning,
+    COLORS.textSecondary,
 ];
+
+const DASHBOARD_MODULE_IDS = new Set([
+    "bookings_matchrooms",
+    "resources",
+    "pricing_promotions",
+    "insights_security",
+]);
+
+const SIDEBAR_MODULE_IDS = new Set([
+    "bookings_matchrooms",
+    "resources",
+    "pricing_promotions",
+    "insights_security",
+    "notifications_center",
+]);
+
+const subtleIconStyle = (color: string) => ({
+    backgroundColor: `${color}12`,
+    borderColor: `${color}38`,
+});
 
 const toMillis = (value: any) => {
     if (!value) return 0;
@@ -140,6 +124,7 @@ export default function ZoneDashboardHome() {
     const { zone, loading } = useZoneData();
     const { user } = useAuth();
     const { showToast } = useToast();
+    const bottomContentPadding = useTabBarClearance(16);
 
     useRouteLogger("ZoneDashboardHome", {
         zoneId: zone?.id,
@@ -287,10 +272,51 @@ export default function ZoneDashboardHome() {
     const dashboardModules = useMemo(
         () =>
             ZONE_ADMIN_MODULES.filter(
-                (module) =>
-                    !["notifications_center", "support_safety"].includes(module.id),
+                (module) => DASHBOARD_MODULE_IDS.has(module.id),
             ),
         [],
+    );
+
+    const sidebarModules = useMemo(
+        () =>
+            ZONE_ADMIN_MODULES.filter(
+                (module) => SIDEBAR_MODULE_IDS.has(module.id),
+            ),
+        [],
+    );
+
+    const snapshotMetrics = useMemo(
+        () => [
+            {
+                key: "queue",
+                label: "Queue",
+                value: `${summary.pendingQueue}`,
+                icon: "pending" as AppIconName,
+                color: COLORS.warning,
+            },
+            {
+                key: "live",
+                label: "Live Rooms",
+                value: `${summary.liveRooms}`,
+                icon: "matchroom" as AppIconName,
+                color: COLORS.accent,
+            },
+            {
+                key: "utilization",
+                label: "Utilization",
+                value: `${summary.utilization}%`,
+                icon: "status" as AppIconName,
+                color: COLORS.successBright,
+            },
+            {
+                key: "walkins",
+                label: "Walk-ins",
+                value: `${summary.walkins}`,
+                icon: "business" as AppIconName,
+                color: COLORS.textSecondary,
+            },
+        ],
+        [summary.liveRooms, summary.pendingQueue, summary.utilization, summary.walkins],
     );
 
     const upcomingMatchrooms = useMemo(
@@ -303,48 +329,6 @@ export default function ZoneDashboardHome() {
                 .sort((a, b) => toMatchroomDateMs(a) - toMatchroomDateMs(b))
                 .slice(0, 5),
         [matchrooms],
-    );
-
-    const operationsCards = useMemo(
-        () => [
-            {
-                key: "ops_queue",
-                title: "Queue Pressure",
-                value: `${summary.pendingQueue}`,
-                subtitle: "Pending approvals right now",
-                icon: "pending-actions" as const,
-                cardStyle: { backgroundColor: "rgba(255,193,7,0.16)", borderColor: "rgba(255,193,7,0.4)" },
-                iconStyle: { borderColor: "rgba(255,193,7,0.4)" },
-            },
-            {
-                key: "ops_live",
-                title: "Live Matchrooms",
-                value: `${summary.liveRooms}`,
-                subtitle: "Open or in-progress sessions",
-                icon: "sports-esports" as const,
-                cardStyle: { backgroundColor: "rgba(66,165,245,0.16)", borderColor: "rgba(66,165,245,0.4)" },
-                iconStyle: { borderColor: "rgba(66,165,245,0.4)" },
-            },
-            {
-                key: "ops_util",
-                title: "Utilization",
-                value: `${summary.utilization}%`,
-                subtitle: "Held + booked resource load",
-                icon: "bolt" as const,
-                cardStyle: { backgroundColor: "rgba(0,230,118,0.14)", borderColor: "rgba(0,230,118,0.4)" },
-                iconStyle: { borderColor: "rgba(0,230,118,0.4)" },
-            },
-            {
-                key: "ops_maint",
-                title: "Maintenance",
-                value: `${summary.maintenanceCount}`,
-                subtitle: "Resources under maintenance",
-                icon: "build-circle" as const,
-                cardStyle: { backgroundColor: "rgba(239,83,80,0.14)", borderColor: "rgba(239,83,80,0.42)" },
-                iconStyle: { borderColor: "rgba(239,83,80,0.42)" },
-            },
-        ],
-        [summary.liveRooms, summary.maintenanceCount, summary.pendingQueue, summary.utilization],
     );
 
     const handleLogout = async () => {
@@ -362,15 +346,17 @@ export default function ZoneDashboardHome() {
 
     const sidebarItems = useMemo(
         () => [
-            { label: "Dashboard", icon: "home" as const, onPress: () => router.push("/zone/(tabs)" as any) },
-            ...dashboardModules.map((module) => ({
+            { label: "Dashboard", icon: "dashboard" as const, onPress: () => router.push("/zone/(tabs)" as any) },
+            { label: "Branches", icon: "branch" as const, onPress: () => router.push("/zone/(tabs)/branches" as any) },
+            ...sidebarModules.map((module) => ({
                 label: module.title,
-                icon: module.icon as any,
+                icon: module.icon,
                 onPress: () => router.push(module.route as any),
             })),
+            { label: "Withdraw Request", icon: "wallet" as const, onPress: () => router.push({ pathname: "/zone/(tabs)/profile", params: { withdraw: "1" } } as any) },
             { label: "Logout", icon: "logout" as const, onPress: handleLogout },
         ],
-        [dashboardModules, router],
+        [router, sidebarModules],
     );
 
     if (loading) {
@@ -435,7 +421,7 @@ export default function ZoneDashboardHome() {
                 onPress={() => router.push("/zone/modules/notifications" as any)}
                 style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
             >
-                <AppIcon name="notifications-none" size="lg" />
+                <AppIcon name="notifications" size="lg" />
                 {notificationCount > 0 ? (
                     <View style={styles.notificationBadge}>
                         <Text style={styles.notificationBadgeText}>{notificationCount > 9 ? "9+" : notificationCount}</Text>
@@ -461,14 +447,18 @@ export default function ZoneDashboardHome() {
             />
             <Animated.View style={[styles.screenContent, entranceStyle]}>
                 <ScrollView
-                    contentContainerStyle={styles.zoneAdmincontainer}
+                    contentInsetAdjustmentBehavior="automatic"
+                    contentContainerStyle={[
+                        styles.zoneAdmincontainer,
+                        { paddingBottom: bottomContentPadding },
+                    ]}
                     showsVerticalScrollIndicator={false}
                 >
                     <View style={styles.heroCard}>
                         <View style={styles.heroRow}>
                             <View style={styles.avatarIconWrap}>
                                 <AppIcon
-                                    name={zone.type === "sports" ? "sports-soccer" : zone.type === "hybrid" ? "sports" : "sports-esports"}
+                                    name={zone.type === "sports" ? "zone" : zone.type === "hybrid" ? "business" : "matchroom"}
                                     size="lg"
                                     tone="accent"
                                 />
@@ -486,29 +476,43 @@ export default function ZoneDashboardHome() {
                         </View>
                     </View>
 
-                    <View style={styles.coreGrid}>
-                        <AdminMetricCard label="Queue" value={summary.pendingQueue} icon="pending-actions" style={styles.coreCard} />
-                        <AdminMetricCard label="Live Rooms" value={summary.liveRooms} icon="sports-esports" style={styles.coreCard} />
-                        <AdminMetricCard label="Utilization" value={`${summary.utilization}%`} icon="bolt" style={styles.coreCard} />
-                        <AdminMetricCard label="Walk-ins" value={summary.walkins} icon="storefront" style={styles.coreCard} />
+                    <View style={styles.snapshotPanel}>
+                        {snapshotMetrics.map((metric, index) => (
+                            <View
+                                key={metric.key}
+                                style={[
+                                    styles.snapshotItem,
+                                    index % 2 === 0 && styles.snapshotItemLeft,
+                                    index < 2 && styles.snapshotItemTop,
+                                ]}
+                            >
+                                <View style={[styles.snapshotIconWrap, subtleIconStyle(metric.color)]}>
+                                    <AppIcon name={metric.icon} size={16} color={metric.color} />
+                                </View>
+                                <View style={styles.snapshotTextWrap}>
+                                    <Text style={styles.snapshotLabel}>{metric.label}</Text>
+                                    <Text style={styles.snapshotValue}>{metric.value}</Text>
+                                </View>
+                            </View>
+                        ))}
                     </View>
 
                     <View style={styles.section}>
                         <AdminSectionHeader title="Admin Modules" subtitle="Core flows" compact />
                         <View style={styles.moduleGrid}>
                             {dashboardModules.map((module, index) => {
-                                const theme = MODULE_COLORS[index % MODULE_COLORS.length];
+                                const iconColor = MODULE_ICON_COLORS[index % MODULE_ICON_COLORS.length];
                                 return (
                                     <AdminQuickActionCard
                                         key={module.id}
                                         title={module.title}
                                         description={module.description}
-                                        icon={module.icon as any}
+                                        icon={module.icon}
                                         badgeLabel={module.tag}
-                                        iconColor={theme.iconColor}
+                                        iconColor={iconColor}
                                         onPress={() => router.push(module.route as any)}
-                                        cardStyle={[styles.moduleCard, theme.cardStyle]}
-                                        iconStyle={theme.iconStyle}
+                                        cardStyle={styles.moduleCard}
+                                        iconStyle={subtleIconStyle(iconColor)}
                                     />
                                 );
                             })}
@@ -526,7 +530,7 @@ export default function ZoneDashboardHome() {
                                 <AdminEmptyStateCard
                                     title="No upcoming matchrooms"
                                     description="Zone-created and approved sessions will appear here."
-                                    icon="sports-esports"
+                                    icon="matchroom"
                                 />
                             ) : (
                                 upcomingMatchrooms.map((room) => (
@@ -542,29 +546,6 @@ export default function ZoneDashboardHome() {
                         </View>
                     </View>
 
-                    <View style={styles.section}>
-                        <AdminSectionHeader
-                            title="Operations"
-                            actionLabel="Detailed Analytics"
-                            onAction={() => router.push("/zone/modules/insights" as any)}
-                            compact
-                        />
-                        <View style={styles.opsGrid}>
-                            {operationsCards.map((card) => (
-                                <AdminQuickActionCard
-                                    key={card.key}
-                                    title={card.title}
-                                    description={card.subtitle}
-                                    icon={card.icon}
-                                    badgeLabel={card.value}
-                                    iconColor={COLORS.text}
-                                    onPress={() => router.push("/zone/modules/insights" as any)}
-                                    cardStyle={[styles.opsTile, card.cardStyle]}
-                                    iconStyle={card.iconStyle}
-                                />
-                            ))}
-                        </View>
-                    </View>
                 </ScrollView>
             </Animated.View>
 

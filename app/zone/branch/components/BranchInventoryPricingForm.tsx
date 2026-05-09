@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
 import { PC_TYPES } from "../../../../constants/profileOptions";
@@ -93,18 +93,66 @@ export const createEmptyBranchInventory = (): BranchInventoryFields => ({
     pcSpecs: {},
 });
 
-export const normalizeBranchInventory = (branch?: any): BranchInventoryFields => ({
-    supportsCs2: Boolean(branch?.supportsCs2),
-    supportsFc25: Boolean(branch?.supportsFc25 || branch?.supportsFc26 || branch?.supportsTekken8),
-    supportsFc26: Boolean(branch?.supportsFc26 || branch?.supportsFc25 || branch?.supportsTekken8),
-    supportsTekken8: Boolean(branch?.supportsTekken8),
-    supportsFutsal: Boolean(branch?.supportsFutsal),
-    supportsIndoorCricket: Boolean(branch?.supportsIndoorCricket),
-    supportsPadel: Boolean(branch?.supportsPadel),
-    supportsPickleball: Boolean(branch?.supportsPickleball),
-    pricing: branch?.pricing || {},
-    pcSpecs: branch?.pcSpecs || {},
-});
+const countResources = (resources: any[] | undefined, assetType: string, tier: string) =>
+    Array.isArray(resources)
+        ? resources.filter((resource) =>
+            resource?.isActive !== false &&
+            String(resource?.assetType || "").toLowerCase() === assetType &&
+            String(resource?.tier || "").toLowerCase() === tier,
+        ).length
+        : 0;
+
+const mergeResourceCountsIntoPricing = (pricing: BranchPricing, resources?: any[]): BranchPricing => {
+    if (!Array.isArray(resources) || resources.length === 0) return pricing || {};
+    const nextPricing: BranchPricing = {
+        ...(pricing || {}),
+        pc: { ...(pricing?.pc || {}) },
+        console: { ...(pricing?.console || {}) },
+    };
+
+    PC_TYPES.forEach((type) => {
+        const tier = type.value;
+        const pcCount = countResources(resources, "pc", tier);
+        if (pcCount > 0) {
+            nextPricing.pc![tier] = {
+                ...(nextPricing.pc?.[tier] || {}),
+                count: String(pcCount),
+            };
+        }
+        const consoleCount = countResources(resources, "console", tier);
+        if (consoleCount > 0) {
+            nextPricing.console![tier] = {
+                ...(nextPricing.console?.[tier] || {}),
+                count: String(consoleCount),
+            };
+        }
+    });
+
+    return nextPricing;
+};
+
+export const normalizeBranchInventory = (branch?: any, resources?: any[]): BranchInventoryFields => {
+    const pricing = mergeResourceCountsIntoPricing(branch?.pricing || {}, resources);
+    const hasPcResources = Array.isArray(resources) && resources.some((resource) =>
+        resource?.isActive !== false && String(resource?.assetType || "").toLowerCase() === "pc",
+    );
+    const hasConsoleResources = Array.isArray(resources) && resources.some((resource) =>
+        resource?.isActive !== false && String(resource?.assetType || "").toLowerCase() === "console",
+    );
+
+    return {
+        supportsCs2: Boolean(branch?.supportsCs2 || hasPcResources),
+        supportsFc25: Boolean(branch?.supportsFc25 || branch?.supportsFc26 || branch?.supportsTekken8 || hasConsoleResources),
+        supportsFc26: Boolean(branch?.supportsFc26 || branch?.supportsFc25 || branch?.supportsTekken8 || hasConsoleResources),
+        supportsTekken8: Boolean(branch?.supportsTekken8),
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
+        pricing,
+        pcSpecs: branch?.pcSpecs || {},
+    };
+};
 
 const sanitizeSpecs = (specs?: PcTierSpecs) => {
     const cleaned: PcTierSpecs = {};
@@ -243,6 +291,8 @@ export default function BranchInventoryPricingForm({
     onChange,
     validationError,
 }: BranchInventoryPricingFormProps) {
+    const [pcExpanded, setPcExpanded] = useState(false);
+    const [consoleExpanded, setConsoleExpanded] = useState(false);
     const updatePricing = (
         category: keyof BranchPricing,
         subKey: string,
@@ -332,8 +382,19 @@ export default function BranchInventoryPricingForm({
 
             {value.supportsCs2 ? (
                 <View style={registerStyles.card}>
-                    <Text style={registerStyles.cardTitle}>PC setups</Text>
-                    {PC_TYPES.map((type) => {
+                    <Pressable
+                        onPress={() => setPcExpanded((prev) => !prev)}
+                        style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                    >
+                        <View>
+                            <Text style={registerStyles.cardTitle}>PC setups</Text>
+                            <Text style={[registerStyles.helperText, { color: COLORS.textSecondary }]}>
+                                Regular, premium, and elite PCs
+                            </Text>
+                        </View>
+                        <AppIcon name={pcExpanded ? "expand-less" : "chevron-right"} size={22} color={COLORS.muted} />
+                    </Pressable>
+                    {pcExpanded ? PC_TYPES.map((type) => {
                         const tier = type.value;
                         const showSpecs =
                             toPositiveNumber(value.pricing.pc?.[tier]?.count) > 0 &&
@@ -396,15 +457,26 @@ export default function BranchInventoryPricingForm({
                                     ) : null}
                             </View>
                         );
-                    })}
+                    }) : null}
                 </View>
             ) : null}
 
             {value.supportsFc25 || value.supportsTekken8 ? (
                 <View style={registerStyles.card}>
-                    <Text style={registerStyles.cardTitle}>Consoles</Text>
+                    <Pressable
+                        onPress={() => setConsoleExpanded((prev) => !prev)}
+                        style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                    >
+                        <View>
+                            <Text style={registerStyles.cardTitle}>Consoles</Text>
+                            <Text style={[registerStyles.helperText, { color: COLORS.textSecondary }]}>
+                                PS5 and Xbox units with 1v1 / 2v2 pricing
+                            </Text>
+                        </View>
+                        <AppIcon name={consoleExpanded ? "expand-less" : "chevron-right"} size={22} color={COLORS.muted} />
+                    </Pressable>
 
-                    {CONSOLE_TYPES.map((type) => (
+                    {consoleExpanded ? CONSOLE_TYPES.map((type) => (
                         <View key={type.value} style={registerStyles.fieldGroup}>
                             <Text style={{ color: COLORS.accent, fontWeight: "600", marginBottom: 8 }}>
                                 {type.label}
@@ -454,7 +526,7 @@ export default function BranchInventoryPricingForm({
                                 </View>
                             </View>
                         </View>
-                    ))}
+                    )) : null}
                 </View>
             ) : null}
 

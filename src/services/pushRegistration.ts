@@ -41,6 +41,21 @@ export async function syncPushRegistration(input: {
     return { ok: true as const, skipped: "disabled" as const };
   }
 
+  if (Constants.appOwnership === "expo") {
+    await convex.mutation((api as any).pushNotifications.upsertDevice, {
+      userId: input.userId,
+      installationId,
+      provider: "expo",
+      platform: Platform.OS,
+      projectId: getProjectId() || undefined,
+      deviceName: String(Constants.deviceName || ""),
+      appVersion: String(Constants.expoConfig?.version || ""),
+      permissionStatus: "undetermined",
+    });
+
+    return { ok: true as const, skipped: "expo_go" as const };
+  }
+
   let permissions = await Notifications.getPermissionsAsync();
   if (permissions.status !== "granted" && permissions.canAskAgain !== false) {
     permissions = await Notifications.requestPermissionsAsync();
@@ -54,8 +69,12 @@ export async function syncPushRegistration(input: {
   let expoPushToken = "";
   const projectId = getProjectId();
   if (permissionStatus === "granted" && projectId) {
-    const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    expoPushToken = token.data;
+    try {
+      const token = await Notifications.getExpoPushTokenAsync({ projectId });
+      expoPushToken = token.data;
+    } catch {
+      expoPushToken = "";
+    }
   }
 
   await convex.mutation((api as any).pushNotifications.upsertDevice, {

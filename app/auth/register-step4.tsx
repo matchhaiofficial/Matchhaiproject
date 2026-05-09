@@ -386,7 +386,7 @@ export default function RegisterStep4() {
     >
       <RegistrationStepHeader
         title="Review and Confirm"
-        subtitle="Review your details."
+        subtitle=""
         stepTitle="Step 4 of 4"
         stepSubtitle="Final review"
         progress="100%"

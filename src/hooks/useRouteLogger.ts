@@ -1,6 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useLocalSearchParams, usePathname } from "expo-router";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import Logger from "../utils/logger";
 
@@ -33,20 +33,23 @@ export function useRouteLogger(screenName: string, details?: LogDetails) {
         [details, params, pathname, screenName],
     );
 
+    const payloadRef = useRef(payload);
+    payloadRef.current = payload;
+
     useEffect(() => {
-        Logger.info("Route", "Mounted screen", payload);
+        Logger.info("Route", "Mounted screen", payloadRef.current);
         return () => {
-            Logger.info("Route", "Unmounted screen", payload);
+            Logger.info("Route", "Unmounted screen", payloadRef.current);
         };
-    }, [payload]);
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
-            Logger.info("Route", "Focused screen", payload);
+            Logger.info("Route", "Focused screen", payloadRef.current);
             return () => {
-                Logger.info("Route", "Blurred screen", payload);
+                Logger.info("Route", "Blurred screen", payloadRef.current);
             };
-        }, [payload]),
+        }, []),
     );
 }
 

@@ -203,7 +203,6 @@ export function deriveMatchroomLobbyState(
       ...(room?.playerUids || []),
       ...slotUids,
       room?.hostUid,
-      room?.zoneOwnerUid,
     ].filter(Boolean) as string[],
   );
   const isJoined = currentIdentityValues.some(

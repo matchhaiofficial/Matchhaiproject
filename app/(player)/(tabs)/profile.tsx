@@ -1,6 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import React, { useCallback, useRef, useState, useEffect } from "react";
@@ -85,6 +85,8 @@ const ALL_GAMES = Array.from(
     .values()
 );
 
+const EXTERNAL_STATS_REFRESH_MS = 5 * 60 * 1000;
+
 interface FullUserProfile {
     uid: string;
     email?: string;
@@ -121,6 +123,7 @@ interface FullUserProfile {
 
     // Platform Metadata
     platformLastSynced?: Record<string, any>; // Reserved for future detailed timestamps per platform if structure changes
+    lastExternalSyncAt?: number;
     updatedAt?: any;
 }
 
@@ -150,6 +153,8 @@ export default function Profile() {
     const [refreshing, setRefreshing] = useState(false);
     const [myTeams, setMyTeams] = useState<Team[]>([]);
     const [loadingTeams, setLoadingTeams] = useState(false);
+    const refreshExternalStats = useAction(api.users.refreshExternalStats);
+    const externalSyncInFlight = useRef(false);
 
     // Convex reactive query for user profile (replaces getDoc)
     const convexProfile = useQuery(
@@ -171,6 +176,42 @@ export default function Profile() {
 
     // Prevent double fetch for teams
     const isFetching = useRef(false);
+
+    const hasExternalPlatform = useCallback(() => {
+        return Boolean(profile?.steamProfileUrl || profile?.steamId || profile?.faceitProfileUrl || profile?.faceitNickname);
+    }, [profile?.faceitNickname, profile?.faceitProfileUrl, profile?.steamId, profile?.steamProfileUrl]);
+
+    const maybeRefreshExternalStats = useCallback(async (force = false) => {
+        if (!user?._id || !hasExternalPlatform() || externalSyncInFlight.current) return;
+
+        const lastSync = Number(profile?.lastExternalSyncAt || 0);
+        if (!force && lastSync && Date.now() - lastSync < EXTERNAL_STATS_REFRESH_MS) return;
+
+        try {
+            externalSyncInFlight.current = true;
+            const result = await refreshExternalStats({
+                userId: user._id as Id<"users">,
+                force,
+            });
+            if (force && result.errors.length > 0 && result.refreshed.length === 0) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: result.errors.map((item) => `${item.platform}: ${item.message}`).join("\n"),
+                });
+            }
+        } catch (error: any) {
+            if (force) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: error?.message || "Could not refresh Steam/FACEIT stats.",
+                });
+            }
+        } finally {
+            externalSyncInFlight.current = false;
+        }
+    }, [hasExternalPlatform, profile?.lastExternalSyncAt, refreshExternalStats, showToast, user?._id]);
 
     const fetchTeams = useCallback(async (isRefresh = false) => {
         if (!user?._id || (isFetching.current && !isRefresh)) return;
@@ -198,11 +239,19 @@ export default function Profile() {
     useFocusEffect(
         useCallback(() => {
             fetchTeams();
-        }, [fetchTeams])
+            void maybeRefreshExternalStats(false);
+
+            const interval = setInterval(() => {
+                void maybeRefreshExternalStats(false);
+            }, EXTERNAL_STATS_REFRESH_MS);
+
+            return () => clearInterval(interval);
+        }, [fetchTeams, maybeRefreshExternalStats])
     );
 
     const onRefresh = () => {
         setRefreshing(true);
+        void maybeRefreshExternalStats(true);
         fetchTeams(true);
     };
 
@@ -648,6 +697,15 @@ export default function Profile() {
                         Open Perf Debug
                     </AppButton>
                 ) : null}
+
+                <AppButton
+                    variant="secondary"
+                    style={[styles.logoutButton, { marginBottom: 12 }]}
+                    onPress={() => router.push("/(player)/support" as any)}
+                    leadingIcon="support"
+                >
+                    Help & Support
+                </AppButton>
 
                 <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
                     <AppIcon name="logout" size={20} color={COLORS.error} />

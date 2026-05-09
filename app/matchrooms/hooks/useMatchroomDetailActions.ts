@@ -795,18 +795,40 @@ export function useMatchroomDetailActions({
   };
 
   const handleInvitePress = (team: "A" | "B", slotId: string) => {
+    const captainUid = team === "A" ? captainUidAResolved : captainUidBResolved;
+    const canInviteForTeam =
+      !!captainUid && identityMatches(captainUid, currentIdentityValues);
+
+    if (!canInviteForTeam) {
+      showToast({
+        message: `Only the captain of Team ${team} can invite teammates for that team.`,
+        title: "Invite unavailable",
+        type: "warning",
+      });
+      return;
+    }
+
     setInvitingSlot({ team, slotId });
     setShowInviteModal(true);
   };
 
   const handleSendInvite = async (friend: any) => {
     if (!invitingSlot || !id || !room) return;
+    const inviteeUid = friend?.uid || friend?._id || friend?.id;
+    if (!inviteeUid) {
+      showToast({
+        message: "This friend profile is missing an invite id. Refresh and try again.",
+        title: "Invite failed",
+        type: "error",
+      });
+      return;
+    }
 
     setJoining(true);
     try {
       const res = await inviteToMatchroomAction({
         matchroomId: id,
-        toUid: friend.uid,
+        toUid: String(inviteeUid),
         team: invitingSlot.team,
         slotId: invitingSlot.slotId,
         role: "Player",
@@ -816,7 +838,7 @@ export function useMatchroomDetailActions({
 
       if (res.ok) {
         showToast({
-          message: `Sent invitation to ${friend.username}`,
+          message: `Sent invitation to ${friend.username || "teammate"}`,
           title: "Invitation sent",
           type: "success",
         });

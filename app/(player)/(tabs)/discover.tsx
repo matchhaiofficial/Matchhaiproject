@@ -95,7 +95,7 @@ function Fab({
       style={[styles.fab, animatedStyle]}
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
     >
-      <AppIcon name="add" size={28} color="#FFF" />
+      <AppIcon name="create" size={28} color="#FFF" />
     </AnimatedPressable>
   );
 }
@@ -405,7 +405,7 @@ export default function DiscoverScreen() {
               pressed && styles.filterButtonPressed,
             ]}
           >
-            <AppIcon name="tune" size={22} color={COLORS.text} />
+            <AppIcon name="filters" size={22} color={COLORS.text} />
             {activeFilterCount > 0 ? (
               <View style={styles.filterBadge}>
                 <Text style={styles.filterBadgeText}>

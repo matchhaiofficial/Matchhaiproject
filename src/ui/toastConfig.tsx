@@ -14,7 +14,7 @@ export const toastConfig = {
     error: ({ text1, text2 }: CustomToastProps) => (
         <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.errorIcon]}>
-                <AppIcon name="error-outline" size={20} tone="danger" />
+                <AppIcon name="error" size={20} tone="danger" />
             </View>
             <View style={toastStyles.textColumn}>
                 {text1 ? <Text style={toastStyles.errorTitle}>{text1}</Text> : null}
@@ -26,7 +26,7 @@ export const toastConfig = {
     success: ({ text1, text2 }: CustomToastProps) => (
         <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.successContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.successIcon]}>
-                <AppIcon name="check-circle" size={20} tone="success" color="#81C784" />
+                <AppIcon name="success" size={20} tone="success" color="#81C784" />
             </View>
             <View style={toastStyles.textColumn}>
                 {text1 ? <Text style={toastStyles.successTitle}>{text1}</Text> : null}
@@ -50,7 +50,7 @@ export const toastConfig = {
     delete: ({ text1, text2 }: CustomToastProps) => (
         <View pointerEvents="none" style={[toastStyles.baseContainer, toastStyles.errorContainer]}>
             <View style={[toastStyles.iconContainer, toastStyles.errorIcon]}>
-                <AppIcon name="delete-outline" size={20} tone="danger" />
+                <AppIcon name="delete" size={20} tone="danger" />
             </View>
             <View style={toastStyles.textColumn}>
                 {text1 ? <Text style={toastStyles.errorTitle}>{text1}</Text> : null}

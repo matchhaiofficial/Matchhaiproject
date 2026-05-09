@@ -314,7 +314,7 @@ export default function AdminRegisterStep4() {
     >
       <RegistrationStepHeader
         title="Review and Confirm"
-        subtitle="Review your zone setup."
+        subtitle=""
         stepTitle="Step 4 of 4"
         stepSubtitle="Final review"
         progress="100%"

@@ -28,8 +28,10 @@ import {
 } from "./components";
 import { useMatchroomJoinFlow } from "../../src/hooks/useMatchroomJoinFlow";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
+import { useToast } from "../../src/hooks/useToast";
 import { useEntrance } from "../../src/motion/useEntrance";
 import { usePressScale } from "../../src/motion/usePressScale";
+import { submitUserReport } from "../../src/services/convex/reportService";
 import { COLORS, SPACING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
@@ -111,7 +113,9 @@ export default function MatchroomDetails() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const { showToast } = useToast();
   const [showJoinTeamSheet, setShowJoinTeamSheet] = useState(false);
+  const [reportedPlayer, setReportedPlayer] = useState<{ uid: string; name: string } | null>(null);
   const footerHitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
@@ -341,7 +345,80 @@ export default function MatchroomDetails() {
     setShowJoinTeamSheet(false);
     handleRequestJoinAction(`Team ${team}`, String(slot.slotId));
   }, [handleRequestJoinAction, joining, openSlotsA, openSlotsB]);
+  const openMatchroomReport = useCallback(() => {
+    setReportedPlayer(null);
+    setShowComplainModal(true);
+  }, [setShowComplainModal]);
+  const openPlayerReport = useCallback((playerUid: string, playerName: string) => {
+    setReportedPlayer({ uid: playerUid, name: playerName });
+    setComplainReason("");
+    setComplainDescription("");
+    setShowComplainModal(true);
+  }, [setComplainDescription, setComplainReason, setShowComplainModal]);
+  const handleReportSubmit = useCallback(async () => {
+    if (!reportedPlayer) {
+      await handleComplainAction();
+      return;
+    }
+    if (!complainReason) {
+      showToast({
+        message: "Please select a reason for your report.",
+        title: "Reason required",
+        type: "warning",
+      });
+      return;
+    }
+
+    setSubmittingComplain(true);
+    const result = await submitUserReport({
+      reportedUserId: reportedPlayer.uid,
+      reason: complainReason,
+      description: complainDescription,
+    });
+    setSubmittingComplain(false);
+
+    if (result.ok) {
+      showToast({
+        message: result.message || "Player report submitted.",
+        title: "Submitted",
+        type: "success",
+      });
+      setReportedPlayer(null);
+      setShowComplainModal(false);
+      setComplainReason("");
+      setComplainDescription("");
+      return;
+    }
+
+    showToast({
+      message: result.message || "Failed to submit report.",
+      title: "Submission failed",
+      type: "error",
+    });
+  }, [
+    complainDescription,
+    complainReason,
+    handleComplainAction,
+    reportedPlayer,
+    setComplainDescription,
+    setComplainReason,
+    setShowComplainModal,
+    setSubmittingComplain,
+    showToast,
+  ]);
   const hasOpenTeamSlot = openSlotsA.length > 0 || openSlotsB.length > 0;
+  const pendingPaymentIntentId = activeIntentIds[0] || null;
+  const hasPendingPayment =
+    Boolean(pendingPaymentIntentId) &&
+    (genericRequestStatus === "approved_pending_payment" ||
+      Array.from(requestedSlots.values()).includes("approved_pending_payment"));
+  const openPendingPayment = useCallback(() => {
+    if (!pendingPaymentIntentId) return;
+    router.push({
+      pathname: "/matchrooms/book/pay/[intentId]",
+      params: { intentId: pendingPaymentIntentId },
+    } as any);
+  }, [pendingPaymentIntentId, router]);
   const showFloatingRequestJoin =
     !isZoneAdmin &&
     !isExpired &&
@@ -353,7 +430,15 @@ export default function MatchroomDetails() {
     !isLocked &&
     !isFull &&
     hasOpenTeamSlot;
-  const showStickyLobbyActions = showFloatingRequestJoin || (!isZoneAdmin && isJoined);
+  const showStickyLobbyActions = showFloatingRequestJoin || (!isZoneAdmin && (isJoined || hasPendingPayment));
+  const resultStatusLabel =
+    room?.status === "in-progress"
+      ? "In Progress"
+      : room?.resultVerification?.status === "resolved"
+        ? `Final Result: ${room.resultVerification.finalWinner === "team2" ? "Team 2" : "Team 1"} Won`
+        : room?.resultVerification?.status === "participant_vote"
+          ? "Result Dispute"
+          : "Verifying Results";
 
   if (loading) {
     return (
@@ -410,7 +495,7 @@ export default function MatchroomDetails() {
                 hitSlop={footerHitSlop}
               />
             )}
-            {user?._id && participantUids.has(user._id) && (
+            {user?._id && (participantUids.has(user._id) || isZoneAdmin) && (
               <HeaderIconButton
                 icon="chat"
                 color={COLORS.accent}
@@ -438,11 +523,11 @@ export default function MatchroomDetails() {
               }}
               hitSlop={footerHitSlop}
             />
-            {room && (isJoined || isZoneAdmin) && canSubmitComplain(room) && (
+            {room && (isZoneAdmin || (isJoined && canSubmitComplain(room))) && (
               <HeaderIconButton
                 icon="flag"
                 color={COLORS.error}
-                onPress={() => setShowComplainModal(true)}
+                onPress={openMatchroomReport}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               />
             )}
@@ -527,6 +612,7 @@ export default function MatchroomDetails() {
                     onInvitePress={handleInvitePressAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
+                    onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
                   />
                 </View>
                 <View
@@ -558,6 +644,7 @@ export default function MatchroomDetails() {
                     onInvitePress={handleInvitePressAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
+                    onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
                   />
                 </View>
               </View>
@@ -570,6 +657,7 @@ export default function MatchroomDetails() {
                 identityMatches={identityMatches}
                 getDisplayRole={getDisplayRole}
                 getSkillBadgeProps={getSkillBadgeProps}
+                onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
               />
             )}
 
@@ -587,7 +675,7 @@ export default function MatchroomDetails() {
               </DetailSectionCard>
             )}
             {/* Footer Actions */}
-            {!showStickyLobbyActions ? (
+            {!showStickyLobbyActions && !isZoneAdmin ? (
               <View
                 style={[
                   styles.buttonWrapper,
@@ -693,12 +781,11 @@ export default function MatchroomDetails() {
                         }
                       >
                         {requestedSlots.size > 0 || genericRequestStatus ? (
-                          <View>
+                          <View style={{ gap: SPACING.sm }}>
                             <Text
                               style={{
                                 textAlign: "center",
                                 color: COLORS.muted,
-                                marginBottom: 8,
                               }}
                             >
                               {genericRequestStatus === "approved_pending_payment" ||
@@ -708,6 +795,16 @@ export default function MatchroomDetails() {
                                   ? `You have requested ${requestedSlots.size} slot${requestedSlots.size > 1 ? "s" : ""}.`
                                   : "Request Sent. Waiting for host approval."}
                             </Text>
+                            {hasPendingPayment ? (
+                              <AppButton
+                                size="lg"
+                                onPress={openPendingPayment}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <Text style={styles.joinButtonText}>Pay Now</Text>
+                                <AppIcon name="payment" size={18} color="#FFF" />
+                              </AppButton>
+                            ) : null}
                             <AppButton
                               variant="danger"
                               size="lg"
@@ -810,16 +907,12 @@ export default function MatchroomDetails() {
                   <View style={{ gap: SPACING.sm }}>
                     <View style={styles.statusBanner}>
                       <Text style={styles.statusText}>
-                        Status:{" "}
-                        {room.status === "in-progress"
-                          ? "In Progress"
-                          : "Verifying Results"}
+                        Status: {resultStatusLabel}
                       </Text>
                     </View>
 
                     {/* Captain Result Action */}
-                    {(room.status === "in-progress" ||
-                      room.resultVerification?.status === "pending") &&
+                    {room.status === "in-progress" &&
                       isJoined && (
                         <AppButton
                           variant="ghost"
@@ -921,6 +1014,20 @@ export default function MatchroomDetails() {
                   <Text style={styles.getRequestButtonText}>Request to Join</Text>
                 )}
               </Pressable>
+            ) : hasPendingPayment ? (
+              <View style={{ gap: SPACING.sm }}>
+                <Text style={{ textAlign: "center", color: COLORS.muted }}>
+                  Captain approved your request. Complete payment to reserve your seat.
+                </Text>
+                <AppButton
+                  size="lg"
+                  onPress={openPendingPayment}
+                  hitSlop={footerHitSlop}
+                >
+                  <Text style={styles.joinButtonText}>Pay Now</Text>
+                  <AppIcon name="payment" size={18} color="#FFF" />
+                </AppButton>
+              </View>
             ) : isExpired ? (
               <View style={[styles.fullButton, styles.expiredBanner]}>
                 <Text style={styles.fullText}>Matchroom Expired</Text>
@@ -967,14 +1074,10 @@ export default function MatchroomDetails() {
               <View style={{ gap: SPACING.sm }}>
                 <View style={styles.statusBanner}>
                   <Text style={styles.statusText}>
-                    Status:{" "}
-                    {room.status === "in-progress"
-                      ? "In Progress"
-                      : "Verifying Results"}
+                    Status: {resultStatusLabel}
                   </Text>
                 </View>
-                {(room.status === "in-progress" ||
-                  room.resultVerification?.status === "pending") && (
+                {room.status === "in-progress" && (
                   <AppButton
                     variant="ghost"
                     size="lg"
@@ -1025,15 +1128,18 @@ export default function MatchroomDetails() {
       {/* Report Issue Modal */}
       <ReportIssueModal
         visible={showComplainModal}
-        title="Report Matchroom"
-        subtitle="Help us keep MatchHai safe."
+        title={reportedPlayer ? `Report ${reportedPlayer.name}` : "Report Matchroom"}
+        subtitle={reportedPlayer ? "Report a player in this matchroom." : "Help us keep MatchHai safe."}
         reasons={COMPLAIN_REASONS}
         reason={complainReason}
         description={complainDescription}
         onChangeReason={setComplainReason}
         onChangeDescription={setComplainDescription}
-        onSubmit={handleComplainAction}
-        onClose={() => setShowComplainModal(false)}
+        onSubmit={handleReportSubmit}
+        onClose={() => {
+          setReportedPlayer(null);
+          setShowComplainModal(false);
+        }}
         loading={submittingComplain}
         submitLabel="Submit Report"
       />

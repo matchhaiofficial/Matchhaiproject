@@ -323,7 +323,7 @@ export default function AdminRegisterStep3() {
     >
       <RegistrationStepHeader
         title="Inventory and Pricing"
-        subtitle="Set inventory and pricing per branch."
+        subtitle=""
         stepTitle="Step 3 of 4"
         stepSubtitle="Inventory and pricing"
         progress="75%"

@@ -100,17 +100,17 @@ export function AdminQuickActionCard({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.quickActionPressable, pressed && styles.pressedCard]}>
-      <AppCard variant="elevated" style={[styles.adminQuickActionCard, cardStyle]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.quickActionPressable, cardStyle, pressed && styles.pressedCard]}>
+      <AppCard variant="elevated" style={styles.adminQuickActionCard}>
         <View style={styles.quickActionTop}>
           <View style={[styles.quickActionIconWrap, iconStyle]}>
             <AppIcon name={icon} size={20} color={iconColor} />
           </View>
           {badgeLabel ? <StatusPill tone="neutral" label={badgeLabel} /> : null}
         </View>
-        <View>
-          <Text style={styles.quickActionTitle}>{title}</Text>
-          <Text style={styles.quickActionDescription}>{description}</Text>
+        <View style={styles.quickActionTextWrap}>
+          <Text style={styles.quickActionTitle} numberOfLines={2} ellipsizeMode="tail">{title}</Text>
+          <Text style={styles.quickActionDescription} numberOfLines={2} ellipsizeMode="tail">{description}</Text>
         </View>
       </AppCard>
     </Pressable>

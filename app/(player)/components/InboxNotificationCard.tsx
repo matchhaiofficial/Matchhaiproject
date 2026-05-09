@@ -558,6 +558,19 @@ export function InboxNotificationCard({
             </Text>
           </View>
         )}
+        {isMatchJoinRequest && (
+          <View style={styles.requestMetaBox}>
+            <Text style={styles.requestMetaText}>
+              Player level: {(item.meta as any)?.requesterSkillTier || "Unranked"}
+              {typeof (item.meta as any)?.requesterRating === "number"
+                ? ` | Rating ${Math.round((item.meta as any).requesterRating)}`
+                : ""}
+              {typeof (item.meta as any)?.roomAverageRating === "number"
+                ? ` | Lobby avg ${Math.round((item.meta as any).roomAverageRating)}`
+                : ""}
+            </Text>
+          </View>
+        )}
         {isBookingCounterOffer && counterOfferOptions.length > 0 && (
           <View style={styles.requestMetaBox}>
             <Text style={styles.requestMetaText}>

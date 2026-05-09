@@ -1,7 +1,8 @@
 import { Picker } from "@react-native-picker/picker";
+import { useQuery } from "convex/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import debounce from "lodash.debounce";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -12,8 +13,10 @@ import {
     TextInput,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { api } from "../../../convex/_generated/api";
+import { Id } from "../../../convex/_generated/dataModel";
 import {
     DEFAULT_CITY,
     KARACHI_AREAS,
@@ -27,8 +30,9 @@ import { AppButton } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
+import { syncBranchResourcesFromPricing } from "../../../src/services/convex/zoneAdminResourceService";
 import { updateZone } from "../../../src/services/convex/zoneService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import BranchInventoryPricingForm, {
     buildZoneGamesFromBranches,
@@ -92,6 +96,7 @@ export default function BranchDetails() {
     const { zone, loading } = useZoneData();
     const router = useRouter();
     const { showToast } = useToast();
+    const insets = useSafeAreaInsets();
 
     const [saving, setSaving] = useState(false);
     const [branchDisplayName, setBranchDisplayName] = useState("");
@@ -103,6 +108,7 @@ export default function BranchDetails() {
     const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [inventory, setInventory] = useState(createEmptyBranchInventory);
+    const hydratedBranchKeyRef = useRef("");
 
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
@@ -130,6 +136,16 @@ export default function BranchDetails() {
 
         return { branch: null as any, index: -1 };
     }, [branches, routeBranchId, zone]);
+    const activeBranchId = useMemo(() => {
+        if (!branchMatch.branch) return "";
+        return getBranchEffectiveId(branchMatch.branch, Math.max(branchMatch.index, 0));
+    }, [branchMatch.branch, branchMatch.index]);
+    const branchResources = useQuery(
+        api.zoneAdminResources.listResourcesByZoneAndBranch,
+        zone?.id && activeBranchId
+            ? { zoneId: zone.id as Id<"zones">, branchId: activeBranchId }
+            : "skip",
+    );
 
     const detectAreaFromLocation = useCallback((locationText: string) => {
         const normalized = locationText.toLowerCase();
@@ -196,6 +212,22 @@ export default function BranchDetails() {
     useEffect(() => {
         const branch = branchMatch.branch;
         if (!branch) return;
+        const resources = Array.isArray(branchResources) ? branchResources : undefined;
+        const resourcesSignature = resources
+            ? resources
+                .map((resource: any) => [
+                    resource._id,
+                    resource.assetType,
+                    resource.tier,
+                    resource.isActive === false ? "inactive" : "active",
+                ].join(":"))
+                .sort()
+                .join("|")
+            : "pending";
+        const hydrateKey = `${activeBranchId}:${resourcesSignature}`;
+        if (hydratedBranchKeyRef.current === hydrateKey) return;
+        if (branchResources === undefined) return;
+        hydratedBranchKeyRef.current = hydrateKey;
 
         const name = String(branch.branchDisplayName || branch.name || "");
         const address = String(branch.addressLine1 || branch.address || "");
@@ -206,8 +238,8 @@ export default function BranchDetails() {
         setContactPhone(formatPakistaniPhone(String(branch.contactPhone || "")));
         setSearchQuery(address || name);
         setSearchResults([]);
-        setInventory(normalizeBranchInventory(branch));
-    }, [branchMatch.branch]);
+        setInventory(normalizeBranchInventory(branch, resources));
+    }, [activeBranchId, branchMatch.branch, branchResources]);
 
     const handleSearchChange = (text: string) => {
         setSearchQuery(text);
@@ -288,9 +320,10 @@ export default function BranchDetails() {
 
         const sanitizedInventory = sanitizeBranchInventory(inventory);
         const existingBranch = branchMatch.branch || {};
+        const effectiveBranchId = getBranchEffectiveId(existingBranch, Math.max(branchMatch.index, 0));
         const updatedBranch = {
             ...existingBranch,
-            id: getBranchEffectiveId(existingBranch, Math.max(branchMatch.index, 0)),
+            id: effectiveBranchId,
             branchDisplayName: branchDisplayName.trim(),
             name: branchDisplayName.trim(),
             city: DEFAULT_CITY,
@@ -310,6 +343,21 @@ export default function BranchDetails() {
         });
 
         try {
+            const syncResult = await syncBranchResourcesFromPricing({
+                zoneId: zone.id,
+                branchId: effectiveBranchId,
+                pricing: sanitizedInventory.pricing || {},
+                adminUid: String((zone as any).ownerUid || ""),
+            });
+            if (!syncResult.ok) {
+                showToast({
+                    type: "error",
+                    title: "Resource sync blocked",
+                    message: syncResult.message,
+                });
+                return;
+            }
+
             const nextBranches =
                 branchMatch.index >= 0
                     ? branches.map((branch: any, index: number) =>
@@ -382,7 +430,7 @@ export default function BranchDetails() {
     }
 
     return (
-        <Screen style={styles.container} scroll={false}>
+        <Screen style={styles.container} scroll={false} edges={["top"]}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={styles.flex1}
@@ -393,7 +441,15 @@ export default function BranchDetails() {
                     inlineTitle
                 />
 
-                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
+                <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={[
+                        styles.content,
+                        styles.contentInsideScreen,
+                        styles.contentWithFooter,
+                    ]}
+                >
                     {/* Branch Info Section */}
                     <Text style={styles.sectionLabel}>Basic Info</Text>
 
@@ -549,16 +605,17 @@ export default function BranchDetails() {
                         onChange={setInventory}
                         validationError={validateBranchInventory(branchDisplayName, inventory)}
                     />
-
-                    <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
-                        <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => router.back()} disabled={saving}>
+                </ScrollView>
+                <View style={[styles.footerContainer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+                    <View style={styles.footerRow}>
+                        <AppButton variant="secondary" style={styles.footerAction} onPress={() => router.back()} disabled={saving}>
                             Cancel
                         </AppButton>
-                        <AppButton style={{ flex: 1 }} onPress={handleSave} loading={saving} disabled={saving}>
+                        <AppButton style={styles.footerAction} onPress={handleSave} loading={saving} disabled={saving}>
                             Save
                         </AppButton>
                     </View>
-                </ScrollView>
+                </View>
             </KeyboardAvoidingView>
         </Screen>
     );

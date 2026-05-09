@@ -27,6 +27,7 @@ export default StyleSheet.create({
     },
     content: {
         padding: SPACING.screenPadding,
+        paddingBottom: SPACING.xl,
     },
 
     // Payment Card
@@ -196,13 +197,14 @@ export default StyleSheet.create({
     },
     methodOption: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         backgroundColor: COLORS.backgroundDark,
         padding: SPACING.md,
         borderRadius: RADII.md,
         borderWidth: 1,
         borderColor: COLORS.accent + '40',
         gap: SPACING.md,
+        marginBottom: SPACING.sm,
     },
     methodOptionActive: {
         borderColor: COLORS.accent,
@@ -226,10 +228,16 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
     },
+    methodCopy: {
+        flex: 1,
+        minWidth: 0,
+        gap: 3,
+    },
     methodDetail: {
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
+        lineHeight: 18,
     },
     footer: {
         gap: SPACING.sm,

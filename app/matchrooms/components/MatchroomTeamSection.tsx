@@ -51,6 +51,7 @@ type MatchroomTeamSectionProps = {
   onInvitePress: (team: "A" | "B", slotId: string) => void;
   onRequestJoin: (teamLabel: string, slotId: string) => void;
   onCancelRequest: () => void;
+  onReportPlayer?: (playerUid: string, playerName: string) => void;
 };
 
 function EmptySlotLabel({ slot, styles }: { slot: any; styles: any }) {
@@ -246,6 +247,7 @@ export default function MatchroomTeamSection({
   onInvitePress,
   onRequestJoin,
   onCancelRequest,
+  onReportPlayer,
 }: MatchroomTeamSectionProps) {
   const {
     animatedStyle: rowMotionStyle,
@@ -314,6 +316,23 @@ export default function MatchroomTeamSection({
                         />
                       )}
                     </View>
+                    {onReportPlayer && slotUserId && slotUserId !== currentUserId ? (
+                      <AnimatedPressable
+                        onPress={() => onReportPlayer(slotUserId, slot.user.username)}
+                        onPressIn={onRowPressIn}
+                        onPressOut={onRowPressOut}
+                        style={{ padding: 4 }}
+                        hitSlop={footerHitSlop}
+                      >
+                        <Animated.View style={rowMotionStyle}>
+                          <AppIcon
+                            name="flag"
+                            size={16}
+                            color={COLORS.error}
+                          />
+                        </Animated.View>
+                      </AnimatedPressable>
+                    ) : null}
                     {canManage && slotUserId !== currentUserId && (
                       <AnimatedPressable
                         onPress={() =>

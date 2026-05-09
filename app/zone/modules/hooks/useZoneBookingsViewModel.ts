@@ -1,20 +1,22 @@
 import { useMemo } from "react";
 
 import {
-  type ZoneBookingAssetType,
   type ZoneBookingQueueItem,
   type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
 
-type RequestFilter = "all" | "open" | "pending_payment" | "accepted";
-type AssetFilter = "all" | ZoneBookingAssetType;
+type RequestFilter = "all" | "open" | "accepted";
+type GameFilter = "all" | string;
+type TimeOfDayFilter = "all" | "day" | "night";
 
 type Params = {
   zone: any;
   queue: ZoneBookingQueueItem[];
   matchrooms: ZoneMatchroomListItem[];
   requestFilter: RequestFilter;
-  assetFilter: AssetFilter;
+  gameFilter: GameFilter;
+  timeOfDayFilter: TimeOfDayFilter;
+  searchQuery: string;
   selectedRequestId: string | null;
   monthCursor: Date;
 };
@@ -64,7 +66,9 @@ export function useZoneBookingsViewModel({
   queue,
   matchrooms,
   requestFilter,
-  assetFilter,
+  gameFilter,
+  timeOfDayFilter,
+  searchQuery,
   selectedRequestId,
   monthCursor,
 }: Params) {
@@ -100,15 +104,46 @@ export function useZoneBookingsViewModel({
 
   const combinedQueue = queue;
 
-  const filteredQueue = useMemo(
-    () =>
-      combinedQueue.filter((item) => {
-        const requestOk = requestFilter === "all" ? true : item.status === requestFilter;
-        const assetOk = assetFilter === "all" ? true : item.assetType === assetFilter;
-        return requestOk && assetOk;
-      }),
-    [assetFilter, combinedQueue, requestFilter],
-  );
+  const filteredQueue = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const toClockHour = (value?: string | null) => {
+      const raw = String(value || "").trim();
+      const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (twelveHour) {
+        let hour = Number(twelveHour[1]) || 0;
+        const period = twelveHour[3].toUpperCase();
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        return hour;
+      }
+      const twentyFourHour = raw.match(/^(\d{1,2}):(\d{2})$/);
+      if (twentyFourHour) return Number(twentyFourHour[1]) || 0;
+      return null;
+    };
+
+    return combinedQueue.filter((item) => {
+      const requestOk = requestFilter === "all" ? true : item.status === requestFilter;
+      const gameOk = gameFilter === "all" ? true : item.gameKey === gameFilter;
+      const hour = toClockHour(item.preferredTime);
+      const timeOk =
+        timeOfDayFilter === "all" ||
+        hour === null ||
+        (timeOfDayFilter === "day" ? hour >= 6 && hour < 18 : hour < 6 || hour >= 18);
+      const searchOk =
+        normalizedSearch.length === 0 ||
+        [
+          item.title,
+          item.userName,
+          item.gameKey,
+          item.preferredTime,
+          ...(item.preferredAreas || []),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch);
+      return requestOk && gameOk && timeOk && searchOk;
+    });
+  }, [combinedQueue, gameFilter, requestFilter, searchQuery, timeOfDayFilter]);
 
   const selectedRequest = useMemo(
     () => combinedQueue.find((item) => item.id === selectedRequestId) || null,

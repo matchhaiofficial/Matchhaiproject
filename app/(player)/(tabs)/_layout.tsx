@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
-import { AppIcon } from "../../../src/components/AppIcon";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS, FONTS } from "../../../src/theme";
 import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
@@ -23,7 +23,6 @@ import { hasVerifiedEmail } from "../../../src/utils/emailVerificationGate";
 
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
-// Responsive helpers
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const isSmall = SCREEN_WIDTH < 360;
 const isLarge = SCREEN_WIDTH >= 428;
@@ -34,36 +33,28 @@ const LABEL_SIZE = isSmall ? 9 : 10;
 const H_PADDING = isSmall ? 10 : isLarge ? 28 : 16;
 const PILL_R = 22;
 
-// Tab definitions
-type TabDef = { name: string; label: string; icon: string };
+type TabDef = { name: string; label: string; icon: AppIconName };
 
 const TABS: TabDef[] = [
     { name: "index", label: "Home", icon: "home" },
-    { name: "discover", label: "Discover", icon: "explore" },
-    { name: "profile", label: "Profile", icon: "person" },
+    { name: "discover", label: "Discover", icon: "discover" },
+    { name: "profile", label: "Profile", icon: "profile" },
 ];
 
-// Custom Tab Bar
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const insets = useSafeAreaInsets();
 
     if (HIDE_PLAYER_TAB_BAR) return null;
 
     const visibleRoutes = state.routes.filter((route) => {
-        // 1. Must be in our explicit TABS list
-        if (!TABS.some((t) => t.name === route.name)) return false;
+        if (!TABS.some((tab) => tab.name === route.name)) return false;
 
-        // 2. ✅ KEY FIX: When Expo Router sets href:null, it injects
-        //    tabBarButton: () => null into the descriptor options.
-        //    We check for that here to respect the emailVerified guard on Discover.
         const opts = descriptors[route.key]?.options as any;
         if (opts?.tabBarButton !== undefined) {
-            // If tabBarButton is a function that returns null → hidden
             try {
                 const result = opts.tabBarButton({});
                 if (result === null) return false;
             } catch {
-                // If it throws, treat as hidden to be safe
                 return false;
             }
         }
@@ -81,21 +72,15 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                 { paddingBottom: bottomPad, paddingHorizontal: H_PADDING },
             ]}
         >
-            {/* Soft glow behind pill */}
             <View style={styles.glow} />
 
-            {/* Floating pill */}
             <View style={styles.pill}>
-                {/* Glass highlight on top edge */}
                 <View style={styles.pillHighlight} />
 
                 {visibleRoutes.map((route) => {
-                    const focusedIndex = state.routes.findIndex((r) => r.key === route.key);
+                    const focusedIndex = state.routes.findIndex((item) => item.key === route.key);
                     const isFocused = state.index === focusedIndex;
-
-                    const def = TABS.find((t) => t.name === route.name)!;
-                    const label = def.label;
-                    const icon = def.icon;
+                    const def = TABS.find((tab) => tab.name === route.name)!;
 
                     const handlePress = () => {
                         const event = navigation.emit({
@@ -103,6 +88,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                             target: route.key,
                             canPreventDefault: true,
                         });
+
                         if (!isFocused && !event.defaultPrevented) {
                             navigation.navigate(route.name);
                         }
@@ -119,7 +105,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
                             <View style={[styles.iconRow, isFocused && styles.iconRowActive]}>
                                 <AppIcon
-                                    name={icon as any}
+                                    name={def.icon}
                                     size={ICON_SIZE}
                                     color={isFocused ? COLORS.accent : "rgba(255,255,255,0.38)"}
                                 />
@@ -133,7 +119,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                                     isFocused ? styles.labelActive : styles.labelInactive,
                                 ]}
                             >
-                                {label}
+                                {def.label}
                             </Text>
 
                             {isFocused && <View style={styles.underlineBar} />}
@@ -145,7 +131,6 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     );
 }
 
-// Layout
 export default function PlayerTabsLayout() {
     const { user, authUser, loading } = useAuth();
 
@@ -185,7 +170,6 @@ export default function PlayerTabsLayout() {
     );
 }
 
-// Styles
 const styles = StyleSheet.create({
     outerWrap: {
         position: "absolute",
@@ -265,6 +249,7 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         marginBottom: 2,
     },
+
     iconRowActive: {
         transform: [{ translateY: -1 }],
     },
@@ -274,10 +259,12 @@ const styles = StyleSheet.create({
         letterSpacing: 0.2,
         textAlign: "center",
     },
+
     labelActive: {
         color: COLORS.accent,
         fontWeight: "700",
     },
+
     labelInactive: {
         color: "rgba(255,255,255,0.38)",
         fontWeight: "500",

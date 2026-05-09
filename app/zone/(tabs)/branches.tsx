@@ -1,5 +1,4 @@
 import { useRouter } from "expo-router";
-import { useQuery } from "convex/react";
 import React, { useMemo } from "react";
 import {
     ActivityIndicator,
@@ -8,30 +7,20 @@ import {
     Text,
     View,
 } from "react-native";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import Screen from "../../../src/components/Screen";
-import { api } from "../../../convex/_generated/api";
-import { Id } from "../../../convex/_generated/dataModel";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useZoneData } from "../../../src/hooks/useZoneData";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./branches.styles";
-
-const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
-const CUSTOM_TAB_BAR_MIN_HEIGHT = 72;
 
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
     const router = useRouter();
-    const insets = useSafeAreaInsets();
-    const tabBarHeight = useBottomTabBarHeight();
-    const bottomClearance = HIDE_ZONE_TAB_BAR
-        ? insets.bottom + 16
-        : Math.max(tabBarHeight, insets.bottom + CUSTOM_TAB_BAR_MIN_HEIGHT) + 16;
+    const bottomContentPadding = useTabBarClearance(SPACING.lg);
 
     // Branches are stored as an array on the zone document in Convex.
     // The zone data from useZoneData already includes branches.
@@ -50,7 +39,7 @@ export default function ZoneBranches() {
         return !isZoneMigrationReady(zone) && branches.length > 0;
     }, [zone, branches.length]);
 
-    const headerLeadingSlot = <View style={styles.headerLeadingSlot} />;
+    const headerGhostAction = <View style={styles.headerGhostAction} />;
 
     if (loading) {
         return (
@@ -63,7 +52,7 @@ export default function ZoneBranches() {
     if (!zone) {
         return (
             <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
-                <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
+                <AppHeader title="Branches" rightAction={headerGhostAction} inlineTitle />
                 <View style={styles.emptyWrap}>
                     <Text style={styles.emptyTitle}>No zone found.</Text>
                 </View>
@@ -73,9 +62,9 @@ export default function ZoneBranches() {
 
     return (
         <Screen style={styles.screen} scroll={false} edges={['top']} contentStyle={styles.screenContent}>
-            <AppHeader title="Branches" leftAction={headerLeadingSlot} inlineTitle />
+            <AppHeader title="Branches" rightAction={headerGhostAction} inlineTitle />
             <ScrollView
-                contentContainerStyle={[styles.content, { paddingBottom: bottomClearance }]}
+                contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
                 showsVerticalScrollIndicator={false}
             >
                 <Text style={styles.branchCountLabel}>{branches.length} locations</Text>

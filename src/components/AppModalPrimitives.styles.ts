@@ -44,7 +44,7 @@ export default StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
     paddingHorizontal: SPACING.md,
-    paddingBottom: 0,
+    paddingBottom: SPACING.sm,
   },
   sheet: {
     backgroundColor: COLORS.cardDark,
@@ -99,6 +99,8 @@ export default StyleSheet.create({
   },
   bodyScroll: {
     flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
   bodyScrollWrap: {
     // The wrapper participates in the card layout so the body keeps its
@@ -110,6 +112,7 @@ export default StyleSheet.create({
     paddingHorizontal: SPACING.xl,
     paddingTop: SPACING.lg,
     paddingBottom: SPACING.md,
+    flexShrink: 1,
   },
   footer: {
     paddingHorizontal: SPACING.xl,

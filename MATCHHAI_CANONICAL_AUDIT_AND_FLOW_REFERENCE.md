@@ -3851,3 +3851,176 @@ This section records the implemented broadcast-area matchroom flow added in the 
 
 - `npx convex codegen`
 - `npx tsc --noEmit --pretty false`
+
+<!-- ICON_INVENTORY_START -->
+
+## 99. Icon Inventory (Code-Scanned)
+
+Generated on: 2026-05-05
+Scope: scanned `app/` and `src/` for JSX usage of `<AppIcon ... />` and string literal `icon="..."` props.
+
+### Icon primitives detected
+
+- `@expo/vector-icons` import `FontAwesome5`: `app\(player)\profile\[uid].tsx`
+- `@expo/vector-icons` import `MaterialIcons`: `src\components\AppIcon.tsx`
+
+### Centralization work (so icons are easier to swap later)
+
+- Added `src/components/iconRegistry.ts` (shared icon constants).
+- Migrated a few high-traffic call sites to use `ICON.*` instead of string literals:
+  - `app/(player)/(tabs)/_layout.tsx`
+  - `src/ui/toastConfig.tsx`
+  - `src/components/AppModalPrimitives.tsx`
+  - `src/components/AppHeader.tsx`
+
+### `<AppIcon name="..." />` literal names
+
+- `check-circle` (14): `app\(player)\profile\[uid].tsx`, `app\(player)\profile\edit.tsx`, `app\auth\register-step4.tsx`, `app\auth\zone-register-step4.tsx`, `app\matchrooms\book\status\[intentId].tsx`, `app\matchrooms\create\components\RoleAutoFill.tsx`, `app\matchrooms\create\components\SkillBracketSection.tsx`, `app\matchrooms\create\components\TeamPicker.tsx`, `app\matchrooms\result.tsx`, `app\matchrooms\vote.tsx`, `app\super-admin\request\[id].tsx`, `app\zone\modules\migration-tools.tsx`, `app\zone\profile\edit.tsx`, `src\features\zoneAdmin\components\ZoneModuleScreen.tsx`
+- `location-on` (11): `app\(player)\(tabs)\profile.tsx`, `app\(player)\components\dashboard\DashboardVenueCard.tsx`, `app\(player)\profile\[uid].tsx`, `app\auth\zone-register-step2.tsx`, `app\matchrooms\components\MatchroomCard.tsx`, `app\matchrooms\components\MatchroomSummarySection.tsx`, `app\zone\(tabs)\profile.tsx`, `app\zone\branch\[id].tsx`, `app\zone\branch\new.tsx`, `src\features\discover\components\DiscoverZoneList.tsx`, `src\features\venues\components\VenueBranchCard.tsx`
+- `chevron-right` (10): `app\(player)\(tabs)\profile.tsx`, `app\(player)\components\dashboard\DashboardAlertRow.tsx`, `app\(player)\friends.tsx`, `app\matchrooms\book\[id].tsx`, `app\matchrooms\components\FriendPicker.tsx`, `app\matchrooms\components\MatchroomJoinTeamSheet.tsx`, `app\matchrooms\create\components\GameDynamicFields.tsx`, `app\zone\(tabs)\branches.tsx`, `app\zone\(tabs)\profile.tsx`, `src\components\SidebarMenu.tsx`
+- `search` (10): `app\(player)\(tabs)\discover.tsx`, `app\(player)\chatrooms.tsx`, `app\(player)\friends.tsx`, `app\(player)\my-teams.tsx`, `app\auth\zone-register-step2.tsx`, `app\matchrooms\components\FriendPicker.tsx`, `app\matchrooms\create\components\GameDynamicFields.tsx`, `app\matchrooms\create\components\ZonePicker.tsx`, `app\zone\branch\[id].tsx`, `app\zone\branch\new.tsx`
+- `sports-esports` (10): `app\(player)\(tabs)\profile.tsx`, `app\(player)\components\InboxNotificationCard.tsx`, `app\(player)\profile\edit.tsx`, `app\auth\register-step3.tsx`, `app\auth\zone-register.tsx`, `app\matchrooms\create\components\GameSelector.tsx`, `app\matchrooms\my.tsx`, `app\matchrooms\result.tsx`, `app\teams\challenges.tsx`, `src\components\GameActivationPromptModal.tsx`
+- `close` (9): `app\(player)\my-teams.tsx`, `app\(player)\profile\[uid].tsx`, `app\matchrooms\book\status\[intentId].tsx`, `app\zone\modules\components\ZoneBookingsCounterOfferSheets.tsx`, `app\zone\modules\components\ZoneBookingsRequestsSection.tsx`, `app\zone\modules\pricing.tsx`, `src\components\SidebarMenu.tsx`, `src\features\chat\ChatPinnedBanner.tsx`, `src\features\chat\ChatThread.tsx`
+- `lock` (8): `app\auth\login.tsx`, `app\auth\register.tsx`, `app\auth\reset-password.tsx`, `app\auth\zone-register.tsx`, `app\matchrooms\[id].tsx`, `app\matchrooms\components\MatchroomCard.tsx`, `app\matchrooms\create\index.tsx`, `app\teams\challenge-create.tsx`
+- `schedule` (8): `app\(player)\profile\[uid].tsx`, `app\matchrooms\book\status\[intentId].tsx`, `app\matchrooms\components\MatchroomCard.tsx`, `app\matchrooms\components\MatchroomSummarySection.tsx`, `app\matchrooms\my.tsx`, `app\zone\modules\components\ZoneBookingsCounterOfferSheets.tsx`, `app\zone\modules\pricing.tsx`, `app\zone\modules\settings.tsx`
+- `check` (7): `app\(player)\profile\[uid].tsx`, `app\matchrooms\book\status\[intentId].tsx`, `app\matchrooms\create\components\GameDynamicFields.tsx`, `app\teams\components\InviteFriendsSheet.tsx`, `app\zone\modules\components\ZoneBookingsAllocationSheet.tsx`, `app\zone\modules\components\ZoneBookingsRequestsSection.tsx`, `src\components\CustomSingleSelect.tsx`
+- `person` (7): `app\(player)\my-teams.tsx`, `app\auth\register-step3.tsx`, `app\auth\register.tsx`, `app\auth\zone-register.tsx`, `app\matchrooms\components\MatchroomFallbackRoster.tsx`, `app\matchrooms\create\components\TeamModeSelector.tsx`, `src\features\discover\components\DiscoverTeamList.tsx`
+- `add` (6): `app\(player)\(tabs)\discover.tsx`, `app\(player)\my-teams.tsx`, `app\zone\(tabs)\branches.tsx`, `app\zone\(tabs)\profile.tsx`, `app\zone\modules\components\ZoneBookingsCounterOfferSheets.tsx`, `src\features\chat\ChatThread.tsx`
+- `email` (6): `app\(player)\profile\edit.tsx`, `app\auth\forgot-password.tsx`, `app\auth\login.tsx`, `app\auth\register.tsx`, `app\auth\zone-register.tsx`, `app\zone\profile\edit.tsx`
+- `edit` (5): `app\matchrooms\[id].tsx`, `app\matchrooms\create\components\RoleAutoFill.tsx`, `app\teams\[id].tsx`, `app\zone\modules\components\ZoneBookingsRequestsSection.tsx`, `src\features\chat\ChatThread.tsx`
+- `error-outline` (5): `app\(player)\zones\[id].tsx`, `app\matchrooms\result.tsx`, `app\matchrooms\vote.tsx`, `app\zone\modules\bookings.tsx`, `app\zone\modules\migration-tools.tsx`
+- `groups` (5): `app\(player)\(tabs)\profile.tsx`, `app\(player)\components\dashboard\DashboardTeamCard.tsx`, `app\(player)\profile\[uid].tsx`, `app\matchrooms\components\MatchroomJoinTeamSheet.tsx`, `app\matchrooms\create\components\TeamModeSelector.tsx`
+- `phone` (5): `app\auth\register.tsx`, `app\auth\zone-register-step2.tsx`, `app\auth\zone-register.tsx`, `app\zone\branch\[id].tsx`, `app\zone\branch\new.tsx`
+- `cancel` (4): `app\auth\register-step4.tsx`, `app\auth\zone-register-step4.tsx`, `app\matchrooms\[id].tsx`, `app\teams\challenge.tsx`
+- `info-outline` (4): `app\(player)\profile\game-details.tsx`, `app\zone\modules\components\ZoneBookingsAllocationSheet.tsx`, `src\features\venues\components\VenueBranchCard.tsx`, `src\features\venues\components\VenueInfoSection.tsx`
+- `map` (4): `app\auth\zone-register-step2.tsx`, `app\auth\zone-register-step4.tsx`, `app\zone\branch\[id].tsx`, `app\zone\branch\new.tsx`
+- `storefront` (4): `app\auth\zone-register-step4.tsx`, `app\super-admin\request\[id].tsx`, `app\zone\(tabs)\profile.tsx`, `app\zone\modules\migration-tools.tsx`
+- `tune` (4): `app\(player)\(tabs)\discover.tsx`, `app\zone\modules\components\ZoneBookingsRequestsSection.tsx`, `app\zone\modules\pricing.tsx`, `app\zone\modules\resources.tsx`
+- `verified` (4): `app\(player)\(tabs)\profile.tsx`, `app\(player)\profile\[uid].tsx`, `app\(player)\profile\edit.tsx`, `app\(player)\profile\game-details.tsx`
+- `arrow-drop-down` (3): `app\matchrooms\create\components\GameDynamicFields.tsx`, `app\matchrooms\create\components\TeamPicker.tsx`, `src\components\CustomSingleSelect.tsx`
+- `arrow-forward` (3): `app\auth\login.tsx`, `app\matchrooms\my.tsx`, `app\teams\challenges.tsx`
+- `error` (3): `app\auth\register-step4.tsx`, `app\auth\zone-register-step4.tsx`, `app\matchrooms\book\status\[intentId].tsx`
+- `groups-2` (3): `app\(player)\(tabs)\index.tsx`, `app\(player)\components\InboxNotificationCard.tsx`, `app\matchrooms\components\MatchroomCard.tsx`
+- `logout` (3): `app\(player)\(tabs)\index.tsx`, `app\(player)\(tabs)\profile.tsx`, `app\zone\(tabs)\index.tsx`
+- `people` (3): `app\(player)\my-teams.tsx`, `app\matchrooms\my.tsx`, `app\teams\[id].tsx`
+- `report-problem` (3): `app\(player)\profile\[uid].tsx`, `app\matchrooms\[id].tsx`, `app\teams\[id].tsx`
+- `access-time` (2): `app\(player)\profile\[uid].tsx`, `app\matchrooms\components\MatchroomSuggestSheet.tsx`
+- `chat` (2): `app\(player)\friends.tsx`, `src\features\chat\ChatThread.tsx`
+- `emoji-events` (2): `app\(player)\(tabs)\profile.tsx`, `app\matchrooms\components\MatchroomTeamSection.tsx`
+- `forum` (2): `app\(player)\chatrooms.tsx`, `src\features\chat\ChatThread.tsx`
+- `insert-drive-file` (2): `src\features\chat\ChatAttachmentMenu.tsx`, `src\features\chat\ChatThread.tsx`
+- `lock-outline` (2): `app\(player)\(tabs)\index.tsx`, `app\(player)\chatrooms.tsx`
+- `menu` (2): `app\(player)\(tabs)\index.tsx`, `app\zone\(tabs)\index.tsx`
+- `notifications-none` (2): `app\(player)\(tabs)\index.tsx`, `app\zone\(tabs)\index.tsx`
+- `payments` (2): `app\matchrooms\book\pay\[intentId].tsx`, `app\zone\modules\settings.tsx`
+- `pending` (2): `app\(player)\profile\edit.tsx`, `app\zone\profile\edit.tsx`
+- `person-add` (2): `app\(player)\profile\[uid].tsx`, `app\teams\components\InviteFriendsSheet.tsx`
+- `phone-android` (2): `app\(player)\profile\edit.tsx`, `app\zone\profile\edit.tsx`
+- `radio-button-unchecked` (2): `app\auth\register-step4.tsx`, `app\auth\zone-register-step4.tsx`
+- `refresh` (2): `app\(player)\profile\game-details.tsx`, `app\matchrooms\book\status\[intentId].tsx`
+- `settings` (2): `app\(player)\(tabs)\profile.tsx`, `app\zone\(tabs)\profile.tsx`
+- `star` (2): `app\matchrooms\result.tsx`, `app\teams\components\RosterSlots.tsx`
+- `store` (2): `app\auth\zone-register-step2.tsx`, `app\zone\(tabs)\profile.tsx`
+- `sync` (2): `app\(player)\profile\[uid].tsx`, `app\zone\modules\migration-tools.tsx`
+- `verified-user` (2): `app\(player)\profile\[uid].tsx`, `app\matchrooms\create\index.tsx`
+- `warning` (2): `app\matchrooms\[id].tsx`, `app\teams\[id].tsx`
+- `account-balance-wallet` (1): `app\matchrooms\book\pay\[intentId].tsx`
+- `add-circle-outline` (1): `app\(player)\profile\[uid].tsx`
+- `alternate-email` (1): `app\auth\register.tsx`
+- `arrow-back` (1): `src\features\chat\ChatThread.tsx`
+- `attach-money` (1): `app\matchrooms\components\MatchroomSummarySection.tsx`
+- `bar-chart` (1): `app\matchrooms\components\MatchroomSummarySection.tsx`
+- `block` (1): `app\matchrooms\result.tsx`
+- `bolt` (1): `app\(player)\components\InboxNotificationCard.tsx`
+- `broadcast-on-personal` (1): `app\matchrooms\create\components\LocationModeSelector.tsx`
+- `cake` (1): `app\(player)\(tabs)\profile.tsx`
+- `calendar-month` (1): `app\zone\modules\components\ZoneBookingsCounterOfferSheets.tsx`
+- `calendar-today` (1): `app\matchrooms\components\MatchroomSuggestSheet.tsx`
+- `chat-bubble-outline` (1): `app\teams\challenge.tsx`
+- `construction` (1): `app\zone\modules\settings.tsx`
+- `delete` (1): `app\(player)\components\InboxSwipeableRow.tsx`
+- `delete-sweep` (1): `app\(player)\inbox.tsx`
+- `event` (1): `app\zone\modules\pricing.tsx`
+- `file-download` (1): `src\features\chat\ChatThread.tsx`
+- `group` (1): `app\matchrooms\book\status\[intentId].tsx`
+- `group-off` (1): `app\(player)\my-teams.tsx`
+- `hourglass-top` (1): `app\matchrooms\book\status\[intentId].tsx`
+- `inbox` (1): `app\(player)\components\InboxEmptyState.tsx`
+- `inventory` (1): `app\auth\zone-register-step4.tsx`
+- `keyboard-arrow-down` (1): `app\auth\zone-register-step2.tsx`
+- `keyboard-arrow-up` (1): `app\auth\zone-register-step2.tsx`
+- `launch` (1): `app\(player)\profile\[uid].tsx`
+- `link` (1): `app\auth\register-step3.tsx`
+- `mark-email-unread` (1): `app\(player)\(tabs)\index.tsx`
+- `mood` (1): `src\features\chat\ChatThread.tsx`
+- `more-horiz` (1): `src\features\chat\ChatThread.tsx`
+- `more-vert` (1): `app\matchrooms\components\MatchroomTeamSection.tsx`
+- `payment` (1): `app\matchrooms\book\status\[intentId].tsx`
+- `person-add-alt` (1): `app\teams\components\RosterSlots.tsx`
+- `person-add-disabled` (1): `app\matchrooms\components\MatchroomInviteSheet.tsx`
+- `person-off` (1): `app\(player)\profile\[uid].tsx`
+- `person-outline` (1): `app\(player)\components\InboxNotificationCard.tsx`
+- `photo` (1): `src\features\chat\ChatAttachmentMenu.tsx`
+- `photo-camera` (1): `app\teams\[id].tsx`
+- `place` (1): `app\matchrooms\create\components\LocationModeSelector.tsx`
+- `policy` (1): `app\zone\modules\settings.tsx`
+- `push-pin` (1): `src\features\chat\ChatPinnedBanner.tsx`
+- `reply` (1): `src\features\chat\SwipeableMessageRow.tsx`
+- `security` (1): `app\matchrooms\book\pay\[intentId].tsx`
+- `sensors` (1): `app\zone\modules\insights.tsx`
+- `shield` (1): `app\(player)\profile\[uid].tsx`
+- `swap-horiz` (1): `app\auth\login.tsx`
+- `tips-and-updates` (1): `src\features\zoneAdmin\components\ZoneModuleScreen.tsx`
+- `videogame-asset` (1): `app\matchrooms\result.tsx`
+
+### String literal `icon="..."` props (potential icon forwards)
+
+- `storefront` (3): `app\super-admin\(tabs)\index.tsx`, `app\super-admin\request\[id].tsx`, `app\zone\(tabs)\index.tsx`
+- `cake` (2): `app\(player)\profile\edit.tsx`, `app\auth\register.tsx`
+- `check-circle` (2): `app\(player)\profile\[uid].tsx`, `src\features\discover\components\DiscoverPlayerList.tsx`
+- `delete-outline` (2): `app\matchrooms\[id].tsx`, `app\teams\[id].tsx`
+- `inbox` (2): `app\(player)\(tabs)\index.tsx`, `app\(player)\components\dashboard\DashboardAtGlancePanel.tsx`
+- `receipt-long` (2): `app\super-admin\(tabs)\index.tsx`, `app\super-admin\easypaisa.tsx`
+- `schedule` (2): `app\(player)\profile\[uid].tsx`, `src\features\discover\components\DiscoverPlayerList.tsx`
+- `search-off` (2): `src\features\discover\components\DiscoverPlayerList.tsx`, `src\features\discover\components\DiscoverTeamList.tsx`
+- `share` (2): `app\matchrooms\[id].tsx`, `app\teams\[id].tsx`
+- `sports-esports` (2): `app\zone\(tabs)\index.tsx`, `src\features\discover\components\DiscoverMatchroomList.tsx`
+- `account-balance-wallet` (1): `app\(player)\components\dashboard\DashboardAtGlancePanel.tsx`
+- `add-circle` (1): `app\(player)\(tabs)\index.tsx`
+- `assessment` (1): `app\(player)\profile\[uid].tsx`
+- `bolt` (1): `app\zone\(tabs)\index.tsx`
+- `cancel` (1): `app\(player)\profile\[uid].tsx`
+- `chat` (1): `app\matchrooms\[id].tsx`
+- `close` (1): `app\(player)\(tabs)\discover.tsx`
+- `emoji-events` (1): `app\(player)\profile\[uid].tsx`
+- `event` (1): `app\(player)\(tabs)\index.tsx`
+- `exit-to-app` (1): `app\matchrooms\[id].tsx`
+- `flag` (1): `app\matchrooms\[id].tsx`
+- `grid-view` (1): `app\(player)\profile\[uid].tsx`
+- `group` (1): `app\super-admin\(tabs)\index.tsx`
+- `groups` (1): `app\(player)\profile\[uid].tsx`
+- `hourglass-empty` (1): `app\zone\(tabs)\index.tsx`
+- `inventory-2` (1): `src\components\AdminSurface.tsx`
+- `notifications-active` (1): `app\zone\modules\notifications.tsx`
+- `pending-actions` (1): `app\zone\(tabs)\index.tsx`
+- `person` (1): `app\(player)\profile\[uid].tsx`
+- `person-add` (1): `src\features\discover\components\DiscoverPlayerList.tsx`
+- `person-add-alt-1` (1): `app\teams\[id].tsx`
+- `pie-chart` (1): `app\(player)\profile\[uid].tsx`
+- `place` (1): `app\(player)\profile\[uid].tsx`
+- `report-gmailerrorred` (1): `app\zone\(tabs)\index.tsx`
+- `report-problem` (1): `app\super-admin\(tabs)\index.tsx`
+- `search` (1): `app\(player)\(tabs)\index.tsx`
+- `shield` (1): `app\(player)\profile\[uid].tsx`
+- `sports-cricket` (1): `app\(player)\profile\[uid].tsx`
+- `sports-tennis` (1): `app\(player)\profile\[uid].tsx`
+- `star` (1): `app\(player)\profile\[uid].tsx`
+- `store-mall-directory` (1): `src\features\discover\components\DiscoverZoneList.tsx`
+- `trending-up` (1): `app\(player)\profile\[uid].tsx`
+
+### `FontAwesome5` usages
+
+- `FontAwesome5 name={icon}` (1): `app\(player)\profile\[uid].tsx`
+
+<!-- ICON_INVENTORY_END -->
+

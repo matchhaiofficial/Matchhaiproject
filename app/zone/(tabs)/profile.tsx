@@ -1,10 +1,12 @@
-import { useRouter } from "expo-router";
-import React, { useMemo } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Pressable,
     ScrollView,
     Text,
+    TextInput,
     View,
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -13,12 +15,22 @@ import Animated from "react-native-reanimated";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
-import { AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import {
+    AppDialog,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
+import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { useEntrance } from "../../../src/motion/useEntrance";
-import { COLORS } from "../../../src/theme";
+import { signOutUser } from "../../../src/services/authService";
+import { requestZoneWithdrawal } from "../../../src/services/convex/zoneWithdrawalService";
+import { COLORS, SPACING } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
@@ -77,10 +89,12 @@ const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
 export default function ZoneProfile() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ withdraw?: string | string[] }>();
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
     const { user } = useAuth();
     const { zone, loading } = useZoneData();
+    const { showToast } = useToast();
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -91,6 +105,12 @@ export default function ZoneProfile() {
         bottomInset: insets.bottom,
         tabBarHeight: HIDE_ZONE_TAB_BAR ? 0 : tabBarHeight,
     });
+    const [withdrawVisible, setWithdrawVisible] = useState(false);
+    const [withdrawAmount, setWithdrawAmount] = useState("");
+    const [withdrawBranchId, setWithdrawBranchId] = useState("");
+    const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const tabBarScrollClearance = useTabBarClearance(SPACING.lg);
+    const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.lg, tabBarScrollClearance);
 
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
@@ -99,6 +119,20 @@ export default function ZoneProfile() {
             ...branch,
         }));
     }, [zone?.branches]);
+    const walletBalance = Number((user as any)?.walletBalance || 0);
+
+    useEffect(() => {
+        const shouldOpen = Array.isArray(params.withdraw) ? params.withdraw[0] : params.withdraw;
+        if (shouldOpen === "1") {
+            setWithdrawVisible(true);
+        }
+    }, [params.withdraw]);
+
+    useEffect(() => {
+        if (!withdrawBranchId && branches[0]?.id) {
+            setWithdrawBranchId(branches[0].id);
+        }
+    }, [branches, withdrawBranchId]);
 
     const venueName = zone?.venueBrandName || "Zone Venue";
     const ownerName = zone?.ownerFullName || user?.fullName || "Zone Admin";
@@ -106,6 +140,64 @@ export default function ZoneProfile() {
     const city = zone?.primaryBranch?.city || branches[0]?.city || "";
     const locationLabel = [primaryArea, city].filter(Boolean).join(", ");
     const branchCountLabel = `${branches.length} branch${branches.length === 1 ? "" : "es"}`;
+    const selectedWithdrawBranch = branches.find((branch: any) => branch.id === withdrawBranchId) || branches[0] || null;
+    const parsedWithdrawAmount = Number(String(withdrawAmount).replace(/[^\d.]/g, ""));
+    const canSubmitWithdrawal =
+        Boolean(user?._id) &&
+        Boolean(selectedWithdrawBranch) &&
+        Number.isFinite(parsedWithdrawAmount) &&
+        parsedWithdrawAmount > 0 &&
+        parsedWithdrawAmount <= walletBalance;
+
+    const closeWithdrawModal = () => {
+        if (withdrawSubmitting) return;
+        setWithdrawVisible(false);
+        setWithdrawAmount("");
+    };
+
+    const submitWithdrawRequest = async () => {
+        if (!user?._id || !selectedWithdrawBranch || !canSubmitWithdrawal) return;
+        setWithdrawSubmitting(true);
+        const result = await requestZoneWithdrawal({
+            userId: user._id,
+            zoneId: zone?.id,
+            branchId: selectedWithdrawBranch.id,
+            branchName: getBranchDisplayName(selectedWithdrawBranch),
+            amount: parsedWithdrawAmount,
+            ownerName,
+            ownerEmail: zone?.contactEmail || user?.email,
+            venueName,
+        });
+        setWithdrawSubmitting(false);
+        if (!result.ok) {
+            showToast({ type: "error", title: "Request failed", message: result.message });
+            return;
+        }
+        showToast({
+            type: "success",
+            title: "Request sent",
+            message: "Your withdrawal request was sent to MatchHai admin.",
+        });
+        closeWithdrawModal();
+    };
+
+    const handleLogout = () => {
+        Alert.alert("Logout", "Are you sure you want to logout?", [
+            { text: "Cancel", style: "cancel" },
+            {
+                text: "Logout",
+                style: "destructive",
+                onPress: async () => {
+                    const result = await signOutUser();
+                    if (result.ok) {
+                        router.replace("/auth/login");
+                    } else {
+                        showToast({ type: "error", title: "Logout Failed", message: result.message });
+                    }
+                },
+            },
+        ]);
+    };
 
     if (loading) {
         return (
@@ -138,7 +230,7 @@ export default function ZoneProfile() {
             routeKey="/zone/(tabs)/profile"
             contentStyle={[
                 styles.scrollContent,
-                { paddingBottom: bottomChromeClearance + 24 },
+                { paddingBottom: profileBottomPadding },
             ]}
             edges={["top"]}
             scrollProps={{ showsVerticalScrollIndicator: false }}
@@ -194,6 +286,15 @@ export default function ZoneProfile() {
                         actionLabel="Add"
                         onPress={() => router.push("/zone/branch/new" as any)}
                     />
+                    <View style={styles.branchActionsRow}>
+                        <Pressable
+                            style={styles.withdrawInlineButton}
+                            onPress={() => setWithdrawVisible(true)}
+                        >
+                            <AppIcon name="wallet" size={18} color={COLORS.accent} />
+                            <Text style={styles.withdrawInlineText}>Withdraw request</Text>
+                        </Pressable>
+                    </View>
 
                     <ScrollView
                         horizontal
@@ -257,7 +358,80 @@ export default function ZoneProfile() {
                         )}
                     </ScrollView>
                 </View>
+
+                <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
+                    <AppIcon name="logout" size={20} color={COLORS.error} />
+                    <Text style={styles.logoutButtonText}>Logout</Text>
+                </AppButton>
             </Animated.View>
+
+            <AppDialog
+                visible={withdrawVisible}
+                onClose={closeWithdrawModal}
+                dismissDisabled={withdrawSubmitting}
+                cardStyle={styles.withdrawDialog}
+            >
+                <AppModalHeader
+                    title="Withdraw request"
+                    subtitle={`Wallet balance: PKR ${Math.round(walletBalance).toLocaleString("en-US")}`}
+                    onClose={closeWithdrawModal}
+                    closeDisabled={withdrawSubmitting}
+                />
+                <AppModalBody scroll contentContainerStyle={styles.withdrawBody}>
+                    <Text style={styles.withdrawLabel}>Branch</Text>
+                    <View style={styles.withdrawBranchWrap}>
+                        {branches.map((branch: any) => {
+                            const selected = branch.id === withdrawBranchId;
+                            return (
+                                <Pressable
+                                    key={branch.id}
+                                    onPress={() => setWithdrawBranchId(branch.id)}
+                                    style={[styles.withdrawBranchChip, selected && styles.withdrawBranchChipActive]}
+                                >
+                                    <Text style={[styles.withdrawBranchChipText, selected && styles.withdrawBranchChipTextActive]}>
+                                        {getBranchDisplayName(branch)}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                    <Text style={styles.withdrawLabel}>Amount</Text>
+                    <View style={styles.withdrawInputBox}>
+                        <Text style={styles.withdrawCurrency}>PKR</Text>
+                        <TextInput
+                            style={styles.withdrawInput}
+                            value={withdrawAmount}
+                            onChangeText={setWithdrawAmount}
+                            keyboardType="numeric"
+                            placeholder="Enter amount"
+                            placeholderTextColor={COLORS.muted}
+                        />
+                    </View>
+                    {parsedWithdrawAmount > walletBalance ? (
+                        <Text style={styles.withdrawWarning}>Amount cannot exceed your wallet balance.</Text>
+                    ) : null}
+                </AppModalBody>
+                <AppModalFooter style={styles.withdrawFooter}>
+                    <Pressable
+                        style={[styles.withdrawAction, styles.withdrawCancelAction]}
+                        onPress={closeWithdrawModal}
+                        disabled={withdrawSubmitting}
+                    >
+                        <Text style={styles.withdrawCancelText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                        style={[styles.withdrawAction, styles.withdrawSubmitAction, !canSubmitWithdrawal && styles.withdrawSubmitDisabled]}
+                        onPress={submitWithdrawRequest}
+                        disabled={!canSubmitWithdrawal || withdrawSubmitting}
+                    >
+                        {withdrawSubmitting ? (
+                            <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                            <Text style={styles.withdrawSubmitText}>Send request</Text>
+                        )}
+                    </Pressable>
+                </AppModalFooter>
+            </AppDialog>
         </Screen>
     );
 }

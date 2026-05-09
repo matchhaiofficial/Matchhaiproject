@@ -71,10 +71,8 @@ export function useMatchroomDetailViewModel({
     !!captainUidAResolved &&
     identityMatches(captainUidAResolved, currentIdentityValues);
   const canInviteTeamB =
-    currentIdentityValues.some(Boolean) &&
-    (!!captainUidBResolved
-      ? identityMatches(captainUidBResolved, currentIdentityValues)
-      : isHost);
+    !!captainUidBResolved &&
+    identityMatches(captainUidBResolved, currentIdentityValues);
 
   const getSkillBadgeProps = useCallback(
     (uid?: string, fallbackTierRaw?: unknown): SkillBadgeProps => {

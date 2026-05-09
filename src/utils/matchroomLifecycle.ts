@@ -40,24 +40,13 @@ export function parseScheduledStartAt(room: any): Date | null {
 }
 
 export function getRoomLockAt(room: any): Date | null {
-    const explicit = toDate(room?.lockAt);
-    if (explicit) return explicit;
-
-    const startAt = parseScheduledStartAt(room);
-    if (!startAt) return null;
-    return new Date(startAt.getTime() - ONE_DAY_MS);
+    // Testing mode: do not time-lock matchrooms before their scheduled start.
+    return null;
 }
 
 export function getRoomExpiresAt(room: any): Date | null {
-    const explicit = toDate(room?.expiresAt);
-    if (explicit) return explicit;
-
-    const lockAt = getRoomLockAt(room);
-    if (lockAt) return lockAt;
-
-    const createdAt = getRoomCreatedAt(room);
-    if (!createdAt) return null;
-    return new Date(createdAt.getTime() + ROOM_TTL_MS);
+    // Testing mode: matchrooms should not expire while validating payment/admin flows.
+    return null;
 }
 
 /**
@@ -112,15 +101,8 @@ export function isRoomFull(room: any): boolean {
  * @returns true if room is expired
  */
 export function isRoomExpired(room: any, now = new Date()): boolean {
-    // Already marked as expired
-    if (room.status === 'expired') return true;
-
-    // Full rooms don't expire
-    if (isRoomFull(room)) return false;
-
-    const expiresAt = getRoomExpiresAt(room);
-    if (!expiresAt) return false;
-    return now.getTime() >= expiresAt.getTime();
+    // Testing mode: disable computed/explicit matchroom expiry.
+    return false;
 }
 
 /**
@@ -141,9 +123,7 @@ export function isRoomLocked(room: any, now = new Date()): boolean {
     // Expired rooms aren't treated as locked for join logic
     if (isRoomExpired(room, now)) return false;
 
-    // Time lock (24h before match)
-    const lockAt = getRoomLockAt(room);
-    if (lockAt && now.getTime() >= lockAt.getTime()) return true;
+    // Testing mode: time locking is disabled.
 
     // Full = locked
     return isRoomFull(room);
@@ -158,6 +138,7 @@ export function isRoomLocked(room: any, now = new Date()): boolean {
 export function getRoomDisplayStatus(room: any): string {
     if (isRoomExpired(room)) return 'expired';
     if (isRoomLocked(room)) return 'locked';
+    if (room.status === 'expired') return 'open';
     return room.status || 'open';
 }
 

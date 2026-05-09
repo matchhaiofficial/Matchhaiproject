@@ -1,13 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
-import { Dimensions } from "react-native";
-
-const SCREEN_W = Dimensions.get("window").width;
-const GRID_GAP = 8;
-// No extra paddingHorizontal on the grid — parent container already has it
-// Subtract a small buffer (12px each side) for the parent's padding
-const CARD_W = (SCREEN_W - 24 - GRID_GAP) / 2.2;
-const CARD_H = Math.round(CARD_W * 1.15);
+import { COLORS, CONTROL_SIZES, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -15,11 +7,8 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     screenContent: {
-        flex: 1,        // ← add this
-        paddingTop: 0,
-        paddingBottom: 0,
-    },
-    container: {
+        flex: 1,
+        paddingTop: 10,
         paddingBottom: 0,
     },
     zoneAdmincontainer: {
@@ -45,7 +34,7 @@ export default StyleSheet.create({
     },
     rejectReason: {
         color: COLORS.error,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.caption,
         textAlign: "center",
     },
@@ -89,9 +78,9 @@ export default StyleSheet.create({
     heroCard: {
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         backgroundColor: COLORS.cardDark,
-        padding: SPACING.md,
+        padding: SPACING.lg,
         marginBottom: SPACING.md,
     },
     heroRow: {
@@ -99,14 +88,14 @@ export default StyleSheet.create({
         alignItems: "center",
     },
     avatarIconWrap: {
-        width: 54,
-        height: 54,
+        width: 58,
+        height: 58,
         borderRadius: 18,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "rgba(66,165,245,0.15)",
+        backgroundColor: `${COLORS.accent}14`,
         borderWidth: 1,
-        borderColor: "rgba(66,165,245,0.38)",
+        borderColor: `${COLORS.accent}55`,
     },
     heroTextWrap: {
         marginLeft: SPACING.md,
@@ -114,41 +103,84 @@ export default StyleSheet.create({
     },
     heroEyebrow: {
         color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.xs,
+        fontFamily: FONTS.interMedium,
+        fontSize: 11,
         textTransform: "uppercase",
         letterSpacing: 1,
     },
     heroTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.lg,
+        fontSize: 22,
         marginTop: 2,
     },
     heroSubtitle: {
         color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.caption,
         marginTop: 2,
     },
     tagsRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        marginTop: SPACING.sm,
+        marginTop: SPACING.md,
         gap: SPACING.sm,
     },
-    coreGrid: {
+    snapshotPanel: {
+        width: "100%",
         flexDirection: "row",
         flexWrap: "wrap",
-        justifyContent: "space-between",
-        gap: SPACING.sm,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
+        backgroundColor: COLORS.cardDark,
+        overflow: "hidden",
         marginBottom: SPACING.md,
     },
-    coreCard: {
-        width: "48%",
+    snapshotItem: {
+        width: "50%",
+        minHeight: 62,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.md,
+    },
+    snapshotItemLeft: {
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderRightColor: COLORS.cardBorder,
+    },
+    snapshotItemTop: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: COLORS.cardBorder,
+    },
+    snapshotIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    snapshotTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    snapshotLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interMedium,
+        fontSize: 11,
+        lineHeight: 14,
+    },
+    snapshotValue: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: 19,
+        lineHeight: 23,
+        marginTop: 1,
     },
     section: {
-        marginTop: SPACING.sm,
+        marginTop: SPACING.lg,
     },
     matchroomsWrap: {
         gap: SPACING.sm,
@@ -156,23 +188,12 @@ export default StyleSheet.create({
     moduleGrid: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: GRID_GAP,
+        justifyContent: "space-between",
+        alignItems: "stretch",
     },
     moduleCard: {
-        width: CARD_W,
-        height: CARD_H,
-        overflow: "hidden",  // clips content neatly if it overflows
-    },
-    opsGrid: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: GRID_GAP,
-    },
-    opsTile: {
-        width: CARD_W,
-        height: Math.round(CARD_W * 1.0), // slightly shorter for ops cards
-        overflow: "hidden",
+        width: "48.5%",
+        minHeight: 122,
+        marginBottom: SPACING.md,
     },
 });
-
-

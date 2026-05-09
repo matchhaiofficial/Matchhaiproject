@@ -40,10 +40,15 @@ export default function SuperAdminLayout() {
                 contentStyle: { backgroundColor: COLORS.backgroundDark },
             }}
         >
-            <Stack.Screen name="(tabs)/index" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="easypaisa" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="request/[id]" options={{ presentation: 'modal' }} />
             <Stack.Screen name="report/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="support-tickets" options={{ headerShown: false }} />
+            <Stack.Screen name="support-ticket/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="matchrooms" options={{ headerShown: false }} />
+            <Stack.Screen name="matchroom/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="support" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
     );
 }

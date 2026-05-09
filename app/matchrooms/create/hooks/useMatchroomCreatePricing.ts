@@ -24,11 +24,14 @@ type FormDataShape = {
   overs: string;
   seriesType: string;
   pricePerPlayer: number;
+  date?: string;
+  time?: string;
 };
 
 type Params<T extends FormDataShape> = {
   selectedZoneId: string | null;
   selectedZone: Zone | null;
+  selectedBranchId?: string | null;
   selectedGame: string | null;
   seriesType: string;
   duration: number;
@@ -52,9 +55,49 @@ const formatCategoryLabel = (value: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 
+const resolvePricingDate = (formData: FormDataShape) => {
+  const date = String(formData.date || "").trim();
+  const time = String(formData.time || "00:00").trim();
+  if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) return new Date();
+  const normalizedTime = time.match(/^\d{1,2}:\d{2}$/) ? time : "00:00";
+  const parsed = new Date(`${date}T${normalizedTime}`);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
+const setPricePerPlayerIfChanged = <T extends FormDataShape>(
+  setFormData: React.Dispatch<React.SetStateAction<T>>,
+  nextPrice: number,
+) => {
+  setFormData((prev) => {
+    if (prev.pricePerPlayer === nextPrice) return prev;
+    return { ...prev, pricePerPlayer: nextPrice };
+  });
+};
+
+const zoneRateOptionsEqual = (
+  left: ZoneRateOption[],
+  right: ZoneRateOption[],
+) => {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return (
+      other &&
+      item.key === other.key &&
+      item.label === other.label &&
+      item.price === other.price &&
+      item.detailLabel === other.detailLabel &&
+      item.resourceContext.assetType === other.resourceContext.assetType &&
+      item.resourceContext.tier === other.resourceContext.tier &&
+      item.resourceContext.surface === other.resourceContext.surface
+    );
+  });
+};
+
 export function useMatchroomCreatePricing<T extends FormDataShape>({
   selectedZoneId,
   selectedZone,
+  selectedBranchId,
   selectedGame,
   seriesType,
   duration,
@@ -99,7 +142,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         BO10: 10,
       };
       const hours = hoursMap[seriesType] || 1;
-      setFormData((prev) => ({ ...prev, pricePerPlayer: zoneRate * hours }));
+      setPricePerPlayerIfChanged(setFormData, zoneRate * hours);
       return;
     }
 
@@ -113,10 +156,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       const hours = hoursMap[seriesType] || 1;
       const totalConsoleCost = zoneRate * hours;
       const divisor = formData.format === "2v2" ? 4 : 2;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: totalConsoleCost / divisor,
-      }));
+      setPricePerPlayerIfChanged(setFormData, totalConsoleCost / divisor);
       return;
     }
 
@@ -132,10 +172,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       const hours = hoursMap[seriesType] || 1;
       const totalConsoleCost = zoneRate * hours;
       const divisor = formData.format === "2v2" ? 4 : 2;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: totalConsoleCost / divisor,
-      }));
+      setPricePerPlayerIfChanged(setFormData, totalConsoleCost / divisor);
       return;
     }
 
@@ -143,10 +180,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       const totalCourtCost = zoneRate * duration;
       const pricePerPlayer =
         formData.maxPlayers > 0 ? totalCourtCost / formData.maxPlayers : 0;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: Math.ceil(pricePerPlayer),
-      }));
+      setPricePerPlayerIfChanged(setFormData, Math.ceil(pricePerPlayer));
       return;
     }
 
@@ -155,10 +189,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       const totalCourtCost = zoneRate * calcDuration;
       const pricePerPlayer =
         formData.maxPlayers > 0 ? totalCourtCost / formData.maxPlayers : 0;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: Math.ceil(pricePerPlayer),
-      }));
+      setPricePerPlayerIfChanged(setFormData, Math.ceil(pricePerPlayer));
       return;
     }
 
@@ -171,10 +202,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         BO10: 3,
       };
       const hours = hoursMap[seriesKey || ""] || 1;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: Math.ceil((zoneRate * hours) / 4),
-      }));
+      setPricePerPlayerIfChanged(setFormData, Math.ceil((zoneRate * hours) / 4));
       return;
     }
 
@@ -188,10 +216,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       };
       const hours = hoursMap[seriesKey || ""] || 1;
       const players = formData.format === "2v2" ? 4 : 2;
-      setFormData((prev) => ({
-        ...prev,
-        pricePerPlayer: Math.ceil((zoneRate * hours) / players),
-      }));
+      setPricePerPlayerIfChanged(setFormData, Math.ceil((zoneRate * hours) / players));
     }
   }, [
     duration,
@@ -214,12 +239,18 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       return;
     }
 
+    const selectedBranch =
+      selectedBranchId && Array.isArray(selectedZone.branches)
+        ? (selectedZone.branches as any[]).find((branch) => String(branch?.id || "") === String(selectedBranchId))
+        : null;
+    const pricingBranch = selectedBranch || (selectedZone.branches?.[0] as any) || null;
     const pricingSources = [
-      (selectedZone.branches?.[0] as any)?.pricing,
+      pricingBranch?.pricing,
       selectedZone.pricing,
     ].filter(Boolean);
     const options: ZoneRateOption[] = [];
-    const branchId = selectedZone.branches?.[0]?.id || null;
+    const branchId = pricingBranch?.id || selectedBranchId || null;
+    const pricingDate = resolvePricingDate(formData);
 
     const formatLabel = formData.format === "2v2" ? "2v2" : "1v1";
     const priceKey = formData.format === "2v2" ? "price2v2" : "price1v1";
@@ -243,7 +274,7 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       if (!price) return;
 
       const resolved = applyPricingRulesToRate(price, zonePricingRules, {
-        at: new Date(),
+        at: pricingDate,
         assetType: context.assetType,
         branchId,
         tier: context.tier || null,
@@ -271,20 +302,25 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       addOption("pc:regular", "Regular", pc?.regular?.price, {
         assetType: "pc",
         tier: "regular",
+        surface: "5v5",
       });
       addOption("pc:premium", "Premium", pc?.premium?.price, {
         assetType: "pc",
         tier: "premium",
+        surface: "5v5",
       });
       addOption("pc:elite", "Elite", pc?.elite?.price, {
         assetType: "pc",
         tier: "elite",
+        surface: "5v5",
       });
     } else if (selectedGame === "fc26" || selectedGame === "tekken8") {
       const console = getPricingBucket("console");
       const regular = console.regular || {};
       const premium = console.premium || {};
       const elite = console.elite || {};
+      const ps5 = console.ps5 || {};
+      const xbox = console.xbox || {};
 
       const regularPrice = getFirstPositivePrice(
         regular?.[priceKey],
@@ -301,18 +337,42 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
         elite?.[otherPriceKey],
         elite?.price,
       );
+      const ps5Price = getFirstPositivePrice(
+        ps5?.[priceKey],
+        ps5?.[otherPriceKey],
+        ps5?.price,
+      );
+      const xboxPrice = getFirstPositivePrice(
+        xbox?.[priceKey],
+        xbox?.[otherPriceKey],
+        xbox?.price,
+      );
+      const consoleSurface = formData.format === "2v2" ? "2v2" : "1v1";
 
       addOption("console:regular", `Regular (${formatLabel})`, regularPrice, {
         assetType: "console",
         tier: "regular",
+        surface: consoleSurface,
       });
       addOption("console:premium", `Premium (${formatLabel})`, premiumPrice, {
         assetType: "console",
         tier: "premium",
+        surface: consoleSurface,
       });
       addOption("console:elite", `Elite (${formatLabel})`, elitePrice, {
         assetType: "console",
         tier: "elite",
+        surface: consoleSurface,
+      });
+      addOption("console:ps5", `PS5 (${formatLabel})`, ps5Price, {
+        assetType: "console",
+        tier: "ps5",
+        surface: consoleSurface,
+      });
+      addOption("console:xbox", `Xbox (${formatLabel})`, xboxPrice, {
+        assetType: "console",
+        tier: "xbox",
+        surface: consoleSurface,
       });
     } else if (selectedGame === "futsal") {
       const futsal = getPricingBucket("futsal");
@@ -357,33 +417,36 @@ export function useMatchroomCreatePricing<T extends FormDataShape>({
       });
     }
 
-    setZoneRateOptions(options);
+    setZoneRateOptions((prev) => (zoneRateOptionsEqual(prev, options) ? prev : options));
     if (options.length === 0) {
-      setSelectedZoneRateKey(null);
-      setZoneRate(0);
+      setSelectedZoneRateKey((prev) => (prev === null ? prev : null));
+      setZoneRate((prev) => (prev === 0 ? prev : 0));
       return;
     }
 
     if (selectedZoneRateKey) {
       const match = options.find((opt) => opt.key === selectedZoneRateKey);
       if (match) {
-        setZoneRate(match.price);
+        setZoneRate((prev) => (prev === match.price ? prev : match.price));
         return;
       }
     }
 
     if (options.length === 1) {
-      setSelectedZoneRateKey(options[0].key);
-      setZoneRate(options[0].price);
+      setSelectedZoneRateKey((prev) => (prev === options[0].key ? prev : options[0].key));
+      setZoneRate((prev) => (prev === options[0].price ? prev : options[0].price));
       return;
     }
 
-    setSelectedZoneRateKey(null);
-    setZoneRate(0);
+    setSelectedZoneRateKey((prev) => (prev === null ? prev : null));
+    setZoneRate((prev) => (prev === 0 ? prev : 0));
   }, [
     formData.format,
+    formData.date,
+    formData.time,
     selectedGame,
     selectedZone,
+    selectedBranchId,
     selectedZoneRateKey,
     zonePricingRules,
   ]);

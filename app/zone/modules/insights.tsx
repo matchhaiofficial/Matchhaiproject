@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
-import { AppIcon } from "../../../src/components/AppIcon";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -48,10 +48,23 @@ const GAME_BUCKET_LABEL: Record<string, string> = {
     valorant: "PC",
     fc26: "Console",
     tekken8: "Console",
-    futsal: "Court",
-    indoor_cricket: "Court",
-    padel: "Court",
-    pickleball: "Court",
+};
+const DISABLED_PHYSICAL_GAME_KEYS = new Set(["futsal", "indoor_cricket", "padel", "pickleball"]);
+
+const formatLabel = (value?: string | null) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "Unknown";
+    const normalized = raw.toLowerCase();
+    if (normalized === "pc") return "PC";
+    if (normalized === "cs2") return "CS2";
+    if (normalized === "cs16") return "CS 1.6";
+    if (normalized === "fc26") return "FC26";
+    if (normalized === "tekken8") return "Tekken 8";
+    return raw
+        .split(/[_\s-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
 };
 
 const getDayKey = (item: ZoneMatchroomListItem) => {
@@ -246,25 +259,37 @@ export default function ZoneInsightsModule() {
         return toPercent(busy, allResources.length);
     }, [allResources.length, statusSummary.booked, statusSummary.held]);
 
+    const branchLabelById = useMemo(() => {
+        const map = new Map<string, string>();
+        branches.forEach((branch) => {
+            map.set(branch.id, branch.branchDisplayName || branch.id);
+        });
+        return map;
+    }, [branches]);
+
     const roomStats = useMemo(() => {
-        const map = new Map<string, { key: string; total: number; booked: number; maintenance: number }>();
+        const map = new Map<string, { key: string; label: string; branchLabel: string; total: number; booked: number; held: number; available: number; maintenance: number }>();
         allResources.forEach((item) => {
-            const key = item.roomLabel || `${item.branchId}-${item.kind}`;
+            const branchLabel = branchLabelById.get(item.branchId) || "Branch";
+            const resourceLabel = item.roomLabel || [item.tier, item.surface, item.kind].filter(Boolean).map(formatLabel).join(" ") || "Resources";
+            const key = `${item.branchId}-${resourceLabel}`;
             if (!map.has(key)) {
-                map.set(key, { key, total: 0, booked: 0, maintenance: 0 });
+                map.set(key, { key, label: resourceLabel, branchLabel, total: 0, booked: 0, held: 0, available: 0, maintenance: 0 });
             }
             const row = map.get(key)!;
             row.total += 1;
             if (item.lifecycleStatus === "booked") row.booked += 1;
+            if (item.lifecycleStatus === "held") row.held += 1;
+            if (item.lifecycleStatus === "available") row.available += 1;
             if (item.lifecycleStatus === "maintenance") row.maintenance += 1;
         });
         return Array.from(map.values()).sort((a, b) => b.total - a.total);
-    }, [allResources]);
+    }, [allResources, branchLabelById]);
 
     const tierStats = useMemo(() => {
         const map = new Map<string, { key: string; total: number; busy: number }>();
         allResources.forEach((item) => {
-            const key = item.tier || "standard";
+            const key = item.tier || item.surface || item.assetType || "standard";
             if (!map.has(key)) {
                 map.set(key, { key, total: 0, busy: 0 });
             }
@@ -281,6 +306,7 @@ export default function ZoneInsightsModule() {
         const map = new Map<string, number>();
         matchrooms.forEach((room) => {
             const key = String(room.game || "unknown").toLowerCase();
+            if (DISABLED_PHYSICAL_GAME_KEYS.has(key)) return;
             map.set(key, (map.get(key) || 0) + 1);
         });
         return Array.from(map.entries())
@@ -289,11 +315,12 @@ export default function ZoneInsightsModule() {
     }, [matchrooms]);
 
     const consoleStats = useMemo(() => {
-        const summary = { PC: 0, Console: 0, Court: 0, Other: 0 };
+        const summary = { PC: 0, Console: 0, Other: 0 };
         matchrooms.forEach((room) => {
             const key = String(room.game || "").toLowerCase();
+            if (DISABLED_PHYSICAL_GAME_KEYS.has(key)) return;
             const bucket = GAME_BUCKET_LABEL[key];
-            if (bucket === "PC" || bucket === "Console" || bucket === "Court") {
+            if (bucket === "PC" || bucket === "Console") {
                 (summary as any)[bucket] += 1;
             } else {
                 summary.Other += 1;
@@ -332,19 +359,15 @@ export default function ZoneInsightsModule() {
         () => dayStats[dayStats.length - 1]?.count || 0,
         [dayStats],
     );
+    const dayStatsMax = useMemo(
+        () => Math.max(...dayStats.map((item) => item.count), 1),
+        [dayStats],
+    );
 
     const pendingQueue = useMemo(
         () => queue.filter((item) => item.status === "open" || item.status === "pending_payment").length,
         [queue],
     );
-
-    const branchLabelById = useMemo(() => {
-        const map = new Map<string, string>();
-        branches.forEach((branch) => {
-            map.set(branch.id, branch.branchDisplayName || branch.id);
-        });
-        return map;
-    }, [branches]);
 
     const financeRows = useMemo(() => {
         if (financeWindow === "all") return matchrooms;
@@ -505,6 +528,24 @@ export default function ZoneInsightsModule() {
         () => financeDayStats.find((item) => item.key === focusedFinanceDayKey) || null,
         [financeDayStats, focusedFinanceDayKey],
     );
+    const summaryMetrics = useMemo(
+        () => [
+            { key: "pending", label: "Pending Queue", value: pendingQueue, icon: "status" as AppIconName, color: COLORS.warning },
+            { key: "live", label: "Live Matchrooms", value: activeMatchrooms, icon: "matchroom" as AppIconName, color: COLORS.accent },
+            { key: "utilization", label: "Utilization", value: `${utilization}%`, icon: "resources" as AppIconName, color: COLORS.successBright },
+            { key: "today", label: "Bookings Today", value: todayBookings, icon: "event" as AppIconName, color: COLORS.textSecondary },
+        ],
+        [activeMatchrooms, pendingQueue, todayBookings, utilization],
+    );
+    const securitySignals = useMemo(
+        () => [
+            { label: "Maintenance resources", value: statusSummary.maintenance },
+            { label: "Held resources", value: statusSummary.held },
+            { label: "Unpaid bookings", value: financeSummary.unpaidCount },
+            { label: "Last sync age", value: `${Math.max(0, Math.round((Date.now() - lastUpdatedAt) / 60000))}m` },
+        ],
+        [financeSummary.unpaidCount, lastUpdatedAt, statusSummary.held, statusSummary.maintenance],
+    );
 
     if (loading) {
         return (
@@ -546,22 +587,24 @@ export default function ZoneInsightsModule() {
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 <View style={styles.summaryGrid}>
-                    <View style={styles.summaryCard}>
-                        <Text style={styles.summaryValue}>{pendingQueue}</Text>
-                        <Text style={styles.summaryLabel}>Pending Queue</Text>
-                    </View>
-                    <View style={styles.summaryCard}>
-                        <Text style={styles.summaryValue}>{activeMatchrooms}</Text>
-                        <Text style={styles.summaryLabel}>Live Matchrooms</Text>
-                    </View>
-                    <View style={styles.summaryCard}>
-                        <Text style={styles.summaryValue}>{utilization}%</Text>
-                        <Text style={styles.summaryLabel}>Resource Utilization</Text>
-                    </View>
-                    <View style={styles.summaryCard}>
-                        <Text style={styles.summaryValue}>{todayBookings}</Text>
-                        <Text style={styles.summaryLabel}>Bookings Today</Text>
-                    </View>
+                    {summaryMetrics.map((metric, index) => (
+                        <View
+                            key={metric.key}
+                            style={[
+                                styles.summaryCard,
+                                index % 2 === 0 && styles.summaryCardLeft,
+                                index < 2 && styles.summaryCardTop,
+                            ]}
+                        >
+                            <View style={[styles.summaryIconWrap, { backgroundColor: `${metric.color}12`, borderColor: `${metric.color}38` }]}>
+                                <AppIcon name={metric.icon} size={16} color={metric.color} />
+                            </View>
+                            <View style={styles.summaryTextWrap}>
+                                <Text style={styles.summaryLabel}>{metric.label}</Text>
+                                <Text style={styles.summaryValue}>{metric.value}</Text>
+                            </View>
+                        </View>
+                    ))}
                 </View>
 
                 {segment === "overview" ? (
@@ -594,7 +637,7 @@ export default function ZoneInsightsModule() {
                                         <View
                                             style={[
                                                 styles.barFill,
-                                                { width: `${toPercent(day.count, Math.max(...dayStats.map((item) => item.count), 1))}%` },
+                                                { width: `${toPercent(day.count, dayStatsMax)}%` },
                                             ]}
                                         />
                                     </View>
@@ -613,16 +656,22 @@ export default function ZoneInsightsModule() {
                                 <Text style={styles.emptyText}>No room-level resources yet.</Text>
                             ) : (
                                 roomStats.map((room) => (
-                                    <View key={room.key} style={styles.metricBlock}>
-                                        <View style={styles.metricRow}>
-                                            <Text style={styles.metricLabel}>{room.key}</Text>
-                                            <Text style={styles.metricValue}>
-                                                {room.booked}/{room.total} booked
-                                            </Text>
+                                    <View key={room.key} style={styles.resourceInsightCard}>
+                                        <View style={styles.resourceInsightHeader}>
+                                            <View style={styles.resourceInsightIcon}>
+                                                <AppIcon name="resources" size={16} color={COLORS.accent} />
+                                            </View>
+                                            <View style={styles.resourceInsightTitleWrap}>
+                                                <Text style={styles.resourceInsightTitle} numberOfLines={1}>{room.label}</Text>
+                                                <Text style={styles.metricHint} numberOfLines={1}>{room.branchLabel}</Text>
+                                            </View>
+                                            <Text style={styles.metricValue}>{room.booked}/{room.total}</Text>
                                         </View>
-                                        <Text style={styles.metricHint}>
-                                            Maintenance: {room.maintenance}
-                                        </Text>
+                                        <View style={styles.resourceInsightStats}>
+                                            <Text style={styles.resourceInsightStat}>Available {room.available}</Text>
+                                            <Text style={styles.resourceInsightStat}>Held {room.held}</Text>
+                                            <Text style={styles.resourceInsightStat}>Maintenance {room.maintenance}</Text>
+                                        </View>
                                     </View>
                                 ))
                             )}
@@ -634,7 +683,7 @@ export default function ZoneInsightsModule() {
                             ) : (
                                 tierStats.map((tier) => (
                                     <View key={tier.key} style={styles.barRow}>
-                                        <Text style={styles.barLabel}>{tier.key}</Text>
+                                        <Text style={styles.barLabel}>{formatLabel(tier.key)}</Text>
                                         <View style={styles.barTrack}>
                                             <View
                                                 style={[
@@ -660,7 +709,7 @@ export default function ZoneInsightsModule() {
                             ) : (
                                 gameStats.map((row) => (
                                     <View key={row.game} style={styles.metricRow}>
-                                        <Text style={styles.metricLabel}>{row.game.toUpperCase()}</Text>
+                                        <Text style={styles.metricLabel}>{formatLabel(row.game)}</Text>
                                         <Text style={styles.metricValue}>{row.count}</Text>
                                     </View>
                                 ))
@@ -672,6 +721,15 @@ export default function ZoneInsightsModule() {
                                 <View key={key} style={styles.metricRow}>
                                     <Text style={styles.metricLabel}>{key}</Text>
                                     <Text style={styles.metricValue}>{count}</Text>
+                                </View>
+                            ))}
+                        </View>
+                        <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Security Signals</Text>
+                            {securitySignals.map((signal) => (
+                                <View key={signal.label} style={styles.metricRow}>
+                                    <Text style={styles.metricLabel}>{signal.label}</Text>
+                                    <Text style={styles.metricValue}>{signal.value}</Text>
                                 </View>
                             ))}
                         </View>

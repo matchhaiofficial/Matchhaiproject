@@ -194,6 +194,28 @@ function HeaderAvatarStack({ others }: { others: ChatParticipant[] }) {
     );
 }
 
+function TypingBubble({ label = "typing" }: { label?: string }) {
+    const [dotCount, setDotCount] = useState(1);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setDotCount((current) => (current >= 3 ? 1 : current + 1));
+        }, 450);
+        return () => clearInterval(timer);
+    }, []);
+
+    return (
+        <View style={styles.typingBubbleRow}>
+            <View style={styles.typingBubble}>
+                <Text style={styles.typingBubbleText}>
+                    {label}
+                    {".".repeat(dotCount)}
+                </Text>
+            </View>
+        </View>
+    );
+}
+
 const ChatMessageRow = React.memo(function ChatMessageRow({
     item,
     todayLabel,
@@ -772,6 +794,17 @@ export default function ChatThread({
                                                     <Text style={styles.emptyTitle}>{emptyTitle}</Text>
                                                     <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
                                                 </View>
+                                            }
+                                            ListFooterComponent={
+                                                typingNames.length > 0 ? (
+                                                    <TypingBubble
+                                                        label={
+                                                            typingNames.length === 1
+                                                                ? `${typingNames[0]} is typing`
+                                                                : `${typingNames.slice(0, 2).join(", ")} typing`
+                                                        }
+                                                    />
+                                                ) : null
                                             }
                                         />
                                     </Pressable>

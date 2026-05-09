@@ -95,10 +95,10 @@ const toRelativeTime = (ms: number) => {
 
 const notificationIcon = (type?: string): AppIconName => {
   if (!type) return "notifications";
-  if (type.includes("team")) return "groups";
-  if (type.includes("friend")) return "person-add";
-  if (type.includes("match")) return "sports-esports";
-  if (type.includes("booking")) return "event";
+  if (type.includes("team")) return "teams";
+  if (type.includes("friend")) return "invite";
+  if (type.includes("match")) return "matchroom";
+  if (type.includes("booking")) return "bookings";
   return "notifications";
 };
 
@@ -357,6 +357,7 @@ export default function PlayerDashboard() {
   const requestStats = dashboardSummary?.requestStats || { myRequests: 0, myOffers: 0 };
   const friendCount = dashboardSummary?.friendCount || 0;
   const walletStats = dashboardSummary?.walletStats || {
+    balance: Number(user?.walletBalance || 0),
     totalSpent: 0,
     pendingAmount: 0,
     transactions: 0,
@@ -443,7 +444,7 @@ export default function PlayerDashboard() {
               onPress={emailVerified ? () => router.push("/(player)/friends" as any) : undefined}
               disabled={!emailVerified}
             >
-              <AppIcon name="groups-2" size={22} color={COLORS.text} />
+              <AppIcon name="players" size={22} color={COLORS.text} />
               {friendCount > 0 ? (
                 <View style={styles.friendBadge}>
                   <Text style={styles.friendBadgeText}>
@@ -460,7 +461,7 @@ export default function PlayerDashboard() {
               onPress={emailVerified ? () => router.push("/(player)/inbox") : undefined}
               disabled={!emailVerified}
             >
-              <AppIcon name="notifications-none" size={24} color={COLORS.text} />
+              <AppIcon name="notifications" size={24} color={COLORS.text} />
               {notificationCount > 0 ? (
                 <View style={styles.notificationBadge}>
                   <Text style={styles.notificationBadgeText}>
@@ -484,12 +485,12 @@ export default function PlayerDashboard() {
             ? [
                 {
                   label: "Discover",
-                  icon: "explore" as const,
+                  icon: "discover" as const,
                   onPress: () => router.push("/(player)/(tabs)/discover"),
                 },
                 {
                   label: "Matchrooms",
-                  icon: "sports-esports" as const,
+                  icon: "matchroom" as const,
                   onPress: () =>
                     router.push({
                       pathname: "/(player)/(tabs)/discover",
@@ -498,7 +499,7 @@ export default function PlayerDashboard() {
                 },
                 {
                   label: "Players",
-                  icon: "people" as const,
+                  icon: "players" as const,
                   onPress: () =>
                     router.push({
                       pathname: "/(player)/(tabs)/discover",
@@ -507,7 +508,7 @@ export default function PlayerDashboard() {
                 },
                 {
                   label: "Zones",
-                  icon: "storefront" as const,
+                  icon: "business" as const,
                   onPress: () =>
                     router.push({
                       pathname: "/(player)/(tabs)/discover",
@@ -516,22 +517,22 @@ export default function PlayerDashboard() {
                 },
                 {
                   label: "Schedule",
-                  icon: "event" as const,
+                  icon: "schedule" as const,
                   onPress: () => router.push("/(player)/schedule" as any),
                 },
                 {
                   label: "Wallet",
-                  icon: "account-balance-wallet" as const,
+                  icon: "wallet" as const,
                   onPress: () => router.push("/(player)/wallet" as any),
                 },
                 {
                   label: "My Friends",
-                  icon: "groups" as const,
+                  icon: "players" as const,
                   onPress: () => router.push("/(player)/friends" as any),
                 },
                 {
                   label: "My Reports",
-                  icon: "report-problem" as const,
+                  icon: "reports" as const,
                   onPress: () => router.push("/(player)/reports" as any),
                 },
               ]
@@ -543,7 +544,7 @@ export default function PlayerDashboard() {
                 },
                 {
                   label: "My Reports",
-                  icon: "report-problem" as const,
+                  icon: "reports" as const,
                   onPress: () => router.push("/(player)/reports" as any),
                 },
                 {
@@ -567,7 +568,7 @@ export default function PlayerDashboard() {
           {!emailVerified ? (
             <AppCard style={styles.verificationBanner}>
               <View style={styles.verificationBannerHeader}>
-                <AppIcon name="mark-email-unread" size={20} color={COLORS.warning} />
+                <AppIcon name="mailVerified" size={20} color={COLORS.warning} />
                 <Text style={styles.verificationBannerTitle}>Verify your email</Text>
               </View>
               <Text style={styles.verificationBannerText}>
@@ -597,7 +598,7 @@ export default function PlayerDashboard() {
           >
             {!emailVerified ? (
               <View style={styles.dashboardLockState}>
-                <AppIcon name="lock-outline" size={16} color={COLORS.textSecondary} />
+                <AppIcon name="password" size={16} color={COLORS.textSecondary} />
                 <Text style={styles.dashboardLockStateText}>
                   Dashboard locked until your email is verified
                 </Text>
@@ -821,7 +822,7 @@ export default function PlayerDashboard() {
                 onPress={() => router.push("/(player)/wallet" as any)}
               />
               <DashboardAtGlancePanel
-                walletValue={`Rs ${walletStats.totalSpent}`}
+                walletValue={`Rs ${Math.round(Number(walletStats.balance || 0))}`}
                 walletDetail={`Pending Rs ${walletStats.pendingAmount} | ${walletStats.transactions} transactions`}
                 walletOnPress={() => router.push("/(player)/wallet" as any)}
                 requestsValue={String(requestStats.myRequests)}

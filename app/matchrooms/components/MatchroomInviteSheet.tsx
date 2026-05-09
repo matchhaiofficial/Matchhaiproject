@@ -1,11 +1,5 @@
 import React, { useCallback } from "react";
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import {
   AppBottomSheet,
@@ -32,13 +26,11 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 14,
-  },
-  list: {
-    flexGrow: 0,
-    maxHeight: 320,
+    gap: 8,
   },
   listContent: {
     paddingBottom: 8,
+    gap: 8,
   },
   footer: {
     paddingHorizontal: 24,
@@ -71,7 +63,7 @@ const InviteRow = React.memo(function InviteRow({
       </View>
       <Text style={styles.friendName}>{friend.username}</Text>
       <AppButton style={styles.sendInviteButton} onPress={handleInvite} disabled={joining}>
-        Invite
+        {joining ? <ActivityIndicator size="small" color="#FFF" /> : "Invite"}
       </AppButton>
     </View>
   );
@@ -104,12 +96,10 @@ export function MatchroomInviteSheet({
     return <InviteRow friend={item} joining={joining} styles={styles} onInvite={onInvite} />;
   }, [joining, onInvite, styles]);
 
-  const hasScrollableList = friends.length > 4;
-
   return (
     <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={[styles.modalContent, localStyles.sheet]}>
       <AppModalHeader title="Invite Teammate" onClose={onClose} />
-      <AppModalBody contentContainerStyle={localStyles.bodyContent}>
+      <AppModalBody scroll contentContainerStyle={localStyles.bodyContent}>
         {loading ? (
           <View style={localStyles.loadingWrap}>
             <ActivityIndicator color={COLORS.accent} />
@@ -125,19 +115,6 @@ export function MatchroomInviteSheet({
               No friends found to invite.
             </Text>
           </View>
-        ) : hasScrollableList ? (
-          <ScrollView
-            style={localStyles.list}
-            contentContainerStyle={localStyles.listContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {friends.map((friend, index) => (
-              <View key={keyExtractor(friend, index)}>
-                {renderFriendRow(friend)}
-              </View>
-            ))}
-          </ScrollView>
         ) : (
           <View style={localStyles.listContent}>
             {friends.map((friend, index) => (

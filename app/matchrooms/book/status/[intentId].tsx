@@ -39,7 +39,7 @@ export default function BookingStatusScreen() {
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
-    const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
+    const ctaBottomGuard = insets.bottom + 24;
 
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
@@ -53,6 +53,14 @@ export default function BookingStatusScreen() {
     );
     const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
     const intent = intentData as BookingIntent | null | undefined;
+    const roomData = useQuery(
+        api.matchrooms.getById,
+        intent?.matchroomId ? { matchroomId: String(intent.matchroomId) } : "skip"
+    ) as any;
+    const settlementSummary = useQuery(
+        (api as any).matchrooms.getSettlementSummary,
+        intent?.matchroomId ? { matchroomId: intent.matchroomId as Id<"matchrooms"> } : "skip",
+    ) as any;
 
     // Handle not found
     useEffect(() => {
@@ -164,7 +172,24 @@ export default function BookingStatusScreen() {
             || checkoutStatus?.status === "token_received"
             || checkoutStatus?.status === "pending"
         );
-
+    const isZoneMatchroom = Boolean(roomData?.zoneId) || roomData?.locationMode === "zone";
+    const isZoneApproved = !isZoneMatchroom || roomData?.zoneAdminApproved === true;
+    const isFullyConfirmed = isCompleted && isZoneApproved;
+    const statusTitle = isFullyConfirmed ? "Booking Confirmed!" :
+        isCompleted && isZoneMatchroom && !isZoneApproved ? "Seat Paid" :
+            isRejected ? "Booking Rejected" :
+                isGatewayPending ? "Payment Processing" :
+                    isApproved ? "Ready for Payment" : "Waiting for Approval";
+    const statusLabel = isFullyConfirmed ? "Confirmed" :
+        isCompleted && isZoneMatchroom && !isZoneApproved ? "Venue Pending" :
+            isRejected ? "Rejected" :
+                isGatewayPending ? "Processing" :
+                    isApproved ? "Payment Ready" : "Pending Approval";
+    const statusTone = isFullyConfirmed ? "success" :
+        isCompleted && isZoneMatchroom && !isZoneApproved ? "warning" :
+            isRejected ? "danger" :
+                isGatewayPending ? "warning" :
+                    isApproved ? "info" : "neutral";
     return (
         <Screen
             style={styles.container}
@@ -186,7 +211,7 @@ export default function BookingStatusScreen() {
             >
                 <AppCard variant="elevated" style={styles.statusDisplay}>
                     <View style={styles.statusIconBg}>
-                        {isCompleted ? (
+                        {isFullyConfirmed || isCompleted ? (
                             <AppIcon name="check-circle" size={60} color={COLORS.success} />
                         ) : isRejected ? (
                             <AppIcon name="error" size={60} color={COLORS.error} />
@@ -197,34 +222,11 @@ export default function BookingStatusScreen() {
                         )}
                     </View>
                     <Text style={styles.statusTitle}>
-                        {isCompleted ? "Booking Confirmed!" :
-                            isRejected ? "Booking Rejected" :
-                                isGatewayPending ? "Payment Processing" :
-                                isApproved ? "Ready for Payment" : "Waiting for Approval"}
+                        {statusTitle}
                     </Text>
                     <StatusPill
-                        tone={
-                            isCompleted
-                                ? "success"
-                                : isRejected
-                                    ? "danger"
-                                    : isGatewayPending
-                                        ? "warning"
-                                        : isApproved
-                                            ? "info"
-                                            : "neutral"
-                        }
-                        label={
-                            isCompleted
-                                ? "Confirmed"
-                                : isRejected
-                                    ? "Rejected"
-                                    : isGatewayPending
-                                        ? "Processing"
-                                        : isApproved
-                                            ? "Payment Ready"
-                                            : "Pending Approval"
-                        }
+                        tone={statusTone as any}
+                        label={statusLabel}
                         style={styles.statusPill}
                     />
 
@@ -271,7 +273,7 @@ export default function BookingStatusScreen() {
                                 isRejected ? styles.stepLabelDeclined :
                                     (isApproved || isCompleted || isPendingApproval) && styles.stepLabelActive
                             ]}>
-                                {isRejected ? "Approval Rejected" : "Captain & Zone Approval"}
+                                {isRejected ? "Captain Rejected" : "Captain Approval"}
                             </Text>
                         </View>
 
@@ -288,8 +290,26 @@ export default function BookingStatusScreen() {
                                         <View style={styles.idleDot} />
                                     )}
                                 </View>
+                                {isCompleted ? <View style={[styles.stepLine, isZoneApproved && styles.stepLineActive]} /> : null}
                             </View>
                             <Text style={[styles.stepLabel, isCompleted && styles.stepLabelActive]}>Payment Confirmation</Text>
+                        </View>
+
+                        <View style={styles.stepContainer}>
+                            <View style={styles.stepLineWrapper}>
+                                <View style={[
+                                    styles.stepIcon,
+                                    isZoneApproved && isCompleted ? styles.stepIconApproved :
+                                        isCompleted ? styles.stepIconPending : {}
+                                ]}>
+                                    {isZoneApproved && isCompleted ? (
+                                        <AppIcon name="check" size={14} color="#FFF" />
+                                    ) : (
+                                        <View style={styles.idleDot} />
+                                    )}
+                                </View>
+                            </View>
+                            <Text style={[styles.stepLabel, isZoneApproved && isCompleted && styles.stepLabelActive]}>Zone Approval</Text>
                         </View>
                     </View>
                 </DetailSectionCard>
@@ -298,7 +318,7 @@ export default function BookingStatusScreen() {
                     <DetailKeyValueRow label="Seats Reserved" value={intent.selectedSlots.length} />
                     <DetailKeyValueRow
                         label="Total Amount"
-                        value={intent.pricing?.totalCost ?? 0}
+                        value={`${(intent.pricing as any)?.currency || "PKR"} ${intent.pricing?.totalCost ?? 0}`}
                         valueTone="accent"
                         last
                         valueStyle={styles.totalAmount}
@@ -332,6 +352,27 @@ export default function BookingStatusScreen() {
                         </Text>
                     ) : null}
                 </DetailSectionCard>
+                {settlementSummary ? (
+                    <DetailSectionCard title="Settlement">
+                        <DetailKeyValueRow
+                            label="MatchHai merchant"
+                            value={settlementSummary.merchantSettlementStatus === "captured" ? "Captured" : "Pending"}
+                        />
+                        <DetailKeyValueRow
+                            label="Merchant reference"
+                            value={settlementSummary.merchantSettlementReference || "Not settled yet"}
+                        />
+                        <DetailKeyValueRow
+                            label="Venue payout"
+                            value={
+                                settlementSummary.venuePayoutStatus === "paid"
+                                    ? `${settlementSummary.currency || "PKR"} ${Math.round(Number(settlementSummary.venuePayoutAmount || 0))}`
+                                    : "Pending completion"
+                            }
+                            last
+                        />
+                    </DetailSectionCard>
+                ) : null}
                 <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
                     <View style={styles.footer}>
                     {isGatewayPending ? (

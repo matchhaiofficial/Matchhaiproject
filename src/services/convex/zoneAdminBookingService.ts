@@ -85,6 +85,7 @@ export interface ZoneMatchroomListItem {
     currency?: string;
     zoneId?: string | null;
     zoneOwnerUid?: string | null;
+    resourceIds?: string[];
     createdAt?: any;
     hostSkillTier?: string;
     hostSkillScore?: number | null;
@@ -216,6 +217,51 @@ const toTimeString = (value: any) => {
         return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
     return undefined;
+};
+
+const toClockMinutes = (value: unknown) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (twelveHour) {
+        let hour = Number(twelveHour[1]);
+        const minute = Number(twelveHour[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+            return null;
+        }
+        const period = twelveHour[3].toUpperCase();
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        return hour * 60 + minute;
+    }
+    const twentyFourHour = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!twentyFourHour) return null;
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+    }
+    return hour * 60 + minute;
+};
+
+const toLocalDateTimeMillis = (dateValue?: string, timeValue?: string) => {
+    const date = String(dateValue || "").trim();
+    const clockMinutes = toClockMinutes(timeValue);
+    const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match || clockMinutes === null) return undefined;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const value = new Date(
+        year,
+        month - 1,
+        day,
+        Math.floor(clockMinutes / 60),
+        clockMinutes % 60,
+        0,
+        0,
+    ).getTime();
+    return Number.isFinite(value) ? value : undefined;
 };
 
 const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueItem => {
@@ -391,6 +437,9 @@ export function subscribeZoneMatchrooms(
                     currency: data.pricing?.currency || data.currency || "PKR",
                     zoneId: data.zoneId || null,
                     zoneOwnerUid: data.zoneOwnerUid || null,
+                    resourceIds: Array.isArray(data.resourceIds)
+                        ? data.resourceIds.map((id: any) => String(id)).filter(Boolean)
+                        : [],
                     createdAt: data.createdAt,
                     hostSkillTier: data.hostSkillTier || "Any",
                     hostSkillScore: data.hostSkillScore ?? null,
@@ -439,7 +488,7 @@ export async function acceptZoneBookingRequest(input: {
     branchName?: string;
     location?: string;
     zoneName?: string;
-}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+}): Promise<{ ok: true; message?: string; matchroomId?: string } | { ok: false; message: string }> {
     try {
         // Get the booking request to build matchroom data
         const request = await convex.query(api.bookings.getRequestById, {
@@ -464,6 +513,11 @@ export async function acceptZoneBookingRequest(input: {
         const scheduledTime = toTimeString(requestData.preferredTime);
         const paymentSlots = Number(requestData.paymentReservedSlots || requestData.reservedSlots || 1);
         const paymentAmount = Math.max(0, Number(requestData.budgetPerPlayer || 0) * paymentSlots);
+        const durationMinutes = toDurationMinutes(requestData);
+        const scheduledStartAt = toLocalDateTimeMillis(scheduledDate, scheduledTime);
+        const expiresAt = scheduledStartAt
+            ? scheduledStartAt + Math.max(30, durationMinutes) * 60 * 1000
+            : Date.now() + 48 * 60 * 60 * 1000;
 
         const matchroomData = {
             hostUid: requestOwnerUid,
@@ -483,7 +537,10 @@ export async function acceptZoneBookingRequest(input: {
             locationMode: "zone" as const,
             scheduledDate,
             scheduledTime,
-            durationMinutes: toDurationMinutes(requestData),
+            scheduledStartAt,
+            lockAt: scheduledStartAt,
+            expiresAt,
+            durationMinutes,
             pricing: {
                 perPlayer: Number(requestData.budgetPerPlayer || 0),
                 currency: requestData.currency || "PKR",
@@ -504,7 +561,7 @@ export async function acceptZoneBookingRequest(input: {
             paymentAmount,
             paymentReservedSlots: paymentSlots,
             paymentCurrency: requestData.currency || "PKR",
-            isLocked: requestData.paymentStatus !== "paid",
+            isLocked: false,
             zoneAdminApproved: true,
             overs: requestData.overs ? Number(requestData.overs) : undefined,
             durationHours: requestData.durationHours || undefined,
@@ -525,7 +582,18 @@ export async function acceptZoneBookingRequest(input: {
             matchroomData,
         });
 
-        return { ok: true };
+        const matchroomId = result?.matchroomId ? String(result.matchroomId) : undefined;
+        if (matchroomId) {
+            return { ok: true, matchroomId };
+        }
+
+        const updatedRequest = await convex.query(api.bookings.getRequestById, {
+            requestId: input.requestId as Id<"bookingRequests">,
+        });
+        return {
+            ok: true,
+            matchroomId: updatedRequest?.matchroomId ? String(updatedRequest.matchroomId) : undefined,
+        };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to accept request", error);
         return { ok: false, message: error?.message || "Failed to accept request." };
@@ -571,6 +639,7 @@ export async function sendZoneCounterOffer(input: {
     scheduleOptions: Array<{
         date: string;
         time: string;
+        endTime?: string;
     }>;
     pricePerPlayer: number;
     currency?: string;

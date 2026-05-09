@@ -1,8 +1,12 @@
 import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 
+import {
+  AdminEmptyStateCard,
+  AdminSectionHeader,
+} from "../../../../src/components/AdminSurface";
+import { AppButton, AppCard } from "../../../../src/components/AppPrimitives";
 import { Matchroom } from "../../../../src/services/convex/matchService";
-import { SPACING } from "../../../../src/theme";
 import {
   type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
@@ -24,26 +28,27 @@ export function ZoneBookingsWalkinsSection({
 }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.walkinCard}>
+      <AppCard style={styles.walkinCard}>
         <Text style={styles.walkinTitle}>Create Walk-in Matchroom</Text>
         <Text style={styles.walkinSubtitle}>
-          Use the same Create Matchroom flow as player dashboard, with admin walk-in controls.
+          Start a venue-created session for players on-site.
         </Text>
-        <Pressable
-          style={[styles.actionButton, styles.walkinCreateButton]}
+        <AppButton
+          style={styles.walkinCreateButton}
           onPress={onCreateWalkIn}
           disabled={processingAction !== null}
         >
-          <Text style={styles.walkinCreateText}>Create Walk-in Matchroom</Text>
-        </Pressable>
-      </View>
+          Create Walk-in Matchroom
+        </AppButton>
+      </AppCard>
 
-      <View style={[styles.counterHeader, { marginTop: SPACING.lg }]}>
-        <Text style={styles.detailsTitle}>Existing Walk-ins</Text>
-        <Text style={styles.emptyText}>{walkInRooms.length}</Text>
-      </View>
+      <AdminSectionHeader title="Existing Walk-ins" subtitle={`${walkInRooms.length}`} compact />
       {walkInRooms.length === 0 ? (
-        <Text style={styles.emptyText}>No walk-in matchrooms yet.</Text>
+        <AdminEmptyStateCard
+          title="No walk-in matchrooms yet."
+          description="Created walk-in sessions will appear here."
+          icon="matchroom"
+        />
       ) : (
         walkInRooms.map((item) => (
           <View key={`walkin-${item.id}`} style={styles.walkinMatchroomItem}>

@@ -251,7 +251,7 @@ export function getMatchroomCreateValidationError(
   if (!isDateAllowed) {
     const label = teamMode === "team" ? "captains" : "solo players";
     return {
-      message: `Earliest date for ${label} is ${minAllowedDateLabel}.`,
+      message: `Earliest allowed time for ${label} is ${minAllowedDateLabel}.`,
       reason: "invalid_date_lead_time",
       title: "Date Too Soon",
     };
@@ -423,7 +423,7 @@ export function getMatchroomCreateSubmitBlockers(
   if (!formData.format) blockers.push("Select match format");
   if (!formData.date || !formData.time) blockers.push("Pick date and time");
   if (!isDateAllowed) {
-    blockers.push(`Earliest allowed date is ${minAllowedDateLabel}`);
+    blockers.push(`Earliest allowed time is ${minAllowedDateLabel}`);
   }
   if (locationMode === "zone" && !selectedZoneId) {
     blockers.push("Select a zone/court");

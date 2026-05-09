@@ -449,6 +449,10 @@ export default defineSchema({
       perPlayer: v.number(),
       currency: v.string(),
     }),
+    requestedResourceAssetType: v.optional(v.string()),
+    requestedResourceSurface: v.optional(v.string()),
+    requestedResourceTier: v.optional(v.string()),
+    selectedZoneRateKey: v.optional(v.string()),
     matchCode: v.optional(v.string()),
     flexibility: v.optional(v.string()),
     bookingSource: v.optional(v.string()),
@@ -511,6 +515,14 @@ export default defineSchema({
     paymentAmount: v.optional(v.number()),
     paymentReservedSlots: v.optional(v.number()),
     paymentCurrency: v.optional(v.string()),
+    merchantSettlementStatus: v.optional(v.union(v.literal("pending"), v.literal("captured"))),
+    merchantSettlementAt: v.optional(v.number()),
+    merchantSettlementAmount: v.optional(v.number()),
+    merchantSettlementReference: v.optional(v.string()),
+    venuePayoutStatus: v.optional(v.union(v.literal("pending"), v.literal("paid"))),
+    venuePayoutAt: v.optional(v.number()),
+    venuePayoutAmount: v.optional(v.number()),
+    venuePayoutReference: v.optional(v.string()),
 
     // Result verification
     resultVerification: v.optional(v.object({
@@ -535,6 +547,9 @@ export default defineSchema({
       participantVotes: v.optional(v.any()),
       deadline: v.optional(v.number()),
       votes: v.optional(v.any()),
+      finalWinner: v.optional(v.union(v.literal("team1"), v.literal("team2"))),
+      resolvedAt: v.optional(v.number()),
+      resolutionSource: v.optional(v.string()),
     })),
 
     // Cancellation
@@ -719,6 +734,7 @@ export default defineSchema({
     scheduleOptions: v.optional(v.array(v.object({
       date: v.string(),
       time: v.string(),
+      endTime: v.optional(v.string()),
     }))),
     recipientUids: v.optional(v.array(v.string())),
     responses: v.optional(v.array(v.object({
@@ -1405,6 +1421,36 @@ export default defineSchema({
     .index("by_reportedUserId", ["reportedUserId"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_status_updatedAt", ["status", "updatedAt"]),
+
+  // ============================================
+  // SUPPORT TICKETS
+  // ============================================
+  supportTickets: defineTable({
+    reference: v.string(),
+    userId: v.id("users"),
+    userRole: v.optional(v.string()),
+    category: v.optional(v.string()),
+    issueSummary: v.string(),
+    conversationExcerpt: v.array(
+      v.object({
+        role: v.union(v.literal("user"), v.literal("assistant")),
+        text: v.string(),
+      })
+    ),
+    metadata: v.optional(v.any()),
+    status: v.union(
+      v.literal("open"),
+      v.literal("in_review"),
+      v.literal("resolved"),
+      v.literal("closed")
+    ),
+    source: v.literal("help_support_chat"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_reference", ["reference"])
+    .index("by_userId", ["userId"])
+    .index("by_status_createdAt", ["status", "createdAt"]),
 
   // ============================================
   // PSN TOKEN CACHE (for PSN API authentication)

@@ -235,6 +235,26 @@ export async function updateBranchResourceStatus(input: {
     }
 }
 
+export async function syncBranchResourcesFromPricing(input: {
+    zoneId: string;
+    branchId: string;
+    pricing: Record<string, any>;
+    adminUid: string;
+}) {
+    try {
+        await convex.mutation(api.zoneAdminResources.syncBranchResourcesFromPricing, {
+            zoneId: input.zoneId as Id<"zones">,
+            branchId: input.branchId,
+            pricing: input.pricing,
+            adminUid: input.adminUid,
+        });
+        return { ok: true as const };
+    } catch (error: any) {
+        Logger.error("zoneAdminResources", "Failed to sync branch resources from pricing", error);
+        return { ok: false as const, message: error?.message || "Failed to sync branch resources." };
+    }
+}
+
 export async function allocateResourcesToBookingRequest(input: {
     zoneId: string;
     branchId: string;

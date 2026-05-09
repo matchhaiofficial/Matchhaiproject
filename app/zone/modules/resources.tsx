@@ -3,14 +3,24 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Dimensions,
     Pressable,
     ScrollView,
     Text,
+    TextInput,
     View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
-import { AppIcon } from "../../../src/components/AppIcon";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import {
+    AppDrawer,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -18,7 +28,12 @@ import { useToast } from "../../../src/hooks/useToast";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { type ResourceLifecycleStatus } from "../../../src/features/zoneAdmin/types";
-import { subscribeZoneBookingQueue, type ZoneBookingQueueItem } from "../../../src/services/convex/zoneAdminBookingService";
+import {
+    subscribeZoneBookingQueue,
+    subscribeZoneMatchrooms,
+    type ZoneBookingQueueItem,
+    type ZoneMatchroomListItem,
+} from "../../../src/services/convex/zoneAdminBookingService";
 import {
     allocateResourcesToBookingRequest,
     reassignResourcesForBookingRequest,
@@ -40,6 +55,7 @@ type AssetFilter =
     | "xbox";
 type StatusFilter = "all" | ResourceLifecycleStatus;
 type ResourcesViewMode = "grid" | "allocation";
+type AllocationDateFilter = "all" | "today" | "tomorrow" | "week" | "undated";
 type ResourceSection = {
     id: string;
     title: string;
@@ -54,6 +70,14 @@ type ResourceSection = {
 
 const STATUS_FILTERS: StatusFilter[] = ["all", "available", "held", "booked", "maintenance"];
 const STATUS_OPTIONS: ResourceLifecycleStatus[] = ["available", "held", "booked", "maintenance"];
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
+const ALLOCATION_DATE_FILTERS: Array<{ key: AllocationDateFilter; label: string }> = [
+    { key: "all", label: "Any date" },
+    { key: "today", label: "Today" },
+    { key: "tomorrow", label: "Tomorrow" },
+    { key: "week", label: "Next 7 days" },
+    { key: "undated", label: "No date" },
+];
 const ASSET_FILTER_LABELS: Record<AssetFilter, string> = {
     all: "All",
     pc: "PCs",
@@ -81,6 +105,44 @@ const titleCase = (value: string) =>
         .filter(Boolean)
         .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
         .join(" ");
+
+const formatGameLabel = (value: string) => {
+    const normalized = value.toLowerCase();
+    if (normalized === "cs2") return "CS2";
+    if (normalized === "cs16") return "CS 1.6";
+    if (normalized === "fc26") return "FC26";
+    if (normalized === "tekken8") return "Tekken 8";
+    return titleCase(value);
+};
+
+const formatTime12 = (value?: string | null) => {
+    if (!value) return "";
+    const trimmed = String(value).trim();
+    const match24 = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match24) return trimmed.toUpperCase();
+    const hours24 = Number(match24[1]);
+    const minutes = Number(match24[2]);
+    if (!Number.isFinite(hours24) || !Number.isFinite(minutes)) return trimmed;
+    const period = hours24 >= 12 ? "PM" : "AM";
+    const hours12 = hours24 % 12 || 12;
+    return `${hours12}:${String(minutes).padStart(2, "0")} ${period}`;
+};
+
+const formatMatchroomTimeRange = (room: ZoneMatchroomListItem) => {
+    const startLabel = formatTime12(room.scheduledTime);
+    if (!startLabel) return "Time TBD";
+    const durationMinutes = Number(room.durationMinutes || 0);
+    const match = String(room.scheduledTime || "").match(/^(\d{1,2}):(\d{2})$/);
+    if (!match || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+        return startLabel;
+    }
+    const start = new Date();
+    start.setHours(Number(match[1]), Number(match[2]), 0, 0);
+    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+    return `${startLabel} - ${formatTime12(
+        `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`,
+    )}`;
+};
 
 const assetFilterForResource = (resource: ZoneBranchResource): AssetFilter => {
     if (resource.assetType === "pc") return "pc";
@@ -115,6 +177,62 @@ const sortResources = (resources: ZoneBranchResource[]) =>
         return a.label.localeCompare(b.label);
     });
 
+const dateKey = (date: Date) => date.toISOString().slice(0, 10);
+
+const isUpcomingMatchroom = (room: ZoneMatchroomListItem) => {
+    const status = String(room.status || "").toLowerCase();
+    if (["completed", "cancelled", "expired"].includes(status)) return false;
+    if (!room.scheduledDate) return true;
+    return String(room.scheduledDate).slice(0, 10) >= dateKey(new Date());
+};
+
+const matchesAllocationDateFilter = (
+    room: ZoneMatchroomListItem | undefined,
+    filter: AllocationDateFilter,
+) => {
+    if (filter === "all") return true;
+    const roomDate = String(room?.scheduledDate || "").slice(0, 10);
+    if (!roomDate) return filter === "undated";
+    if (filter === "undated") return false;
+
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    if (filter === "today") return roomDate === dateKey(today);
+    if (filter === "tomorrow") return roomDate === dateKey(tomorrow);
+    if (filter === "week") {
+        const weekEnd = new Date(today);
+        weekEnd.setDate(today.getDate() + 7);
+        return roomDate >= dateKey(today) && roomDate <= dateKey(weekEnd);
+    }
+    return true;
+};
+
+const formatAllocationScheduleLabel = (
+    resources: ZoneBranchResource[],
+    matchroomByResourceId: Map<string, ZoneMatchroomListItem>,
+    branchById: Map<string, ZoneBranch>,
+) => {
+    const labels = Array.from(
+        new Set(
+            resources
+                .map((resource) => {
+                    const room = matchroomByResourceId.get(resource.id);
+                    if (!room) return "";
+                    const branch = branchById.get(String(room.branchId || resource.branchId || ""));
+                    const branchName = branch?.branchDisplayName || "Branch TBD";
+                    const date = room.scheduledDate || "Date TBD";
+                    const time = formatMatchroomTimeRange(room);
+                    return `${branchName} | ${date} | ${time}`;
+                })
+                .filter(Boolean),
+        ),
+    );
+    if (labels.length === 0) return "";
+    if (labels.length === 1) return labels[0];
+    return `${labels[0]} +${labels.length - 1} more`;
+};
+
 const buildPcRooms = (resources: ZoneBranchResource[], tier: string) => {
     const sorted = sortResources(resources);
     const rooms: Array<{ id: string; title: string; resources: ZoneBranchResource[] }> = [];
@@ -148,6 +266,7 @@ const buildCourtRooms = (resources: ZoneBranchResource[]) => {
 
 export default function ZoneResourcesModule() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{
         branchId?: string | string[];
         requestId?: string | string[];
@@ -165,11 +284,15 @@ export default function ZoneResourcesModule() {
     const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
     const [resources, setResources] = useState<ZoneBranchResource[]>([]);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
+    const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
     const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-    const [showFilters, setShowFilters] = useState(true);
+    const [showFilters, setShowFilters] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [allocationGameFilter, setAllocationGameFilter] = useState("all");
+    const [allocationDateFilter, setAllocationDateFilter] = useState<AllocationDateFilter>("all");
     const [viewMode, setViewMode] = useState<ResourcesViewMode>("grid");
     const [expandedSectionIds, setExpandedSectionIds] = useState<string[]>([]);
     const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
@@ -207,6 +330,11 @@ export default function ZoneResourcesModule() {
         if (!branches.length) return [];
         return Array.from(new Set(branches.map((item) => item.areaLabel).filter(Boolean) as string[]));
     }, [branches]);
+
+    const branchById = useMemo(
+        () => new Map(branches.map((branch) => [branch.id, branch] as const)),
+        [branches],
+    );
 
     useEffect(() => {
         if (!zone?.id) {
@@ -308,6 +436,28 @@ export default function ZoneResourcesModule() {
     }, [branchAreas, deepRequestId, zone?.id]);
 
     useEffect(() => {
+        if (!zone?.id) {
+            setMatchrooms([]);
+            return;
+        }
+        const unsub = subscribeZoneMatchrooms(
+            zone.id,
+            user?._id,
+            (rows) => setMatchrooms(rows),
+            () => setMatchrooms([]),
+            {
+                locationHints: [
+                    zone.venueBrandName || "",
+                    zone.primaryBranch?.branchDisplayName || "",
+                    zone.primaryBranch?.areaLabel || "",
+                    ...branchAreas,
+                ],
+            },
+        );
+        return () => unsub();
+    }, [branchAreas, user?._id, zone?.id, zone?.primaryBranch?.areaLabel, zone?.primaryBranch?.branchDisplayName, zone?.venueBrandName]);
+
+    useEffect(() => {
         setSelectedRequestId((prev) => {
             if (prev && queue.some((item) => item.id === prev)) return prev;
             if (deepRequestId && queue.some((item) => item.id === deepRequestId)) {
@@ -322,14 +472,97 @@ export default function ZoneResourcesModule() {
         setSelectedResourceIds((prev) => (prev.includes(deepResourceId) ? prev : [...prev, deepResourceId]));
     }, [deepResourceId]);
 
+    const upcomingAllocatedMatchrooms = useMemo(
+        () =>
+            matchrooms.filter(
+                (room) =>
+                    isUpcomingMatchroom(room) &&
+                    Array.isArray(room.resourceIds) &&
+                    room.resourceIds.length > 0,
+            ),
+        [matchrooms],
+    );
+
+    const matchroomByResourceId = useMemo(() => {
+        const map = new Map<string, ZoneMatchroomListItem>();
+        upcomingAllocatedMatchrooms.forEach((room) => {
+            (room.resourceIds || []).forEach((resourceId) => {
+                if (!map.has(resourceId)) map.set(resourceId, room);
+            });
+        });
+        return map;
+    }, [upcomingAllocatedMatchrooms]);
+
+    const allocationGameFilters = useMemo(() => {
+        const games = Array.from(
+            new Set(
+                upcomingAllocatedMatchrooms
+                    .map((room) => String(room.game || "").trim().toLowerCase())
+                    .filter(Boolean),
+            ),
+        ).sort();
+        return [{ key: "all", label: "All games" }, ...games.map((game) => ({ key: game, label: formatGameLabel(game) }))];
+    }, [upcomingAllocatedMatchrooms]);
+
     const filteredResources = useMemo(
         () =>
             resources.filter((item) => {
+                const allocatedMatchroom = matchroomByResourceId.get(item.id);
+                if (viewMode === "allocation") {
+                    if (!allocatedMatchroom) return false;
+                    if (
+                        allocationGameFilter !== "all" &&
+                        String(allocatedMatchroom.game || "").toLowerCase() !== allocationGameFilter
+                    ) {
+                        return false;
+                    }
+                    if (!matchesAllocationDateFilter(allocatedMatchroom, allocationDateFilter)) {
+                        return false;
+                    }
+                }
+                const normalizedSearch = searchQuery.trim().toLowerCase();
                 const assetOk = assetFilter === "all" ? true : assetFilterForResource(item) === assetFilter;
                 const statusOk = statusFilter === "all" ? true : item.lifecycleStatus === statusFilter;
-                return assetOk && statusOk;
+                const searchOk =
+                    normalizedSearch.length === 0 ||
+                    [
+                        item.label,
+                        item.roomLabel,
+                        item.kind,
+                        item.assetType,
+                        item.tier,
+                        item.surface,
+                        item.lifecycleStatus,
+                        allocatedMatchroom?.title,
+                        allocatedMatchroom?.game,
+                        allocatedMatchroom?.scheduledDate,
+                        allocatedMatchroom?.scheduledTime,
+                    ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .toLowerCase()
+                        .includes(normalizedSearch);
+                return assetOk && statusOk && searchOk;
             }),
-        [assetFilter, resources, statusFilter],
+        [
+            allocationDateFilter,
+            allocationGameFilter,
+            assetFilter,
+            matchroomByResourceId,
+            resources,
+            searchQuery,
+            statusFilter,
+            viewMode,
+        ],
+    );
+
+    const activeFilterCount = useMemo(
+        () =>
+            (assetFilter !== "all" ? 1 : 0) +
+            (statusFilter !== "all" ? 1 : 0) +
+            (viewMode === "allocation" && allocationGameFilter !== "all" ? 1 : 0) +
+            (viewMode === "allocation" && allocationDateFilter !== "all" ? 1 : 0),
+        [allocationDateFilter, allocationGameFilter, assetFilter, statusFilter, viewMode],
     );
 
     const availableAssetFilters = useMemo(() => {
@@ -430,6 +663,40 @@ export default function ZoneResourcesModule() {
         });
         return summary;
     }, [resources]);
+
+    const resourceMetrics = useMemo(
+        () => [
+            {
+                key: "available",
+                label: "Available",
+                value: statusSummary.available,
+                icon: "status" as AppIconName,
+                color: COLORS.successBright,
+            },
+            {
+                key: "held",
+                label: "Held",
+                value: statusSummary.held,
+                icon: "pending" as AppIconName,
+                color: COLORS.warning,
+            },
+            {
+                key: "booked",
+                label: "Booked",
+                value: statusSummary.booked,
+                icon: "event-seat" as AppIconName,
+                color: COLORS.accent,
+            },
+            {
+                key: "maintenance",
+                label: "Maintenance",
+                value: statusSummary.maintenance,
+                icon: "resources" as AppIconName,
+                color: COLORS.textSecondary,
+            },
+        ],
+        [statusSummary],
+    );
 
     useEffect(() => {
         if (!selectedRequest) {
@@ -612,7 +879,7 @@ export default function ZoneResourcesModule() {
             <SegmentedTabs
                 items={[
                     { key: "grid", label: "Resource Grid", badge: filteredResources.length },
-                    { key: "allocation", label: "Allocation", badge: queue.length },
+                    { key: "allocation", label: "Allocation", badge: filteredResources.length },
                 ]}
                 value={viewMode}
                 onChange={(value) => setViewMode(value)}
@@ -630,47 +897,153 @@ export default function ZoneResourcesModule() {
                 </View>
             ) : null}
 
-            <Pressable
-                style={styles.filtersToggle}
-                onPress={() => setShowFilters((prev) => !prev)}
-            >
-                <View style={styles.filtersToggleLeft}>
-                    <AppIcon name="tune" size="sm" tone="accent" />
-                    <Text style={styles.filtersToggleText}>Filters</Text>
+            <View style={styles.searchRow}>
+                <View style={styles.searchBar}>
+                    <AppIcon name="search" size={20} color={COLORS.muted} />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder={viewMode === "allocation" ? "Search allocated resources..." : "Search resources..."}
+                        placeholderTextColor={COLORS.muted}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                    />
+                    {searchQuery.length > 0 ? (
+                        <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
+                            <AppIcon name="close" size={18} color={COLORS.muted} />
+                        </Pressable>
+                    ) : null}
                 </View>
-                <AppIcon
-                    name={showFilters ? "expand-less" : "expand-more"}
-                    size={18}
-                    tone="muted"
-                />
-            </Pressable>
+                <Pressable
+                    onPress={() => setShowFilters(true)}
+                    style={({ pressed }) => [
+                        styles.filterButton,
+                        pressed && styles.filterButtonPressed,
+                    ]}
+                >
+                    <AppIcon name="filters" size={22} color={COLORS.text} />
+                    {activeFilterCount > 0 ? (
+                        <View style={styles.filterBadge}>
+                            <Text style={styles.filterBadgeText}>
+                                {activeFilterCount > 9 ? "9+" : activeFilterCount}
+                            </Text>
+                        </View>
+                    ) : null}
+                </Pressable>
+            </View>
 
-            {showFilters ? (
-                <View style={styles.filterRow}>
-                    <Text style={styles.fieldLabel}>Branch</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                        {branches.map((branch) => (
-                            <Pressable
-                                key={branch.id}
-                                onPress={() => setSelectedBranchId(branch.id)}
-                                style={[
-                                    styles.branchChip,
-                                    selectedBranchId === branch.id && styles.branchChipActive,
-                                ]}
-                            >
-                                <Text
-                                    style={[
-                                        styles.branchChipText,
-                                        selectedBranchId === branch.id && styles.branchChipTextActive,
-                                    ]}
-                                >
-                                    {branch.branchDisplayName}
-                                </Text>
-                            </Pressable>
-                        ))}
-                    </ScrollView>
+            <AppDrawer
+                visible={showFilters}
+                onClose={() => setShowFilters(false)}
+                drawerStyle={[styles.filterDrawer, { width: DRAWER_WIDTH }]}
+            >
+                <View style={[styles.filterDrawerContent, { paddingTop: Math.max(insets.top, 16) }]}>
+                    <AppModalHeader title="Filters" subtitle="Resources" onClose={() => setShowFilters(false)} compact />
+                    <AppModalBody scroll contentContainerStyle={styles.filtersDrawerBody}>
+                        <View style={styles.filtersWrap}>
+                            <Text style={styles.filterSectionLabel}>Branch</Text>
+                            <View style={styles.filterChipWrap}>
+                                {branches.map((branch) => (
+                                    <Pressable
+                                        key={branch.id}
+                                        onPress={() => setSelectedBranchId(branch.id)}
+                                        style={[
+                                            styles.filterChip,
+                                            selectedBranchId === branch.id && styles.filterChipActive,
+                                        ]}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.filterChipText,
+                                                selectedBranchId === branch.id && styles.filterChipTextActive,
+                                            ]}
+                                        >
+                                            {branch.branchDisplayName}
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+
+                            {viewMode === "allocation" ? (
+                                <>
+                                    <Text style={styles.filterSectionLabel}>Game</Text>
+                                    <View style={styles.filterChipWrap}>
+                                        {allocationGameFilters.map((filter) => (
+                                            <Pressable
+                                                key={filter.key}
+                                                onPress={() => setAllocationGameFilter(filter.key)}
+                                                style={[styles.filterChip, allocationGameFilter === filter.key && styles.filterChipActive]}
+                                            >
+                                                <Text style={[styles.filterChipText, allocationGameFilter === filter.key && styles.filterChipTextActive]}>
+                                                    {filter.label}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
+
+                                    <Text style={styles.filterSectionLabel}>Date</Text>
+                                    <View style={styles.filterChipWrap}>
+                                        {ALLOCATION_DATE_FILTERS.map((filter) => (
+                                            <Pressable
+                                                key={filter.key}
+                                                onPress={() => setAllocationDateFilter(filter.key)}
+                                                style={[styles.filterChip, allocationDateFilter === filter.key && styles.filterChipActive]}
+                                            >
+                                                <Text style={[styles.filterChipText, allocationDateFilter === filter.key && styles.filterChipTextActive]}>
+                                                    {filter.label}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
+                                </>
+                            ) : null}
+
+                            <Text style={styles.filterSectionLabel}>Resource category</Text>
+                            <View style={styles.filterChipWrap}>
+                                {availableAssetFilters.map((filter) => (
+                                    <Pressable
+                                        key={filter}
+                                        onPress={() => setAssetFilter(filter)}
+                                        style={[styles.filterChip, assetFilter === filter && styles.filterChipActive]}
+                                    >
+                                        <Text style={[styles.filterChipText, assetFilter === filter && styles.filterChipTextActive]}>
+                                            {ASSET_FILTER_LABELS[filter]}
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+
+                            <Text style={styles.filterSectionLabel}>Resource status</Text>
+                            <View style={styles.filterChipWrap}>
+                                {STATUS_FILTERS.map((filter) => (
+                                    <Pressable
+                                        key={filter}
+                                        onPress={() => setStatusFilter(filter)}
+                                        style={[styles.filterChip, statusFilter === filter && styles.filterChipActive]}
+                                    >
+                                        <Text style={[styles.filterChipText, statusFilter === filter && styles.filterChipTextActive]}>
+                                            {STATUS_LABELS[filter]}
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        </View>
+                    </AppModalBody>
+                    <AppModalFooter style={styles.filterDrawerFooter}>
+                        <AppButton
+                            variant="ghost"
+                            onPress={() => {
+                                setAssetFilter("all");
+                                setStatusFilter("all");
+                                setAllocationGameFilter("all");
+                                setAllocationDateFilter("all");
+                            }}
+                        >
+                            Reset
+                        </AppButton>
+                        <AppButton onPress={() => setShowFilters(false)}>Done</AppButton>
+                    </AppModalFooter>
                 </View>
-            ) : null}
+            </AppDrawer>
 
             {(loadingBranches || loadingResources) ? (
                 <View style={styles.loadingWrap}>
@@ -681,68 +1054,47 @@ export default function ZoneResourcesModule() {
                     {viewMode === "grid" ? (
                         <>
                             <View style={styles.summaryGrid}>
-                                <View style={styles.summaryCard}>
-                                    <Text style={styles.summaryValue}>{statusSummary.available}</Text>
-                                    <Text style={styles.summaryLabel}>Available</Text>
-                                </View>
-                                <View style={styles.summaryCard}>
-                                    <Text style={styles.summaryValue}>{statusSummary.held}</Text>
-                                    <Text style={styles.summaryLabel}>Held</Text>
-                                </View>
-                                <View style={styles.summaryCard}>
-                                    <Text style={styles.summaryValue}>{statusSummary.booked}</Text>
-                                    <Text style={styles.summaryLabel}>Booked</Text>
-                                </View>
-                                <View style={styles.summaryCard}>
-                                    <Text style={styles.summaryValue}>{statusSummary.maintenance}</Text>
-                                    <Text style={styles.summaryLabel}>Maintenance</Text>
-                                </View>
+                                {resourceMetrics.map((metric, index) => (
+                                    <View
+                                        key={metric.key}
+                                        style={[
+                                            styles.summaryCard,
+                                            index % 2 === 0 && styles.summaryCardLeft,
+                                            index < 2 && styles.summaryCardTop,
+                                        ]}
+                                    >
+                                        <View style={[styles.summaryIconWrap, { backgroundColor: `${metric.color}12`, borderColor: `${metric.color}38` }]}>
+                                            <AppIcon name={metric.icon} size={16} color={metric.color} />
+                                        </View>
+                                        <View style={styles.summaryTextWrap}>
+                                            <Text style={styles.summaryLabel}>{metric.label}</Text>
+                                            <Text style={styles.summaryValue}>{metric.value}</Text>
+                                        </View>
+                                    </View>
+                                ))}
                             </View>
 
-                            {showFilters ? (
-                                <>
-                                    <Text style={styles.fieldLabel}>Resource category</Text>
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                        {availableAssetFilters.map((filter) => (
-                                            <Pressable
-                                                key={filter}
-                                                onPress={() => setAssetFilter(filter)}
-                                                style={[styles.filterChip, assetFilter === filter && styles.filterChipActive]}
-                                            >
-                                                <Text style={[styles.filterChipText, assetFilter === filter && styles.filterChipTextActive]}>
-                                                    {ASSET_FILTER_LABELS[filter]}
-                                                </Text>
-                                            </Pressable>
-                                        ))}
-                                    </ScrollView>
-
-                                    <Text style={styles.fieldLabel}>Resource status</Text>
-                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                        {STATUS_FILTERS.map((filter) => (
-                                            <Pressable
-                                                key={filter}
-                                                onPress={() => setStatusFilter(filter)}
-                                                style={[styles.filterChip, statusFilter === filter && styles.filterChipActive]}
-                                            >
-                                                <Text style={[styles.filterChipText, statusFilter === filter && styles.filterChipTextActive]}>
-                                                    {STATUS_LABELS[filter]}
-                                                </Text>
-                                            </Pressable>
-                                        ))}
-                                    </ScrollView>
-                                    <View style={styles.selectionActionsRow}>
+                            <View style={styles.selectionPanel}>
+                                <View style={styles.selectionPanelHeader}>
+                                    <View>
+                                        <Text style={styles.selectionPanelTitle}>Manage selection</Text>
+                                        <Text style={styles.selectionPanelMeta}>
+                                            {selectedResourceIds.length} selected from {filteredResources.length} visible
+                                        </Text>
+                                    </View>
+                                    <View style={styles.selectionInlineActions}>
                                         <Pressable
                                             style={({ pressed }) => [
-                                                styles.selectionAction,
-                                                isSelectVisibleActive && styles.selectionActionActive,
+                                                styles.selectionMiniAction,
+                                                isSelectVisibleActive && styles.selectionMiniActionActive,
                                                 pressed && styles.selectionActionPressed,
                                             ]}
                                             onPress={() => setSelectedResourceIds(filteredResources.map((item) => item.id))}
                                         >
                                             <Text
                                                 style={[
-                                                    styles.selectionActionText,
-                                                    isSelectVisibleActive && styles.selectionActionTextActive,
+                                                    styles.selectionMiniActionText,
+                                                    isSelectVisibleActive && styles.selectionMiniActionTextActive,
                                                 ]}
                                             >
                                                 Select visible
@@ -750,185 +1102,74 @@ export default function ZoneResourcesModule() {
                                         </Pressable>
                                         <Pressable
                                             style={({ pressed }) => [
-                                                styles.selectionAction,
-                                                isClearSelectionActive && styles.selectionActionActive,
+                                                styles.selectionMiniAction,
+                                                isClearSelectionActive && styles.selectionMiniActionActive,
                                                 pressed && styles.selectionActionPressed,
                                             ]}
                                             onPress={() => setSelectedResourceIds([])}
                                         >
                                             <Text
                                                 style={[
-                                                    styles.selectionActionText,
-                                                    isClearSelectionActive && styles.selectionActionTextActive,
+                                                    styles.selectionMiniActionText,
+                                                    isClearSelectionActive && styles.selectionMiniActionTextActive,
                                                 ]}
                                             >
-                                                Clear selection
+                                                Clear
                                             </Text>
                                         </Pressable>
                                     </View>
-                                    <View style={styles.bulkStatusWrap}>
-                                        <Text style={styles.fieldLabel}>Bulk status update</Text>
-                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bulkStatusScroll}>
-                                            <View style={styles.bulkStatusRow}>
-                                            {STATUS_OPTIONS.map((status) => (
-                                                <Pressable
-                                                    key={`bulk_${status}`}
-                                                    style={({ pressed }) => [
-                                                        styles.bulkStatusButton,
-                                                        selectedResourceIds.length === 0 && styles.bulkStatusButtonDisabled,
-                                                        pressed && styles.bulkStatusButtonPressed,
-                                                    ]}
-                                                    disabled={selectedResourceIds.length === 0 || processingBulkStatus !== null}
-                                                    onPress={() => applyBulkStatus(status)}
-                                                >
-                                                    {processingBulkStatus === status ? (
-                                                        <ActivityIndicator size="small" color="#FFF" />
-                                                    ) : (
-                                                        <Text style={styles.bulkStatusButtonText}>{STATUS_LABELS[status]}</Text>
-                                                    )}
-                                                </Pressable>
-                                            ))}
-                                            </View>
-                                        </ScrollView>
-                                    </View>
-                                </>
-                            ) : null}
-                        </>
-                    ) : (
-                        <View style={styles.allocateCard}>
-                            <Text style={styles.allocateTitle}>Allocation Panel</Text>
-                            <Text style={styles.fieldLabel}>Booking request</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {queue.map((request) => (
-                                    <Pressable
-                                        key={request.id}
-                                        onPress={() => setSelectedRequestId(request.id)}
-                                        style={[
-                                            styles.requestChip,
-                                            selectedRequestId === request.id && styles.requestChipActive,
-                                        ]}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.requestChipText,
-                                                selectedRequestId === request.id && styles.requestChipTextActive,
-                                            ]}
-                                        >
-                                            {request.title}
-                                        </Text>
-                                    </Pressable>
-                                ))}
-                            </ScrollView>
-                            <Text style={styles.allocateMeta}>
-                                Selected request: {selectedRequest?.title || "None"}
-                            </Text>
-                            {hasExistingAllocation ? (
-                                <Text style={styles.allocateMeta}>
-                                    Current allocation: {selectedRequest?.allocatedResourceIds?.length || 0} resource(s) linked
-                                </Text>
-                            ) : null}
-                            <Text style={styles.allocateMeta}>
-                                Requested slots: {requestedCount || "-"}
-                            </Text>
-                            <Text style={styles.allocateMeta}>
-                                Selected resources: {selectedResourceIds.length}
-                            </Text>
-                            {selectedRequest ? (
-                                <Text style={[styles.allocateMeta, needsMoreResources ? styles.allocateMetaWarn : styles.allocateMetaGood]}>
-                                    {needsMoreResources
-                                        ? `Needs ${allocationGap} more resource(s)`
-                                        : allocationGap < 0
-                                            ? `${Math.abs(allocationGap)} extra resource(s) selected`
-                                            : "Allocation count matched"}
-                                </Text>
-                            ) : null}
-                            <View style={styles.selectionActionsRow}>
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.selectionAction,
-                                        isSelectVisibleActive && styles.selectionActionActive,
-                                        pressed && styles.selectionActionPressed,
-                                    ]}
-                                    onPress={() => setSelectedResourceIds(filteredResources.map((item) => item.id))}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.selectionActionText,
-                                            isSelectVisibleActive && styles.selectionActionTextActive,
-                                        ]}
-                                    >
-                                        Select visible
-                                    </Text>
-                                </Pressable>
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.selectionAction,
-                                        isClearSelectionActive && styles.selectionActionActive,
-                                        pressed && styles.selectionActionPressed,
-                                    ]}
-                                    onPress={() => setSelectedResourceIds([])}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.selectionActionText,
-                                            isClearSelectionActive && styles.selectionActionTextActive,
-                                        ]}
-                                    >
-                                        Clear selection
-                                    </Text>
-                                </Pressable>
-                            </View>
-                            <View style={styles.bulkStatusWrap}>
-                                <Text style={styles.fieldLabel}>Bulk status update</Text>
+                                </View>
+                                <Text style={styles.selectionPanelSubLabel}>Set selected status</Text>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bulkStatusScroll}>
-                                    <View style={styles.bulkStatusRow}>
-                                    {STATUS_OPTIONS.map((status) => (
-                                        <Pressable
-                                            key={`alloc_bulk_${status}`}
-                                            style={({ pressed }) => [
-                                                styles.bulkStatusButton,
-                                                selectedResourceIds.length === 0 && styles.bulkStatusButtonDisabled,
-                                                pressed && styles.bulkStatusButtonPressed,
-                                            ]}
-                                            disabled={selectedResourceIds.length === 0 || processingBulkStatus !== null}
-                                            onPress={() => applyBulkStatus(status)}
-                                        >
-                                            {processingBulkStatus === status ? (
-                                                <ActivityIndicator size="small" color="#FFF" />
-                                            ) : (
-                                                <Text style={styles.bulkStatusButtonText}>{STATUS_LABELS[status]}</Text>
-                                            )}
-                                        </Pressable>
-                                    ))}
+                                    <View style={styles.bulkStatusRowCompact}>
+                                        {STATUS_OPTIONS.map((status) => (
+                                            <Pressable
+                                                key={`bulk_${status}`}
+                                                style={({ pressed }) => [
+                                                    styles.bulkStatusButton,
+                                                    selectedResourceIds.length === 0 && styles.bulkStatusButtonDisabled,
+                                                    pressed && styles.bulkStatusButtonPressed,
+                                                ]}
+                                                disabled={selectedResourceIds.length === 0 || processingBulkStatus !== null}
+                                                onPress={() => applyBulkStatus(status)}
+                                            >
+                                                {processingBulkStatus === status ? (
+                                                    <ActivityIndicator size="small" color="#FFF" />
+                                                ) : (
+                                                    <Text style={styles.bulkStatusButtonText}>{STATUS_LABELS[status]}</Text>
+                                                )}
+                                            </Pressable>
+                                        ))}
                                     </View>
                                 </ScrollView>
                             </View>
-                            <Pressable
-                                style={[
-                                    styles.allocateButton,
-                                    (allocating || !selectedRequestId || selectedResourceIds.length === 0) && styles.allocateButtonDisabled,
-                                ]}
-                                onPress={handleAllocate}
-                                disabled={allocating || !selectedRequestId || selectedResourceIds.length === 0}
-                            >
-                                {allocating ? (
-                                    <ActivityIndicator size="small" color="#FFF" />
-                                ) : (
-                                    <Text style={styles.allocateButtonText}>
-                                        {hasExistingAllocation ? "Reassign Selected" : "Allocate Selected"}
-                                    </Text>
-                                )}
-                            </Pressable>
+                        </>
+                    ) : (
+                        <View style={styles.allocateCard}>
+                            <Text style={styles.allocateTitle}>Upcoming allocations</Text>
+                            <Text style={styles.allocateMeta}>
+                                Showing resources already allocated to upcoming accepted matchrooms.
+                            </Text>
+                            <Text style={styles.allocateMeta}>
+                                {upcomingAllocatedMatchrooms.length} matchroom(s) • {filteredResources.length} resource(s)
+                            </Text>
                         </View>
                     )}
 
                     {filteredResources.length === 0 ? (
-                        <Text style={styles.emptyText}>No resources found for current filters.</Text>
+                        <Text style={styles.emptyText}>
+                            {viewMode === "allocation"
+                                ? "No allocated resources found for upcoming matchrooms."
+                                : "No resources found for current filters."}
+                        </Text>
                     ) : (
                         <View style={styles.sectionStack}>
                             {resourceSections.map((section) => {
                                 const sectionExpanded = expandedSectionIds.includes(section.id);
                                 const sectionSelectedCount = section.resources.filter((resource) => selectedResourceIds.includes(resource.id)).length;
+                                const sectionSchedule = viewMode === "allocation"
+                                    ? formatAllocationScheduleLabel(section.resources, matchroomByResourceId, branchById)
+                                    : "";
                                 return (
                                     <View key={section.id} style={styles.accordionCard}>
                                         <Pressable
@@ -938,11 +1179,16 @@ export default function ZoneResourcesModule() {
                                             <View style={styles.accordionHeaderTextWrap}>
                                                 <Text style={styles.accordionTitle}>{section.title}</Text>
                                                 <Text style={styles.accordionMeta}>
-                                                    {section.resources.length} resources • {sectionSelectedCount} selected
+                                                    {viewMode === "allocation"
+                                                        ? `${section.resources.length} booked resources`
+                                                        : `${section.resources.length} resources • ${sectionSelectedCount} selected`}
                                                 </Text>
+                                                {sectionSchedule ? (
+                                                    <Text style={styles.accordionSchedule}>{sectionSchedule}</Text>
+                                                ) : null}
                                             </View>
                                             <AppIcon
-                                                name={sectionExpanded ? "expand-less" : "expand-more"}
+                                                name={sectionExpanded ? "expand-less" : "chevron-right"}
                                                 size="md"
                                                 tone="muted"
                                             />
@@ -956,6 +1202,9 @@ export default function ZoneResourcesModule() {
                                                         const roomExpanded = expandedRoomIds.includes(room.id);
                                                         const roomSelected = room.resources.every((resource) => selectedResourceIds.includes(resource.id));
                                                         const roomBusy = room.resources.some((resource) => processingResourceId === resource.id) || processingBulkStatus !== null;
+                                                        const roomSchedule = viewMode === "allocation"
+                                                            ? formatAllocationScheduleLabel(room.resources, matchroomByResourceId, branchById)
+                                                            : "";
                                                         return (
                                                             <View key={room.id} style={styles.roomCard}>
                                                                 <Pressable
@@ -967,27 +1216,32 @@ export default function ZoneResourcesModule() {
                                                                         <Text style={styles.roomMeta}>
                                                                             {room.resources.length} resources
                                                                         </Text>
+                                                                        {roomSchedule ? (
+                                                                            <Text style={styles.roomSchedule}>{roomSchedule}</Text>
+                                                                        ) : null}
                                                                     </View>
                                                                     <View style={styles.roomHeaderActions}>
-                                                                        <Pressable
-                                                                            style={[
-                                                                                styles.roomSelectButton,
-                                                                                roomSelected && styles.roomSelectButtonActive,
-                                                                            ]}
-                                                                            onPress={() => toggleRoomSelected(room.resources)}
-                                                                            disabled={roomBusy}
-                                                                        >
-                                                                            <Text
+                                                                        {viewMode !== "allocation" ? (
+                                                                            <Pressable
                                                                                 style={[
-                                                                                    styles.roomSelectButtonText,
-                                                                                    roomSelected && styles.roomSelectButtonTextActive,
+                                                                                    styles.roomSelectButton,
+                                                                                    roomSelected && styles.roomSelectButtonActive,
                                                                                 ]}
+                                                                                onPress={() => toggleRoomSelected(room.resources)}
+                                                                                disabled={roomBusy}
                                                                             >
-                                                                                {roomSelected ? "Deselect room" : "Select room"}
-                                                                            </Text>
-                                                                        </Pressable>
+                                                                                <Text
+                                                                                    style={[
+                                                                                        styles.roomSelectButtonText,
+                                                                                        roomSelected && styles.roomSelectButtonTextActive,
+                                                                                    ]}
+                                                                                >
+                                                                                    {roomSelected ? "Deselect room" : "Select room"}
+                                                                                </Text>
+                                                                            </Pressable>
+                                                                        ) : null}
                                                                         <AppIcon
-                                                                            name={roomExpanded ? "expand-less" : "expand-more"}
+                                                                            name={roomExpanded ? "expand-less" : "chevron-right"}
                                                                             size="md"
                                                                             tone="muted"
                                                                         />
@@ -997,30 +1251,38 @@ export default function ZoneResourcesModule() {
                                                                 {roomExpanded ? (
                                                                     <View style={styles.grid}>
                                                                         {room.resources.map((resource) => {
-                                                                            const selected = selectedResourceIds.includes(resource.id);
+                                                                            const selected = viewMode !== "allocation" && selectedResourceIds.includes(resource.id);
                                                                             const busy = processingResourceId === resource.id || processingBulkStatus !== null;
+                                                                            const allocatedMatchroom = matchroomByResourceId.get(resource.id);
                                                                             return (
                                                                                 <Pressable
                                                                                     key={resource.id}
                                                                                     style={[styles.resourceCard, selected && styles.resourceCardSelected]}
-                                                                                    onPress={() => toggleResourceSelected(resource.id)}
+                                                                                    onPress={viewMode === "allocation" ? undefined : () => toggleResourceSelected(resource.id)}
+                                                                                    disabled={viewMode === "allocation"}
                                                                                 >
                                                                                     <Text style={styles.resourceLabel} numberOfLines={1}>
                                                                                         {resource.label}
                                                                                     </Text>
                                                                                     <Text style={styles.resourceMeta}>
-                                                                                        {resource.kind} | {resource.assetType}
-                                                                                        {resource.tier ? ` | ${resource.tier}` : ""}
-                                                                                        {resource.surface ? ` | ${resource.surface}` : ""}
+                                                                                        {titleCase(resource.kind)} | {titleCase(resource.assetType)}
+                                                                                        {resource.tier ? ` | ${titleCase(resource.tier)}` : ""}
+                                                                                        {resource.surface ? ` | ${titleCase(resource.surface)}` : ""}
                                                                                     </Text>
                                                                                     <Text style={styles.resourceMeta}>
-                                                                                        Status: {getResourceLifecycleLabel(resource.lifecycleStatus)}
+                                                                                        Status: {viewMode === "allocation" ? "Booked" : getResourceLifecycleLabel(resource.lifecycleStatus)}
                                                                                     </Text>
+                                                                                    {viewMode === "allocation" && allocatedMatchroom ? (
+                                                                                        <Text style={styles.resourceMeta} numberOfLines={2}>
+                                                                                            Matchroom: {allocatedMatchroom.title} • {formatMatchroomTimeRange(allocatedMatchroom)}
+                                                                                        </Text>
+                                                                                    ) : null}
                                                                                     {resource.holdRequestId ? (
                                                                                         <Text style={styles.resourceMeta} numberOfLines={1}>
                                                                                             Hold request: {resource.holdRequestId}
                                                                                         </Text>
                                                                                     ) : null}
+                                                                                    {viewMode !== "allocation" ? (
                                                                                     <View style={styles.statusRow}>
                                                                                         {STATUS_OPTIONS.map((status) => (
                                                                                             <Pressable
@@ -1043,6 +1305,7 @@ export default function ZoneResourcesModule() {
                                                                                             </Pressable>
                                                                                         ))}
                                                                                     </View>
+                                                                                    ) : null}
                                                                                 </Pressable>
                                                                             );
                                                                         })}
@@ -1055,24 +1318,32 @@ export default function ZoneResourcesModule() {
                                             ) : (
                                                 <View style={styles.grid}>
                                                     {section.resources.map((resource) => {
-                                                        const selected = selectedResourceIds.includes(resource.id);
+                                                        const selected = viewMode !== "allocation" && selectedResourceIds.includes(resource.id);
                                                         const busy = processingResourceId === resource.id || processingBulkStatus !== null;
+                                                        const allocatedMatchroom = matchroomByResourceId.get(resource.id);
                                                         return (
                                                             <Pressable
                                                                 key={resource.id}
                                                                 style={[styles.resourceCard, selected && styles.resourceCardSelected]}
-                                                                onPress={() => toggleResourceSelected(resource.id)}
+                                                                onPress={viewMode === "allocation" ? undefined : () => toggleResourceSelected(resource.id)}
+                                                                disabled={viewMode === "allocation"}
                                                             >
                                                                 <Text style={styles.resourceLabel} numberOfLines={1}>
                                                                     {resource.label}
                                                                 </Text>
                                                                 <Text style={styles.resourceMeta}>
-                                                                    {resource.kind} | {resource.assetType}
-                                                                    {resource.surface ? ` | ${resource.surface}` : ""}
+                                                                    {titleCase(resource.kind)} | {titleCase(resource.assetType)}
+                                                                    {resource.surface ? ` | ${titleCase(resource.surface)}` : ""}
                                                                 </Text>
                                                                 <Text style={styles.resourceMeta}>
-                                                                    Status: {getResourceLifecycleLabel(resource.lifecycleStatus)}
+                                                                    Status: {viewMode === "allocation" ? "Booked" : getResourceLifecycleLabel(resource.lifecycleStatus)}
                                                                 </Text>
+                                                                {viewMode === "allocation" && allocatedMatchroom ? (
+                                                                    <Text style={styles.resourceMeta} numberOfLines={2}>
+                                                                        Matchroom: {allocatedMatchroom.title} • {formatMatchroomTimeRange(allocatedMatchroom)}
+                                                                    </Text>
+                                                                ) : null}
+                                                                {viewMode !== "allocation" ? (
                                                                 <View style={styles.statusRow}>
                                                                     {STATUS_OPTIONS.map((status) => (
                                                                         <Pressable
@@ -1095,6 +1366,7 @@ export default function ZoneResourcesModule() {
                                                                         </Pressable>
                                                                     ))}
                                                                 </View>
+                                                                ) : null}
                                                             </Pressable>
                                                         );
                                                     })}

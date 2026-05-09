@@ -113,7 +113,9 @@ export async function inviteToMatchroomAction(data: {
 
     return { ok: true, message: "Invitation sent successfully." };
   } catch (error: any) {
-    Logger.error("matchroomActionService", "inviteToMatchroomAction error", error);
+    Logger.warn("matchroomActionService", "inviteToMatchroomAction rejected", {
+      message: error?.message || "Failed to send invitation.",
+    });
     return { ok: false, message: error.message || "Failed to send invitation." };
   }
 }

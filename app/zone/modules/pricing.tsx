@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
     ActivityIndicator,
     Alert,
+    Dimensions,
     Pressable,
     ScrollView,
     Switch,
@@ -10,10 +11,18 @@ import {
     TextInput,
     View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
-import { AppIcon } from "../../../src/components/AppIcon";
-import { AppPickerSheet } from "../../../src/components/AppModalPrimitives";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import {
+    AppDrawer,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+    AppPickerSheet,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -23,6 +32,7 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import {
     createZonePricingRule,
     deleteZonePricingRule,
+    getEnabledPricingRulesForZone,
     setZonePricingRuleEnabled,
     subscribeZonePricingRules,
     type PricingRule,
@@ -34,17 +44,50 @@ import { COLORS } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./pricing.styles";
 
-const ASSET_TYPES: PricingRuleAssetType[] = [
-    "pc",
-    "console",
-    "futsal",
-    "indoor_cricket",
-    "padel",
-    "pickleball",
-];
+const ASSET_TYPES: PricingRuleAssetType[] = ["pc", "console"];
 
 const RULE_TYPES: PricingRuleType[] = ["percentage_discount", "fixed_override"];
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
+type RuleEnabledFilter = "all" | "enabled" | "disabled";
+const ENABLED_FILTERS: Array<{ key: RuleEnabledFilter; label: string }> = [
+    { key: "all", label: "All states" },
+    { key: "enabled", label: "Enabled" },
+    { key: "disabled", label: "Disabled" },
+];
+const TIER_OPTIONS_BY_ASSET: Partial<Record<PricingRuleAssetType, Array<{ key: string; label: string }>>> = {
+    pc: [
+        { key: "regular", label: "Regular PCs" },
+        { key: "premium", label: "Premium PCs" },
+        { key: "elite", label: "Elite PCs" },
+    ],
+    console: [
+        { key: "ps5", label: "PS5" },
+        { key: "xbox", label: "Xbox" },
+    ],
+};
+const MODE_OPTIONS_BY_ASSET: Partial<Record<PricingRuleAssetType, Array<{ key: string; label: string }>>> = {
+    pc: [{ key: "5v5", label: "5v5" }],
+    console: [
+        { key: "1v1", label: "1v1" },
+        { key: "2v2", label: "2v2" },
+    ],
+};
+
+const formatLabel = (value?: string | null) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "All";
+    const normalized = raw.toLowerCase();
+    if (normalized === "pc") return "PCs";
+    if (normalized === "cs2") return "CS2";
+    if (normalized === "cs16") return "CS 1.6";
+    if (normalized === "fc26") return "FC26";
+    if (normalized === "ps5") return "PS5";
+    return raw
+        .split(/[_\s-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+};
 
 const toMillis = (value: any) => {
     if (!value) return 0;
@@ -90,10 +133,12 @@ const RULE_SWITCH_TRACK_COLOR = {
 
 const PricingRuleRow = memo(function PricingRuleRow({
     rule,
+    branchLabel,
     onToggle,
     onDelete,
 }: {
     rule: PricingRule;
+    branchLabel: string;
     onToggle: (rule: PricingRule, enabled: boolean) => void | Promise<void>;
     onDelete: (rule: PricingRule) => void | Promise<void>;
 }) {
@@ -102,13 +147,15 @@ const PricingRuleRow = memo(function PricingRuleRow({
             <View style={styles.ruleBody}>
                 <Text style={styles.ruleName}>{rule.name}</Text>
                 <Text style={styles.ruleMeta}>
-                    {rule.assetType} | {rule.ruleType} | value {rule.value}
+                    {formatLabel(rule.assetType)} | {formatLabel(rule.ruleType)} | value {rule.value}
                 </Text>
                 <Text style={styles.ruleMeta}>
                     {rule.timeStart}-{rule.timeEnd} | priority {rule.priority}
                 </Text>
                 <Text style={styles.ruleMeta}>
-                    branch: {rule.branchId || "all"}
+                    Branch: {branchLabel}
+                    {rule.tier ? ` | Tier: ${formatLabel(rule.tier)}` : ""}
+                    {rule.surface ? ` | Mode: ${formatLabel(rule.surface)}` : ""}
                 </Text>
             </View>
             <View style={styles.ruleActions}>
@@ -128,6 +175,7 @@ const PricingRuleRow = memo(function PricingRuleRow({
 
 export default function ZonePricingModule() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const { zone } = useZoneData();
     const { showToast } = useToast();
@@ -162,9 +210,13 @@ export default function ZonePricingModule() {
     });
     const [validFromAt, setValidFromAt] = useState<Date | null>(null);
     const [validToAt, setValidToAt] = useState<Date | null>(null);
-    const [showFilters, setShowFilters] = useState(true);
+    const [showRuleFilters, setShowRuleFilters] = useState(false);
+    const [ruleSearchQuery, setRuleSearchQuery] = useState("");
+    const [ruleAssetFilter, setRuleAssetFilter] = useState<PricingRuleAssetType | "all">("all");
+    const [ruleTypeFilter, setRuleTypeFilter] = useState<PricingRuleType | "all">("all");
+    const [ruleEnabledFilter, setRuleEnabledFilter] = useState<RuleEnabledFilter>("all");
+    const [ruleBranchFilter, setRuleBranchFilter] = useState("all");
     const [priority, setPriority] = useState("0");
-    const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1, 2, 3, 4, 5]);
     const [viewMode, setViewMode] = useState<"create" | "rules">("create");
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
@@ -269,7 +321,7 @@ export default function ZonePricingModule() {
                 surface: surface.trim() || null,
                 ruleType,
                 value: parsedValue,
-                daysOfWeek,
+                daysOfWeek: [],
                 timeStart: toTimeValue(timeStartAt),
                 timeEnd: toTimeValue(timeEndAt),
                 validFrom: validFromAt ? toDateValue(validFromAt) : null,
@@ -292,6 +344,8 @@ export default function ZonePricingModule() {
         setValidFromAt(null);
         setValidToAt(null);
         setPriority("0");
+        const refreshedRules = await getEnabledPricingRulesForZone(zone.id, { forceRefresh: true });
+        setRules(refreshedRules.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt)));
         showToast({ type: "success", title: "Rule created", message: "Pricing rule is now active." });
     };
 
@@ -322,14 +376,81 @@ export default function ZonePricingModule() {
 
     const summary = useMemo(() => {
         const enabled = rules.filter((item) => item.isEnabled).length;
-        return { total: rules.length, enabled };
+        return { total: rules.length, enabled, disabled: rules.length - enabled };
     }, [rules]);
+    const filteredRules = useMemo(() => {
+        const normalizedSearch = ruleSearchQuery.trim().toLowerCase();
+        return rules.filter((rule) => {
+            if (ruleAssetFilter !== "all" && rule.assetType !== ruleAssetFilter) return false;
+            if (ruleTypeFilter !== "all" && rule.ruleType !== ruleTypeFilter) return false;
+            if (ruleEnabledFilter === "enabled" && !rule.isEnabled) return false;
+            if (ruleEnabledFilter === "disabled" && rule.isEnabled) return false;
+            if (ruleBranchFilter !== "all" && String(rule.branchId || "all") !== ruleBranchFilter) return false;
+            if (!normalizedSearch) return true;
+            return [
+                rule.name,
+                rule.assetType,
+                rule.ruleType,
+                rule.tier,
+                rule.surface,
+                rule.branchId,
+                rule.timeStart,
+                rule.timeEnd,
+                rule.validFrom,
+                rule.validTo,
+            ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase()
+                .includes(normalizedSearch);
+        });
+    }, [ruleAssetFilter, ruleBranchFilter, ruleEnabledFilter, ruleSearchQuery, ruleTypeFilter, rules]);
+    const activeRuleFilterCount = useMemo(
+        () =>
+            (ruleAssetFilter !== "all" ? 1 : 0) +
+            (ruleTypeFilter !== "all" ? 1 : 0) +
+            (ruleEnabledFilter !== "all" ? 1 : 0) +
+            (ruleBranchFilter !== "all" ? 1 : 0),
+        [ruleAssetFilter, ruleBranchFilter, ruleEnabledFilter, ruleTypeFilter],
+    );
+    const pricingMetrics = useMemo(
+        () => [
+            { key: "total", label: "Rules", value: summary.total, icon: "pricing" as AppIconName, color: COLORS.accent },
+            { key: "enabled", label: "Enabled", value: summary.enabled, icon: "status" as AppIconName, color: COLORS.successBright },
+            { key: "disabled", label: "Disabled", value: summary.disabled, icon: "cancel" as AppIconName, color: COLORS.warning },
+            { key: "branches", label: "Branches", value: branches.length || 1, icon: "branch" as AppIconName, color: COLORS.textSecondary },
+        ],
+        [branches.length, summary.disabled, summary.enabled, summary.total],
+    );
+    const branchLabelById = useMemo(
+        () => new Map(branches.map((branch) => [branch.id, branch.branchDisplayName] as const)),
+        [branches],
+    );
+    const tierOptions = useMemo(
+        () => TIER_OPTIONS_BY_ASSET[assetType] || [{ key: "", label: "All tiers" }],
+        [assetType],
+    );
+    const modeOptions = useMemo(
+        () => MODE_OPTIONS_BY_ASSET[assetType] || [{ key: "", label: "All modes" }],
+        [assetType],
+    );
+    useEffect(() => {
+        const tierValid = tierOptions.some((option) => option.key === tier);
+        if (!tierValid) {
+            setTier(tierOptions[0]?.key || "");
+        }
+        const modeValid = modeOptions.some((option) => option.key === surface);
+        if (!modeValid) {
+            setSurface(modeOptions[0]?.key || "");
+        }
+    }, [assetType, modeOptions, surface, tier, tierOptions]);
     const migrationNotice = !pricingEngineReady
         ? `Pricing stays locked until migration succeeds. Current state: ${getZoneMigrationLabel(zone)}. Open Migration Tools if you need to repair the venue setup.`
         : null;
     const hours12 = useMemo(() => Array.from({ length: 12 }).map((_, index) => index + 1), []);
     const minutes = useMemo(() => [0, 30], []);
     const periods: Array<"AM" | "PM"> = ["AM", "PM"];
+    const timeColumnMaxHeight = Math.min(360, Math.max(220, Dimensions.get("window").height * 0.46));
     const monthYearLabel = useMemo(
         () => monthCursor.toLocaleString("en-US", { month: "long", year: "numeric" }),
         [monthCursor],
@@ -359,7 +480,7 @@ export default function ZonePricingModule() {
             <SegmentedTabs
                 items={[
                     { key: "create", label: "Create Rule" },
-                    { key: "rules", label: "Rules", badge: rules.length },
+                    { key: "rules", label: "Rules", badge: filteredRules.length },
                 ]}
                 value={viewMode}
                 onChange={(value) => setViewMode(value)}
@@ -378,28 +499,150 @@ export default function ZonePricingModule() {
             ) : null}
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                <View style={styles.summaryCard}>
-                    <Text style={styles.summaryValue}>{summary.enabled}/{summary.total}</Text>
-                    <Text style={styles.summaryLabel}>Enabled rules</Text>
+                <View style={styles.summaryGrid}>
+                    {pricingMetrics.map((metric, index) => (
+                        <View
+                            key={metric.key}
+                            style={[
+                                styles.summaryCard,
+                                index % 2 === 0 && styles.summaryCardLeft,
+                                index < 2 && styles.summaryCardTop,
+                            ]}
+                        >
+                            <View style={[styles.summaryIconWrap, { backgroundColor: `${metric.color}12`, borderColor: `${metric.color}38` }]}>
+                                <AppIcon name={metric.icon} size={16} color={metric.color} />
+                            </View>
+                            <View style={styles.summaryTextWrap}>
+                                <Text style={styles.summaryLabel}>{metric.label}</Text>
+                                <Text style={styles.summaryValue}>{metric.value}</Text>
+                            </View>
+                        </View>
+                    ))}
                 </View>
+
+                {viewMode === "rules" ? (
+                    <>
+                        <View style={styles.searchRow}>
+                            <View style={styles.searchBar}>
+                                <AppIcon name="search" size={20} color={COLORS.muted} />
+                                <TextInput
+                                    style={styles.searchInput}
+                                    placeholder="Search rules..."
+                                    placeholderTextColor={COLORS.muted}
+                                    value={ruleSearchQuery}
+                                    onChangeText={setRuleSearchQuery}
+                                />
+                                {ruleSearchQuery.length > 0 ? (
+                                    <Pressable onPress={() => setRuleSearchQuery("")} hitSlop={8}>
+                                        <AppIcon name="close" size={18} color={COLORS.muted} />
+                                    </Pressable>
+                                ) : null}
+                            </View>
+                            <Pressable
+                                onPress={() => setShowRuleFilters(true)}
+                                style={({ pressed }) => [
+                                    styles.filterButton,
+                                    pressed && styles.filterButtonPressed,
+                                ]}
+                            >
+                                <AppIcon name="filters" size={22} color={COLORS.text} />
+                                {activeRuleFilterCount > 0 ? (
+                                    <View style={styles.filterBadge}>
+                                        <Text style={styles.filterBadgeText}>
+                                            {activeRuleFilterCount > 9 ? "9+" : activeRuleFilterCount}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                            </Pressable>
+                        </View>
+
+                        <AppDrawer
+                            visible={showRuleFilters}
+                            onClose={() => setShowRuleFilters(false)}
+                            drawerStyle={[styles.filterDrawer, { width: DRAWER_WIDTH }]}
+                        >
+                            <View style={[styles.filterDrawerContent, { paddingTop: Math.max(insets.top, 16) }]}>
+                                <AppModalHeader title="Filters" subtitle="Pricing rules" onClose={() => setShowRuleFilters(false)} compact />
+                                <AppModalBody scroll contentContainerStyle={styles.filtersDrawerBody}>
+                                    <View style={styles.filtersWrap}>
+                                        <Text style={styles.filterSectionLabel}>State</Text>
+                                        <View style={styles.filterChipWrap}>
+                                            {ENABLED_FILTERS.map((filter) => (
+                                                <Pressable
+                                                    key={filter.key}
+                                                    onPress={() => setRuleEnabledFilter(filter.key)}
+                                                    style={[styles.chip, ruleEnabledFilter === filter.key && styles.chipActive]}
+                                                >
+                                                    <Text style={[styles.chipText, ruleEnabledFilter === filter.key && styles.chipTextActive]}>{filter.label}</Text>
+                                                </Pressable>
+                                            ))}
+                                        </View>
+                                        <Text style={styles.filterSectionLabel}>Asset type</Text>
+                                        <View style={styles.filterChipWrap}>
+                                            {(["all", ...ASSET_TYPES] as Array<PricingRuleAssetType | "all">).map((item) => (
+                                                <Pressable
+                                                    key={item}
+                                                    onPress={() => setRuleAssetFilter(item)}
+                                            style={[styles.chip, ruleAssetFilter === item && styles.chipActive]}
+                                        >
+                                            <Text style={[styles.chipText, ruleAssetFilter === item && styles.chipTextActive]}>{formatLabel(item)}</Text>
+                                        </Pressable>
+                                    ))}
+                                </View>
+                                        <Text style={styles.filterSectionLabel}>Rule type</Text>
+                                        <View style={styles.filterChipWrap}>
+                                            {(["all", ...RULE_TYPES] as Array<PricingRuleType | "all">).map((item) => (
+                                                <Pressable
+                                                    key={item}
+                                                    onPress={() => setRuleTypeFilter(item)}
+                                            style={[styles.chip, ruleTypeFilter === item && styles.chipActive]}
+                                        >
+                                            <Text style={[styles.chipText, ruleTypeFilter === item && styles.chipTextActive]}>{formatLabel(item)}</Text>
+                                        </Pressable>
+                                    ))}
+                                </View>
+                                        <Text style={styles.filterSectionLabel}>Branch</Text>
+                                        <View style={styles.filterChipWrap}>
+                                            <Pressable
+                                                onPress={() => setRuleBranchFilter("all")}
+                                                style={[styles.chip, ruleBranchFilter === "all" && styles.chipActive]}
+                                            >
+                                                <Text style={[styles.chipText, ruleBranchFilter === "all" && styles.chipTextActive]}>All branches</Text>
+                                            </Pressable>
+                                            {branches.map((branch) => (
+                                                <Pressable
+                                                    key={branch.id}
+                                                    onPress={() => setRuleBranchFilter(branch.id)}
+                                                    style={[styles.chip, ruleBranchFilter === branch.id && styles.chipActive]}
+                                                >
+                                                    <Text style={[styles.chipText, ruleBranchFilter === branch.id && styles.chipTextActive]}>{branch.branchDisplayName}</Text>
+                                                </Pressable>
+                                            ))}
+                                        </View>
+                                    </View>
+                                </AppModalBody>
+                                <AppModalFooter style={styles.filterDrawerFooter}>
+                                    <AppButton
+                                        variant="ghost"
+                                        onPress={() => {
+                                            setRuleAssetFilter("all");
+                                            setRuleTypeFilter("all");
+                                            setRuleEnabledFilter("all");
+                                            setRuleBranchFilter("all");
+                                        }}
+                                    >
+                                        Reset
+                                    </AppButton>
+                                    <AppButton onPress={() => setShowRuleFilters(false)}>Done</AppButton>
+                                </AppModalFooter>
+                            </View>
+                        </AppDrawer>
+                    </>
+                ) : null}
 
                 {viewMode === "create" ? (
                     <View style={styles.formCard}>
                         <Text style={styles.formTitle}>Create Rule</Text>
-                        <Pressable
-                            style={styles.filtersToggle}
-                            onPress={() => setShowFilters((prev) => !prev)}
-                        >
-                            <View style={styles.filtersToggleLeft}>
-                                <AppIcon name="tune" size="sm" tone="accent" />
-                                <Text style={styles.filtersToggleText}>Rule Scope & Schedule</Text>
-                            </View>
-                            <AppIcon
-                                name={showFilters ? "expand-less" : "expand-more"}
-                                size={18}
-                                tone="muted"
-                            />
-                        </Pressable>
 
                         <Text style={styles.fieldLabel}>Rule name</Text>
                         <TextInput
@@ -410,62 +653,58 @@ export default function ZonePricingModule() {
                             placeholderTextColor={COLORS.muted}
                         />
 
-                        {showFilters ? (
-                            <>
-                                <Text style={styles.fieldLabel}>Asset type</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                    {ASSET_TYPES.map((item) => (
-                                        <Pressable
-                                            key={item}
-                                            onPress={() => setAssetType(item)}
-                                            style={[styles.chip, assetType === item && styles.chipActive]}
-                                        >
-                                            <Text style={[styles.chipText, assetType === item && styles.chipTextActive]}>
-                                                {item}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </ScrollView>
+                        <Text style={styles.fieldLabel}>Resource</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {ASSET_TYPES.map((item) => (
+                                <Pressable
+                                    key={item}
+                                    onPress={() => setAssetType(item)}
+                                    style={[styles.chip, assetType === item && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, assetType === item && styles.chipTextActive]}>
+                                        {formatLabel(item)}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
 
-                                <Text style={styles.fieldLabel}>Rule type</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                    {RULE_TYPES.map((item) => (
-                                        <Pressable
-                                            key={item}
-                                            onPress={() => setRuleType(item)}
-                                            style={[styles.chip, ruleType === item && styles.chipActive]}
-                                        >
-                                            <Text style={[styles.chipText, ruleType === item && styles.chipTextActive]}>
-                                                {item}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </ScrollView>
+                        <Text style={styles.fieldLabel}>Rule type</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {RULE_TYPES.map((item) => (
+                                <Pressable
+                                    key={item}
+                                    onPress={() => setRuleType(item)}
+                                    style={[styles.chip, ruleType === item && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, ruleType === item && styles.chipTextActive]}>
+                                        {formatLabel(item)}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
 
-                                <Text style={styles.fieldLabel}>Branch scope</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                    <Pressable
-                                        onPress={() => setSelectedBranchId("all")}
-                                        style={[styles.chip, selectedBranchId === "all" && styles.chipActive]}
-                                    >
-                                        <Text style={[styles.chipText, selectedBranchId === "all" && styles.chipTextActive]}>
-                                            All branches
-                                        </Text>
-                                    </Pressable>
-                                    {branches.map((branch) => (
-                                        <Pressable
-                                            key={branch.id}
-                                            onPress={() => setSelectedBranchId(branch.id)}
-                                            style={[styles.chip, selectedBranchId === branch.id && styles.chipActive]}
-                                        >
-                                            <Text style={[styles.chipText, selectedBranchId === branch.id && styles.chipTextActive]}>
-                                                {branch.branchDisplayName}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </ScrollView>
-                            </>
-                        ) : null}
+                        <Text style={styles.fieldLabel}>Branch scope</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            <Pressable
+                                onPress={() => setSelectedBranchId("all")}
+                                style={[styles.chip, selectedBranchId === "all" && styles.chipActive]}
+                            >
+                                <Text style={[styles.chipText, selectedBranchId === "all" && styles.chipTextActive]}>
+                                    All branches
+                                </Text>
+                            </Pressable>
+                            {branches.map((branch) => (
+                                <Pressable
+                                    key={branch.id}
+                                    onPress={() => setSelectedBranchId(branch.id)}
+                                    style={[styles.chip, selectedBranchId === branch.id && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, selectedBranchId === branch.id && styles.chipTextActive]}>
+                                        {branch.branchDisplayName}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
 
                         <Text style={styles.fieldLabel}>Rule value</Text>
                         <TextInput
@@ -477,21 +716,33 @@ export default function ZonePricingModule() {
                             placeholderTextColor={COLORS.muted}
                         />
                         <Text style={styles.fieldLabel}>Tier</Text>
-                        <TextInput
-                            value={tier}
-                            onChangeText={setTier}
-                            style={styles.input}
-                            placeholder="regular"
-                            placeholderTextColor={COLORS.muted}
-                        />
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {tierOptions.map((option) => (
+                                <Pressable
+                                    key={`tier_${option.key || "all"}`}
+                                    onPress={() => setTier(option.key)}
+                                    style={[styles.chip, tier === option.key && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, tier === option.key && styles.chipTextActive]}>
+                                        {option.label}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
                         <Text style={styles.fieldLabel}>Surface / Mode</Text>
-                        <TextInput
-                            value={surface}
-                            onChangeText={setSurface}
-                            style={styles.input}
-                            placeholder="5v5"
-                            placeholderTextColor={COLORS.muted}
-                        />
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                            {modeOptions.map((option) => (
+                                <Pressable
+                                    key={`mode_${option.key || "all"}`}
+                                    onPress={() => setSurface(option.key)}
+                                    style={[styles.chip, surface === option.key && styles.chipActive]}
+                                >
+                                    <Text style={[styles.chipText, surface === option.key && styles.chipTextActive]}>
+                                        {option.label}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
 
                         <View style={styles.row}>
                             <View style={styles.fieldColumn}>
@@ -599,30 +850,6 @@ export default function ZonePricingModule() {
                             placeholderTextColor={COLORS.muted}
                         />
 
-                        <Text style={styles.fieldLabel}>Active days</Text>
-                        <View style={styles.daysWrap}>
-                            {DAY_LABELS.map((label, dayIndex) => {
-                                const selected = daysOfWeek.includes(dayIndex);
-                                return (
-                                    <Pressable
-                                        key={label}
-                                        style={[styles.dayChip, selected && styles.dayChipActive]}
-                                        onPress={() =>
-                                            setDaysOfWeek((prev) =>
-                                                prev.includes(dayIndex)
-                                                    ? prev.filter((item) => item !== dayIndex)
-                                                    : [...prev, dayIndex].sort((a, b) => a - b),
-                                            )
-                                        }
-                                    >
-                                        <Text style={[styles.dayChipText, selected && styles.dayChipTextActive]}>
-                                            {label}
-                                        </Text>
-                                    </Pressable>
-                                );
-                            })}
-                        </View>
-
                         <Pressable
                             onPress={createRule}
                             disabled={saving || !pricingEngineReady}
@@ -642,13 +869,18 @@ export default function ZonePricingModule() {
                         <Text style={styles.formTitle}>Existing Rules</Text>
                         {loadingRules ? (
                             <ActivityIndicator size="small" color={COLORS.accent} />
-                        ) : rules.length === 0 ? (
+                        ) : filteredRules.length === 0 ? (
                             <Text style={styles.emptyText}>No pricing rules yet.</Text>
                         ) : (
-                            rules.map((rule) => (
+                            filteredRules.map((rule) => (
                                 <PricingRuleRow
                                     key={rule.id}
                                     rule={rule}
+                                    branchLabel={
+                                        rule.branchId
+                                            ? branchLabelById.get(rule.branchId) || "Unknown branch"
+                                            : "All branches"
+                                    }
                                     onToggle={toggleRule}
                                     onDelete={removeRule}
                                 />
@@ -661,7 +893,7 @@ export default function ZonePricingModule() {
             <AppPickerSheet
                 visible={showDatePicker}
                 onClose={() => setShowDatePicker(false)}
-                sheetStyle={styles.pickerSheet}
+                sheetStyle={[styles.pickerSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
             >
                 <View style={styles.pickerHeader}>
                     <Pressable onPress={() => setShowDatePicker(false)}>
@@ -755,7 +987,7 @@ export default function ZonePricingModule() {
             <AppPickerSheet
                 visible={showTimePicker}
                 onClose={() => setShowTimePicker(false)}
-                sheetStyle={styles.pickerSheet}
+                sheetStyle={[styles.pickerSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
             >
                 <View style={styles.pickerHeader}>
                     <Pressable onPress={() => setShowTimePicker(false)}>
@@ -787,7 +1019,11 @@ export default function ZonePricingModule() {
                     </Pressable>
                 </View>
                 <View style={styles.timePickerRow}>
-                            <View style={styles.timeColumn}>
+                            <ScrollView
+                                style={[styles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                contentContainerStyle={styles.timeColumnContent}
+                                showsVerticalScrollIndicator={false}
+                            >
                                 {hours12.map((hour) => {
                                     const selected = timeDraft.hour === hour;
                                     return (
@@ -802,8 +1038,12 @@ export default function ZonePricingModule() {
                                         </Pressable>
                                     );
                                 })}
-                            </View>
-                            <View style={styles.timeColumn}>
+                            </ScrollView>
+                            <ScrollView
+                                style={[styles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                contentContainerStyle={styles.timeColumnContent}
+                                showsVerticalScrollIndicator={false}
+                            >
                                 {minutes.map((minute) => {
                                     const selected = timeDraft.minute === minute;
                                     return (
@@ -818,8 +1058,12 @@ export default function ZonePricingModule() {
                                         </Pressable>
                                     );
                                 })}
-                            </View>
-                            <View style={styles.timeColumn}>
+                            </ScrollView>
+                            <ScrollView
+                                style={[styles.timeColumnScroll, { maxHeight: timeColumnMaxHeight }]}
+                                contentContainerStyle={styles.timeColumnContent}
+                                showsVerticalScrollIndicator={false}
+                            >
                                 {periods.map((period) => {
                                     const selected = timeDraft.period === period;
                                     return (
@@ -834,7 +1078,7 @@ export default function ZonePricingModule() {
                                         </Pressable>
                                     );
                                 })}
-                            </View>
+                            </ScrollView>
                         </View>
             </AppPickerSheet>
         </Screen>

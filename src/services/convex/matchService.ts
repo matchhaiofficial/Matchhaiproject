@@ -85,6 +85,10 @@ export interface Matchroom {
   expiresAt?: number;
   durationMinutes?: number;
   pricing: { perPlayer: number; currency: string };
+  requestedResourceAssetType?: string;
+  requestedResourceSurface?: string;
+  requestedResourceTier?: string;
+  selectedZoneRateKey?: string;
   matchCode?: string;
   flexibility?: string;
   bookingSource?: string;
@@ -157,6 +161,9 @@ export interface Matchroom {
     participantVotes?: Record<string, "team1" | "team2" | "unknown">;
     deadline?: any;
     votes?: Record<string, string>;
+    finalWinner?: "team1" | "team2";
+    resolvedAt?: any;
+    resolutionSource?: string;
   };
 }
 
@@ -373,7 +380,7 @@ export async function createMatchroom(
 
       const now = Date.now();
       const isAdminFlow = roomData.zoneAdminApproved === true;
-      const minLeadMs = isAdminFlow ? ONE_DAY_MS : 2 * ONE_DAY_MS;
+      const minLeadMs = isAdminFlow ? ONE_DAY_MS : 60 * 60 * 1000;
 
       if (scheduledStartAt - now < minLeadMs) {
         const hours = Math.round(minLeadMs / (60 * 60 * 1000));
@@ -418,8 +425,8 @@ export async function createMatchroom(
       roomData.scheduledDate,
       roomData.scheduledTime
     ) ?? undefined;
-    const lockAt = scheduledStartAt ? scheduledStartAt - ONE_DAY_MS : undefined;
-    const expiresAt = lockAt;
+    const lockAt = undefined;
+    const expiresAt = undefined;
 
     const matchroomId = await convex.mutation(api.matchrooms.create, {
       hostUid: roomData.hostUid,
@@ -449,6 +456,10 @@ export async function createMatchroom(
       expiresAt,
       durationMinutes: roomData.durationMinutes,
       pricing: roomData.pricing,
+      requestedResourceAssetType: roomData.requestedResourceAssetType,
+      requestedResourceSurface: roomData.requestedResourceSurface,
+      requestedResourceTier: roomData.requestedResourceTier,
+      selectedZoneRateKey: roomData.selectedZoneRateKey,
       slotsA,
       slotsB,
       captainUidA: roomData.captainUidA || roomData.hostUid,
@@ -467,6 +478,9 @@ export async function createMatchroom(
       bookingSource: roomData.bookingSource,
       isPrivate: roomData.isPrivate,
       paymentStatus: roomData.paymentStatus,
+      paymentAmount: roomData.paymentAmount,
+      paymentReservedSlots: roomData.paymentReservedSlots,
+      paymentCurrency: roomData.paymentCurrency,
       zoneAdminApproved: roomData.zoneAdminApproved,
     });
 

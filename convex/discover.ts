@@ -100,10 +100,10 @@ function matchesTimeline(room: any, timeline: string) {
 }
 
 function isRoomExpired(room: any) {
-  if (["expired", "completed", "cancelled"].includes(String(room?.status || ""))) {
+  if (["completed", "cancelled"].includes(String(room?.status || ""))) {
     return true;
   }
-  return typeof room?.expiresAt === "number" && room.expiresAt <= Date.now();
+  return false;
 }
 
 function isActivePendingNotification(row: any) {

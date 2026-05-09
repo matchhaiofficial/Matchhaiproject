@@ -90,6 +90,11 @@ function logGatewayDebug(event: string, payload: Record<string, unknown>) {
   console.log(`[easypaisa] ${event}`, JSON.stringify(payload));
 }
 
+function getEmailDomain(email?: string | null) {
+  const domain = String(email || "").split("@")[1] || "";
+  return domain || null;
+}
+
 function ensurePaymentConfig() {
   if (!CONVEX_SITE_URL) {
     throw new Error("Payment callbacks are not configured. Set EXPO_PUBLIC_CONVEX_SITE_URL first.");
@@ -662,7 +667,28 @@ export const startCheckout = action({
     const currency = String(context.currency || "PKR");
     const active = context.activeTransaction;
 
+    logGatewayDebug("start.context", {
+      kind: args.kind,
+      userId: String(userId),
+      bookingIntentId: bookingIntentId ? String(bookingIntentId) : null,
+      amount,
+      currency,
+      flow: args.flow || EASYPAISA_DEFAULT_FLOW,
+      transactionType: args.transactionType || "MA",
+      phoneMasked: maskPhone(userPhone),
+      emailDomain: getEmailDomain(userEmail),
+      activeTransactionId: active?._id ? String(active._id) : null,
+      activeStatus: active?.status || null,
+    });
+
     if (active) {
+      logGatewayDebug("start.reuse_active", {
+        transactionId: String(active._id),
+        orderRefNum: active.orderRefNum,
+        status: active.status,
+        amount: active.amount,
+        kind: active.kind,
+      });
       return {
         transactionId: active._id,
         orderRefNum: active.orderRefNum,
@@ -705,6 +731,17 @@ export const startCheckout = action({
       flow,
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
+    });
+
+    logGatewayDebug("start.transaction_created", {
+      transactionId: String(transactionId),
+      orderRefNum,
+      kind: args.kind,
+      amount,
+      currency,
+      flow,
+      transactionType,
+      hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
     });
 
     if (flow === "hosted") {
@@ -756,6 +793,16 @@ export const startCheckout = action({
     const endpointPath = transactionType === "OTC"
       ? "/initiate-otc-transaction"
       : "/initiate-ma-transaction";
+    logGatewayDebug("rest.initiate.request", {
+      transactionId: String(transactionId),
+      orderRefNum,
+      endpointPath,
+      kind: args.kind,
+      amount,
+      transactionType,
+      phoneMasked: maskPhone(normalizedPhone),
+      emailDomain: getEmailDomain(emailAddress),
+    });
     let responseBody: any = {};
     try {
       const initiateResult: any = await ctx.runAction((internal as any).easypaisaNode.initiateRestTransaction, {
@@ -763,6 +810,18 @@ export const startCheckout = action({
         payload: requestPayload,
       });
       responseBody = initiateResult?.body || {};
+
+      logGatewayDebug("rest.initiate.response", {
+        transactionId: String(transactionId),
+        orderRefNum,
+        endpointPath,
+        httpStatus: initiateResult?.status || null,
+        ok: Boolean(initiateResult?.ok),
+        responseCode: responseBody?.responseCode || null,
+        responseDesc: responseBody?.responseDesc || null,
+        providerTransactionId: responseBody?.transactionId || null,
+        paymentTokenPresent: Boolean(responseBody?.paymentToken),
+      });
 
       await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
         orderRefNum,
@@ -797,6 +856,13 @@ export const startCheckout = action({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initiate Easypaisa payment.";
+      logGatewayDebug("rest.initiate.error", {
+        transactionId: String(transactionId),
+        orderRefNum,
+        endpointPath,
+        recoverable: isRecoverableCheckoutStartError(error),
+        message,
+      });
       if (isRecoverableCheckoutStartError(error)) {
         await ctx.runMutation((internal as any).easypaisa.markCheckoutPendingAfterInitiateTimeout, {
           transactionId,
@@ -1073,6 +1139,19 @@ export const applyProviderUpdate = internalMutation({
     const snapshot = args.snapshot as ProviderSnapshot;
     const normalized = normalizeProviderUpdate(args.source, snapshot);
     const providerReference = getProviderReference(snapshot, row.orderRefNum);
+    logGatewayDebug("provider.update", {
+      transactionId: String(row._id),
+      orderRefNum: row.orderRefNum,
+      source: args.source,
+      kind: row.kind,
+      amount: row.amount,
+      previousStatus: row.status,
+      resolvedStatus: normalized.resolvedStatus,
+      providerStatus: normalized.transactionStatus || normalized.responseCode || null,
+      providerDescription: normalized.responseDesc || null,
+      providerReference,
+      processedAt: row.processedAt || null,
+    });
     const currentPayload = row.providerPayload || {};
     const sourcePayload = args.source === "ipn"
       ? {
@@ -1227,6 +1306,12 @@ export const applyProviderUpdate = internalMutation({
 
     try {
       if (row.kind === "wallet_topup") {
+        logGatewayDebug("reconcile.wallet_topup.begin", {
+          transactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          userId: String(row.userId),
+          amount: row.amount,
+        });
         await ctx.runMutation(api.wallet.addFunds, {
           userId: row.userId,
           amount: row.amount,
@@ -1239,6 +1324,13 @@ export const applyProviderUpdate = internalMutation({
           },
         });
       } else if (row.bookingIntentId) {
+        logGatewayDebug("reconcile.booking_intent.begin", {
+          transactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          userId: String(row.userId),
+          bookingIntentId: String(row.bookingIntentId),
+          amount: row.amount,
+        });
         await ctx.runMutation(api.matchrooms.payMatchroomSeatIntent, {
           intentId: row.bookingIntentId,
           userId: row.userId,
@@ -1251,6 +1343,14 @@ export const applyProviderUpdate = internalMutation({
         status: "paid",
         processedAt: now,
         lastError: undefined,
+      });
+
+      logGatewayDebug("reconcile.complete", {
+        transactionId: String(row._id),
+        orderRefNum: row.orderRefNum,
+        kind: row.kind,
+        amount: row.amount,
+        status: "paid",
       });
 
       if (row.kind === "wallet_topup") {
@@ -1281,6 +1381,13 @@ export const applyProviderUpdate = internalMutation({
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Payment reconciliation failed.";
+      logGatewayDebug("reconcile.error", {
+        transactionId: String(row._id),
+        orderRefNum: row.orderRefNum,
+        kind: row.kind,
+        amount: row.amount,
+        message,
+      });
       await ctx.db.patch(row._id, {
         ...callbackPatch,
         status: "pending",

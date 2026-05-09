@@ -323,6 +323,7 @@ export default function CreateMatchroom() {
   } = useMatchroomCreatePricing({
     selectedZoneId,
     selectedZone,
+    selectedBranchId: walkInBranchId || (typeof params.branchId === "string" ? params.branchId : null),
     selectedGame,
     seriesType,
     duration,
@@ -521,28 +522,51 @@ export default function CreateMatchroom() {
     }, [selectedTeamId, refreshSelectedTeam]),
   );
 
-  const minLeadDays = isZoneWalkInAdmin ? 0 : 2;
-  const minAllowedDate = (() => {
+  const minAllowedDate = useMemo(() => {
     const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + minLeadDays);
+    if (isZoneWalkInAdmin) {
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    d.setMinutes(0, 0, 0);
+    d.setHours(d.getHours() + 1);
     return d;
-  })();
+  }, [isZoneWalkInAdmin]);
+  const minAllowedDateLabel = useMemo(
+    () =>
+      isZoneWalkInAdmin
+        ? minAllowedDate.toLocaleDateString()
+        : `${minAllowedDate.toLocaleDateString()} at ${minAllowedDate.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          })}`,
+    [isZoneWalkInAdmin, minAllowedDate],
+  );
 
-  const isDateAllowed = (() => {
+  const isDateAllowed = useMemo(() => {
     if (!formData.date) return false;
     const dateObj = new Date(`${formData.date}T00:00`);
     if (isNaN(dateObj.getTime())) return false;
-    return dateObj.getTime() >= minAllowedDate.getTime();
-  })();
+    if (isZoneWalkInAdmin) {
+      return dateObj.getTime() >= minAllowedDate.getTime();
+    }
+    if (!formData.time) {
+      const minDay = new Date(minAllowedDate);
+      minDay.setHours(0, 0, 0, 0);
+      return dateObj.getTime() >= minDay.getTime();
+    }
+    const scheduledStart = new Date(`${formData.date}T${formData.time}`);
+    if (isNaN(scheduledStart.getTime())) return false;
+    return scheduledStart.getTime() >= minAllowedDate.getTime();
+  }, [formData.date, formData.time, isZoneWalkInAdmin, minAllowedDate]);
 
   useEffect(() => {
     if (isZoneWalkInAdmin) return;
-    if (!formData.date) return;
+    if (!formData.date || !formData.time) return;
     if (!isDateAllowed) {
       setFormData((prev) => ({ ...prev, date: "" }));
     }
-  }, [isZoneWalkInAdmin, teamMode]);
+  }, [formData.date, formData.time, isDateAllowed, isZoneWalkInAdmin]);
 
   // Format-specific defaults are now applied in handleFieldChange to avoid duplicated effects
 
@@ -981,7 +1005,7 @@ export default function CreateMatchroom() {
       isDateAllowed,
       isZoneWalkInAdmin,
       locationMode,
-      minAllowedDateLabel: minAllowedDate.toLocaleDateString(),
+      minAllowedDateLabel,
       reservedSlots,
       selectedGame,
       selectedTeamId,
@@ -1013,7 +1037,7 @@ export default function CreateMatchroom() {
       isDateAllowed,
       isZoneWalkInAdmin,
       locationMode,
-      minAllowedDate,
+      minAllowedDateLabel,
       reservedSlots,
       selectedGame,
       selectedTeamId,
@@ -1533,7 +1557,7 @@ export default function CreateMatchroom() {
             onChange={handleFieldChange}
             selectedGame={selectedGame || undefined}
             minimumDate={minAllowedDate}
-            dateHelperText={`Earliest allowed date is ${minAllowedDate.toLocaleDateString()} (minimum 2 days from now)`}
+            dateHelperText={`Earliest allowed time is ${minAllowedDateLabel}.`}
           />
 
           <TeamBookingSection

@@ -6,7 +6,7 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     title: "Bookings & Matchrooms",
     description: "Requests, counter-offers, lifecycle, and payment state",
     route: "/zone/modules/bookings",
-    icon: "event-note",
+    icon: "bookings",
     tag: "Core",
   },
   {
@@ -14,21 +14,21 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     title: "Resources",
     description: "Per-branch seat and court allocation with live statuses",
     route: "/zone/modules/resources",
-    icon: "grid-view",
+    icon: "resources",
   },
   {
     id: "pricing_promotions",
     title: "Pricing & Promotions",
     description: "Scheduled rules, discounts, and off-peak campaigns",
     route: "/zone/modules/pricing",
-    icon: "sell",
+    icon: "pricing",
   },
   {
     id: "support_safety",
     title: "Support & Safety",
     description: "Complaints, tickets, warnings, and bans",
     route: "/zone/modules/support",
-    icon: "shield",
+    icon: "support",
   },
   {
     id: "insights_security",
@@ -50,7 +50,7 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     title: "Migration Tools",
     description: "Migration status, repair jobs, and retry controls",
     route: "/zone/modules/migration-tools",
-    icon: "sync-problem",
+    icon: "databaseMigration",
     tag: "System",
   },
   {
@@ -58,7 +58,7 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     title: "Audit & Security",
     description: "Change history for bookings, pricing, resources, and migrations",
     route: "/zone/modules/audit",
-    icon: "history",
+    icon: "auditTrail",
     tag: "System",
   },
   {
@@ -66,7 +66,7 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     title: "Notifications Center",
     description: "Realtime alerts, reminders, and targeted updates",
     route: "/zone/modules/notifications",
-    icon: "notifications-active",
+    icon: "notifications",
   },
 ];
 
