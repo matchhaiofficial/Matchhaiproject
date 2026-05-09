@@ -8,7 +8,7 @@ export default StyleSheet.create({
         backgroundColor: COLORS.backgroundDark,
     },
     scrollContent: {
-        paddingTop: 0,
+        paddingTop: 10,
     },
     loadingContainer: {
         flex: 1,
@@ -213,5 +213,139 @@ export default StyleSheet.create({
     emptyWrap: {
         flex: 1,
         justifyContent: "center",
+    },
+    branchActionsRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        marginBottom: SPACING.md,
+    },
+    withdrawInlineButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.xs,
+        minHeight: 40,
+        borderWidth: 1,
+        borderColor: "rgba(66,165,245,0.45)",
+        backgroundColor: "rgba(66,165,245,0.10)",
+        borderRadius: RADII.pill,
+        paddingHorizontal: SPACING.md,
+    },
+    withdrawInlineText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
+    withdrawDialog: {
+        backgroundColor: COLORS.cardDark,
+    },
+    withdrawBody: {
+        gap: SPACING.md,
+    },
+    withdrawLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+        textTransform: "uppercase",
+        letterSpacing: 0.7,
+    },
+    withdrawBranchWrap: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: SPACING.sm,
+    },
+    withdrawBranchChip: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.pill,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+    },
+    withdrawBranchChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: `${COLORS.accent}14`,
+    },
+    withdrawBranchChipText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    withdrawBranchChipTextActive: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+    },
+    withdrawInputBox: {
+        minHeight: 52,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.inputBackground,
+        borderRadius: RADII.lg,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: SPACING.md,
+        gap: SPACING.sm,
+    },
+    withdrawCurrency: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
+    withdrawInput: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingVertical: 0,
+    },
+    logoutButton: {
+        marginTop: SPACING.lg,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: SPACING.sm,
+    },
+    logoutButtonText: {
+        color: COLORS.error,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.body,
+    },
+    withdrawWarning: {
+        color: COLORS.error,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    withdrawFooter: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+    },
+    withdrawAction: {
+        flex: 1,
+        minHeight: 48,
+        borderRadius: RADII.lg,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    withdrawCancelAction: {
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.cardBackground,
+    },
+    withdrawSubmitAction: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent,
+    },
+    withdrawSubmitDisabled: {
+        opacity: 0.45,
+    },
+    withdrawCancelText: {
+        color: COLORS.text,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
+    withdrawSubmitText: {
+        color: "#FFF",
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
     },
 });

@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "convex/react";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Text,
@@ -21,7 +22,6 @@ import { type Matchroom } from "../../../src/services/convex/matchService";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
-    type ZoneBookingAssetType,
     type ZoneBookingQueueItem,
     type ZoneMatchroomListItem,
 } from "../../../src/services/convex/zoneAdminBookingService";
@@ -49,12 +49,30 @@ import {
 } from "./hooks/useZoneBookingsViewModel";
 import styles from "./bookings.styles";
 
-type Segment = "requests" | "matchrooms" | "walkins";
-type RequestFilter = "all" | "open" | "pending_payment" | "accepted";
-type AssetFilter = "all" | ZoneBookingAssetType;
+type Segment = "requests" | "pending" | "matchrooms" | "walkins";
+type RequestFilter = "all" | "open";
+type MatchroomFilter = "all" | "open" | "locked" | "cancelled";
+type GameFilter = "all" | "cs2" | "cs16" | "valorant" | "fc26" | "tekken8" | "futsal" | "indoor_cricket" | "padel" | "pickleball";
+type TimeOfDayFilter = "all" | "day" | "night";
 
-const REQUEST_FILTERS: RequestFilter[] = ["all", "open", "pending_payment", "accepted"];
-const ASSET_FILTERS: AssetFilter[] = ["all", "pc", "console", "court", "mixed", "unknown"];
+const MATCHROOM_FILTERS: MatchroomFilter[] = ["all", "open", "locked", "cancelled"];
+const GAME_FILTERS: Array<{ key: GameFilter; label: string }> = [
+    { key: "all", label: "All games" },
+    { key: "cs2", label: "CS2" },
+    { key: "cs16", label: "CS 1.6" },
+    { key: "valorant", label: "Valorant" },
+    { key: "fc26", label: "FC26" },
+    { key: "tekken8", label: "Tekken 8" },
+    { key: "futsal", label: "Futsal" },
+    { key: "indoor_cricket", label: "Cricket" },
+    { key: "padel", label: "Padel" },
+    { key: "pickleball", label: "Pickleball" },
+];
+const TIME_OF_DAY_FILTERS: Array<{ key: TimeOfDayFilter; label: string }> = [
+    { key: "all", label: "Any time" },
+    { key: "day", label: "Day" },
+    { key: "night", label: "Night" },
+];
 
 const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
 const CONSOLE_GAMES = new Set(["fc25", "fc26", "tekken8"]);
@@ -79,6 +97,24 @@ const getTierFromRateKey = (value?: string | null) => {
     return tier || "";
 };
 
+const formatEnumLabel = (value?: string | null) =>
+    String(value || "")
+        .replace(/[_-]/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase())
+        .trim();
+
+const inferResourceTier = (resource: ZoneBranchResource) => {
+    const explicit = normalizeResourceToken(resource.tier);
+    if (explicit) return explicit;
+    const label = normalizeResourceToken(`${resource.label} ${resource.roomLabel || ""}`);
+    if (label.includes("elite")) return "elite";
+    if (label.includes("premium")) return "premium";
+    if (label.includes("regular")) return "regular";
+    if (label.includes("ps5") || label.includes("playstation 5")) return "ps5";
+    if (label.includes("xbox")) return "xbox";
+    return "";
+};
+
 const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => {
     const gameKey = normalizeGameKey(request?.gameKey);
     const requestedTier =
@@ -87,19 +123,24 @@ const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => 
     const requestedSurface = normalizeResourceToken(request?.requestedResourceSurface);
 
     if (CS_STYLE_GAMES.has(gameKey)) {
+        const tier = ["regular", "premium", "elite"].includes(requestedTier) ? requestedTier : "";
         return {
             assetType: "pc",
             requiredCount: 2,
-            tier: ["regular", "premium", "elite"].includes(requestedTier) ? requestedTier : "",
+            tier,
+            resourceLabel: tier ? `${formatEnumLabel(tier)} PC rooms` : "PC rooms",
+            roomSize: 5,
             unit: "pc_room" as const,
         };
     }
 
     if (CONSOLE_GAMES.has(gameKey)) {
+        const tier = ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "";
         return {
             assetType: "console",
             requiredCount: 1,
-            tier: ["ps5", "xbox"].includes(requestedTier) ? requestedTier : "",
+            tier,
+            resourceLabel: tier ? formatEnumLabel(tier) : "Console",
             unit: "resource" as const,
         };
     }
@@ -117,6 +158,7 @@ const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => 
     return {
         assetType: normalizeResourceToken(request?.requestedResourceAssetType) || request?.assetType || "unknown",
         requiredCount: 1,
+        resourceLabel: "Resource",
         unit: "resource" as const,
     };
 };
@@ -124,9 +166,17 @@ const getAllocationResourceProfile = (request?: ZoneBookingQueueItem | null) => 
 const resourceMatchesAllocationProfile = (
     resource: ZoneBranchResource,
     profile: ReturnType<typeof getAllocationResourceProfile>,
+    request?: ZoneBookingQueueItem | null,
 ) => {
+    if (!resource.isActive) return false;
+    if (resource.lifecycleStatus === "held") {
+        const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
+        if (linkedRequestId && linkedRequestId !== String(request?.id || "")) {
+            return false;
+        }
+    }
     if (normalizeResourceToken(resource.assetType) !== profile.assetType) return false;
-    if ("tier" in profile && profile.tier && normalizeResourceToken(resource.tier) !== profile.tier) {
+    if ("tier" in profile && profile.tier && inferResourceTier(resource) !== profile.tier) {
         return false;
     }
     if ("surface" in profile && profile.surface && normalizeResourceToken(resource.surface) !== profile.surface) {
@@ -146,13 +196,13 @@ const buildAllocationResourceOptions = (
 ): ZoneBookingAllocationResourceOption[] => {
     const profile = getAllocationResourceProfile(request);
     const matchingResources = sortAllocationResources(
-        resources.filter((resource) => resourceMatchesAllocationProfile(resource, profile)),
+        resources.filter((resource) => resourceMatchesAllocationProfile(resource, profile, request)),
     );
 
     if (profile.unit === "pc_room") {
         const grouped = new Map<string, ZoneBranchResource[]>();
         matchingResources.forEach((resource) => {
-            const roomKey = `${normalizeResourceToken(resource.tier) || "pc"}:${resource.roomLabel || "Room"}`;
+            const roomKey = `${inferResourceTier(resource) || "pc"}:${resource.roomLabel || "Room"}`;
             const current = grouped.get(roomKey) || [];
             current.push(resource);
             grouped.set(roomKey, current);
@@ -161,17 +211,18 @@ const buildAllocationResourceOptions = (
         const options: ZoneBookingAllocationResourceOption[] = [];
         Array.from(grouped.entries()).forEach(([roomKey, roomResources]) => {
             const sortedRoomResources = sortAllocationResources(roomResources);
-            for (let index = 0; index < sortedRoomResources.length; index += 5) {
-                const chunk = sortedRoomResources.slice(index, index + 5);
-                if (chunk.length < 5) continue;
+            const roomSize = profile.roomSize;
+            for (let index = 0; index < sortedRoomResources.length; index += roomSize) {
+                const chunk = sortedRoomResources.slice(index, index + roomSize);
+                if (chunk.length < roomSize) continue;
                 const baseLabel = chunk[0]?.roomLabel || "PC Room";
-                const label = sortedRoomResources.length > 5
-                    ? `${baseLabel} ${Math.floor(index / 5) + 1}`
+                const label = sortedRoomResources.length > roomSize
+                    ? `${baseLabel} ${Math.floor(index / roomSize) + 1}`
                     : baseLabel;
                 options.push({
                     id: `${roomKey}:${index}`,
                     label,
-                    meta: `${chunk[0]?.tier || "PC"} | 5 PCs available`,
+                    meta: `${formatEnumLabel(inferResourceTier(chunk[0])) || "PC"} | ${roomSize} PCs available`,
                     resourceIds: chunk.map((resource) => resource.id),
                 });
             }
@@ -182,11 +233,49 @@ const buildAllocationResourceOptions = (
     return matchingResources.map((resource) => ({
         id: resource.id,
         label: resource.roomLabel ? `${resource.label} | ${resource.roomLabel}` : resource.label,
-        meta: [resource.assetType, resource.tier || resource.surface, resource.lifecycleStatus]
+        meta: [resource.assetType, inferResourceTier(resource) || resource.surface, resource.lifecycleStatus]
             .filter(Boolean)
             .join(" | "),
         resourceIds: [resource.id],
     }));
+};
+
+const getRequestFixedBranch = (
+    request: ZoneBookingQueueItem | null,
+    branches: ZoneBranch[],
+    primaryBranch?: ZoneBranch | null,
+) => {
+    if (!request) return primaryBranch || branches[0] || null;
+
+    const raw = request.raw || {};
+    const explicitBranchId = String(
+        request.allocatedBranchId ||
+        raw.branchId ||
+        raw.selectedBranchId ||
+        raw.targetBranchId ||
+        raw.confirmedBranchId ||
+        "",
+    ).trim();
+    if (explicitBranchId) {
+        const explicit = branches.find((branch) => String(branch.id) === explicitBranchId);
+        if (explicit) return explicit;
+    }
+
+    const requestedArea = normalizeResourceToken(
+        request.targetAreaLabel ||
+        raw.targetAreaLabel ||
+        raw.branchAreaLabel ||
+        raw.areaLabel ||
+        request.preferredAreas?.[0],
+    );
+    if (requestedArea) {
+        const areaMatch = branches.find(
+            (branch) => normalizeResourceToken(branch.areaLabel) === requestedArea,
+        );
+        if (areaMatch) return areaMatch;
+    }
+
+    return primaryBranch || branches[0] || null;
 };
 
 const getRequiredResourceCount = (request?: ZoneBookingQueueItem | null) => {
@@ -198,14 +287,15 @@ const getAllocationValidationMessage = (
     selectedCount: number,
 ) => {
     if (!request) return "Select a booking request first.";
+    const gameKey = normalizeGameKey(request.gameKey);
     const requiredCount = getRequiredResourceCount(request);
-    if (request.assetType === "pc") {
+    if (CS_STYLE_GAMES.has(gameKey)) {
         if (selectedCount !== requiredCount) {
             return `CS/Valorant bookings require exactly ${requiredCount} PC rooms.`;
         }
         return null;
     }
-    if (request.assetType === "console") {
+    if (CONSOLE_GAMES.has(gameKey)) {
         if (selectedCount !== 1) {
             return "Console bookings require exactly 1 selected console.";
         }
@@ -230,18 +320,48 @@ const formatDateTime = (value: Date) => ({
 
 const createDefaultScheduleOption = () => {
     const suggested = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    return formatDateTime(suggested);
+    const start = formatDateTime(suggested);
+    const end = formatDateTime(new Date(suggested.getTime() + 60 * 60 * 1000));
+    return { ...start, endTime: end.time };
+};
+
+const toClockMinutes = (value?: string | null) => {
+    const raw = String(value || "").trim();
+    const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (twelveHour) {
+        let hour = Number(twelveHour[1]) || 0;
+        const minute = Number(twelveHour[2]) || 0;
+        const period = twelveHour[3].toUpperCase();
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
+        return hour * 60 + minute;
+    }
+    const twentyFourHour = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!twentyFourHour) return null;
+    const hour = Math.max(0, Math.min(23, Number(twentyFourHour[1]) || 0));
+    const minute = Math.max(0, Math.min(59, Number(twentyFourHour[2]) || 0));
+    return hour * 60 + minute;
+};
+
+const fromClockMinutes = (value: number) => {
+    const normalized = ((Math.round(value / 15) * 15) % 1440 + 1440) % 1440;
+    const hour24 = Math.floor(normalized / 60);
+    const minute = normalized % 60;
+    const period = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 || 12;
+    return `${String(hour12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`;
 };
 
 const parseTimeToDraft = (value?: string | null) => {
-    const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (!match) {
+    const minutes = toClockMinutes(value);
+    if (minutes === null) {
         return { hour: 12, minute: 0, period: "PM" as const };
     }
+    const hour24 = Math.floor(minutes / 60);
     return {
-        hour: Number(match[1]) || 12,
-        minute: Number(match[2]) || 0,
-        period: (match[3]?.toUpperCase() === "AM" ? "AM" : "PM") as "AM" | "PM",
+        hour: hour24 % 12 || 12,
+        minute: minutes % 60,
+        period: (hour24 >= 12 ? "PM" : "AM") as "AM" | "PM",
     };
 };
 
@@ -319,9 +439,13 @@ export default function ZoneBookingsModule() {
     const { showToast } = useToast();
 
     const [segment, setSegment] = useState<Segment>("requests");
-    const [showFilters, setShowFilters] = useState(true);
+    const [showFilters, setShowFilters] = useState(false);
     const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
-    const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
+    const [matchroomFilter, setMatchroomFilter] = useState<MatchroomFilter>("all");
+    const [gameFilter, setGameFilter] = useState<GameFilter>("all");
+    const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDayFilter>("all");
+    const [requestSearchQuery, setRequestSearchQuery] = useState("");
+    const [matchroomSearchQuery, setMatchroomSearchQuery] = useState("");
     const [showCounterModal, setShowCounterModal] = useState(false);
     const [showAllocationSheet, setShowAllocationSheet] = useState(false);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
@@ -341,7 +465,8 @@ export default function ZoneBookingsModule() {
     useRouteLogger("ZoneBookingsModule", {
         segment,
         requestFilter,
-        assetFilter,
+        gameFilter,
+        timeOfDayFilter,
         zoneId: zone?.id,
         userId: user?._id,
     });
@@ -350,16 +475,22 @@ export default function ZoneBookingsModule() {
     const [rejectNote, setRejectNote] = useState("");
     const [rejectAlternative, setRejectAlternative] = useState("");
 
-    const [counterOptions, setCounterOptions] = useState<Array<{ date: string; time: string }>>([
+    const [counterOptions, setCounterOptions] = useState<Array<{ date: string; time: string; endTime?: string }>>([
         createDefaultScheduleOption(),
     ]);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [editingOptionIndex, setEditingOptionIndex] = useState<number | null>(null);
+    const [editingTimeField, setEditingTimeField] = useState<"start" | "end">("start");
     const [dateDraft, setDateDraft] = useState<Date | null>(new Date());
     const [monthCursor, setMonthCursor] = useState(new Date());
     const [timeDraft, setTimeDraft] = useState(parseTimeToDraft(createDefaultScheduleOption().time));
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
+
+    const zoneOffers = useQuery(
+        api.bookings.listOffersByZone,
+        zone?.id ? { zoneId: zone.id as Id<"zones"> } : "skip",
+    );
 
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
@@ -383,16 +514,121 @@ export default function ZoneBookingsModule() {
         queue,
         matchrooms,
         requestFilter,
-        assetFilter,
+        gameFilter,
+        timeOfDayFilter,
+        searchQuery: requestSearchQuery,
         selectedRequestId,
         monthCursor,
     });
 
-    const updateCounterOption = (index: number, patch: Partial<{ date: string; time: string }>) => {
-        setCounterOptions((prev) =>
-            prev.map((option, optionIndex) =>
-                optionIndex === index ? { ...option, ...patch } : option,
+    const activeRequestFilterCount = useMemo(
+        () => (gameFilter !== "all" ? 1 : 0) + (timeOfDayFilter !== "all" ? 1 : 0),
+        [gameFilter, timeOfDayFilter],
+    );
+
+    const originalStartMinutes = useMemo(
+        () => toClockMinutes(selectedRequest?.preferredTime) ?? toClockMinutes(counterOptions[0]?.time) ?? 12 * 60,
+        [counterOptions, selectedRequest?.preferredTime],
+    );
+    const originalDurationMinutes = useMemo(() => {
+        const explicitMinutes = Number((selectedRequest?.raw as any)?.durationMinutes || 0);
+        if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes;
+        const durationHours = Number(selectedRequest?.raw?.durationHours || 0);
+        if (Number.isFinite(durationHours) && durationHours > 0) return Math.round(durationHours * 60);
+        return 60;
+    }, [selectedRequest?.raw]);
+    const allowedStartMin = originalStartMinutes - 120;
+    const allowedStartMax = originalStartMinutes + 120;
+    const originalEndMinutes = originalStartMinutes + originalDurationMinutes;
+    const allowedEndMin = originalEndMinutes - 120;
+    const allowedEndMax = originalEndMinutes + 120;
+
+    const counterValidationMessage = useMemo(() => {
+        const option = counterOptions[0];
+        if (!option?.date || !option?.time || !option?.endTime) return "Date, start time, and end time are required.";
+        const start = toClockMinutes(option.time);
+        const end = toClockMinutes(option.endTime);
+        if (start === null || end === null) return "Use a valid start and end time.";
+        if (end <= start) return "Ending booking time must be after the starting time.";
+        if (start < allowedStartMin || start > allowedStartMax || end < allowedEndMin || end > allowedEndMax) {
+            return "Alternative time must stay within 2 hours of the original booking window.";
+        }
+        return "";
+    }, [allowedEndMax, allowedEndMin, allowedStartMax, allowedStartMin, counterOptions]);
+
+    const pendingOffers = useMemo(() => {
+        const now = Date.now();
+        return ((zoneOffers || []) as any[])
+            .filter((offer) => offer.status === "pending" && (!offer.expiresAt || offer.expiresAt > now))
+            .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+    }, [zoneOffers]);
+
+    const pendingRequestIds = useMemo(
+        () => new Set(pendingOffers.map((offer) => String(offer.requestId))),
+        [pendingOffers],
+    );
+
+    const visibleRequestsQueue = useMemo(
+        () =>
+            filteredQueue.filter((item) =>
+                ["open", "pending_payment"].includes(String(item.status || "")) &&
+                !pendingRequestIds.has(String(item.id)),
             ),
+        [filteredQueue, pendingRequestIds],
+    );
+
+    const filteredMatchrooms = useMemo(() => {
+        const normalizedSearch = matchroomSearchQuery.trim().toLowerCase();
+        return matchrooms.filter((item) => {
+            const statusOk =
+                matchroomFilter === "all" ||
+                String(item.status || "").toLowerCase() === matchroomFilter;
+            const searchOk =
+                normalizedSearch.length === 0 ||
+                [
+                    item.title,
+                    item.game,
+                    item.location,
+                    item.scheduledDate,
+                    item.scheduledTime,
+                    item.hostName,
+                ]
+                    .join(" ")
+                    .toLowerCase()
+                    .includes(normalizedSearch);
+            return statusOk && searchOk;
+        });
+    }, [matchroomFilter, matchroomSearchQuery, matchrooms]);
+
+    const updateCounterOption = (index: number, patch: Partial<{ date: string; time: string; endTime?: string }>) => {
+        setCounterOptions((prev) =>
+            prev.map((option, optionIndex) => {
+                if (optionIndex !== index) return option;
+                if (patch.time) {
+                    const startRaw = toClockMinutes(patch.time);
+                    const start = startRaw === null
+                        ? null
+                        : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
+                    return {
+                        ...option,
+                        ...patch,
+                        time: start === null ? patch.time : fromClockMinutes(start),
+                        endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
+                    };
+                }
+                if (patch.endTime) {
+                    const endRaw = toClockMinutes(patch.endTime);
+                    const end = endRaw === null
+                        ? null
+                        : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
+                    return {
+                        ...option,
+                        ...patch,
+                        endTime: end === null ? patch.endTime : fromClockMinutes(end),
+                    };
+                }
+                return { ...option, ...patch };
+            }),
         );
     };
 
@@ -546,10 +782,9 @@ export default function ZoneBookingsModule() {
             (rows) => {
                 setAllocationBranches(rows);
                 setLoadingAllocationBranches(false);
-                setAllocationBranchId((prev) => {
-                    if (prev && rows.some((branch) => branch.id === prev)) return prev;
-                    return selectedRequest?.allocatedBranchId || primaryBranch?.id || rows[0]?.id || null;
-                });
+                setAllocationBranchId(
+                    getRequestFixedBranch(selectedRequest, rows, primaryBranch)?.id || null,
+                );
             },
             () => {
                 setLoadingAllocationBranches(false);
@@ -558,7 +793,7 @@ export default function ZoneBookingsModule() {
         );
 
         return () => unsub();
-    }, [primaryBranch?.id, selectedRequest?.allocatedBranchId, showAllocationSheet, zone?.id]);
+    }, [primaryBranch, selectedRequest, showAllocationSheet, zone?.id]);
 
     useEffect(() => {
         if (!showAllocationSheet || !zone?.id || !allocationBranchId) {
@@ -594,6 +829,16 @@ export default function ZoneBookingsModule() {
     const allocationResourceOptions = useMemo(
         () => buildAllocationResourceOptions(selectedRequest, allocationResources),
         [allocationResources, selectedRequest],
+    );
+
+    const allocationFixedBranch = useMemo(
+        () => getRequestFixedBranch(selectedRequest, allocationBranches, primaryBranch),
+        [allocationBranches, primaryBranch, selectedRequest],
+    );
+
+    const allocationBranchesForSheet = useMemo(
+        () => (allocationFixedBranch ? [allocationFixedBranch] : []),
+        [allocationFixedBranch],
     );
 
     const allocationSelectedUnitCount = useMemo(
@@ -662,13 +907,43 @@ export default function ZoneBookingsModule() {
         if (!request) return;
         setSelectedRequestId(request.id);
         setAllocationSelectedResourceIds([]);
-        setAllocationBranchId(request.allocatedBranchId || primaryBranch?.id || null);
+        setAllocationBranchId(
+            getRequestFixedBranch(request, allocationBranches, primaryBranch)?.id || primaryBranch?.id || null,
+        );
         setShowAllocationSheet(true);
+    };
+
+    const openCounterModalForRequest = (targetRequest?: ZoneBookingQueueItem) => {
+        const request = targetRequest || selectedRequest;
+        if (request) {
+            const defaultOption = createDefaultScheduleOption();
+            const startMinutes = toClockMinutes(request.preferredTime) ?? toClockMinutes(defaultOption.time) ?? 12 * 60;
+            const start = fromClockMinutes(startMinutes);
+            const durationHours = Number(request.raw?.durationHours || 0);
+            const durationMinutes =
+                Number.isFinite(durationHours) && durationHours > 0
+                    ? Math.round(durationHours * 60)
+                    : Number((request.raw as any)?.durationMinutes || 60) || 60;
+            const explicitEndMinutes = toClockMinutes(
+                (request.raw as any)?.endTime ||
+                (request.raw as any)?.preferredEndTime ||
+                (request.raw as any)?.scheduledEndTime,
+            );
+            setSelectedRequestId(request.id);
+            setCounterOptions([{
+                date: toDateString(request.preferredDate) || defaultOption.date,
+                time: start,
+                endTime: fromClockMinutes(explicitEndMinutes ?? startMinutes + durationMinutes),
+            }]);
+        } else {
+            setCounterOptions([createDefaultScheduleOption()]);
+        }
+        setShowCounterModal(true);
     };
 
     const handleAllocationSubmit = async () => {
         if (!selectedRequest || !allocationBranchId) return;
-        const branch = allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
+        const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
         const result = await handleAccept({
             targetRequest: selectedRequest,
             branchId: allocationBranchId,
@@ -679,6 +954,11 @@ export default function ZoneBookingsModule() {
         if (result?.ok) {
             setShowAllocationSheet(false);
             setAllocationSelectedResourceIds([]);
+            if (result.matchroomId) {
+                router.push(`/matchrooms/${result.matchroomId}` as any);
+            } else {
+                setSegment("matchrooms");
+            }
         }
     };
 
@@ -693,8 +973,9 @@ export default function ZoneBookingsModule() {
 
             <SegmentedTabs
                 items={[
-                    { key: "requests", label: "Requests", badge: filteredQueue.length },
-                    { key: "matchrooms", label: "Matchrooms", badge: matchrooms.length },
+                    { key: "requests", label: "Requests", badge: visibleRequestsQueue.length },
+                    { key: "pending", label: "Pending", badge: pendingOffers.length },
+                    { key: "matchrooms", label: "Matchrooms", badge: filteredMatchrooms.length },
                     { key: "walkins", label: "Walk-ins", badge: walkInCount },
                 ]}
                 value={segment}
@@ -715,20 +996,47 @@ export default function ZoneBookingsModule() {
                     loadingQueue={loadingQueue}
                     showFilters={showFilters}
                     onToggleFilters={() => setShowFilters((prev) => !prev)}
-                    requestFilters={REQUEST_FILTERS}
-                    assetFilters={ASSET_FILTERS}
-                    requestFilter={requestFilter}
-                    assetFilter={assetFilter}
-                    onSelectRequestFilter={(filter) => setRequestFilter(filter as RequestFilter)}
-                    onSelectAssetFilter={(filter) => setAssetFilter(filter as AssetFilter)}
-                    filteredQueue={filteredQueue}
+                    gameFilters={GAME_FILTERS}
+                    timeFilters={TIME_OF_DAY_FILTERS}
+                    gameFilter={gameFilter}
+                    timeFilter={timeOfDayFilter}
+                    searchQuery={requestSearchQuery}
+                    activeFilterCount={activeRequestFilterCount}
+                    onSearchQueryChange={setRequestSearchQuery}
+                    onSelectGameFilter={(filter) => setGameFilter(filter as GameFilter)}
+                    onSelectTimeFilter={(filter) => setTimeOfDayFilter(filter as TimeOfDayFilter)}
+                    filteredQueue={visibleRequestsQueue}
                     selectedRequestId={selectedRequestId}
                     processingAction={processingAction}
                     onSelectRequest={setSelectedRequestId}
-                    onOpenCounterModal={() => {
-                        setCounterOptions([createDefaultScheduleOption()]);
-                        setShowCounterModal(true);
-                    }}
+                    onOpenCounterModal={openCounterModalForRequest}
+                    onAccept={openAllocationSheet}
+                    onReject={handleReject}
+                    buildRequestMatchroom={requestToMatchroomCardData}
+                />
+            ) : null}
+
+            {segment === "pending" ? (
+                <ZoneBookingsRequestsSection
+                    mode="pending"
+                    loadingQueue={zoneOffers === undefined}
+                    showFilters={false}
+                    onToggleFilters={() => undefined}
+                    gameFilters={GAME_FILTERS}
+                    timeFilters={TIME_OF_DAY_FILTERS}
+                    gameFilter={gameFilter}
+                    timeFilter={timeOfDayFilter}
+                    searchQuery={requestSearchQuery}
+                    activeFilterCount={activeRequestFilterCount}
+                    onSearchQueryChange={setRequestSearchQuery}
+                    onSelectGameFilter={(filter) => setGameFilter(filter as GameFilter)}
+                    onSelectTimeFilter={(filter) => setTimeOfDayFilter(filter as TimeOfDayFilter)}
+                    filteredQueue={combinedQueue.filter((item) => pendingRequestIds.has(String(item.id)))}
+                    pendingOffers={pendingOffers}
+                    selectedRequestId={selectedRequestId}
+                    processingAction={processingAction}
+                    onSelectRequest={setSelectedRequestId}
+                    onOpenCounterModal={openCounterModalForRequest}
                     onAccept={openAllocationSheet}
                     onReject={handleReject}
                     buildRequestMatchroom={requestToMatchroomCardData}
@@ -738,7 +1046,15 @@ export default function ZoneBookingsModule() {
             {segment === "matchrooms" ? (
                 <ZoneBookingsMatchroomsSection
                     loadingMatchrooms={loadingMatchrooms}
-                    matchrooms={matchrooms}
+                    matchrooms={filteredMatchrooms}
+                    showFilters={showFilters}
+                    onToggleFilters={() => setShowFilters((prev) => !prev)}
+                    statusFilters={MATCHROOM_FILTERS}
+                    statusFilter={matchroomFilter}
+                    searchQuery={matchroomSearchQuery}
+                    activeFilterCount={matchroomFilter === "all" ? 0 : 1}
+                    onSearchQueryChange={setMatchroomSearchQuery}
+                    onSelectStatusFilter={(filter) => setMatchroomFilter(filter as MatchroomFilter)}
                     focusedMatchroomId={focusedMatchroomId}
                     buildMatchroomCardData={(item) =>
                         toMatchroomCardData(
@@ -801,15 +1117,19 @@ export default function ZoneBookingsModule() {
                 daysInMonth={daysInMonth}
                 monthYearLabel={monthYearLabel}
                 parseTimeToDraft={parseTimeToDraft}
+                editingTimeField={editingTimeField}
+                setEditingTimeField={setEditingTimeField}
+                validationMessage={counterValidationMessage}
             />
             <ZoneBookingsAllocationSheet
                 visible={showAllocationSheet}
                 onClose={() => setShowAllocationSheet(false)}
                 processingAction={processingAction}
                 request={selectedRequest}
-                branches={allocationBranches}
+                branches={allocationBranchesForSheet}
                 selectedBranchId={allocationBranchId}
-                onSelectBranch={setAllocationBranchId}
+                onSelectBranch={() => undefined}
+                branchLocked
                 loadingResources={loadingAllocationBranches || loadingAllocationResources}
                 resources={allocationResourceOptions}
                 selectedResourceIds={allocationSelectedResourceIds}

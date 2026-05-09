@@ -13,6 +13,8 @@ export type SuperAdminSummary = {
     teams: number;
   };
   users: {
+    active30d: number;
+    activeSource?: string;
     players: number;
     zoneAdmins: number;
     superAdmins: number;
@@ -33,6 +35,10 @@ export type SuperAdminSummary = {
     open: number;
     inProgress: number;
     completed: number;
+  };
+  revenue?: {
+    total: number;
+    currency: string;
   };
 };
 
@@ -76,6 +82,36 @@ export type SuperAdminReport = {
   resolutionSummary?: string | null;
 };
 
+export type SuperAdminSupportTicketStatus = "open" | "in_review" | "resolved";
+
+export type SuperAdminSupportTicket = {
+  id: string;
+  _id: string;
+  reference: string;
+  userRole?: string;
+  category?: string;
+  issueSummary: string;
+  status: SuperAdminSupportTicketStatus;
+  source: "help_support_chat";
+  createdAt: number;
+  updatedAt: number;
+  userDisplayName?: string;
+  userEmail?: string;
+  excerptPreview?: string;
+  conversationExcerpt?: Array<{
+    role: "user" | "assistant";
+    text: string;
+  }>;
+  metadataSummary?: {
+    knownNonSensitiveDetails?: Record<string, unknown>;
+    user?: Record<string, unknown>;
+    zones?: Array<Record<string, unknown>>;
+    recentPayments?: Array<Record<string, unknown>>;
+    recentMatchrooms?: Array<Record<string, unknown>>;
+    recentReports?: Array<Record<string, unknown>>;
+  };
+};
+
 export type EasypaisaAdminTransaction = {
   id: string;
   _id: string;
@@ -84,6 +120,7 @@ export type EasypaisaAdminTransaction = {
   currency: string;
   orderRefNum: string;
   status: string;
+  accountOwnerName?: string;
   providerStatus?: string | null;
   providerDescription?: string | null;
   providerReference?: string | null;
@@ -100,6 +137,45 @@ export type EasypaisaAdminTransaction = {
     lastSyncAt?: number | null;
     flow?: string | null;
   };
+};
+
+export type SuperAdminMatchroomLifecycle =
+  | "created_open"
+  | "waiting_lobby_fill"
+  | "waiting_zone_approval"
+  | "confirmed"
+  | "in-progress"
+  | "completed"
+  | "cancelled_expired";
+
+export type SuperAdminMatchroom = {
+  id: string;
+  _id: string;
+  title: string;
+  game: string;
+  location: string;
+  status: string;
+  lifecycleStatus: SuperAdminMatchroomLifecycle;
+  paymentStatus?: string | null;
+  zoneAdminApproved?: boolean | null;
+  broadcastRequestStatus?: string | null;
+  resultVerificationStatus?: string | null;
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+  scheduledStartAt?: number | null;
+  currentPlayers?: number;
+  maxPlayers?: number;
+  hostName?: string;
+  hostUserName?: string | null;
+  matchCode?: string | null;
+  description?: string | null;
+  zoneName?: string | null;
+  players?: any[];
+  slotsA?: any[];
+  slotsB?: any[];
+  pricing?: any;
+  createdAt: number;
+  updatedAt: number;
 };
 
 type Result<T> = { ok: true; data: T } | { ok: false; message: string };
@@ -244,6 +320,60 @@ export async function getReports(
   }
 }
 
+export async function getSupportTickets(
+  status?: SuperAdminSupportTicketStatus
+): Promise<Result<SuperAdminSupportTicket[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const tickets = await getCachedOrLoad(
+      `supportTickets:${sessionToken}:${status || "all"}`,
+      () =>
+        convex.query(api.admin.listSupportTickets, {
+          sessionToken,
+          status,
+          limit: 100,
+        })
+    );
+    return { ok: true, data: tickets as SuperAdminSupportTicket[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getSupportTickets error", error);
+    return { ok: false, message: "Failed to load support tickets." };
+  }
+}
+
+export async function getSupportTicketById(ticketId: string): Promise<Result<SuperAdminSupportTicket | null>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const ticket = await convex.query(api.admin.getSupportTicketById, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+    });
+    return { ok: true, data: ticket as SuperAdminSupportTicket | null };
+  } catch (error: any) {
+    console.error("[superAdminService] getSupportTicketById error", error);
+    return { ok: false, message: "Failed to load support ticket." };
+  }
+}
+
+export async function updateSupportTicketStatus(
+  ticketId: string,
+  status: SuperAdminSupportTicketStatus
+): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.updateSupportTicketStatus, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+      status,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] updateSupportTicketStatus error", error);
+    return { ok: false, message: "Failed to update support ticket status." };
+  }
+}
+
 export async function getEasypaisaTransactions(
   orderRefNum?: string
 ): Promise<Result<EasypaisaAdminTransaction[]>> {
@@ -258,6 +388,34 @@ export async function getEasypaisaTransactions(
   } catch (error: any) {
     console.error("[superAdminService] getEasypaisaTransactions error", error);
     return { ok: false, message: "Failed to load Easypaisa transactions." };
+  }
+}
+
+export async function getSuperAdminMatchrooms(): Promise<Result<SuperAdminMatchroom[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const rooms = await convex.query(api.admin.listSuperAdminMatchrooms, {
+      sessionToken,
+      limit: 150,
+    });
+    return { ok: true, data: rooms as SuperAdminMatchroom[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminMatchrooms error", error);
+    return { ok: false, message: "Failed to load matchrooms." };
+  }
+}
+
+export async function getSuperAdminMatchroomById(matchroomId: string): Promise<Result<SuperAdminMatchroom | null>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const room = await convex.query(api.admin.getSuperAdminMatchroomById, {
+      sessionToken,
+      matchroomId: matchroomId as Id<"matchrooms">,
+    });
+    return { ok: true, data: room as SuperAdminMatchroom | null };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminMatchroomById error", error);
+    return { ok: false, message: "Failed to load matchroom." };
   }
 }
 

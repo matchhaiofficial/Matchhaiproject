@@ -1,0 +1,88 @@
+import { router } from "expo-router";
+import React from "react";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+
+import AppHeader from "../../../src/components/AppHeader";
+import { AdminInfoLine } from "../../../src/components/AdminSurface";
+import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import Screen from "../../../src/components/Screen";
+import { useAuth } from "../../../src/context/AuthContext";
+import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
+import { useToast } from "../../../src/hooks/useToast";
+import { signOutUser } from "../../../src/services/convex/authService";
+import { COLORS, FONTS, SPACING } from "../../../src/theme";
+
+export default function SuperAdminProfileTab() {
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
+  const { user } = useAuth();
+  const { showToast } = useToast();
+
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          await signOutUser();
+          router.replace("/auth/login");
+        },
+      },
+    ]);
+  };
+
+  return (
+    <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
+      <AppHeader title="Profile" subtitle="Super Admin account and support." inlineTitle />
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]} showsVerticalScrollIndicator={false}>
+        <AppCard style={styles.card}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{String(user?.fullName || user?.username || "S").charAt(0).toUpperCase()}</Text>
+          </View>
+          <Text style={styles.name}>{user?.fullName || "Super Admin"}</Text>
+          <Text style={styles.email}>{user?.email || "Email not available"}</Text>
+          <StatusPill tone="info" label="Super Admin" />
+          <View style={styles.infoStack}>
+            <AdminInfoLine label="Username" value={user?.username || "N/A"} />
+            <AdminInfoLine label="Account type" value={user?.accountType || "N/A"} />
+            <AdminInfoLine label="Role" value={user?.role || "super-admin"} />
+          </View>
+        </AppCard>
+
+        <AppCard style={styles.card}>
+          <Text style={styles.sectionTitle}>Support</Text>
+          <Text style={styles.helperText}>Open Help & Support for MatchHai admin usage, reports, payments, and troubleshooting.</Text>
+          <AppButton variant="secondary" onPress={() => router.push("/super-admin/support" as any)} leadingIcon="support">
+            Help & Support
+          </AppButton>
+        </AppCard>
+
+        <AppCard style={styles.card}>
+          <Text style={styles.sectionTitle}>Moderation Actions</Text>
+          <Text style={styles.helperText}>Warning, temporary suspension, and permanent suspension require backend support before they can be enabled.</Text>
+          <View style={styles.actionsRow}>
+            <AppButton variant="secondary" disabled onPress={() => showToast({ type: "info", title: "Coming soon", message: "Requires backend support." })}>Warning - Coming soon</AppButton>
+            <AppButton variant="danger" disabled>Suspension - Requires backend support</AppButton>
+          </View>
+        </AppCard>
+
+        <AppButton variant="danger" onPress={handleLogout} leadingIcon="logout">Sign Out</AppButton>
+      </ScrollView>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
+  screenContent: { paddingTop: 0 },
+  content: { gap: SPACING.md },
+  card: { gap: SPACING.md, alignItems: "flex-start" },
+  avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.accent, alignItems: "center", justifyContent: "center" },
+  avatarText: { color: "#fff", fontFamily: FONTS.heading, fontSize: 24 },
+  name: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 20 },
+  email: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13 },
+  infoStack: { width: "100%", gap: SPACING.sm },
+  sectionTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
+  helperText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, lineHeight: 20 },
+  actionsRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
+});

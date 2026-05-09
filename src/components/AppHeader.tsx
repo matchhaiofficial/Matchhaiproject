@@ -47,7 +47,7 @@ export default function AppHeader({
                                 pressed && styles.backButtonPressed,
                             ]}
                         >
-                            <AppIcon name="arrow-back" size={22} color={COLORS.text} />
+                            <AppIcon name="back" size={22} color={COLORS.text} />
                         </Pressable>
                     ) : (
                         shouldInlineTitle ? null : <View style={styles.backPlaceholder} />

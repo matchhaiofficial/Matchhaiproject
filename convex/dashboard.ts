@@ -78,10 +78,10 @@ function getRoomStartAt(room: any) {
 }
 
 function isRoomExpired(room: any) {
-  if (["expired", "completed", "cancelled"].includes(String(room?.status || ""))) {
+  if (["completed", "cancelled"].includes(String(room?.status || ""))) {
     return true;
   }
-  return typeof room?.expiresAt === "number" && room.expiresAt <= Date.now();
+  return false;
 }
 
 function isRoomLocked(room: any) {
@@ -222,6 +222,7 @@ export const getPlayerHomeSummary = query({
       },
       friendCount: friendOnlineCount,
       walletStats: {
+        balance: Math.round(Number((user as any).walletBalance || 0)),
         totalSpent: Math.round(walletStats.totalSpent),
         pendingAmount: Math.round(walletStats.pendingAmount),
         transactions: walletStats.transactions,

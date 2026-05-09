@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, CONTROL_SIZES, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -8,6 +8,95 @@ export default StyleSheet.create({
     },
     segmentTabs: {
         marginBottom: SPACING.md,
+    },
+    searchRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        marginBottom: SPACING.md,
+    },
+    searchBar: {
+        flex: 1,
+        minHeight: 50,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: RADII.lg,
+        backgroundColor: COLORS.cardDark,
+        paddingHorizontal: SPACING.md,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+    },
+    searchInput: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.body,
+        paddingVertical: 0,
+    },
+    filterButton: {
+        width: 50,
+        height: 50,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: RADII.lg,
+        backgroundColor: COLORS.cardDark,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    filterButtonPressed: {
+        opacity: 0.85,
+        borderColor: COLORS.accent,
+    },
+    filterBadge: {
+        position: "absolute",
+        top: -5,
+        right: -5,
+        minWidth: 19,
+        height: 19,
+        borderRadius: 10,
+        backgroundColor: COLORS.accent,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: "#FFF",
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 10,
+    },
+    filterDrawer: {
+        flex: 1,
+        backgroundColor: COLORS.backgroundDark,
+    },
+    filterDrawerContent: {
+        flex: 1,
+        backgroundColor: COLORS.backgroundDark,
+    },
+    filtersDrawerBody: {
+        paddingHorizontal: SPACING.lg,
+        paddingBottom: SPACING.xl,
+        gap: SPACING.lg,
+    },
+    filtersWrap: {
+        gap: SPACING.md,
+    },
+    filterSectionLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+        letterSpacing: 0.8,
+        textTransform: "uppercase",
+    },
+    filterChipWrap: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: SPACING.sm,
+    },
+    filterDrawerFooter: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+        backgroundColor: COLORS.backgroundDark,
     },
     content: {
         paddingBottom: SPACING.xxl + 28,
@@ -38,29 +127,62 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
     },
-    summaryCard: {
+    summaryGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         backgroundColor: COLORS.cardDark,
-        padding: SPACING.md,
+        overflow: "hidden",
         marginBottom: SPACING.md,
+    },
+    summaryCard: {
+        width: "50%",
+        minHeight: 62,
+        flexDirection: "row",
         alignItems: "center",
+        gap: SPACING.sm,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.md,
+    },
+    summaryCardLeft: {
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderRightColor: COLORS.cardBorder,
+    },
+    summaryCardTop: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: COLORS.cardBorder,
+    },
+    summaryIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    summaryTextWrap: {
+        flex: 1,
+        minWidth: 0,
     },
     summaryValue: {
         color: COLORS.text,
         fontFamily: FONTS.heading,
-        fontSize: TEXT_SIZES.xxl,
+        fontSize: 19,
+        lineHeight: 23,
+        marginTop: 1,
     },
     summaryLabel: {
         color: COLORS.textSecondary,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.interMedium,
+        fontSize: 11,
+        lineHeight: 14,
     },
     formCard: {
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         backgroundColor: COLORS.cardDark,
         padding: SPACING.md,
         marginBottom: SPACING.md,
@@ -68,7 +190,7 @@ export default StyleSheet.create({
     listCard: {
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         backgroundColor: COLORS.cardDark,
         padding: SPACING.md,
     },
@@ -77,28 +199,6 @@ export default StyleSheet.create({
         fontFamily: FONTS.heading,
         fontSize: TEXT_SIZES.subheading,
         marginBottom: SPACING.sm,
-    },
-    filtersToggle: {
-        height: 48,
-        borderWidth: 1,
-        borderColor: COLORS.cardBorder,
-        borderRadius: RADII.md,
-        backgroundColor: COLORS.backgroundDark,
-        paddingHorizontal: SPACING.md,
-        alignItems: "center",
-        justifyContent: "space-between",
-        flexDirection: "row",
-        marginBottom: SPACING.md,
-    },
-    filtersToggleLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-    },
-    filtersToggleText: {
-        marginLeft: SPACING.xs,
-        color: COLORS.text,
-        fontFamily: FONTS.body,
-        fontSize: TEXT_SIZES.caption,
     },
     fieldLabel: {
         color: COLORS.textSecondary,
@@ -143,24 +243,22 @@ export default StyleSheet.create({
         borderRadius: RADII.pill,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
-        backgroundColor: COLORS.cardBackground,
+        backgroundColor: COLORS.cardDark,
         justifyContent: "center",
         alignItems: "center",
     },
     chipActive: {
         borderColor: COLORS.accent,
-        backgroundColor: COLORS.cardDark,
+        backgroundColor: `${COLORS.accent}14`,
     },
     chipText: {
         color: COLORS.muted,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: 13,
-        textTransform: "capitalize",
     },
     chipTextActive: {
-        color: COLORS.text,
-        fontFamily: FONTS.body,
-        fontWeight: "700",
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
     },
     dateField: {
         flex: 1,
@@ -416,6 +514,13 @@ export default StyleSheet.create({
     timeColumn: {
         flex: 1,
         gap: SPACING.sm,
+    },
+    timeColumnScroll: {
+        flex: 1,
+    },
+    timeColumnContent: {
+        gap: SPACING.sm,
+        paddingBottom: SPACING.sm,
     },
     timeOption: {
         paddingVertical: 10,

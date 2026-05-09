@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import { useAction } from "convex/react";
 import {
     ActivityIndicator,
-    Alert,
     ScrollView,
     Text,
     Pressable,
@@ -44,7 +43,7 @@ export default function MockPaymentScreen() {
     const [processing, setProcessing] = useState(false);
     const [walletBalance, setWalletBalance] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
-    const ctaBottomGuard = Math.max(insets.bottom + 12, 96);
+    const ctaBottomGuard = insets.bottom + 24;
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -87,11 +86,27 @@ export default function MockPaymentScreen() {
 
         try {
             if (paymentMethod === "easypaisa") {
-                const checkout: any = await startCheckout({
-                    kind: "booking_intent",
-                    bookingIntentId: intentId as Id<"bookingIntents">,
-                    userId: user._id as Id<"users">,
-                });
+                let checkout: any;
+                try {
+                    checkout = await startCheckout({
+                        kind: "booking_intent",
+                        bookingIntentId: intentId as Id<"bookingIntents">,
+                        userId: user._id as Id<"users">,
+                        transactionType: "MA",
+                    });
+                } catch (error: any) {
+                    const message = String(error?.message || error || "");
+                    if (!/ACCOUNT DOES N[O']?T? EXIST/i.test(message) && !/ACCOUNT DOES NO EXIST/i.test(message)) {
+                        throw error;
+                    }
+                    Logger.warn("MockPayment", "Easypaisa MA account unavailable, falling back to OTC", { intentId });
+                    checkout = await startCheckout({
+                        kind: "booking_intent",
+                        bookingIntentId: intentId as Id<"bookingIntents">,
+                        userId: user._id as Id<"users">,
+                        transactionType: "OTC",
+                    });
+                }
                 const message = checkout.transactionType === "OTC"
                     ? `Use the Easypaisa OTC token ${checkout.paymentToken || ""}`.trim()
                     : "Approve the payment in Easypaisa. MatchHai will keep checking the status.";
@@ -120,8 +135,9 @@ export default function MockPaymentScreen() {
                 setProcessing(false);
             }
         } catch (e) {
-            Logger.error("MockPayment", "Transaction error", e);
-            showToast({ type: "error", title: "Error", message: "An unexpected error occurred." });
+            const message = e instanceof Error ? e.message : String(e || "Payment could not be started.");
+            Logger.warn("MockPayment", "Transaction unavailable", { message });
+            showToast({ type: "error", title: "Payment unavailable", message });
             setProcessing(false);
         }
     };
@@ -197,7 +213,7 @@ export default function MockPaymentScreen() {
                         <View style={styles.methodIcon}>
                             <AppIcon name="account-balance-wallet" size={24} color={COLORS.accent} />
                         </View>
-                        <View style={{ flex: 1 }}>
+                        <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>MatchHai Wallet</Text>
                             <Text style={styles.methodDetail}>Balance: {(intent.pricing as any)?.currency || "PKR"} {Math.round(walletBalance)}</Text>
                         </View>
@@ -216,7 +232,7 @@ export default function MockPaymentScreen() {
                         <View style={styles.methodIcon}>
                             <AppIcon name="payments" size={24} color={COLORS.accent} />
                         </View>
-                        <View style={{ flex: 1 }}>
+                        <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>{FEATURE_READINESS.payments.easypaisa.label}</Text>
                             <Text style={styles.methodDetail}>{FEATURE_READINESS.payments.easypaisa.description}</Text>
                         </View>

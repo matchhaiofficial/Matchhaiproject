@@ -47,6 +47,7 @@ import Toast from "react-native-toast-message";
 import AuthProvider from "../src/context/AuthContext";
 import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBridge";
 import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
+import MatchResultGate from "../src/components/MatchResultGate";
 import AuthenticatedConvexProvider from "../src/providers/AuthenticatedConvexProvider";
 import InAppAlertProvider from "../src/providers/InAppAlertProvider";
 import { useToast } from "../src/hooks/useToast";
@@ -179,6 +180,7 @@ export default function RootLayout() {
                 contentStyle: { backgroundColor: COLORS.backgroundDark },
               }}
             />
+            <MatchResultGate />
             <Toast config={toastConfig} />
           </View>
         </InAppAlertProvider>

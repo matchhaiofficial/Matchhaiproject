@@ -17,6 +17,18 @@ function normalizeResourceToken(value?: string | null) {
   return String(value || "").trim().toLowerCase();
 }
 
+function inferResourceTier(resource: any) {
+  const explicit = normalizeResourceToken(resource?.tier);
+  if (explicit) return explicit;
+  const label = normalizeResourceToken(`${resource?.name || ""} ${resource?.label || ""} ${resource?.roomLabel || ""}`);
+  if (label.includes("elite")) return "elite";
+  if (label.includes("premium")) return "premium";
+  if (label.includes("regular")) return "regular";
+  if (label.includes("ps5") || label.includes("playstation 5")) return "ps5";
+  if (label.includes("xbox")) return "xbox";
+  return "";
+}
+
 function getTierFromRateKey(value?: string | null) {
   const [, tier] = normalizeResourceToken(value).split(":");
   return tier || "";
@@ -76,13 +88,59 @@ function validateSelectedResourceFit(request: any, selectedResources: any[]) {
     if (normalizeResourceToken(resource.assetType) !== profile.assetType) {
       throw new Error(`${resource.name || "Selected resource"} does not support this matchroom game.`);
     }
-    if ("tier" in profile && profile.tier && normalizeResourceToken(resource.tier) !== profile.tier) {
+    if ("tier" in profile && profile.tier && inferResourceTier(resource) !== profile.tier) {
       throw new Error(`${resource.name || "Selected resource"} does not match the requested resource type.`);
     }
     if ("surface" in profile && profile.surface && normalizeResourceToken(resource.surface) !== profile.surface) {
       throw new Error(`${resource.name || "Selected resource"} does not match the requested surface.`);
     }
   });
+}
+
+function getConfirmedSlotCount(room: any) {
+  return [...(room?.slotsA || []), ...(room?.slotsB || [])].filter((slot: any) =>
+    slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
+  ).length;
+}
+
+function getExpectedPaidPlayerCount(room: any) {
+  return Math.max(1, Number(room?.maxPlayers || room?.currentPlayers || getConfirmedSlotCount(room) || 1));
+}
+
+function getMatchroomGrossAmount(room: any) {
+  const explicit = Number(room?.merchantSettlementAmount || room?.paymentAmount || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const perPlayer = Number(room?.pricing?.perPlayer || 0);
+  return Math.max(0, perPlayer * getExpectedPaidPlayerCount(room));
+}
+
+function isFullPaidZoneRoom(room: any) {
+  if (!room || room.locationMode !== "zone" || !room.zoneId) return false;
+  if (room.zoneAdminApproved !== true) return false;
+  const maxPlayers = getExpectedPaidPlayerCount(room);
+  return Number(room.currentPlayers || 0) >= maxPlayers && getConfirmedSlotCount(room) >= maxPlayers;
+}
+
+async function markMerchantCapturedForAcceptedMatchroom(ctx: any, matchroomId: any) {
+  const room = await ctx.db.get(matchroomId);
+  if (!isFullPaidZoneRoom(room)) return null;
+  if (room.merchantSettlementStatus === "captured") return room.merchantSettlementReference || null;
+  const now = Date.now();
+  const amount = getMatchroomGrossAmount(room);
+  const reference = `merchant_capture:${String(matchroomId)}`;
+  await ctx.db.patch(matchroomId, {
+    merchantSettlementStatus: "captured",
+    merchantSettlementAt: now,
+    merchantSettlementAmount: amount,
+    merchantSettlementReference: reference,
+    updatedAt: now,
+  });
+  console.log("[settlement] merchant_capture.marked", {
+    matchroomId: String(matchroomId),
+    amount,
+    reference,
+  });
+  return reference;
 }
 
 async function resolveUserByAnyId(ctx: any, value?: string | null) {
@@ -669,6 +727,9 @@ export const acceptBookingRequest = mutation({
       locationMode: v.optional(v.string()),
       scheduledDate: v.optional(v.string()),
       scheduledTime: v.optional(v.string()),
+      scheduledStartAt: v.optional(v.number()),
+      lockAt: v.optional(v.number()),
+      expiresAt: v.optional(v.number()),
       durationMinutes: v.optional(v.number()),
       pricing: v.object({
         perPlayer: v.number(),
@@ -755,6 +816,46 @@ export const acceptBookingRequest = mutation({
           updatedAt: now,
         });
       }
+      await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
+    } else if (bookingRequest.matchroomId) {
+      matchroomId = bookingRequest.matchroomId;
+
+      for (const resourceId of args.resourceIds) {
+        await ctx.db.patch(resourceId, {
+          lifecycleStatus: "booked",
+          bookingRequestId: args.requestId,
+          bookedAt: now,
+          bookedByUid: args.adminUid,
+          matchroomId,
+          updatedAt: now,
+        });
+      }
+
+      await ctx.db.patch(matchroomId, {
+        status: "locked",
+        isLocked: true,
+        zoneId: args.zoneId,
+        zoneOwnerUid: args.adminUid,
+        locationMode: (args.matchroomData.locationMode as any) || "zone",
+        zoneAdminApproved: true,
+        bookingSource: "zone_accepted",
+        branchId: args.branchId,
+        resourceIds: args.resourceIds,
+        location: args.location || args.branchName || args.zoneName || args.matchroomData.location || "Zone Venue",
+        updatedAt: now,
+      });
+
+      await ctx.db.patch(args.requestId, {
+        status: "accepted",
+        matchroomId,
+        allocatedBranchId: args.branchId,
+        allocatedResourceIds: args.resourceIds,
+        allocatedAt: now,
+        allocatedByUid: args.adminUid,
+        lifecycleStatus: "zone_accepted",
+        updatedAt: now,
+      });
+      await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
     } else {
       for (const resourceId of args.resourceIds) {
         await ctx.db.patch(resourceId, {
@@ -771,6 +872,7 @@ export const acceptBookingRequest = mutation({
         status: "open",
         currentPlayers: args.matchroomData.players.length,
         zoneId: args.zoneId,
+        zoneOwnerUid: args.adminUid,
         locationMode: (args.matchroomData.locationMode as any) || "zone",
         captainUidA: args.matchroomData.hostUid,
         isLocked: args.matchroomData.isLocked,
@@ -794,6 +896,7 @@ export const acceptBookingRequest = mutation({
         lifecycleStatus: "zone_accepted",
         updatedAt: now,
       });
+      await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
 
       for (const resourceId of args.resourceIds) {
         await ctx.db.patch(resourceId, {
@@ -967,6 +1070,7 @@ export const sendCounterOffer = mutation({
     scheduleOptions: v.array(v.object({
       date: v.string(),
       time: v.string(),
+      endTime: v.optional(v.string()),
     })),
     pricePerPlayer: v.number(),
     currency: v.optional(v.string()),
@@ -986,6 +1090,7 @@ export const sendCounterOffer = mutation({
       .map((option) => ({
         date: String(option.date || "").trim(),
         time: String(option.time || "").trim(),
+        endTime: option.endTime ? String(option.endTime).trim() : undefined,
       }))
       .filter((option) => option.date && option.time)
       .slice(0, 3);

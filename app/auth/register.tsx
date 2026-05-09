@@ -385,7 +385,7 @@ export default function Register() {
     >
       <RegistrationStepHeader
         title="Create Account"
-        subtitle="Create your player account."
+        subtitle=""
         stepTitle="Step 1 of 4"
         stepSubtitle="Account details"
         progress="25%"

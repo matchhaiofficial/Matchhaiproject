@@ -90,6 +90,7 @@ export const listHistory = query({
 
       let title = "Wallet transaction";
       if (row.type === "deposit") title = "Wallet top-up";
+      if (metadata.source === "matchroom_completion_payout") title = "Venue payout";
       if (row.type === "withdrawal") title = "Wallet payment";
       if (row.type === "booking_payment") title = "Booking payment";
       if (row.type === "refund") title = "Wallet refund";
@@ -160,6 +161,53 @@ export const listHistory = query({
     );
   },
 });
+
+export const createZoneWithdrawalTransaction = mutation({
+  args: {
+    userId: v.id("users"),
+    zoneId: v.optional(v.string()),
+    branchId: v.string(),
+    branchName: v.string(),
+    amount: v.number(),
+    ownerName: v.optional(v.string()),
+    ownerEmail: v.optional(v.string()),
+    venueName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.amount <= 0) {
+      throw new Error("Withdrawal amount must be positive.");
+    }
+
+    const user = await getWalletUserRecord(ctx, args.userId);
+    const walletBalance = Number(user.walletBalance || 0);
+    if (walletBalance < args.amount) {
+      throw new Error("Withdrawal amount cannot exceed wallet balance.");
+    }
+
+    const now = Date.now();
+    const reference = `zone_withdrawal_${String(user._id)}_${now}`;
+    await ctx.db.insert("walletTransactions", {
+      userId: user._id,
+      type: "withdrawal",
+      amount: args.amount,
+      status: "pending",
+      reference,
+      metadata: {
+        source: "zone_admin_withdrawal_request",
+        zoneId: args.zoneId || null,
+        branchId: args.branchId,
+        branchName: args.branchName,
+        ownerName: args.ownerName || user.fullName || user.username || null,
+        ownerEmail: args.ownerEmail || user.email || null,
+        venueName: args.venueName || null,
+      },
+      createdAt: now,
+    });
+
+    return { reference, createdAt: now, walletBalance };
+  },
+});
+
 
 // ============================================
 // WALLET MUTATIONS

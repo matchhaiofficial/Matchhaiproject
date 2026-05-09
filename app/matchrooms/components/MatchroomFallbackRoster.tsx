@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { AppIcon } from "../../../src/components/AppIcon";
 import SkillBadge from "../../../src/components/SkillBadge";
 import { SkillTier } from "../../../src/services/skillRatingService";
@@ -29,6 +29,7 @@ type Props = {
   ) => boolean;
   getDisplayRole: (role?: string | null) => string;
   getSkillBadgeProps: (uid?: string, fallbackTierRaw?: unknown) => SkillBadgeProps;
+  onReportPlayer?: (playerUid: string, playerName: string) => void;
 };
 
 export function MatchroomFallbackRoster({
@@ -39,6 +40,7 @@ export function MatchroomFallbackRoster({
   identityMatches,
   getDisplayRole,
   getSkillBadgeProps,
+  onReportPlayer,
 }: Props) {
   return (
     <View style={styles.playersContainer}>
@@ -71,14 +73,27 @@ export function MatchroomFallbackRoster({
                   </View>
                 )}
               </View>
-              {player.uid === currentUserId && (
+              {onReportPlayer && player.uid !== currentUserId ? (
+                <Pressable
+                  onPress={() => onReportPlayer(player.uid, player.username)}
+                  hitSlop={8}
+                  style={{ padding: 4 }}
+                >
+                  <AppIcon
+                    name="flag"
+                    size={16}
+                    color={COLORS.error}
+                    style={{ opacity: 0.85 }}
+                  />
+                </Pressable>
+              ) : player.uid === currentUserId ? (
                 <AppIcon
                   name="person"
                   size={16}
                   color={COLORS.accent}
                   style={{ opacity: 0.6 }}
                 />
-              )}
+              ) : null}
             </View>
             <View
               style={{

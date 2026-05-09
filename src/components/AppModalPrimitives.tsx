@@ -137,16 +137,16 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomInset = insets.bottom;
 
   return (
     <View
       style={[
         styles.footer,
-        {
-          paddingBottom: Math.max(SPACING.md, bottomInset),
-        },
         style,
+        {
+          paddingBottom: Math.max(SPACING.md, bottomInset + SPACING.md),
+        },
       ]}
     >
       {children}
@@ -164,7 +164,7 @@ export function AppDialog({
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomClearance = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomClearance = insets.bottom;
   const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
@@ -215,7 +215,7 @@ export function AppBottomSheet({
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomInset = insets.bottom;
   const maxSheetHeight = Math.floor(
     Math.min(
       windowHeight * 0.82,
@@ -242,14 +242,14 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-        <View style={styles.sheetWrap}>
+        <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
           <Animated.View style={entrance.animatedStyle}>
             <View
               style={[
                 styles.sheet,
-                { maxHeight: maxSheetHeight },
                 sheetStyle,
                 contentStyle,
+                { maxHeight: maxSheetHeight },
               ]}
             >
               {children}

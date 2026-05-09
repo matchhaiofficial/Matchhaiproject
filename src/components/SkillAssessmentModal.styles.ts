@@ -3,7 +3,6 @@ import { COLORS, FONTS, RADII, SHADOWS, SPACING, TEXT_SIZES } from '../theme';
 
 export default StyleSheet.create({
     container: {
-        maxHeight: '85%',
         ...SHADOWS.cardElevated,
     },
     content: {

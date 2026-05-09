@@ -16,6 +16,7 @@ import styles from "../bookings.styles";
 type CounterOption = {
   date: string;
   time: string;
+  endTime?: string;
 };
 
 type TimeDraft = {
@@ -66,6 +67,9 @@ type Props = {
   daysInMonth: number;
   monthYearLabel: string;
   parseTimeToDraft: (value?: string | null) => TimeDraft;
+  editingTimeField: "start" | "end";
+  setEditingTimeField: React.Dispatch<React.SetStateAction<"start" | "end">>;
+  validationMessage?: string;
 };
 
 export function ZoneBookingsCounterOfferSheets({
@@ -95,7 +99,13 @@ export function ZoneBookingsCounterOfferSheets({
   daysInMonth,
   monthYearLabel,
   parseTimeToDraft,
+  editingTimeField,
+  setEditingTimeField,
+  validationMessage,
 }: Props) {
+  const option = counterOptions[0] || createDefaultScheduleOption();
+  const canSend = processingAction === null && !validationMessage;
+
   return (
     <>
       <AppBottomSheet
@@ -106,7 +116,7 @@ export function ZoneBookingsCounterOfferSheets({
       >
         <AppModalHeader
           title="Suggest Alternative"
-          subtitle="Share 1 to 3 date and time options"
+          subtitle="Send one adjusted booking time"
           onClose={() => setShowCounterModal(false)}
           closeDisabled={processingAction !== null}
         />
@@ -116,26 +126,12 @@ export function ZoneBookingsCounterOfferSheets({
           style={styles.counterForm}
           contentContainerStyle={styles.counterFormContent}
         >
-          {counterOptions.map((option, index) => (
-            <View key={`counter-option-${index}`} style={styles.scheduleOptionCard}>
-              <View style={styles.scheduleOptionHeader}>
-                <Text style={styles.formLabel}>Option {index + 1}</Text>
-                {counterOptions.length > 1 ? (
-                  <Pressable
-                    style={styles.removeOptionButton}
-                  onPress={() => removeCounterOption(index)}
-                  disabled={processingAction !== null}
-                >
-                    <AppIcon name="close" size="sm" tone="muted" />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <View style={styles.dateRow}>
+            <View style={styles.scheduleOptionCard}>
+              <Text style={styles.formLabel}>Date</Text>
                 <Pressable
                   style={styles.dateField}
                   onPress={() => {
-                    setEditingOptionIndex(index);
+                    setEditingOptionIndex(0);
                     const nextDate = option.date ? new Date(`${option.date}T00:00:00`) : new Date();
                     setDateDraft(nextDate);
                     setMonthCursor(nextDate);
@@ -145,10 +141,15 @@ export function ZoneBookingsCounterOfferSheets({
                   <AppIcon name="calendar-month" size="sm" tone="accent" />
                   <Text style={styles.dateFieldText}>{formatDateForDisplay(option.date)}</Text>
                 </Pressable>
+
+              <View style={styles.dateRow}>
+                <View style={styles.halfInput}>
+                  <Text style={styles.formLabel}>Starting booking time</Text>
                 <Pressable
                   style={styles.dateField}
                   onPress={() => {
-                    setEditingOptionIndex(index);
+                    setEditingOptionIndex(0);
+                    setEditingTimeField("start");
                     setTimeDraft(parseTimeToDraft(option.time));
                     setShowTimePicker(true);
                   }}
@@ -156,24 +157,31 @@ export function ZoneBookingsCounterOfferSheets({
                   <AppIcon name="schedule" size="sm" tone="accent" />
                   <Text style={styles.dateFieldText}>{formatTimeForDisplay(option.time)}</Text>
                 </Pressable>
+                </View>
+                <View style={styles.halfInput}>
+                  <Text style={styles.formLabel}>Ending booking time</Text>
+                  <Pressable
+                    style={styles.dateField}
+                    onPress={() => {
+                      setEditingOptionIndex(0);
+                      setEditingTimeField("end");
+                      setTimeDraft(parseTimeToDraft(option.endTime));
+                      setShowTimePicker(true);
+                    }}
+                  >
+                    <AppIcon name="clock" size="sm" tone="accent" />
+                    <Text style={styles.dateFieldText}>{formatTimeForDisplay(option.endTime)}</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
-          ))}
-
-          {counterOptions.length < 3 ? (
-            <Pressable
-              style={styles.addOptionButton}
-              onPress={() => setCounterOptions((prev) => [...prev, createDefaultScheduleOption()])}
-              disabled={processingAction !== null}
-            >
-              <AppIcon name="add" size="sm" tone="accent" />
-              <Text style={styles.addOptionText}>Add another date and time</Text>
-            </Pressable>
-          ) : null}
 
           <Text style={styles.emptyText}>
-            Captains will get these options in their inbox and have 4 hours to respond.
+            Captains will get this alternative in their inbox and have 2 hours to respond.
           </Text>
+          {validationMessage ? (
+            <Text style={styles.validationText}>{validationMessage}</Text>
+          ) : null}
         </AppModalBody>
 
         <AppModalFooter style={styles.counterFooter}>
@@ -189,10 +197,10 @@ export function ZoneBookingsCounterOfferSheets({
             <AppButton
               style={styles.modalActionButton}
               loading={processingAction === "counter"}
-              disabled={processingAction !== null}
+              disabled={!canSend}
               onPress={handleCounterOffer}
             >
-              Send Time Options
+              Send
             </AppButton>
           </View>
         </AppModalFooter>
@@ -301,7 +309,12 @@ export function ZoneBookingsCounterOfferSheets({
           <Pressable
             onPress={() => {
               if (editingOptionIndex !== null) {
-                updateCounterOption(editingOptionIndex, { time: draftToTimeString(timeDraft) });
+                updateCounterOption(
+                  editingOptionIndex,
+                  editingTimeField === "start"
+                    ? { time: draftToTimeString(timeDraft) }
+                    : { endTime: draftToTimeString(timeDraft) },
+                );
               }
               setShowTimePicker(false);
             }}
@@ -309,56 +322,62 @@ export function ZoneBookingsCounterOfferSheets({
             <Text style={styles.pickerAction}>Done</Text>
           </Pressable>
         </View>
-        <View style={styles.timePickerRow}>
-          <View style={styles.timeColumn}>
-            {HOURS_12.map((hour) => {
-              const selected = timeDraft.hour === hour;
-              return (
-                <Pressable
-                  key={`h-${hour}`}
-                  style={[styles.timeOption, selected && styles.timeOptionActive]}
-                  onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}
-                >
-                  <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                    {String(hour).padStart(2, "0")}
-                  </Text>
-                </Pressable>
-              );
-            })}
+        <ScrollView
+          style={styles.timePickerScroll}
+          contentContainerStyle={styles.timePickerScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.timePickerRow}>
+            <View style={styles.timeColumn}>
+              {HOURS_12.map((hour) => {
+                const selected = timeDraft.hour === hour;
+                return (
+                  <Pressable
+                    key={`h-${hour}`}
+                    style={[styles.timeOption, selected && styles.timeOptionActive]}
+                    onPress={() => setTimeDraft((prev) => ({ ...prev, hour }))}
+                  >
+                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                      {String(hour).padStart(2, "0")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.timeColumn}>
+              {MINUTES.map((minute) => {
+                const selected = timeDraft.minute === minute;
+                return (
+                  <Pressable
+                    key={`m-${minute}`}
+                    style={[styles.timeOption, selected && styles.timeOptionActive]}
+                    onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}
+                  >
+                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                      {String(minute).padStart(2, "0")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.timeColumn}>
+              {PERIODS.map((period) => {
+                const selected = timeDraft.period === period;
+                return (
+                  <Pressable
+                    key={`p-${period}`}
+                    style={[styles.timeOption, selected && styles.timeOptionActive]}
+                    onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}
+                  >
+                    <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
+                      {period}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-          <View style={styles.timeColumn}>
-            {MINUTES.map((minute) => {
-              const selected = timeDraft.minute === minute;
-              return (
-                <Pressable
-                  key={`m-${minute}`}
-                  style={[styles.timeOption, selected && styles.timeOptionActive]}
-                  onPress={() => setTimeDraft((prev) => ({ ...prev, minute }))}
-                >
-                  <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                    {String(minute).padStart(2, "0")}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.timeColumn}>
-            {PERIODS.map((period) => {
-              const selected = timeDraft.period === period;
-              return (
-                <Pressable
-                  key={`p-${period}`}
-                  style={[styles.timeOption, selected && styles.timeOptionActive]}
-                  onPress={() => setTimeDraft((prev) => ({ ...prev, period }))}
-                >
-                  <Text style={[styles.timeOptionText, selected && styles.timeOptionTextActive]}>
-                    {period}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+        </ScrollView>
       </AppPickerSheet>
     </>
   );

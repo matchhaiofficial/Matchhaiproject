@@ -1,38 +1,29 @@
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import React, { memo, useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../../src/components/AppHeader";
-import {
-    AdminEmptyStateCard,
-    AdminInfoLine,
-    AdminListCard,
-    AdminSectionHeader,
-} from "../../../src/components/AdminSurface";
+import { AdminEmptyStateCard } from "../../../src/components/AdminSurface";
+import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { useAuth } from "../../../src/context/AuthContext";
-import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
-import { useToast } from "../../../src/hooks/useToast";
 import {
     getZoneAdminNotificationStatus,
     isPendingZoneAdminNotification,
     isVisibleZoneAdminNotification,
 } from "../../../src/features/zoneAdmin/notificationFilters";
+import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
+import { useToast } from "../../../src/hooks/useToast";
 import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
-import {
-    rejectZoneBookingRequest,
-} from "../../../src/services/convex/zoneAdminBookingService";
+import { rejectZoneBookingRequest } from "../../../src/services/convex/zoneAdminBookingService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
-import {
-    getNotificationStatusLabel,
-    getNotificationStatusTone,
-} from "../../../src/utils/statusLabels";
+import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
 import styles from "./notifications.styles";
 
 type AdminNotification = {
@@ -52,16 +43,28 @@ type AdminNotification = {
     matchroomId?: string;
 };
 
-const formatTime = (value: any) => {
-    if (!value) return "Now";
-    if (typeof value === "number") return new Date(value).toLocaleString();
-    if (value instanceof Date) return value.toLocaleString();
-    return "Now";
+const getTimeAgo = (timestamp: any): string => {
+    if (!timestamp) return "Just now";
+    const then =
+        typeof timestamp === "number"
+            ? new Date(timestamp)
+            : timestamp?.toDate
+                ? timestamp.toDate()
+                : new Date(timestamp);
+    const diffMs = Date.now() - then.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return then.toLocaleDateString();
 };
 
 const getTypeLabel = (value?: string) =>
     String(value || "notification")
-        .replace(/_/g, " ")
+        .replace(/[_.]/g, " ")
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 const ZONE_DECISION_TYPES = new Set([
@@ -93,34 +96,57 @@ const NotificationRow = memo(function NotificationRow({
 }) {
     const meta = item.data || {};
     const status = getZoneAdminNotificationStatus(item);
-    const typeLabel = getTypeLabel(item.type);
     const isMatchRequest = String(item.type || "").toLowerCase().includes("match");
-    const title = item.title || item.message || "Admin Alert";
-    const message = item.message && item.message !== item.title ? item.message : "";
+    const title = ZONE_MATCH_REQUEST_TYPES.has(item.type)
+        ? `${item.fromUsername || "Player"} wants to join`
+        : item.title || item.message || "Admin Alert";
+    const message = item.message && item.message !== item.title ? item.message : item.body || "";
     const requestId = String(meta.requestId || meta.requestRef || "").trim();
     const matchroomId = String(meta.matchroomId || item.matchroomId || "").trim();
     const matchroomLabel = String(meta.matchroomTitle || matchroomId || "").trim();
-    const hasResourceContext = !!meta.resourceId || !!meta.branchId;
-    const resourceLabel = String(meta.resourceName || meta.resourceId || "Resources").trim();
     const playerLabel = String(meta.userName || meta.playerName || meta.requesterName || "").trim();
+    const resourceLabel = String(meta.resourceName || meta.resourceId || "").trim();
     const needsDecision =
         ZONE_DECISION_TYPES.has(item.type) &&
         status !== "accepted" &&
         status !== "rejected";
 
     return (
-        <AdminListCard
-            title={ZONE_MATCH_REQUEST_TYPES.has(item.type) ? `${item.fromUsername || "Player"} wants to join` : title}
-            subtitle={`${typeLabel} • ${formatTime(item.createdAt)}`}
-            statusLabel={getNotificationStatusLabel(status)}
-            statusTone={getNotificationStatusTone(status)}
-            onPress={() => onOpen(item)}
-            actions={
-                needsDecision ? (
+        <Pressable style={styles.notificationCard} onPress={() => onOpen(item)}>
+            <View style={styles.cardHeader}>
+                <View style={styles.iconContainer}>
+                    <AppIcon name={isMatchRequest ? "matchroom" : "notifications"} size={20} color={COLORS.accent} />
+                </View>
+                {item.isRead === false ? <View style={styles.unreadDot} /> : null}
+                <View style={styles.headerInfo}>
+                    <Text style={styles.typeText}>{title}</Text>
+                    <Text style={styles.timeText}>{getTypeLabel(item.type)} • {getTimeAgo(item.createdAt)}</Text>
+                </View>
+                {status !== "pending" ? (
+                    <View style={styles.statusBadge}>
+                        <Text style={styles.statusText}>{getNotificationStatusLabel(status)}</Text>
+                    </View>
+                ) : null}
+            </View>
+
+            <View style={styles.cardBody}>
+                <Text style={styles.messageText}>
+                    {isMatchRequest
+                        ? `${matchroomLabel || "Matchroom"} • ${meta.game || "--"}`
+                        : message || "New admin notification."}
+                </Text>
+                {playerLabel ? <Text style={styles.metaText}>Player: {playerLabel}</Text> : null}
+                {matchroomId ? <Text style={styles.metaText}>Matchroom: {matchroomLabel}</Text> : null}
+                {resourceLabel ? <Text style={styles.metaText}>Resource: {resourceLabel}</Text> : null}
+            </View>
+
+            <View style={styles.actionRow}>
+                {needsDecision ? (
                     <>
                         <AppButton
                             variant="success"
                             size="sm"
+                            style={styles.actionButton}
                             loading={processingId === item.id}
                             onPress={(event) => {
                                 event.stopPropagation();
@@ -132,6 +158,7 @@ const NotificationRow = memo(function NotificationRow({
                         <AppButton
                             variant="danger"
                             size="sm"
+                            style={styles.actionButton}
                             loading={processingId === item.id}
                             onPress={(event) => {
                                 event.stopPropagation();
@@ -145,6 +172,7 @@ const NotificationRow = memo(function NotificationRow({
                     <>
                         <AppButton
                             size="sm"
+                            style={styles.actionButton}
                             onPress={(event) => {
                                 event.stopPropagation();
                                 onOpen(item);
@@ -156,6 +184,7 @@ const NotificationRow = memo(function NotificationRow({
                             <AppButton
                                 variant="secondary"
                                 size="sm"
+                                style={styles.actionButton}
                                 onPress={(event) => {
                                     event.stopPropagation();
                                     onMarkSeen(item);
@@ -165,30 +194,9 @@ const NotificationRow = memo(function NotificationRow({
                             </AppButton>
                         ) : null}
                     </>
-                )
-            }
-        >
-            <View style={styles.infoStack}>
-                {isMatchRequest ? (
-                    <>
-                        <AdminInfoLine
-                            label="Room"
-                            value={`${meta.matchroomTitle || meta.matchroomId || item.matchroomId || "Unknown"} • ${meta.game || "--"}`}
-                        />
-                        <AdminInfoLine
-                            label="Seat request"
-                            value={`Role: ${meta.role || "Flex"} • Team: ${meta.targetTeam || "Any"}`}
-                        />
-                    </>
-                ) : message ? (
-                    <Text style={styles.messageText}>{message}</Text>
-                ) : null}
-                {!!playerLabel ? <AdminInfoLine label="Player" value={playerLabel} /> : null}
-                {!!requestId ? <AdminInfoLine label="Request" value={requestId} /> : null}
-                {!!matchroomId ? <AdminInfoLine label="Matchroom" value={matchroomLabel} /> : null}
-                {hasResourceContext ? <AdminInfoLine label="Resource" value={resourceLabel} /> : null}
+                )}
             </View>
-        </AdminListCard>
+        </Pressable>
     );
 });
 
@@ -197,7 +205,7 @@ export default function ZoneNotificationsModule() {
     const { user } = useAuth();
     const { showToast } = useToast();
 
-    const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "read">("all");
+    const [statusFilter, setStatusFilter] = useState<"pending" | "resolved">("pending");
     const [processingId, setProcessingId] = useState<string | null>(null);
     const [clearing, setClearing] = useState(false);
     useRouteLogger("ZoneNotificationsModule", {
@@ -240,15 +248,12 @@ export default function ZoneNotificationsModule() {
     }, [rawNotifications]);
 
     const pendingCount = useMemo(() => items.filter(isPendingZoneAdminNotification).length, [items]);
-    const seenCount = useMemo(() => items.filter((item) => item.status === "seen").length, [items]);
+    const resolvedCount = useMemo(() => items.filter((item) => item.status !== "pending").length, [items]);
     const filteredItems = useMemo(
         () =>
-            items.filter((item) => {
-                if (statusFilter === "all") return true;
-                if (statusFilter === "pending") return item.status === "pending";
-                if (statusFilter === "read") return item.status === "seen";
-                return true;
-            }),
+            statusFilter === "pending"
+                ? items.filter((item) => item.status === "pending")
+                : items.filter((item) => item.status !== "pending"),
         [items, statusFilter],
     );
 
@@ -271,54 +276,58 @@ export default function ZoneNotificationsModule() {
         } as any);
     }, [router]);
 
-    const openResources = useCallback((params: Record<string, any>) => {
-        router.push({
-            pathname: "/zone/modules/resources",
-            params,
-        } as any);
-    }, [router]);
+    const openNotification = useCallback(async (item: AdminNotification) => {
+        await markSeenIfPending(item);
+        const meta = item.data || {};
+        const type = String(item.type || "").toLowerCase();
+        const requestId = String(meta.requestId || meta.requestRef || "").trim();
+        if (requestId && (ZONE_DECISION_TYPES.has(type) || type.includes("booking"))) {
+            openBookings({
+                segment: "requests",
+                requestId,
+                expandedRequestId: requestId,
+                focusRequestId: requestId,
+            });
+            return;
+        }
+        if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
+            router.push(`/matchrooms/${meta.matchroomId || item.matchroomId}` as any);
+            return;
+        }
+        openBookings({
+            segment: (meta.matchroomId || item.matchroomId) ? "matchrooms" : "requests",
+            requestId,
+            expandedRequestId: requestId || undefined,
+            matchroomId: meta.matchroomId || item.matchroomId,
+        });
+    }, [markSeenIfPending, openBookings, router]);
 
     const handleClearAll = useCallback(async () => {
         if (!user?._id || items.length === 0) return;
-
         const hasPending = pendingCount > 0;
-        const alertTitle = hasPending ? "Mark All as Seen" : "Clear Notification History";
-        const alertMsg = hasPending
-            ? "This will mark all notifications as seen."
-            : "This will archive all seen notifications.";
-
         Alert.alert(
-            alertTitle,
-            alertMsg,
+            hasPending ? "Mark all as read" : "Clear history",
+            hasPending ? "This will mark all pending notifications as read." : "This will archive resolved notifications.",
             [
                 { text: "Cancel", style: "cancel" },
                 {
-                    text: hasPending ? "Mark Seen" : "Archive History",
-                    style: "default",
+                    text: hasPending ? "Mark Read" : "Clear",
                     onPress: async () => {
                         setClearing(true);
                         try {
                             if (hasPending) {
-                                const pendingIds = items
-                                    .filter(isPendingZoneAdminNotification)
-                                    .map((item) => item._id as Id<"notifications">);
-                                if (pendingIds.length) {
-                                    await markManyAsReadMutation({
-                                        notificationIds: pendingIds,
-                                    });
-                                }
+                                await markManyAsReadMutation({
+                                    notificationIds: items
+                                        .filter(isPendingZoneAdminNotification)
+                                        .map((item) => item._id as Id<"notifications">),
+                                });
                             } else {
-                                const seenIds = items
-                                    .filter((item) => item.status === "seen")
-                                    .map((item) => item._id as Id<"notifications">);
-                                if (seenIds.length) {
-                                    await archiveManyMutation({
-                                        notificationIds: seenIds,
-                                    });
-                                }
+                                await archiveManyMutation({
+                                    notificationIds: items
+                                        .filter((item) => item.status !== "pending")
+                                        .map((item) => item._id as Id<"notifications">),
+                                });
                             }
-                        } catch (error) {
-                            Logger.error("ZoneNotifications", "Clear all failed", error);
                         } finally {
                             setClearing(false);
                         }
@@ -334,20 +343,12 @@ export default function ZoneNotificationsModule() {
         try {
             const requestId = item.data.requestId;
             const zoneId = item.data.zoneId || (user as any).zoneId;
-
             if (!zoneId) {
                 showToast({ type: "error", title: "Error", message: "Zone ID not found. Cannot process request." });
                 return;
             }
-
             if (decision === "accept") {
-                router.push({
-                    pathname: "/zone/modules/bookings",
-                    params: {
-                        segment: "requests",
-                        requestId,
-                    },
-                } as any);
+                openBookings({ segment: "requests", requestId });
                 showToast({
                     type: "info",
                     title: "Allocation required",
@@ -355,24 +356,16 @@ export default function ZoneNotificationsModule() {
                 });
                 return;
             }
-
             const result = await rejectZoneBookingRequest({
-                    requestId,
-                    adminUid: user._id,
-                    zoneId,
-                    requestOwnerUid: item.fromUid,
-                    reason: "Declined by admin",
-                });
-
+                requestId,
+                adminUid: user._id,
+                zoneId,
+                requestOwnerUid: item.fromUid,
+                reason: "Declined by admin",
+            });
             if (result.ok) {
-                await markAsReadMutation({
-                    notificationId: item._id as Id<"notifications">,
-                });
-                showToast({
-                    type: "success",
-                    title: "Rejected",
-                    message: "Booking request rejected.",
-                });
+                await markAsReadMutation({ notificationId: item._id as Id<"notifications"> });
+                showToast({ type: "success", title: "Rejected", message: "Booking request rejected." });
             } else {
                 showToast({ type: "error", title: "Error", message: result.message });
             }
@@ -381,26 +374,18 @@ export default function ZoneNotificationsModule() {
         } finally {
             setProcessingId(null);
         }
-    }, [markAsReadMutation, showToast, user]);
+    }, [markAsReadMutation, openBookings, showToast, user]);
 
     const handleAcceptReject = useCallback(async (item: AdminNotification, decision: "accept" | "reject") => {
         if (!user?._id) return;
         setProcessingId(item.id);
         try {
             const result = await respondToMatchJoinRequest(item.id, decision, user._id);
-            if (result.ok) {
-                if (decision === "accept") {
-                    showToast({
-                        type: "success",
-                        title: "Accepted",
-                        message: `${item.fromUsername || "Player"} has been added to the room.`,
-                    });
-                } else {
-                    showToast({ type: "success", title: "Rejected", message: "Request has been rejected." });
-                }
-            } else {
-                showToast({ type: "error", title: "Error", message: result.message });
-            }
+            showToast({
+                type: result.ok ? "success" : "error",
+                title: result.ok ? (decision === "accept" ? "Accepted" : "Rejected") : "Error",
+                message: result.ok ? "Request updated." : result.message,
+            });
         } catch (error) {
             Logger.error("ZoneNotifications", "Accept/Reject failed", error);
         } finally {
@@ -408,101 +393,52 @@ export default function ZoneNotificationsModule() {
         }
     }, [showToast, user?._id]);
 
-    const openNotification = useCallback(async (item: AdminNotification) => {
-        await markSeenIfPending(item);
-
-        const meta = item.data || {};
-        const type = String(item.type || "").toLowerCase();
-
-        if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
-            router.push(`/matchrooms/${meta.matchroomId || item.matchroomId}` as any);
-            return;
-        }
-
-        if (meta.requestId || meta.matchroomId || item.matchroomId || type.includes("booking")) {
-            openBookings({
-                segment: (meta.matchroomId || item.matchroomId) ? "matchrooms" : "requests",
-                requestId: meta.requestId,
-                matchroomId: meta.matchroomId || item.matchroomId,
-            });
-            return;
-        }
-
-        if (meta.branchId || meta.resourceId || type.includes("resource")) {
-            openResources({
-                branchId: meta.branchId,
-                requestId: meta.requestId,
-                resourceId: meta.resourceId,
-            });
-            return;
-        }
-
-        openBookings({});
-    }, [markSeenIfPending, openBookings, openResources, router]);
-
     const handleAccept = useCallback((item: AdminNotification) => {
-        if (item.type === "admin_booking_request") {
-            void handleAcceptRejectBooking(item, "accept");
-            return;
-        }
-        void handleAcceptReject(item, "accept");
+        if (item.type === "admin_booking_request") void handleAcceptRejectBooking(item, "accept");
+        else void handleAcceptReject(item, "accept");
     }, [handleAcceptReject, handleAcceptRejectBooking]);
 
     const handleReject = useCallback((item: AdminNotification) => {
-        if (item.type === "admin_booking_request") {
-            void handleAcceptRejectBooking(item, "reject");
-            return;
-        }
-        void handleAcceptReject(item, "reject");
+        if (item.type === "admin_booking_request") void handleAcceptRejectBooking(item, "reject");
+        else void handleAcceptReject(item, "reject");
     }, [handleAcceptReject, handleAcceptRejectBooking]);
+
+    const headerRightAction = pendingCount > 0 || resolvedCount > 0 ? (
+        <Pressable onPress={handleClearAll} style={styles.markAllReadButton} disabled={clearing}>
+            {clearing ? (
+                <ActivityIndicator size="small" color={COLORS.accent} />
+            ) : (
+                <Text style={styles.markAllReadText}>{pendingCount > 0 ? "Mark all read" : "Clear history"}</Text>
+            )}
+        </Pressable>
+    ) : undefined;
 
     return (
         <Screen style={styles.screen} scroll={false}>
             <AppHeader
                 title="Notifications Center"
-                subtitle={`Pending alerts: ${pendingCount}`}
                 onBack={() => router.back()}
                 inlineTitle
+                rightAction={headerRightAction}
             />
             <SegmentedTabs
                 items={[
-                    { key: "all", label: "All", badge: items.length },
-                    { key: "pending", label: "Pending", badge: pendingCount },
-                    { key: "read", label: "Seen", badge: seenCount },
+                    { key: "pending", label: "Pending", badge: pendingCount || undefined },
+                    { key: "resolved", label: "History", badge: resolvedCount || undefined },
                 ]}
                 value={statusFilter}
-                onChange={(value) => setStatusFilter(value as "all" | "pending" | "read")}
+                onChange={setStatusFilter}
                 style={styles.segmentTabs}
             />
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                {items.length > 0 ? (
-                    <View style={styles.clearActionRow}>
-                        <AdminSectionHeader
-                            title="Queue Actions"
-                            subtitle="Mark active alerts seen or clear the resolved history."
-                            compact
-                            accessory={(
-                                <AppButton
-                                    variant={pendingCount > 0 ? "secondary" : "danger"}
-                                    size="sm"
-                                    loading={clearing}
-                                    onPress={handleClearAll}
-                                >
-                                    {pendingCount > 0 ? "Mark All Seen" : "Clear History"}
-                                </AppButton>
-                            )}
-                        />
-                    </View>
-                ) : null}
-
                 {loading ? (
                     <ActivityIndicator size="small" color={COLORS.accent} />
                 ) : filteredItems.length === 0 ? (
                     <AdminEmptyStateCard
                         title="No admin notifications yet"
                         description="Booking, resource, and moderation alerts will appear here."
-                        icon="notifications-active"
+                        icon="notifications"
                     />
                 ) : (
                     filteredItems.map((item) => (

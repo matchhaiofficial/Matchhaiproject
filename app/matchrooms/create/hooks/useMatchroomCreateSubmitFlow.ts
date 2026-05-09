@@ -1,12 +1,11 @@
 import { router } from "expo-router";
 import { useAction, useQuery } from "convex/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { convex } from "../../../../src/lib/convex";
-import { createBookingRequest } from "../../../../src/services/bookingRequestService";
 import {
   createMatchroom,
   getEnablePatchForGame,
@@ -19,7 +18,6 @@ import type { UserProfile } from "../../../../src/services/userService";
 import { getUserProfile } from "../../../../src/services/userService";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
 import { useToast } from "../../../../src/hooks/useToast";
-import { APP_ROUTES } from "../../../../src/navigation/routes";
 import Logger from "../../../../src/utils/logger";
 import {
   formatPakistaniPhone,
@@ -32,7 +30,6 @@ import {
 } from "../../../../src/utils/emailVerificationGate";
 import {
   buildAssignedTeamMembers,
-  buildBookingRequestPayload,
   buildMatchroomPayload,
   buildZoneWalkInPayload,
 } from "../utils/matchroomCreatePayloads";
@@ -138,6 +135,21 @@ type Params = {
 
 const WALKIN_SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
 const EASYPAY_PENDING_STATUSES = ["created", "redirected", "token_received", "pending"];
+const PAYMENT_RESUME_TIMEOUT_MS = 15000;
+
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = PAYMENT_RESUME_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function generateMatchCode(zoneName?: string | null) {
   const prefix = zoneName
@@ -309,6 +321,16 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     [activeEasypaisaOrderRef, notify, syncCheckoutStatus, user?._id],
   );
 
+  useEffect(() => {
+    if (!activeEasypaisaOrderRef) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        refreshEasypaisaPaymentStatus("poll");
+      }
+    });
+    return () => subscription.remove();
+  }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus]);
+
   const confirmEasypaisaPayment = useCallback(async () => {
     if (!user?._id || startingEasypaisaPayment) return;
     const amount = Math.max(0, Math.ceil(Number(easypaisaPaymentAmount || 0)));
@@ -332,6 +354,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     setStartingEasypaisaPayment(true);
     try {
       const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
+      Logger.info("CreateMatchroomPayment", "Starting Easypaisa wallet top-up", {
+        amount,
+        phoneMasked: normalizedPhone.phoneE164
+          ? `${normalizedPhone.phoneE164.slice(0, 5)}***${normalizedPhone.phoneE164.slice(-2)}`
+          : "unavailable",
+      });
       const checkout: any = await startCheckout({
         kind: "wallet_topup",
         amount,
@@ -341,6 +369,14 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       });
 
       const orderRefNum = String(checkout.orderRefNum || "");
+      Logger.info("CreateMatchroomPayment", "Easypaisa checkout response", {
+        orderRefNum,
+        status: checkout.status,
+        transactionType: checkout.transactionType,
+        actionRequired: checkout.actionRequired,
+        startTimedOut: Boolean(checkout.startTimedOut),
+        paymentTokenPresent: Boolean(checkout.paymentToken),
+      });
       setActiveEasypaisaOrderRef(orderRefNum || null);
       setEasypaisaPaymentPhase(checkout.status === "paid" ? "confirmed" : "payment_sent");
       const instruction =
@@ -415,12 +451,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     [user?._id],
   );
 
-  const submit = useCallback(async (options?: SubmitOptions) => {
-    if (!user) return;
+  const submit = useCallback(async (options?: SubmitOptions): Promise<boolean> => {
+    if (!user) return false;
     const skipPaymentPrompt = options?.skipPaymentPrompt === true;
     if (!hasVerifiedEmail(authUser) && !isZoneWalkInAdmin) {
       showEmailVerificationRequiredAlert();
-      return;
+      return false;
     }
 
     if (isZoneWalkInAdmin) {
@@ -432,7 +468,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             title: "Zone not found",
             type: "error",
           });
-          return;
+          return false;
         }
 
         const walkInSeries = WALKIN_SERIES_OPTIONS.includes(
@@ -474,7 +510,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             title: "Walk-in failed",
             type: "error",
           });
-          return;
+          return false;
         }
 
         Alert.alert("Walk-in created", "Walk-in matchroom created successfully.", [
@@ -491,6 +527,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
               } as any),
           },
         ]);
+        return true;
       } catch (error) {
         Logger.error("CreateMatchroom", "Error creating admin walk-in", error);
         showToast({
@@ -498,10 +535,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           title: "Walk-in failed",
           type: "error",
         });
+        return false;
       } finally {
         setSubmitting(false);
       }
-      return;
     }
 
     if (!userProfile) {
@@ -510,12 +547,25 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         title: "Profile missing",
         type: "error",
       });
-      return;
+      return false;
     }
 
     setSubmitting(true);
     try {
-      const latestProfileResult = await getUserProfile(user._id as Id<"users">);
+      Logger.info("CreateMatchroomPayment", "Submit started", {
+        locationMode,
+        selectedGame,
+        selectedZoneId,
+        skipPaymentPrompt,
+      });
+      const latestProfileResult =
+        skipPaymentPrompt && userProfile
+          ? { ok: true as const, data: userProfile }
+          : await withTimeout(
+              getUserProfile(user._id as Id<"users">),
+              "Loading latest profile",
+              10000,
+            );
       if (!latestProfileResult.ok || !latestProfileResult.data) {
         notify({
           message: latestProfileResult.ok
@@ -525,12 +575,16 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           type: "error",
         });
         setSubmitting(false);
-        return;
+        return false;
       }
 
       const latestProfile = latestProfileResult.data;
       setUserProfile(latestProfile);
 
+      Logger.info("CreateMatchroomPayment", "Profile ready for submit", {
+        usedCachedProfile: skipPaymentPrompt && Boolean(userProfile),
+        selectedGame,
+      });
       const participation = await prepareProfileForMatchParticipation(
         user._id,
         latestProfile,
@@ -546,7 +600,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         });
         setShowActivationPrompt(true);
         setSubmitting(false);
-        return;
+        return false;
       }
 
       if (participation.status === "needs_assessment") {
@@ -558,7 +612,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         });
         setShowAssessment(true);
         setSubmitting(false);
-        return;
+        return false;
       }
 
       const activeProfile = participation.profile as UserProfile;
@@ -575,7 +629,18 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       const amountDue = Math.max(0, Math.ceil(Number(effectivePriceValue || 0)));
       const seatsPaid = captainSeatsPaid;
       if (amountDue > 0 && !skipPaymentPrompt) {
+        Logger.info("CreateMatchroomPayment", "Payment required before booking request", {
+          amountDue,
+          walletBalance: Number(user.walletBalance || 0),
+          selectedGame,
+          selectedZoneId,
+          locationMode,
+        });
         const paymentChoice = await promptPaymentChoice(amountDue);
+        Logger.info("CreateMatchroomPayment", "Payment choice selected", {
+          paymentChoice,
+          amountDue,
+        });
         if (paymentChoice === "cancel") {
           notify({
             message: "Your booking request was not sent.",
@@ -583,7 +648,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             type: "warning",
           });
           setSubmitting(false);
-          return;
+          return false;
         }
 
         if (paymentChoice === "easypaisa") {
@@ -593,73 +658,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           resumedEasypaisaOrderRef.current = null;
           setShowEasypaisaPhonePrompt(true);
           setSubmitting(false);
-          return;
+          return true;
         }
       }
 
       const paymentStatus = "paid";
       const isBroadcastFlow = locationMode === "broadcast";
-      const shouldCreateBookingRequest = !isBroadcastFlow;
-
-      if (shouldCreateBookingRequest) {
-        const walletPayment = await payWithWallet(amountDue);
-        if (!walletPayment.ok) {
-          notify({
-            message: walletPayment.message || "Wallet payment failed.",
-            title: "Payment failed",
-            type: "error",
-          });
-          setSubmitting(false);
-          return;
-        }
-
-        const requestData = buildBookingRequestPayload({
-          amountDue,
-          broadcastAreas,
-          duration,
-          formData,
-          gameKey: selectedGame!,
-          hostSkillAnswers,
-          hostSkillScore,
-          hostSkillTier,
-          locationMode,
-          paymentStatus,
-          reservedSlots,
-          seatsPaid,
-          selectedTeamId,
-          selectedZoneId,
-          selectedZoneRateKey,
-          selectedZoneRateResourceContext,
-          seriesType,
-          teamMode,
-          userId: user._id,
-          userProfile: activeProfile,
-        });
-
-        const result = await createBookingRequest(requestData as any, {
-          status: "open",
-        });
-
-        if (result.ok) {
-          notify({
-            message: "Your booking request was sent to the venue for admin review.",
-            title: "Request sent",
-            type: "success",
-          });
-          router.replace({
-            params: { t: Date.now().toString() },
-            pathname: APP_ROUTES.playerHome,
-          } as any);
-        } else {
-          notify({
-            message: result.message || "Failed to create request.",
-            title: "Request failed",
-            type: "error",
-          });
-        }
-        setSubmitting(false);
-        return;
-      }
 
       const assignedTeamMembers = buildAssignedTeamMembers({
         activeProfile,
@@ -696,6 +700,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             ? teams.find((team) => team.id === selectedTeamId)?.name || null
             : null,
         selectedZoneId,
+        selectedZoneRateKey,
+        selectedZoneRateResourceContext,
         seriesType,
         teamMode,
         teamPaymentMode,
@@ -703,40 +709,55 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       });
 
       const result = await createMatchroom(matchroomData as any);
+      Logger.info("CreateMatchroomPayment", "Create matchroom result", {
+        ok: result.ok,
+        matchroomId: result.ok ? result.id : null,
+        message: result.ok ? undefined : result.message,
+      });
       if (result.ok) {
-        if (isBroadcastFlow) {
-          try {
-            if (amountDue > 0) {
-              await convex.mutation(api.wallet.deductFunds, {
+        try {
+          if (amountDue > 0) {
+            Logger.info("CreateMatchroomPayment", "Deducting wallet for created matchroom", {
+              amountDue,
+              matchroomId: result.id,
+            });
+            await withTimeout(
+              convex.mutation(api.wallet.deductFunds, {
                 amount: amountDue,
                 metadata: {
-                  flow: "broadcast_matchroom_create",
+                  flow: isBroadcastFlow ? "broadcast_matchroom_create" : "zone_matchroom_create",
                   matchroomId: result.id,
                 },
                 reference: `matchroom_create:${result.id}`,
                 source: "matchroom_create",
                 userId: user._id as Id<"users">,
-              });
-            }
-          } catch (error) {
-            await convex.mutation(api.matchrooms.remove, {
-              matchroomId: result.id as Id<"matchrooms">,
-            });
-            notify({
-              message: "Wallet payment failed. The broadcast matchroom was not created.",
-              title: "Payment failed",
-              type: "error",
-            });
-            setSubmitting(false);
-            return;
+              }),
+              "Wallet deduction",
+              10000,
+            );
           }
+        } catch (error) {
+          await convex.mutation(api.matchrooms.remove, {
+            matchroomId: result.id as Id<"matchrooms">,
+          });
+          notify({
+            message: "Wallet payment failed. The matchroom was not created.",
+            title: "Payment failed",
+            type: "error",
+          });
+          setSubmitting(false);
+          return false;
         }
 
+        setShowEasypaisaPhonePrompt(false);
+        setActiveEasypaisaOrderRef(null);
+        setEasypaisaPaymentPhase("idle");
+        resumedEasypaisaOrderRef.current = null;
         Alert.alert(
           "Success!",
           isBroadcastFlow
             ? "Your broadcast matchroom is live. Venue requests will fan out automatically once the room becomes full."
-            : "Your matchroom has been created",
+            : "Your matchroom is live. It will be sent to the venue once every slot is filled and paid.",
           [
             {
               text: "View Match",
@@ -744,12 +765,14 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             },
           ],
         );
+        return true;
       } else {
         notify({
           message: result.message || "Failed to create matchroom.",
           title: "Create failed",
           type: "error",
         });
+        return false;
       }
     } catch (error) {
       Logger.error("CreateMatchroom", "Error creating matchroom", error);
@@ -758,6 +781,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         title: "Create failed",
         type: "error",
       });
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -837,6 +861,11 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       return;
     }
 
+    Logger.info("CreateMatchroomPayment", "Easypaisa payment confirmed, resuming matchroom create", {
+      orderRefNum: activeEasypaisaOrderRef,
+      providerStatus: checkoutStatus.providerStatus,
+      providerDescription: checkoutStatus.providerDescription,
+    });
     resumedEasypaisaOrderRef.current = activeEasypaisaOrderRef;
     setEasypaisaPaymentPhase("confirmed");
     notify({
@@ -847,10 +876,32 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
     const timer = setTimeout(() => {
       setEasypaisaPaymentPhase("completing");
-      submit({ skipPaymentPrompt: true }).catch((error) => {
-        Logger.error("CreateMatchroom", "Failed to resume after Easypaisa payment", error);
-        setEasypaisaPaymentPhase("confirmed");
-      });
+      withTimeout(
+        submit({ skipPaymentPrompt: true }),
+        "Completing matchroom after payment",
+        PAYMENT_RESUME_TIMEOUT_MS,
+      )
+        .then((completed) => {
+          if (!completed && resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
+            setEasypaisaPaymentPhase("failed");
+            notify({
+              message: "Payment was added to your wallet, but MatchHai could not finish the matchroom automatically. Close this and create again using Wallet.",
+              title: "Completion failed",
+              type: "warning",
+            });
+          }
+        })
+        .catch((error) => {
+          Logger.error("CreateMatchroom", "Failed to resume after Easypaisa payment", error);
+          if (resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
+            setEasypaisaPaymentPhase("failed");
+            notify({
+              message: "Payment was added to your wallet, but MatchHai could not finish the matchroom automatically. Close this and create again using Wallet.",
+              title: "Completion timed out",
+              type: "warning",
+            });
+          }
+        });
     }, 900);
 
     return () => clearTimeout(timer);
@@ -863,7 +914,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
     const timer = setInterval(() => {
       refreshEasypaisaPaymentStatus("poll");
-    }, 5000);
+    }, 2000);
 
     return () => clearInterval(timer);
   }, [activeEasypaisaOrderRef, checkoutStatus, refreshEasypaisaPaymentStatus]);

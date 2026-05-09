@@ -8,10 +8,10 @@ export default StyleSheet.create({
     },
     screenContent: {
         flex: 1,
-        paddingTop: 0,
+        paddingTop: 10,
         paddingBottom: 0,
     },
-    headerLeadingSlot: {
+    headerGhostAction: {
         width: 40,
         height: 40,
     },
@@ -26,9 +26,8 @@ export default StyleSheet.create({
     },
     branchCountLabel: {
         color: COLORS.muted,
-        fontFamily: FONTS.subheading,
-        fontSize: TEXT_SIZES.subheading,
-        marginTop: -SPACING.sm,
+        fontFamily: FONTS.interMedium,
+        fontSize: TEXT_SIZES.caption,
         marginBottom: SPACING.md,
     },
     noticeBox: {
@@ -55,7 +54,7 @@ export default StyleSheet.create({
         marginBottom: SPACING.md,
     },
     addButton: {
-        height: 46,
+        minHeight: 44,
         borderRadius: 14,
         backgroundColor: COLORS.accent,
         alignItems: "center",

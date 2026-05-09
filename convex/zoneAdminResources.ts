@@ -54,6 +54,24 @@ export const getZoneBranches = query({
 // MUTATIONS
 // ============================================
 
+const toPositiveInt = (value: unknown) => {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const resourceRoomLabel = (assetType: string, tier: string, index: number) => {
+  const label = tier === "ps5" ? "PS5" : tier === "xbox" ? "Xbox" : `${tier.charAt(0).toUpperCase()}${tier.slice(1)} ${assetType === "pc" ? "PCs" : "Consoles"}`;
+  const roomIndex = assetType === "pc" ? Math.floor((index - 1) / 5) + 1 : Math.floor((index - 1) / 2) + 1;
+  return assetType === "pc" ? `${label} Room ${roomIndex}` : `${label} Bay ${roomIndex}`;
+};
+
+const resourceNamePrefix = (assetType: string, tier: string) => {
+  if (tier === "ps5") return "PS5";
+  if (tier === "xbox") return "Xbox";
+  const label = `${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+  return assetType === "pc" ? `${label} PCs` : `${label} Consoles`;
+};
+
 async function validateBookableResources(
   ctx: any,
   input: {
@@ -143,6 +161,98 @@ export const updateResourceLifecycleStatus = mutation({
     });
 
     return true;
+  },
+});
+
+export const syncBranchResourcesFromPricing = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+    pricing: v.any(),
+    adminUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const resources = await ctx.db
+      .query("zoneResources")
+      .withIndex("by_zoneId_and_branchId", (q) =>
+        q.eq("zoneId", args.zoneId).eq("branchId", args.branchId)
+      )
+      .collect();
+
+    const configs = [
+      { assetType: "pc", tier: "regular", count: toPositiveInt(args.pricing?.pc?.regular?.count) },
+      { assetType: "pc", tier: "premium", count: toPositiveInt(args.pricing?.pc?.premium?.count) },
+      { assetType: "pc", tier: "elite", count: toPositiveInt(args.pricing?.pc?.elite?.count) },
+      { assetType: "console", tier: "regular", count: toPositiveInt(args.pricing?.console?.regular?.count) },
+      { assetType: "console", tier: "premium", count: toPositiveInt(args.pricing?.console?.premium?.count) },
+      { assetType: "console", tier: "elite", count: toPositiveInt(args.pricing?.console?.elite?.count) },
+      { assetType: "console", tier: "ps5", count: toPositiveInt(args.pricing?.console?.ps5?.count) },
+      { assetType: "console", tier: "xbox", count: toPositiveInt(args.pricing?.console?.xbox?.count) },
+    ];
+
+    const changed: any[] = [];
+    for (const config of configs) {
+      const current = resources.filter((resource: any) =>
+        resource.isActive !== false &&
+        String(resource.assetType || "").toLowerCase() === config.assetType &&
+        String(resource.tier || "").toLowerCase() === config.tier,
+      );
+      const delta = config.count - current.length;
+      const prefix = resourceNamePrefix(config.assetType, config.tier);
+
+      if (delta > 0) {
+        for (let offset = 1; offset <= delta; offset += 1) {
+          const nextIndex = current.length + offset;
+          await ctx.db.insert("zoneResources", {
+            zoneId: args.zoneId,
+            branchId: args.branchId,
+            kind: "seat",
+            name: `${prefix} ${nextIndex}`,
+            assetType: config.assetType,
+            tier: config.tier,
+            roomLabel: resourceRoomLabel(config.assetType, config.tier, nextIndex),
+            lifecycleStatus: "available",
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        changed.push({ ...config, added: delta, removed: 0 });
+      } else if (delta < 0) {
+        const removable = current
+          .filter((resource: any) =>
+            resource.lifecycleStatus === "available" &&
+            !resource.bookingRequestId &&
+            !resource.matchroomId,
+          )
+          .sort((left: any, right: any) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+        const removeCount = Math.abs(delta);
+        if (removable.length < removeCount) {
+          throw new Error(`Cannot reduce ${prefix} to ${config.count}; ${removeCount - removable.length} resource(s) are booked, held, or under maintenance.`);
+        }
+        for (const resource of removable.slice(0, removeCount)) {
+          await ctx.db.delete(resource._id);
+        }
+        changed.push({ ...config, added: 0, removed: removeCount });
+      }
+    }
+
+    if (changed.length > 0) {
+      await recordZoneAuditEvent(ctx, {
+        zoneId: String(args.zoneId),
+        module: "resources",
+        action: "sync_branch_resources_from_pricing",
+        actorUid: args.adminUid,
+        targetType: "branch",
+        targetId: args.branchId,
+        summary: "Synced branch resources from branch inventory changes.",
+        details: { branchId: args.branchId, changes: changed },
+        createdAt: now,
+      });
+    }
+
+    return { ok: true, changes: changed };
   },
 });
 

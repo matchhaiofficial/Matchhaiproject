@@ -16,6 +16,11 @@ function useBetterAuthConvexAuth() {
   const effectiveSession = session ?? sessionSnapshot;
   const effectiveSessionId = effectiveSession?.session?.id ?? null;
   const warnedTokenFailureForSessionRef = useRef<string | null>(null);
+  const sessionSnapshotRef = useRef<AuthSession | null>(null);
+
+  useEffect(() => {
+    sessionSnapshotRef.current = sessionSnapshot;
+  }, [sessionSnapshot]);
 
   const refreshSessionSnapshot = useCallback(async (reason: "mount" | "resume") => {
     try {
@@ -32,12 +37,12 @@ function useBetterAuthConvexAuth() {
 
       Logger.info("ConvexAuthBridge", "Session snapshot refreshed", {
         reason,
-        hasSession: Boolean(liveSession?.session || sessionSnapshot?.session),
-        sessionId: liveSession?.session?.id ?? sessionSnapshot?.session?.id ?? null,
-        authUserId: liveSession?.user?.id ?? sessionSnapshot?.user?.id ?? null,
+        hasSession: Boolean(liveSession?.session || sessionSnapshotRef.current?.session),
+        sessionId: liveSession?.session?.id ?? sessionSnapshotRef.current?.session?.id ?? null,
+        authUserId: liveSession?.user?.id ?? sessionSnapshotRef.current?.user?.id ?? null,
       });
     } catch (error) {
-      if (reason === "mount" && !session?.session && !sessionSnapshot?.session) {
+      if (reason === "mount" && !session?.session && !sessionSnapshotRef.current?.session) {
         const cachedSession = await loadCachedAuthSession();
         setSessionSnapshot(cachedSession);
       }
@@ -45,7 +50,7 @@ function useBetterAuthConvexAuth() {
     } finally {
       setSessionChecked(true);
     }
-  }, [session?.session, sessionSnapshot?.session, sessionSnapshot?.user?.id]);
+  }, [session?.session]);
 
   useEffect(() => {
     void refreshSessionSnapshot("mount");

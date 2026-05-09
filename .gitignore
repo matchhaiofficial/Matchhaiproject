@@ -26,6 +26,14 @@ expo-env.d.ts
 !.env.example
 !.env.local.example
 !*.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+workers/.dev.vars
+workers/.dev.vars.*
+!workers/.dev.vars.example
+.wrangler/
+workers/.wrangler/
 
 # Local tooling and agent state
 .agents/

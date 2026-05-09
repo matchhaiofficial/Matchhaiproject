@@ -275,6 +275,28 @@ export default StyleSheet.create({
         fontSize: 13,
         fontStyle: "italic",
     },
+    typingBubbleRow: {
+        flexDirection: "row",
+        justifyContent: "flex-start",
+        paddingHorizontal: SPACING.md,
+        paddingTop: SPACING.xs,
+        paddingBottom: SPACING.sm,
+    },
+    typingBubble: {
+        minWidth: 96,
+        borderRadius: 20,
+        borderBottomLeftRadius: 8,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.surface,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+    },
+    typingBubbleText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 13,
+    },
 
     // -------- Reply card inside bubble --------
     replyCard: {

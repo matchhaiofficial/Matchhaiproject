@@ -11,6 +11,7 @@ import Logger from "../../../../src/utils/logger";
 type CounterOption = {
   date: string;
   time: string;
+  endTime?: string;
 };
 
 type ZoneBookingsActionDeps = {
@@ -147,9 +148,10 @@ export function useZoneBookingsActions({
       .map((option) => ({
         date: String(option.date || "").trim(),
         time: String(option.time || "").trim(),
+        endTime: String(option.endTime || "").trim() || undefined,
       }))
       .filter((option) => option.date && option.time)
-      .slice(0, 3);
+      .slice(0, 1);
 
     if (!normalizedOptions.length) {
       showToast({ type: "warning", title: "Missing schedule", message: "Add at least one date and time option." });
@@ -171,7 +173,7 @@ export function useZoneBookingsActions({
         pricePerPlayer: selectedRequest.budgetPerPlayer || 0,
         currency: selectedRequest.currency || "PKR",
         location: zone.primaryBranch?.areaLabel || "",
-        expiresInMinutes: 240,
+        expiresInMinutes: 120,
       });
 
       if (!result.ok) {
@@ -181,8 +183,8 @@ export function useZoneBookingsActions({
 
       showToast({
         type: "success",
-        title: "Time options sent",
-        message: "Captains can now respond from their inbox.",
+        title: "Alternative sent",
+        message: "The request moved to Pending while captains respond.",
       });
       setShowCounterModal(false);
       setCounterOptions([createDefaultScheduleOption()]);

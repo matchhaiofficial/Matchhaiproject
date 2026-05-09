@@ -173,7 +173,7 @@ export default function RegisterStep2() {
     >
       <RegistrationStepHeader
         title="Play Preferences"
-        subtitle="Choose your areas and games."
+        subtitle=""
         stepTitle="Step 2 of 4"
         stepSubtitle="Location and interests"
         progress="50%"

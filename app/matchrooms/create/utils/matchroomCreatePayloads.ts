@@ -364,6 +364,12 @@ export function buildMatchroomPayload(params: {
   selectedTeamId: string | null;
   selectedTeamName: string | null;
   selectedZoneId: string | null;
+  selectedZoneRateKey: string | null;
+  selectedZoneRateResourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  } | null;
   seriesType: string;
   teamMode: TeamMode;
   teamPaymentMode: TeamPaymentMode;
@@ -396,6 +402,8 @@ export function buildMatchroomPayload(params: {
     selectedTeamId,
     selectedTeamName,
     selectedZoneId,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     seriesType,
     teamMode,
     teamPaymentMode,
@@ -485,8 +493,12 @@ export function buildMatchroomPayload(params: {
     rankRequirement: formData.rankRequirement || null,
     requiredRoles: [],
     reservedSlots: teamMode === "team" ? reservedSlots : 1,
+    requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || undefined,
+    requestedResourceSurface: selectedZoneRateResourceContext?.surface || undefined,
+    requestedResourceTier: selectedZoneRateResourceContext?.tier || undefined,
     scheduledDate: formData.date,
     scheduledTime: formData.time,
+    selectedZoneRateKey: selectedZoneRateKey || undefined,
     selectedMaps: formData.selectedMaps || [],
     seriesType:
       isCsStyleGame(gameKey) || gameKey === "fc26" || gameKey === "tekken8"

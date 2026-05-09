@@ -32,6 +32,7 @@ type Props = {
   branches: ZoneBranch[];
   selectedBranchId: string | null;
   onSelectBranch: (branchId: string) => void;
+  branchLocked?: boolean;
   loadingResources: boolean;
   resources: ZoneBookingAllocationResourceOption[];
   selectedResourceIds: string[];
@@ -52,6 +53,7 @@ export function ZoneBookingsAllocationSheet({
   branches,
   selectedBranchId,
   onSelectBranch,
+  branchLocked = false,
   loadingResources,
   resources,
   selectedResourceIds,
@@ -64,14 +66,19 @@ export function ZoneBookingsAllocationSheet({
   onSubmit,
 }: Props) {
   return (
-    <AppBottomSheet visible={visible} onClose={onClose} dismissDisabled={processingAction === "accept"}>
+    <AppBottomSheet
+      visible={visible}
+      onClose={onClose}
+      dismissDisabled={processingAction === "accept"}
+      sheetStyle={styles.allocateSheet}
+    >
       <AppModalHeader
         title="Allocate resources"
         subtitle="Select the branch and resources before accepting the booking."
         onClose={onClose}
         closeDisabled={processingAction === "accept"}
       />
-      <AppModalBody scroll={false} contentContainerStyle={styles.allocateSheetBody}>
+      <AppModalBody scroll style={styles.allocateBodyScroll} contentContainerStyle={styles.allocateSheetBody}>
         <View style={styles.allocateSummaryCard}>
           <Text style={styles.allocateSheetTitle}>{request?.title || "Booking request"}</Text>
           <Text style={styles.allocateSheetMeta}>
@@ -95,7 +102,9 @@ export function ZoneBookingsAllocationSheet({
         </View>
 
         <View style={styles.allocateBranchWrap}>
-          <Text style={styles.allocateSectionLabel}>Branch</Text>
+          <Text style={styles.allocateSectionLabel}>
+            {branchLocked ? "Branch fixed for this request" : "Branch"}
+          </Text>
           <FlatList
             data={branches}
             horizontal
@@ -105,6 +114,7 @@ export function ZoneBookingsAllocationSheet({
               const selected = selectedBranchId === item.id;
               return (
                 <Pressable
+                  disabled={branchLocked}
                   onPress={() => onSelectBranch(item.id)}
                   style={[styles.allocateBranchChip, selected && styles.allocateBranchChipActive]}
                 >
@@ -134,6 +144,7 @@ export function ZoneBookingsAllocationSheet({
             <FlatList
               data={resources}
               keyExtractor={(item) => item.id}
+              scrollEnabled={false}
               contentContainerStyle={styles.allocateResourceList}
               ListEmptyComponent={
                 <Text style={styles.allocateEmptyText}>No available resources found for this branch.</Text>

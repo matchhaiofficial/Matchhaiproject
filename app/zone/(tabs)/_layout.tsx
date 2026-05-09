@@ -10,8 +10,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
-import { AppIcon } from "../../../src/components/AppIcon";
+import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { COLORS, FONTS } from "../../../src/theme";
+import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
 
 // Responsive helpers (mirrors PlayerTabsLayout)
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -25,12 +26,12 @@ const H_PADDING = isSmall ? 10 : isLarge ? 28 : 16;
 const PILL_R = 22;
 
 // Tab definitions
-type TabDef = { name: string; label: string; icon: string };
+type TabDef = { name: string; label: string; icon: AppIconName };
 
 const TABS: TabDef[] = [
-    { name: "index", label: "Home", icon: "home" },
-    { name: "branches", label: "Branches", icon: "store" },
-    { name: "profile", label: "Profile", icon: "person" },
+    { name: "index", label: "Dashboard", icon: "dashboard" },
+    { name: "branches", label: "Branches", icon: "branch" },
+    { name: "profile", label: "Profile", icon: "profile" },
 ];
 
 // Custom Tab Bar
@@ -45,7 +46,7 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
         TABS.some((t) => t.name === route.name)
     );
 
-    const bottomPad = Math.max(insets.bottom, 8);
+    const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
 
     return (
         <View
@@ -93,7 +94,7 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
 
                             <View style={[styles.iconRow, isFocused && styles.iconRowActive]}>
                                 <AppIcon
-                                    name={icon as any}
+                                    name={icon}
                                     size={ICON_SIZE}
                                     color={isFocused ? COLORS.accent : "rgba(255,255,255,0.38)"}
                                 />
@@ -131,7 +132,7 @@ export default function ZoneTabsLayout() {
         >
             <Tabs.Screen
                 name="index"
-                options={{ title: "Home" }}
+                options={{ title: "Dashboard" }}
             />
             <Tabs.Screen
                 name="branches"
@@ -159,7 +160,7 @@ const styles = StyleSheet.create({
         right: 0,
         alignItems: "center",
         pointerEvents: "box-none",
-        paddingTop: 8,
+        paddingTop: 0,
         backgroundColor: COLORS.backgroundDark,
     },
 

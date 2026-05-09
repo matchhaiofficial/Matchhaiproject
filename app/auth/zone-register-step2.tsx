@@ -358,7 +358,7 @@ export default function AdminRegisterStep2() {
     >
       <RegistrationStepHeader
         title="Branch Setup"
-        subtitle="Add your Karachi branches."
+        subtitle=""
         stepTitle="Step 2 of 4"
         stepSubtitle="Branches and locations"
         progress="50%"

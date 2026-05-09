@@ -13,6 +13,103 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SKILL_JOIN_DELTA = 10;
 const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_request"]);
 
+function getMatchroomPlayerUids(room: any): string[] {
+  const fromPlayerUids = Array.isArray(room.playerUids) ? room.playerUids.map(String) : [];
+  const fromPlayers = Array.isArray(room.players) ? room.players.map((player: any) => String(player?.uid || "")).filter(Boolean) : [];
+  return Array.from(new Set([...fromPlayerUids, ...fromPlayers]));
+}
+
+function resolveResultCaptains(room: any, rv: any = {}) {
+  const team1Captain = String(rv.team1Captain || room.captainUidA || room.hostUid || "");
+  const team2Captain = String(
+    rv.team2Captain ||
+    room.captainUidB ||
+    (room.players || []).find((player: any) => String(player?.uid || "") !== team1Captain)?.uid ||
+    "",
+  );
+  return { team1Captain, team2Captain };
+}
+
+function chooseRandomWinner() {
+  return Math.random() < 0.5 ? "team1" as const : "team2" as const;
+}
+
+async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "team2", source: string) {
+  const matchroomId = room._id;
+  const now = Date.now();
+  const title = "Match result finalized";
+  const body = `${room.title || "Matchroom"} result finalized: ${winner === "team1" ? "Team 1" : "Team 2"} won.`;
+
+  const recipients = new Map<string, { id: Id<"users">; role?: "zone_admin" | "super_admin" }>();
+  if (room.zoneOwnerUid) {
+    const zoneOwner = await resolveUserByAnyId(ctx, String(room.zoneOwnerUid));
+    if (zoneOwner?._id) {
+      recipients.set(String(zoneOwner._id), { id: zoneOwner._id, role: "zone_admin" });
+    }
+  }
+
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .collect();
+  for (const superAdmin of superAdmins) {
+    recipients.set(String(superAdmin._id), { id: superAdmin._id, role: "super_admin" });
+  }
+
+  for (const [uid, meta] of recipients.entries()) {
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.result_finalized",
+      toUid: meta.id,
+      recipientRole: meta.role,
+      status: "pending",
+      dedupeKey: `match.result_finalized:${String(matchroomId)}:${uid}`,
+      dedupePolicy: "upsert_active",
+      matchroomId,
+      route: meta.role === "super_admin" ? "/super-admin" : `/matchrooms/${String(matchroomId)}`,
+      title,
+      body,
+      data: {
+        matchroomId,
+        winner,
+        source,
+        finalizedAt: now,
+        href: meta.role === "super_admin" ? "/super-admin" : `/matchrooms/${String(matchroomId)}`,
+      },
+    });
+  }
+}
+
+async function finalizeMatchroomResult(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  room: any,
+  rv: any,
+  winner: "team1" | "team2",
+  source: string,
+) {
+  const now = Date.now();
+  const captains = resolveResultCaptains(room, rv);
+  const nextVerification = {
+    status: "resolved" as const,
+    team1Captain: captains.team1Captain,
+    team2Captain: captains.team2Captain,
+    captainReports: rv.captainReports,
+    participantVotes: rv.participantVotes,
+    deadline: rv.deadline,
+    votes: rv.votes,
+    finalWinner: winner,
+    resolvedAt: now,
+    resolutionSource: source,
+  };
+
+  await ctx.db.patch(matchroomId, {
+    resultVerification: nextVerification,
+    updatedAt: now,
+  });
+  await notifyResultFinalized(ctx, { ...room, _id: matchroomId }, winner, source);
+  return { ok: true, status: "resolved", winner, source };
+}
+
 export async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
 
@@ -85,12 +182,6 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
 // Helper: Check if room is expired
 export function isRoomExpired(room: any): boolean {
-  if (room.status === "expired" || room.status === "completed" || room.status === "cancelled") {
-    return true;
-  }
-  if (room.expiresAt && Date.now() > room.expiresAt) {
-    return true;
-  }
   return false;
 }
 
@@ -230,6 +321,194 @@ function isGameEnabledForUser(user: any, game?: string | null) {
     default:
       return true;
   }
+}
+
+function getDefaultResourceAssetType(game?: string | null) {
+  switch (normalizeGameKey(game)) {
+    case "cs2":
+    case "cs16":
+    case "valorant":
+      return "pc";
+    case "fc26":
+    case "tekken8":
+      return "console";
+    default:
+      return undefined;
+  }
+}
+
+function getZoneRequestPreferredDate(room: any) {
+  if (room.scheduledDate) {
+    const timestamp = new Date(String(room.scheduledDate)).getTime();
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return typeof room.scheduledStartAt === "number" ? room.scheduledStartAt : undefined;
+}
+
+function getConfirmedSlotCount(room: any) {
+  return [...(room?.slotsA || []), ...(room?.slotsB || [])].filter((slot: any) =>
+    slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
+  ).length;
+}
+
+function getExpectedPaidPlayerCount(room: any) {
+  return Math.max(1, Number(room?.maxPlayers || room?.currentPlayers || getConfirmedSlotCount(room) || 1));
+}
+
+function getMatchroomGrossAmount(room: any) {
+  const explicit = Number(room?.merchantSettlementAmount || room?.paymentAmount || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const perPlayer = Number(room?.pricing?.perPlayer || 0);
+  return Math.max(0, perPlayer * getExpectedPaidPlayerCount(room));
+}
+
+function isFullPaidZoneRoom(room: any) {
+  if (!room || room.locationMode !== "zone" || !room.zoneId) return false;
+  if (room.zoneAdminApproved !== true) return false;
+  const maxPlayers = getExpectedPaidPlayerCount(room);
+  return Number(room.currentPlayers || 0) >= maxPlayers && getConfirmedSlotCount(room) >= maxPlayers;
+}
+
+async function markMerchantCapturedForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, roomInput?: any) {
+  const room = roomInput || await ctx.db.get(matchroomId);
+  if (!isFullPaidZoneRoom(room)) return null;
+  if (room.merchantSettlementStatus === "captured") {
+    return {
+      status: "captured",
+      reference: room.merchantSettlementReference || null,
+      amount: Number(room.merchantSettlementAmount || 0),
+      capturedAt: room.merchantSettlementAt || null,
+    };
+  }
+
+  const now = Date.now();
+  const amount = getMatchroomGrossAmount(room);
+  const reference = `merchant_capture:${String(matchroomId)}`;
+  await ctx.db.patch(matchroomId, {
+    merchantSettlementStatus: "captured",
+    merchantSettlementAt: now,
+    merchantSettlementAmount: amount,
+    merchantSettlementReference: reference,
+    updatedAt: now,
+  });
+  console.log("[settlement] merchant_capture.marked", {
+    matchroomId: String(matchroomId),
+    amount,
+    reference,
+  });
+  return { status: "captured", reference, amount, capturedAt: now };
+}
+
+async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"matchrooms">, roomInput?: any) {
+  const room = roomInput || await ctx.db.get(matchroomId);
+  if (!room || room.status !== "completed") return null;
+  if (!room.zoneOwnerUid) return null;
+  if (room.venuePayoutStatus === "paid") {
+    return {
+      status: "paid",
+      reference: room.venuePayoutReference || null,
+      amount: Number(room.venuePayoutAmount || 0),
+      paidAt: room.venuePayoutAt || null,
+    };
+  }
+
+  const owner = await resolveUserByAnyId(ctx, String(room.zoneOwnerUid));
+  if (!owner) return null;
+
+  const now = Date.now();
+  const grossAmount = getMatchroomGrossAmount(room);
+  const payoutAmount = Math.round(grossAmount * 0.9 * 100) / 100;
+  if (payoutAmount <= 0) return null;
+
+  const reference = `venue_payout:${String(matchroomId)}`;
+  await ctx.runMutation(api.wallet.addFunds, {
+    userId: owner._id,
+    amount: payoutAmount,
+    reference,
+    metadata: {
+      source: "matchroom_completion_payout",
+      matchroomId: String(matchroomId),
+      grossAmount,
+      platformShareAmount: Math.round((grossAmount - payoutAmount) * 100) / 100,
+      payoutRate: 0.9,
+    },
+  });
+  await ctx.db.patch(matchroomId, {
+    venuePayoutStatus: "paid",
+    venuePayoutAt: now,
+    venuePayoutAmount: payoutAmount,
+    venuePayoutReference: reference,
+    updatedAt: now,
+  });
+  console.log("[settlement] venue_payout.completed", {
+    matchroomId: String(matchroomId),
+    zoneOwnerUid: String(owner._id),
+    grossAmount,
+    payoutAmount,
+    reference,
+  });
+  return { status: "paid", reference, amount: payoutAmount, paidAt: now };
+}
+
+async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: Id<"matchrooms">) {
+  const room = await ctx.db.get(matchroomId);
+  if (!room || room.locationMode !== "zone" || !room.zoneId) return null;
+
+  const existing = await ctx.db
+    .query("bookingRequests")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .first();
+  if (existing) return existing._id;
+
+  const maxPlayers = Math.max(1, Number(room.maxPlayers || room.currentPlayers || 1));
+  if (Number(room.currentPlayers || 0) < maxPlayers) return null;
+
+  const confirmedSlotCount = [...(room.slotsA || []), ...(room.slotsB || [])].filter((slot: any) =>
+    slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
+  ).length;
+  if (confirmedSlotCount < maxPlayers) return null;
+
+  const host = await resolveUserByAnyId(ctx, String(room.hostUid || ""));
+  if (!host) return null;
+
+  return await ctx.runMutation(api.bookings.createRequest, {
+    userId: host._id,
+    gameKey: normalizeGameKey(room.game) || String(room.game || ""),
+    zoneId: room.zoneId as Id<"zones">,
+    userName: room.hostName || host.username || host.fullName || "Player",
+    title: room.title || `${getGameLabel(room.game)} booking request`,
+    description: room.description || "Full paid matchroom ready for venue allocation.",
+    maxPlayers,
+    format: room.format,
+    seriesType: room.seriesType,
+    durationHours: room.durationHours,
+    selectedMaps: room.selectedMaps,
+    skillLevel: room.skillLevel,
+    hostSkillScore: room.hostSkillScore,
+    hostSkillTier: room.hostSkillTier,
+    hostSkillContext: room.hostSkillContext,
+    overs: room.overs ? String(room.overs) : undefined,
+    teamMode: room.teamMode,
+    teamId: room.teamId,
+    reservedSlots: room.reservedSlots,
+    preferredDate: getZoneRequestPreferredDate(room),
+    preferredTime: room.scheduledTime,
+    flexibilityWindow: "Exact time",
+    locationMode: "zone",
+    budgetPerPlayer: Number(room.pricing?.perPlayer || 0),
+    currency: room.pricing?.currency || "PKR",
+    playerCount: maxPlayers,
+    paymentStatus: "paid",
+    paymentAmount: Number(room.pricing?.perPlayer || 0) * maxPlayers,
+    paymentReservedSlots: maxPlayers,
+    requestedResourceAssetType: room.requestedResourceAssetType || getDefaultResourceAssetType(room.game),
+    requestedResourceSurface: room.requestedResourceSurface,
+    requestedResourceTier: room.requestedResourceTier,
+    selectedZoneRateKey: room.selectedZoneRateKey,
+    matchroomId,
+    lifecycleStatus: "zone_admin_pending",
+    notes: "Auto-sent after every slot was filled and paid.",
+  });
 }
 
 async function requireUserGameSkill(ctx: any, uid: string, game?: string | null) {
@@ -895,6 +1174,10 @@ export const create = mutation({
       perPlayer: v.number(),
       currency: v.string(),
     }),
+    requestedResourceAssetType: v.optional(v.string()),
+    requestedResourceSurface: v.optional(v.string()),
+    requestedResourceTier: v.optional(v.string()),
+    selectedZoneRateKey: v.optional(v.string()),
 
     // Slots
     slotsA: v.array(slotValidator),
@@ -921,6 +1204,9 @@ export const create = mutation({
     bookingSource: v.optional(v.string()),
     isPrivate: v.optional(v.boolean()),
     paymentStatus: v.optional(v.string()),
+    paymentAmount: v.optional(v.number()),
+    paymentReservedSlots: v.optional(v.number()),
+    paymentCurrency: v.optional(v.string()),
     zoneAdminApproved: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -999,6 +1285,10 @@ export const create = mutation({
       expiresAt: args.expiresAt,
       durationMinutes: args.durationMinutes,
       pricing: args.pricing,
+      requestedResourceAssetType: args.requestedResourceAssetType,
+      requestedResourceSurface: args.requestedResourceSurface,
+      requestedResourceTier: args.requestedResourceTier,
+      selectedZoneRateKey: args.selectedZoneRateKey,
       matchCode: args.matchCode,
       slotsA: args.slotsA,
       slotsB: args.slotsB,
@@ -1021,6 +1311,9 @@ export const create = mutation({
       bookingSource: args.bookingSource,
       isPrivate: args.isPrivate,
       paymentStatus: args.paymentStatus as any,
+      paymentAmount: args.paymentAmount,
+      paymentReservedSlots: args.paymentReservedSlots,
+      paymentCurrency: args.paymentCurrency,
       zoneAdminApproved: args.zoneAdminApproved,
       createdAt: now,
       updatedAt: now,
@@ -1033,7 +1326,36 @@ export const create = mutation({
       await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
     }
 
+    if (
+      args.locationMode === "zone" &&
+      normalizedPlayers.length >= args.maxPlayers &&
+      Number(args.paymentReservedSlots || 0) >= args.maxPlayers
+    ) {
+      await dispatchZoneAdminRequestForFullMatchroom(ctx, matchroomId);
+    }
+
     return matchroomId;
+  },
+});
+
+export const getSettlementSummary = query({
+  args: { matchroomId: v.id("matchrooms") },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return null;
+    return {
+      matchroomId: String(args.matchroomId),
+      grossAmount: getMatchroomGrossAmount(room),
+      currency: room.paymentCurrency || room.pricing?.currency || "PKR",
+      merchantSettlementStatus: room.merchantSettlementStatus || "pending",
+      merchantSettlementAt: room.merchantSettlementAt || null,
+      merchantSettlementAmount: room.merchantSettlementAmount || null,
+      merchantSettlementReference: room.merchantSettlementReference || null,
+      venuePayoutStatus: room.venuePayoutStatus || "pending",
+      venuePayoutAt: room.venuePayoutAt || null,
+      venuePayoutAmount: room.venuePayoutAmount || null,
+      venuePayoutReference: room.venuePayoutReference || null,
+    };
   },
 });
 
@@ -1173,7 +1495,15 @@ export const updateStatus = mutation({
     };
 
     if (args.status === "completed") {
+      const room = await ctx.db.get(args.matchroomId);
+      const captains = room ? resolveResultCaptains(room, room.resultVerification) : { team1Captain: "", team2Captain: "" };
       updateData.completedAt = Date.now();
+      updateData.resultVerification = room?.resultVerification || {
+        status: "pending",
+        team1Captain: captains.team1Captain,
+        team2Captain: captains.team2Captain,
+        captainReports: {},
+      };
     }
     if (args.status === "locked") {
       updateData.isLocked = true;
@@ -1181,6 +1511,10 @@ export const updateStatus = mutation({
     }
 
     await ctx.db.patch(args.matchroomId, updateData);
+    if (args.status === "completed") {
+      const completedRoom = await ctx.db.get(args.matchroomId);
+      await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
+    }
     return true;
   },
 });
@@ -1216,11 +1550,12 @@ export const submitCaptainReport = mutation({
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
+    if (room.status !== "completed") throw new Error("Results can only be submitted after match completion");
 
     const rv = room.resultVerification || { status: "pending" as const };
-    const team1Captain = rv.team1Captain || room.hostUid;
-    const team2Captain = rv.team2Captain || room.captainUidB ||
-      room.players.find((p) => p.uid !== team1Captain)?.uid || "";
+    if (rv.status === "resolved") return { ok: true, status: "resolved", winner: rv.finalWinner };
+
+    const { team1Captain, team2Captain } = resolveResultCaptains(room, rv);
 
     const captainKey = args.captainUid === team1Captain
       ? "team1Captain"
@@ -1235,21 +1570,56 @@ export const submitCaptainReport = mutation({
       result: args.winner,
       timestamp: Date.now(),
     };
+    const nextRv = {
+      status: rv.status || "pending",
+      team1Captain,
+      team2Captain,
+      captainReports,
+      participantVotes: rv.participantVotes,
+      deadline: rv.deadline,
+      votes: rv.votes,
+      finalWinner: rv.finalWinner,
+      resolvedAt: rv.resolvedAt,
+      resolutionSource: rv.resolutionSource,
+    };
+
+    const team1Report = captainReports.team1Captain?.result;
+    const team2Report = captainReports.team2Captain?.result;
+    if (team1Report && team2Report) {
+      if (team1Report === team2Report) {
+        return await finalizeMatchroomResult(
+          ctx,
+          args.matchroomId,
+          room,
+          nextRv,
+          team1Report,
+          "captain_agreement",
+        );
+      }
+
+      const participantUids = getMatchroomPlayerUids(room);
+      if (participantUids.length <= 2) {
+        return await finalizeMatchroomResult(
+          ctx,
+          args.matchroomId,
+          room,
+          nextRv,
+          chooseRandomWinner(),
+          "two_player_random_tiebreak",
+        );
+      }
+
+      nextRv.status = "participant_vote";
+      nextRv.deadline = rv.deadline || Date.now() + ONE_DAY_MS;
+      nextRv.participantVotes = rv.participantVotes || {};
+    }
 
     await ctx.db.patch(args.matchroomId, {
-      resultVerification: {
-        status: rv.status || "pending",
-        team1Captain,
-        team2Captain,
-        captainReports,
-        participantVotes: rv.participantVotes,
-        deadline: rv.deadline,
-        votes: rv.votes,
-      },
+      resultVerification: nextRv,
       updatedAt: Date.now(),
     });
 
-    return { ok: true };
+    return { ok: true, status: nextRv.status };
   },
 });
 
@@ -1265,22 +1635,119 @@ export const submitParticipantVote = mutation({
     if (!room) throw new Error("Matchroom not found");
 
     const rv = room.resultVerification || { status: "pending" as const };
+    if (rv.status === "resolved") return { ok: true, status: "resolved", winner: rv.finalWinner };
+    if (rv.status !== "participant_vote") throw new Error("Participant voting is not active");
+
+    const participantUids = getMatchroomPlayerUids(room);
+    if (!participantUids.includes(String(args.participantUid))) {
+      throw new Error("Only match participants can vote on this result");
+    }
+
     const participantVotes = { ...rv.participantVotes, [args.participantUid]: args.vote };
+    const team1Votes = Object.values(participantVotes).filter((vote) => vote === "team1").length;
+    const team2Votes = Object.values(participantVotes).filter((vote) => vote === "team2").length;
+    const submittedCount = participantUids.filter((uid) => participantVotes[uid] && participantVotes[uid] !== "unknown").length;
+    const majority = Math.floor(participantUids.length / 2) + 1;
+    const nextRv = {
+      status: "participant_vote" as const,
+      team1Captain: rv.team1Captain,
+      team2Captain: rv.team2Captain,
+      captainReports: rv.captainReports,
+      participantVotes,
+      deadline: rv.deadline,
+      votes: rv.votes,
+      finalWinner: rv.finalWinner,
+      resolvedAt: rv.resolvedAt,
+      resolutionSource: rv.resolutionSource,
+    };
+
+    if (team1Votes >= majority || team2Votes >= majority) {
+      return await finalizeMatchroomResult(
+        ctx,
+        args.matchroomId,
+        room,
+        nextRv,
+        team1Votes >= majority ? "team1" : "team2",
+        "participant_majority",
+      );
+    }
+
+    if (submittedCount >= participantUids.length && team1Votes !== team2Votes) {
+      return await finalizeMatchroomResult(
+        ctx,
+        args.matchroomId,
+        room,
+        nextRv,
+        team1Votes > team2Votes ? "team1" : "team2",
+        "participant_all_votes",
+      );
+    }
+
+    if (submittedCount >= participantUids.length && team1Votes === team2Votes) {
+      return await finalizeMatchroomResult(
+        ctx,
+        args.matchroomId,
+        room,
+        nextRv,
+        chooseRandomWinner(),
+        "participant_random_tiebreak",
+      );
+    }
 
     await ctx.db.patch(args.matchroomId, {
-      resultVerification: {
-        status: "participant_vote",
-        team1Captain: rv.team1Captain,
-        team2Captain: rv.team2Captain,
-        captainReports: rv.captainReports,
-        participantVotes,
-        deadline: rv.deadline,
-        votes: rv.votes,
-      },
+      resultVerification: nextRv,
       updatedAt: Date.now(),
     });
 
-    return { ok: true };
+    return { ok: true, status: "participant_vote" };
+  },
+});
+
+export const getPendingResultForUser = query({
+  args: {
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await resolveUserByAnyId(ctx, args.userId);
+    const uidCandidates = Array.from(
+      new Set([args.userId, identity?.authId, identity?._id ? String(identity._id) : null].filter(Boolean).map(String)),
+    );
+
+    const completedRooms = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_status", (q: any) => q.eq("status", "completed"))
+      .collect();
+
+    for (const room of completedRooms) {
+      const participantUids = getMatchroomPlayerUids(room);
+      const isParticipant = participantUids.some((uid) => uidCandidates.includes(String(uid)));
+      if (!isParticipant) continue;
+
+      const rv = room.resultVerification || { status: "pending" as const };
+      if (rv.status === "resolved") continue;
+
+      const { team1Captain, team2Captain } = resolveResultCaptains(room, rv);
+      const isTeam1Captain = uidCandidates.includes(team1Captain);
+      const isTeam2Captain = uidCandidates.includes(team2Captain);
+
+      if (rv.status === "pending") {
+        if (isTeam1Captain && !rv.captainReports?.team1Captain) {
+          return { room, phase: "captain", captainSlot: "team1Captain" };
+        }
+        if (isTeam2Captain && !rv.captainReports?.team2Captain) {
+          return { room, phase: "captain", captainSlot: "team2Captain" };
+        }
+      }
+
+      if (rv.status === "participant_vote") {
+        const hasVoted = uidCandidates.some((uid) => Boolean(rv.participantVotes?.[uid]));
+        if (!hasVoted) {
+          return { room, phase: "participant", captainSlot: null };
+        }
+      }
+    }
+
+    return null;
   },
 });
 
@@ -1512,6 +1979,8 @@ export const syncLifecycleIfDue = mutation({
         },
         updatedAt: now,
       });
+      const completedRoom = await ctx.db.get(args.matchroomId);
+      await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
       changed = true;
     }
 
@@ -1584,6 +2053,9 @@ export const requestToJoinMatchroom = mutation({
     }
 
     const ratingDiff = Math.abs(Number(requesterSkill.rating) - Number(skillStats.avgSkillScoreLive));
+    const requesterLevelLabel = requesterSkill.tier
+      ? `${requesterSkill.tier} (${Math.round(Number(requesterSkill.rating))})`
+      : `Rating ${Math.round(Number(requesterSkill.rating))}`;
     if (ratingDiff <= SKILL_JOIN_DELTA) {
       const intentId = await createSingleSeatBookingIntent(ctx, {
         room,
@@ -1628,7 +2100,7 @@ export const requestToJoinMatchroom = mutation({
         matchroomId: args.matchroomId,
         route: `/matchrooms/${String(args.matchroomId)}`,
         title: "Captain Approval Required",
-        body: `${args.fromUsername} wants to join ${room.title}`,
+        body: `${args.fromUsername} (${requesterLevelLabel}) wants to join ${room.title}`,
         data: {
           matchroomId: args.matchroomId,
           fromAuthId: actor.userId,
@@ -2217,6 +2689,8 @@ export const payMatchroomSeatIntent = mutation({
       });
     }
     await closePendingJoinRequestsForJoinedUser(ctx, intent.matchroomId, payerUid, now);
+    const paidRoom = await ctx.db.get(intent.matchroomId);
+    await markMerchantCapturedForMatchroom(ctx, intent.matchroomId, paidRoom);
 
     const relatedPaymentNotifications = await ctx.db
       .query("notifications")
@@ -2259,8 +2733,12 @@ export const payMatchroomSeatIntent = mutation({
       },
     });
 
-    if (rosterPatch.willBeFull && room.locationMode === "broadcast") {
-      await dispatchBroadcastZoneRequestsForMatchroom(ctx, intent.matchroomId);
+    if (rosterPatch.willBeFull) {
+      if (room.locationMode === "broadcast") {
+        await dispatchBroadcastZoneRequestsForMatchroom(ctx, intent.matchroomId);
+      } else if (room.locationMode === "zone") {
+        await dispatchZoneAdminRequestForFullMatchroom(ctx, intent.matchroomId);
+      }
     }
 
     return {

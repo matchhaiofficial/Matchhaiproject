@@ -200,6 +200,39 @@ export default function SuperAdminReportDetail() {
             <Text style={styles.helperText}>
               Reviewed reports should capture triage context. Resolved reports should include the final moderation outcome.
             </Text>
+            {report.type === "user_report" ? (
+              <View style={styles.actionRow}>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Warning - Coming soon</Text>
+                </Pressable>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Temp ban - Requires backend support</Text>
+                </Pressable>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Permanent suspension - Requires backend support</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {report.type === "zone_complaint" ? (
+              <View style={styles.actionRow}>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Flag venue - Coming soon</Text>
+                </Pressable>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Suspend zone - Use zone request screen</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {report.type === "matchroom_complaint" ? (
+              <View style={styles.actionRow}>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Flag matchroom - Coming soon</Text>
+                </Pressable>
+                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
+                  <Text style={styles.secondaryButtonText}>Cancel matchroom - Requires backend support</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={styles.actionRow}>
               {report.status !== "reviewed" ? (
                 <Pressable
@@ -445,5 +478,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.interSemiBold,
     fontSize: 14,
+  },
+  disabledAction: {
+    opacity: 0.55,
   },
 });

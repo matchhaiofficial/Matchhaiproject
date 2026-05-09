@@ -1,0 +1,4 @@
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+CLOUDFLARE_WORKERS_AI_API_TOKEN=your-workers-ai-api-token
+SUPPORT_AI_MODEL=@cf/meta/llama-3.1-8b-instruct
+

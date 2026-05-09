@@ -69,7 +69,7 @@ export default StyleSheet.create({
   heading: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.xxl,
+    fontSize: TEXT_SIZES.xl,
     lineHeight: 32,
     marginBottom: SPACING.xs,
   },

@@ -101,6 +101,19 @@ export default function ZoneSupportModule() {
           }
           showsVerticalScrollIndicator={false}
         >
+          <Pressable
+            style={({ pressed }) => [pressed && styles.cardPressed]}
+            onPress={() => router.push("/zone/modules/ai-support" as any)}
+          >
+            <AppCard>
+              <Text style={styles.infoTitle}>Help & Support AI</Text>
+              <Text style={styles.infoText}>
+                Ask MatchHai support questions about accounts, bookings, payments, reports, notifications, or zone admin usage.
+              </Text>
+              <Text style={styles.linkHint}>Open support chat</Text>
+            </AppCard>
+          </Pressable>
+
           <AppCard>
             <Text style={styles.infoTitle}>Zone Review Scope</Text>
             <Text style={styles.infoText}>{footerHint}</Text>

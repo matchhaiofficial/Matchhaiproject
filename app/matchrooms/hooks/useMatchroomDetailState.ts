@@ -27,6 +27,20 @@ const identityMatches = (
   );
 };
 
+const isZoneAdminProfile = (profile: any) => {
+  const role = String(profile?.role || "").toLowerCase();
+  const accountType = String(profile?.accountType || "").toLowerCase();
+  return (
+    role === "zone-admin" ||
+    role === "zone_admin" ||
+    role === "super-admin" ||
+    role === "super_admin" ||
+    accountType === "zone" ||
+    accountType === "zone_admin" ||
+    accountType === "super_admin"
+  );
+};
+
 type Params = { id: string };
 
 export function useMatchroomDetailState({ id }: Params) {
@@ -63,8 +77,8 @@ export function useMatchroomDetailState({ id }: Params) {
     [room?.hostUid, currentIdentityValues],
   );
   const isAdminEarly = useMemo(
-    () => profile?.role === "zone-admin" || profile?.role === "super-admin",
-    [profile?.role],
+    () => isZoneAdminProfile(profile),
+    [profile],
   );
 
   // ─── Convex data ─────────────────────────────────────────────
@@ -166,7 +180,7 @@ export function useMatchroomDetailState({ id }: Params) {
     });
   }, [user?._id]);
 
-  const isZoneAdmin = profile?.role === "zone-admin" || profile?.role === "super-admin";
+  const isZoneAdmin = isZoneAdminProfile(profile);
 
   const rawBookingRequestId = useMemo(() => {
     if (!room) return null;

@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { COLORS, CTA, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, CONTROL_SIZES, CTA, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
     screen: {
@@ -33,11 +33,69 @@ export default StyleSheet.create({
     content: {
         paddingBottom: SPACING.xxl + 24,
     },
+    searchRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        marginBottom: SPACING.md,
+    },
+    searchBar: {
+        flex: 1,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.inputBackground,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: SPACING.md,
+    },
+    searchInput: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingVertical: 0,
+        paddingHorizontal: SPACING.sm,
+    },
+    filterButton: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.inputBackground,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    filterButtonPressed: {
+        opacity: 0.9,
+    },
+    filterBadge: {
+        position: "absolute",
+        top: -4,
+        right: -4,
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: COLORS.accent,
+        borderWidth: 2,
+        borderColor: COLORS.backgroundDark,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: "#FFF",
+        fontFamily: FONTS.heading,
+        fontSize: 10,
+        fontWeight: "700",
+    },
     filtersToggle: {
         height: 48,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
-        borderRadius: RADII.md,
+        borderRadius: RADII.lg,
         backgroundColor: COLORS.cardDark,
         paddingHorizontal: SPACING.md,
         alignItems: "center",
@@ -52,12 +110,33 @@ export default StyleSheet.create({
     filtersToggleText: {
         marginLeft: SPACING.xs,
         color: COLORS.text,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interMedium,
         fontSize: TEXT_SIZES.caption,
     },
     filtersWrap: {
         gap: SPACING.sm,
         marginBottom: SPACING.md,
+    },
+    filterDrawer: {
+        flex: 1,
+    },
+    filterDrawerContent: {
+        flex: 1,
+    },
+    filtersDrawerBody: {
+        paddingTop: SPACING.sm,
+        gap: SPACING.md,
+    },
+    filterDrawerFooter: {
+        backgroundColor: COLORS.cardDark,
+    },
+    filterSectionLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+        marginBottom: SPACING.xs,
+        marginTop: SPACING.sm,
+        textTransform: "uppercase",
     },
     filterChip: {
         minWidth: 84,
@@ -66,36 +145,49 @@ export default StyleSheet.create({
         borderRadius: RADII.pill,
         borderWidth: 1,
         borderColor: COLORS.inputBorder,
-        backgroundColor: COLORS.cardBackground,
+        backgroundColor: COLORS.cardDark,
         marginRight: SPACING.sm,
         alignItems: "center",
         justifyContent: "center",
     },
     filterChipActive: {
         borderColor: COLORS.accent,
-        backgroundColor: COLORS.cardDark,
+        backgroundColor: `${COLORS.accent}14`,
     },
     filterChipText: {
         color: COLORS.muted,
-        fontFamily: FONTS.body,
+        fontFamily: FONTS.interRegular,
         fontSize: 13,
         textTransform: "capitalize",
     },
     filterChipTextActive: {
-        color: COLORS.text,
-        fontFamily: FONTS.body,
-        fontWeight: "700",
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
     },
     emptyText: {
         color: COLORS.textSecondary,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
     },
+    emptyStateCard: {
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
+        backgroundColor: COLORS.cardDark,
+        padding: SPACING.lg,
+        alignItems: "center",
+    },
+    emptyStateTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+        marginBottom: 4,
+    },
     requestCard: {
         backgroundColor: COLORS.cardDark,
         borderColor: COLORS.cardBorder,
         borderWidth: 1,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         padding: SPACING.md,
         marginBottom: SPACING.sm,
     },
@@ -154,18 +246,51 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderColor: COLORS.cardBorder,
         borderWidth: 1,
-        borderRadius: 20,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
         padding: SPACING.md,
     },
     inlineActionsCard: {
-        backgroundColor: COLORS.cardDark,
-        borderColor: COLORS.cardBorder,
-        borderWidth: 1,
-        borderTopWidth: 0,
-        borderBottomLeftRadius: 20,
-        borderBottomRightRadius: 20,
+        borderTopWidth: 1,
+        borderTopColor: COLORS.cardBorder,
         paddingHorizontal: SPACING.md,
-        paddingVertical: SPACING.sm,
+        paddingTop: SPACING.sm,
+        paddingBottom: SPACING.md,
+    },
+    requestExpandedCard: {
+        borderWidth: 1.5,
+        borderColor: COLORS.accent,
+        borderRadius: 20,
+        backgroundColor: COLORS.cardDark,
+        marginBottom: SPACING.sm,
+        overflow: "hidden",
+    },
+    requestEmbeddedMatchroomCard: {
+        marginBottom: 0,
+        borderWidth: 0,
+        borderRadius: 0,
+        backgroundColor: "transparent",
+    },
+    pendingOfferPanel: {
+        borderTopWidth: 1,
+        borderTopColor: COLORS.cardBorder,
+        padding: SPACING.md,
+        gap: 4,
+    },
+    pendingOfferTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+    },
+    pendingOfferText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+    pendingOfferExpiry: {
+        color: COLORS.warning,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 4,
     },
     detailsTitle: {
         color: COLORS.text,
@@ -182,8 +307,7 @@ export default StyleSheet.create({
     actionsRow: {
         flexDirection: "row",
         gap: SPACING.xs,
-        marginTop: SPACING.sm,
-        marginBottom: SPACING.sm,
+        marginTop: SPACING.xs,
     },
     actionButton: {
         flex: 1,
@@ -316,6 +440,12 @@ export default StyleSheet.create({
         gap: SPACING.xs,
         paddingHorizontal: SPACING.sm,
     },
+    validationText: {
+        color: COLORS.warning,
+        fontFamily: FONTS.interMedium,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+    },
     dateFieldText: {
         color: COLORS.text,
         fontFamily: FONTS.body,
@@ -362,8 +492,9 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardDark,
         borderColor: COLORS.cardBorder,
         borderWidth: 1,
-        borderRadius: 20,
-        padding: SPACING.md,
+        borderRadius: CONTROL_SIZES.cardRadius + 2,
+        padding: SPACING.lg,
+        marginBottom: SPACING.lg,
     },
     walkinTitle: {
         color: COLORS.text,
@@ -375,7 +506,8 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
         marginTop: 4,
-        marginBottom: SPACING.sm,
+        marginBottom: SPACING.md,
+        lineHeight: 19,
     },
     chipScroll: {
         marginBottom: SPACING.sm,
@@ -411,6 +543,7 @@ export default StyleSheet.create({
         padding: SPACING.md,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
+        paddingBottom: SPACING.xl,
     },
     pickerHandle: {
         width: 44,
@@ -512,6 +645,12 @@ export default StyleSheet.create({
         gap: SPACING.md,
         marginTop: SPACING.sm,
     },
+    timePickerScroll: {
+        maxHeight: 460,
+    },
+    timePickerScrollContent: {
+        paddingBottom: SPACING.lg,
+    },
     timeColumn: {
         flex: 1,
         gap: SPACING.sm,
@@ -546,7 +685,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.cardBackground,
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
-        maxHeight: "90%",
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
     },
@@ -571,7 +709,7 @@ export default StyleSheet.create({
         marginTop: 2,
     },
     counterForm: {
-        maxHeight: 520,
+        flexShrink: 1,
     },
     counterFormContent: {
         paddingHorizontal: SPACING.xl,
@@ -581,6 +719,7 @@ export default StyleSheet.create({
     },
     counterFooter: {
         paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.sm,
     },
     modalActionsRow: {
         flexDirection: "row",
@@ -589,8 +728,16 @@ export default StyleSheet.create({
     modalActionButton: {
         flex: 1,
     },
+    allocateSheet: {
+        flexShrink: 1,
+    },
+    allocateBodyScroll: {
+        flexShrink: 1,
+        minHeight: 0,
+    },
     allocateSheetBody: {
         paddingTop: SPACING.md,
+        paddingBottom: SPACING.lg,
         gap: SPACING.md,
     },
     allocateSummaryCard: {
@@ -647,7 +794,6 @@ export default StyleSheet.create({
         fontWeight: "700",
     },
     allocateResourcesWrap: {
-        minHeight: 240,
         gap: SPACING.sm,
     },
     allocateResourcesHeader: {
@@ -666,7 +812,7 @@ export default StyleSheet.create({
         justifyContent: "center",
     },
     allocateResourceList: {
-        paddingBottom: SPACING.sm,
+        paddingBottom: SPACING.md,
     },
     allocateEmptyText: {
         color: COLORS.textSecondary,
@@ -736,6 +882,8 @@ export default StyleSheet.create({
     },
     allocateFooter: {
         paddingHorizontal: SPACING.xl,
+        paddingTop: SPACING.sm,
+        backgroundColor: COLORS.cardDark,
     },
     allocateSubmitButton: {
         ...CTA.primaryButton,

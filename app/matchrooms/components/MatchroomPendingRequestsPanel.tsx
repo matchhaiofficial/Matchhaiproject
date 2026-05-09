@@ -13,6 +13,9 @@ type PendingRequest = {
   meta?: {
     role?: string;
     targetTeam?: string;
+    requesterRating?: number;
+    requesterSkillTier?: string;
+    roomAverageRating?: number;
   };
 };
 
@@ -76,6 +79,19 @@ export function MatchroomPendingRequestsPanel({
             >
               Role: {req.meta?.role || "Player"} • Team:{" "}
               {req.meta?.targetTeam || "Any"}
+            </Text>
+            <Text
+              style={{
+                color: COLORS.accent,
+                fontSize: 12,
+                marginTop: 2,
+                fontWeight: "600",
+              }}
+            >
+              Level: {req.meta?.requesterSkillTier || "Unranked"}
+              {typeof req.meta?.requesterRating === "number"
+                ? ` (${Math.round(req.meta.requesterRating)})`
+                : ""}
             </Text>
           </View>
 

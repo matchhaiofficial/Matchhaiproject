@@ -33,6 +33,7 @@ import type * as pushNotificationsActions from "../pushNotificationsActions.js";
 import type * as reports from "../reports.js";
 import type * as social from "../social.js";
 import type * as storage from "../storage.js";
+import type * as support from "../support.js";
 import type * as teamChallengeChat from "../teamChallengeChat.js";
 import type * as teamChallenges from "../teamChallenges.js";
 import type * as teams from "../teams.js";
@@ -43,6 +44,7 @@ import type * as zoneAdminBooking from "../zoneAdminBooking.js";
 import type * as zoneAdminResources from "../zoneAdminResources.js";
 import type * as zoneAudit from "../zoneAudit.js";
 import type * as zoneBranchMigration from "../zoneBranchMigration.js";
+import type * as zoneWithdrawals from "../zoneWithdrawals.js";
 import type * as zones from "../zones.js";
 
 import type {
@@ -77,6 +79,7 @@ declare const fullApi: ApiFromModules<{
   reports: typeof reports;
   social: typeof social;
   storage: typeof storage;
+  support: typeof support;
   teamChallengeChat: typeof teamChallengeChat;
   teamChallenges: typeof teamChallenges;
   teams: typeof teams;
@@ -87,6 +90,7 @@ declare const fullApi: ApiFromModules<{
   zoneAdminResources: typeof zoneAdminResources;
   zoneAudit: typeof zoneAudit;
   zoneBranchMigration: typeof zoneBranchMigration;
+  zoneWithdrawals: typeof zoneWithdrawals;
   zones: typeof zones;
 }>;
 

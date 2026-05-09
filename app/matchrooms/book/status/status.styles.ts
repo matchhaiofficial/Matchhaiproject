@@ -38,7 +38,8 @@ export default StyleSheet.create({
     },
     content: {
         padding: SPACING.screenPadding,
-        alignItems: 'center',
+        alignItems: 'stretch',
+        paddingBottom: SPACING.xl,
     },
     statusDisplay: {
         width: '100%',
@@ -108,7 +109,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: SPACING.md,
-        height: 60,
+        minHeight: 58,
     },
     stepLineWrapper: {
         alignItems: 'center',

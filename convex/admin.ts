@@ -8,6 +8,7 @@ import { authComponent } from "./auth";
 import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 
 const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").trim().toLowerCase();
+const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
@@ -69,6 +70,100 @@ function toCountMap<T extends string>(items: Array<T>) {
   }, {});
 }
 
+function formatSupportTicketExcerpt(ticket: any) {
+  const messages = Array.isArray(ticket.conversationExcerpt) ? ticket.conversationExcerpt : [];
+  const lastUserMessage = [...messages].reverse().find((message) => message?.role === "user");
+  const fallback = messages[messages.length - 1];
+  return String(lastUserMessage?.text || fallback?.text || "").slice(0, 180);
+}
+
+function summarizeSupportTicketMetadata(metadata: any) {
+  const knownNonSensitiveDetails = metadata?.knownNonSensitiveDetails || {};
+  const safeSupportContext = metadata?.safeSupportContext || {};
+  return {
+    knownNonSensitiveDetails,
+    user: safeSupportContext?.user
+      ? {
+          role: safeSupportContext.user.role,
+          accountType: safeSupportContext.user.accountType,
+          displayName: safeSupportContext.user.displayName,
+          username: safeSupportContext.user.username,
+          onboardingCompleted: safeSupportContext.user.onboardingCompleted,
+          onboardingStep: safeSupportContext.user.onboardingStep,
+          isVerified: safeSupportContext.user.isVerified,
+          city: safeSupportContext.user.city,
+        }
+      : undefined,
+    zones: Array.isArray(safeSupportContext?.zones)
+      ? safeSupportContext.zones.slice(0, 3).map((zone: any) => ({
+          id: zone.id,
+          name: zone.name,
+          status: zone.status,
+          onboardingStep: zone.onboardingStep,
+          city: zone.city,
+          branchCount: zone.branchCount,
+          primaryBranch: zone.primaryBranch,
+        }))
+      : [],
+    recentPayments: Array.isArray(safeSupportContext?.recentPayments)
+      ? safeSupportContext.recentPayments.slice(0, 3).map((payment: any) => ({
+          id: payment.id,
+          kind: payment.kind,
+          status: payment.status,
+          amount: payment.amount,
+          currency: payment.currency,
+          orderRefNum: payment.orderRefNum,
+          providerStatus: payment.providerStatus,
+          providerReference: payment.providerReference,
+          createdAt: payment.createdAt,
+        }))
+      : [],
+    recentMatchrooms: Array.isArray(safeSupportContext?.recentMatchrooms)
+      ? safeSupportContext.recentMatchrooms.slice(0, 3).map((room: any) => ({
+          id: room.id,
+          title: room.title,
+          game: room.game,
+          status: room.status,
+          paymentStatus: room.paymentStatus,
+          paymentAmount: room.paymentAmount,
+          scheduledDate: room.scheduledDate,
+          scheduledTime: room.scheduledTime,
+          createdAt: room.createdAt,
+        }))
+      : [],
+    recentReports: Array.isArray(safeSupportContext?.recentReports)
+      ? safeSupportContext.recentReports.slice(0, 3)
+      : [],
+  };
+}
+
+async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = false) {
+  const user = await ctx.db.get(ticket.userId);
+  const base = {
+    id: ticket._id,
+    _id: ticket._id,
+    reference: ticket.reference,
+    userRole: ticket.userRole,
+    category: ticket.category,
+    issueSummary: ticket.issueSummary,
+    status: ticket.status,
+    source: ticket.source,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    userDisplayName: user?.fullName || user?.username || "Unknown user",
+    userEmail: user?.email,
+    excerptPreview: formatSupportTicketExcerpt(ticket),
+  };
+
+  if (!includeDetail) return base;
+
+  return {
+    ...base,
+    conversationExcerpt: ticket.conversationExcerpt || [],
+    metadataSummary: summarizeSupportTicketMetadata(ticket.metadata),
+  };
+}
+
 function zoneStatusNotificationCopy(status: string, rejectionReason?: string | null) {
   switch (status) {
     case "active":
@@ -120,6 +215,7 @@ export const getDashboardSummary = query({
       openMatches,
       inProgressMatches,
       completedMatches,
+      paidPayments,
       teams,
     ] = await Promise.all([
       ctx.db.query("users").collect(),
@@ -134,11 +230,14 @@ export const getDashboardSummary = query({
       ctx.db.query("matchrooms").withIndex("by_status", (q) => q.eq("status", "open")).collect(),
       ctx.db.query("matchrooms").withIndex("by_status", (q) => q.eq("status", "in-progress")).collect(),
       ctx.db.query("matchrooms").withIndex("by_status", (q) => q.eq("status", "completed")).collect(),
+      ctx.db.query("paymentTransactions").withIndex("by_status", (q) => q.eq("status", "paid")).collect(),
       ctx.db.query("teams").collect(),
     ]);
 
     const userRoles = toCountMap(allUsers.map((user) => user.role || "none"));
     const accountTypes = toCountMap(allUsers.map((user) => user.accountType || "unknown"));
+    const activeCutoff = Date.now() - ACTIVE_USER_WINDOW_MS;
+    const activeUsers30d = allUsers.filter((user) => Number(user.lastActiveAt || 0) >= activeCutoff).length;
 
     return {
       counts: {
@@ -149,6 +248,8 @@ export const getDashboardSummary = query({
         teams: teams.length,
       },
       users: {
+        active30d: activeUsers30d || allUsers.length,
+        activeSource: activeUsers30d ? "lastActiveAt" : "totalUsersFallback",
         players: accountTypes["player"] || 0,
         zoneAdmins: accountTypes["zone"] || 0,
         superAdmins: userRoles["super-admin"] || 0,
@@ -170,6 +271,106 @@ export const getDashboardSummary = query({
         inProgress: inProgressMatches.length,
         completed: completedMatches.length,
       },
+      revenue: {
+        total: paidPayments.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        currency: "PKR",
+      },
+    };
+  },
+});
+
+function isRoomFull(room: any) {
+  const slots = [...(room.slotsA || []), ...(room.slotsB || [])];
+  if (slots.length > 0) {
+    return slots.every((slot: any) => String(slot?.status || "").toLowerCase() === "confirmed");
+  }
+  return Number(room.currentPlayers || 0) >= Number(room.maxPlayers || 0);
+}
+
+function needsZoneApproval(room: any) {
+  return Boolean(room.zoneId || room.confirmedZoneId || room.locationMode === "zone" || room.broadcastRequestStatus);
+}
+
+function mapMatchroomLifecycle(room: any) {
+  const status = String(room.status || "").toLowerCase();
+  if (status === "in-progress") return "in-progress";
+  if (status === "completed") return "completed";
+  if (status === "cancelled" || status === "expired") return "cancelled_expired";
+
+  const zoneApprovalNeeded = needsZoneApproval(room);
+  const zoneApproved = !zoneApprovalNeeded || room.zoneAdminApproved === true || room.broadcastRequestStatus === "zone_confirmed";
+  const paid = room.paymentStatus === "paid";
+
+  if (!zoneApproved) return "waiting_zone_approval";
+  if (!isRoomFull(room)) return "waiting_lobby_fill";
+  if (paid || status === "locked") return "confirmed";
+  return "created_open";
+}
+
+function mapAdminMatchroom(room: any) {
+  return {
+    id: room._id,
+    _id: room._id,
+    title: room.title,
+    game: room.game,
+    location: room.location || room.confirmedBranchId || room.branchId || "Location TBD",
+    status: room.status,
+    lifecycleStatus: mapMatchroomLifecycle(room),
+    paymentStatus: room.paymentStatus || null,
+    zoneAdminApproved: room.zoneAdminApproved ?? null,
+    broadcastRequestStatus: room.broadcastRequestStatus || null,
+    resultVerificationStatus: room.resultVerification?.status || null,
+    scheduledDate: room.scheduledDate || null,
+    scheduledTime: room.scheduledTime || null,
+    scheduledStartAt: room.scheduledStartAt || room.startTime || null,
+    currentPlayers: room.currentPlayers,
+    maxPlayers: room.maxPlayers,
+    hostName: room.hostName,
+    matchCode: room.matchCode || null,
+    createdAt: room.createdAt,
+    updatedAt: room.updatedAt,
+  };
+}
+
+export const listSuperAdminMatchrooms = query({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 100, 200));
+    const docs = await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(limit);
+    return docs.map(mapAdminMatchroom);
+  },
+});
+
+export const getSuperAdminMatchroomById = query({
+  args: {
+    sessionToken: v.string(),
+    matchroomId: v.id("matchrooms"),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return null;
+    const [zone, host] = await Promise.all([
+      room.zoneId ? ctx.db.get(room.zoneId as Id<"zones">) : Promise.resolve(null),
+      ctx.db
+        .query("users")
+        .withIndex("by_authId", (q: any) => q.eq("authId", String(room.hostUid || "")))
+        .unique()
+        .catch(() => null),
+    ]);
+    return {
+      ...mapAdminMatchroom(room),
+      description: room.description || null,
+      zoneName: zone?.venueBrandName || zone?.name || null,
+      hostUserName: host?.fullName || host?.username || room.hostName || null,
+      players: room.players || [],
+      slotsA: room.slotsA || [],
+      slotsB: room.slotsB || [],
+      pricing: room.pricing,
     };
   },
 });
@@ -222,30 +423,33 @@ export const listEasypaisaTransactions = query({
       .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
       .slice(0, limit);
 
-    return filtered.map((row) => ({
-      id: row._id,
-      _id: row._id,
-      kind: row.kind,
-      amount: row.amount,
-      currency: row.currency,
-      orderRefNum: row.orderRefNum,
-      status: row.status,
-      providerStatus: row.providerStatus || null,
-      providerDescription: row.providerDescription || null,
-      providerReference: row.providerReference || null,
-      processedAt: row.processedAt || null,
-      lastError: row.lastError || null,
-      callbackCount: row.callbackCount || 0,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      providerPayload: {
-        rest: row.providerPayload?.rest || null,
-        ipn: row.providerPayload?.ipn || null,
-        hosted: row.providerPayload?.hosted || null,
-        lastProviderStatus: row.providerPayload?.lastProviderStatus || null,
-        lastSyncAt: row.providerPayload?.lastSyncAt || null,
-        flow: row.providerPayload?.flow || null,
-      },
+    return await Promise.all(filtered.map(async (row) => {
+      const owner: any = await ctx.db.get(row.userId);
+      return {
+        id: row._id,
+        _id: row._id,
+        kind: row.kind,
+        amount: row.amount,
+        currency: row.currency,
+        orderRefNum: row.orderRefNum,
+        status: row.status,
+        accountOwnerName: owner?.fullName || owner?.username || "Unknown user",
+        providerStatus: row.providerStatus || null,
+        providerDescription: row.providerDescription || null,
+        providerReference: row.providerReference || null,
+        processedAt: row.processedAt || null,
+        lastError: row.lastError || null,
+        callbackCount: row.callbackCount || 0,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        providerPayload: {
+          ipn: row.providerPayload?.ipn || null,
+          hosted: row.providerPayload?.hosted || null,
+          lastProviderStatus: row.providerPayload?.lastProviderStatus || null,
+          lastSyncAt: row.providerPayload?.lastSyncAt || null,
+          flow: row.providerPayload?.flow || null,
+        },
+      };
     }));
   },
 });
@@ -382,6 +586,44 @@ export const getReportById = query({
       reviewedByName: reviewedBy?.fullName || reviewedBy?.username || null,
       resolvedByName: resolvedBy?.fullName || resolvedBy?.username || null,
     };
+  },
+});
+
+export const listSupportTickets = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(v.literal("open"), v.literal("in_review"), v.literal("resolved"))
+    ),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const limit = args.limit || 100;
+    const docs = args.status
+      ? await ctx.db
+          .query("supportTickets")
+          .withIndex("by_status_createdAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(limit)
+      : await ctx.db.query("supportTickets").order("desc").take(limit);
+
+    return await Promise.all(docs.map((ticket) => serializeSupportTicket(ctx, ticket, false)));
+  },
+});
+
+export const getSupportTicketById = query({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) return null;
+    return await serializeSupportTicket(ctx, ticket, true);
   },
 });
 
@@ -656,6 +898,29 @@ export const setReportStatus = mutation({
     });
 
     return true;
+  },
+});
+
+export const updateSupportTicketStatus = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    status: v.union(v.literal("open"), v.literal("in_review"), v.literal("resolved")),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) {
+      throw new Error("Support ticket not found.");
+    }
+
+    await ctx.db.patch(args.ticketId, {
+      status: args.status,
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
   },
 });
 

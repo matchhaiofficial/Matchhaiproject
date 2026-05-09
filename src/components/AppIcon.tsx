@@ -1,10 +1,12 @@
-import { MaterialIcons } from "@expo/vector-icons";
 import React from "react";
-import { StyleProp, TextStyle } from "react-native";
+import { StyleProp } from "react-native";
+import type { SvgProps } from "react-native-svg";
 
+import { AppIcons, type AppIconName } from "../theme/icons";
 import { COLORS, STATUS_TONES } from "../theme";
 
-export type AppIconName = keyof typeof MaterialIcons.glyphMap;
+export type { AppIconName } from "../theme/icons";
+
 export type AppIconTone =
   | "default"
   | "muted"
@@ -46,23 +48,29 @@ export function AppIcon({
   tone = "default",
   surface = "default",
   color,
+  strokeWidth = 2,
   decorative = true,
   style,
 }: {
-  name: AppIconName;
+  name: AppIconName | string;
   size?: AppIconSize;
   tone?: AppIconTone;
   surface?: AppIconSurface;
   color?: string;
+  strokeWidth?: number;
   decorative?: boolean;
-  style?: StyleProp<TextStyle>;
+  style?: StyleProp<any>;
 }) {
+  const Icon = AppIcons[name as AppIconName];
+
+  if (!Icon) return null;
+
   return (
-    <MaterialIcons
-      name={name}
+    <Icon
       size={resolveSize(size)}
       color={color ?? resolveColor(tone, surface)}
-      accessible={!decorative}
+      strokeWidth={strokeWidth}
+      accessibilityElementsHidden={decorative}
       importantForAccessibility={decorative ? "no" : "auto"}
       style={style}
     />

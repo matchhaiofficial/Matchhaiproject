@@ -273,7 +273,7 @@ export default function AdminRegisterStep1() {
     >
       <RegistrationStepHeader
         title="Zone Setup"
-        subtitle="Create your zone admin account."
+        subtitle=""
         stepTitle="Step 1 of 4"
         stepSubtitle="Admin details"
         progress="25%"
