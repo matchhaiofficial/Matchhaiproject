@@ -288,6 +288,8 @@ export const respond = mutation({
     challengeId: v.id("teamChallenges"),
     accept: v.boolean(),
     lineupB: v.optional(v.array(v.string())),
+    teamBPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
+    teamBPaymentAmount: v.optional(v.number()),
     actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
@@ -307,6 +309,8 @@ export const respond = mutation({
       status: nextStatus,
       chatId,
       lineupB: args.accept ? args.lineupB || challenge.lineupB : challenge.lineupB,
+      teamBPaymentStatus: args.accept ? args.teamBPaymentStatus || challenge.teamBPaymentStatus || "paid" : challenge.teamBPaymentStatus,
+      teamBPaymentAmount: args.accept ? args.teamBPaymentAmount ?? challenge.teamBPaymentAmount : challenge.teamBPaymentAmount,
       updatedAt: Date.now(),
     });
 
@@ -485,7 +489,15 @@ export const createFull = mutation({
     maxPlayers: v.number(),
     scheduledDate: v.optional(v.string()),
     scheduledTime: v.optional(v.string()),
+    scheduledAt: v.optional(v.number()),
     pricePerPlayer: v.optional(v.number()),
+    zoneRateKey: v.optional(v.string()),
+    zoneRateLabel: v.optional(v.string()),
+    zoneRatePrice: v.optional(v.number()),
+    teamAPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
+    teamBPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
+    teamAPaymentAmount: v.optional(v.number()),
+    teamBPaymentAmount: v.optional(v.number()),
     proposedVenueByCaptainA: v.optional(venueChoiceValidator),
     alternativeVenueByCaptainB: v.optional(venueChoiceValidator),
     commonAreas: v.optional(v.array(v.string())),
@@ -528,6 +540,27 @@ export const createFull = mutation({
     }
 
     const now = Date.now();
+    const scheduledAt = typeof args.scheduledAt === "number" ? args.scheduledAt : undefined;
+
+    // Prevent spamming the same opponent team with duplicate pending challenges until the proposed time passes.
+    if (args.status === "pending" && scheduledAt && scheduledAt > now) {
+      const existing = await ctx.db
+        .query("teamChallenges")
+        .withIndex("by_challengerTeamId", (q) => q.eq("challengerTeamId", args.challengerTeamId))
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("opponentTeamId"), args.opponentTeamId),
+            q.eq(q.field("status"), "pending"),
+          ),
+        )
+        .collect();
+
+      const active = existing.find((row: any) => typeof row?.scheduledAt === "number" && row.scheduledAt > now);
+      if (active) {
+        throw new Error("You already have a pending challenge for this team. Wait until the scheduled time passes before challenging again.");
+      }
+    }
+
     const challengeId = await ctx.db.insert("teamChallenges", {
       challengerTeamId: args.challengerTeamId,
       challengerTeamName: args.challengerTeamName,
@@ -546,7 +579,15 @@ export const createFull = mutation({
       maxPlayers: args.maxPlayers,
       scheduledDate: args.scheduledDate,
       scheduledTime: args.scheduledTime,
+      scheduledAt,
       pricePerPlayer: args.pricePerPlayer,
+      zoneRateKey: args.zoneRateKey,
+      zoneRateLabel: args.zoneRateLabel,
+      zoneRatePrice: args.zoneRatePrice,
+      teamAPaymentStatus: args.teamAPaymentStatus ?? "unpaid",
+      teamBPaymentStatus: args.teamBPaymentStatus ?? "unpaid",
+      teamAPaymentAmount: args.teamAPaymentAmount,
+      teamBPaymentAmount: args.teamBPaymentAmount,
       proposedVenueByCaptainA: args.proposedVenueByCaptainA,
       alternativeVenueByCaptainB: args.alternativeVenueByCaptainB,
       captainVenueChoices: args.proposedVenueByCaptainA
@@ -580,7 +621,11 @@ export const createFull = mutation({
         gameKey: args.gameKey,
         scheduledDate: args.scheduledDate,
         scheduledTime: args.scheduledTime,
+        scheduledAt,
         pricePerPlayer: args.pricePerPlayer,
+        zoneRateLabel: args.zoneRateLabel,
+        teamAPaymentStatus: args.teamAPaymentStatus ?? "unpaid",
+        teamBPaymentStatus: args.teamBPaymentStatus ?? "unpaid",
         seriesType: args.seriesType ?? null,
         proposedVenueByCaptainA: args.proposedVenueByCaptainA,
       },

@@ -5,7 +5,7 @@ import Animated from "react-native-reanimated";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
-import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useToast } from "../../../src/hooks/useToast";
@@ -253,10 +253,6 @@ export default function SuperAdminDashboardTab() {
                 ))}
               </View>
             )}
-
-            <AppButton variant="secondary" onPress={() => router.push("/super-admin/support" as any)} leadingIcon="support">
-              Help & Support
-            </AppButton>
           </ScrollView>
         </Animated.View>
       )}

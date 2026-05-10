@@ -93,6 +93,27 @@ export const listFriendsForGame = query({
         const friend = await ctx.db.get(f.friendId);
         if (!friend || !doesUserPlayGame(friend, args.game)) return null;
 
+        // Mark users already in an active team for this game (so we can disable inviting them).
+        let inTeam = false;
+        let teamName: string | null = null;
+        try {
+          const memberships = await ctx.db
+            .query("teamMembers")
+            .withIndex("by_userId", (q) => q.eq("odxerId", f.friendId))
+            .collect();
+          for (const membership of memberships) {
+            const team = await ctx.db.get(membership.teamId);
+            if (!team) continue;
+            if (team.status === "deleted" || Boolean((team as any).deletedAt)) continue;
+            if (String(team.game || "").toLowerCase() !== String(args.game || "").toLowerCase()) continue;
+            inTeam = true;
+            teamName = team.name || null;
+            break;
+          }
+        } catch {
+          // Ignore eligibility failures.
+        }
+
         return {
           friendshipId: f._id,
           friendId: f.friendId,
@@ -100,6 +121,8 @@ export const listFriendsForGame = query({
           fullName: friend.fullName,
           photoURL: friend.photoURL,
           isOnline: !!(friend.isOnline && friend.lastActiveAt && (now - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS),
+          inTeam,
+          teamName,
           playsCs2: !!friend.playsCs2,
           playsCs16: !!friend.playsCs16,
           playsValorant: !!friend.playsValorant,

@@ -1,13 +1,14 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
+import BottomActionBar from "../../src/components/BottomActionBar";
 import { AppIcon } from "../../src/components/AppIcon";
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
-import { getCaptainedTeams, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
+import { getCaptainedTeams, payTeamChallengeWithWallet, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { Team, getTeamById } from "../../src/services/convex/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
 import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
@@ -16,9 +17,10 @@ import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
 import styles from "../matchrooms/create/create.styles";
 
-const SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
+type SeriesType = "BO1" | "BO3" | "BO5" | "BO7" | "BO10" | "BO20" | "BO40";
 const GAME_ICONS: Record<string, string> = {
     cs2: "sports-esports",
     cs16: "sports-esports",
@@ -32,13 +34,111 @@ const GAME_ICONS: Record<string, string> = {
     pickleball: "sports-tennis",
 };
 
-const getSeriesHours = (gameKey: string, seriesType: "BO1" | "BO3" | "BO5") => {
+const localStyles = StyleSheet.create({
+    keyboardShell: {
+        flex: 1,
+    },
+    scroll: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingBottom: 140,
+    },
+    matchupCard: {
+        backgroundColor: COLORS.cardBackground,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        marginBottom: SPACING.lg,
+        gap: SPACING.sm,
+    },
+    matchupTopRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+    },
+    gamePill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.xs,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: `${COLORS.accent}44`,
+        backgroundColor: `${COLORS.accent}14`,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+    },
+    gamePillText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
+    matchupTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body + 1,
+        lineHeight: 22,
+    },
+    teamFillRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: SPACING.sm,
+    },
+    teamFillPill: {
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        backgroundColor: COLORS.cardDark,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+    },
+    teamFillText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
+});
+
+const isCsStyleGame = (gameKey: string) => {
     const game = String(gameKey || "").toLowerCase();
-    if (game === "cs2" || game === "cs16" || game === "valorant") return seriesType === "BO3" ? 3 : seriesType === "BO5" ? 5 : 1;
-    if (game === "fc26" || game === "fc25") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 0.5;
-    if (game === "tekken8") return seriesType === "BO3" ? 2 : seriesType === "BO5" ? 3 : 1;
-    if (game === "padel" || game === "pickleball") return seriesType === "BO3" ? 1 : seriesType === "BO5" ? 2 : 1;
-    return seriesType === "BO3" ? 2 : seriesType === "BO5" ? 3 : 1;
+    return game === "cs2" || game === "cs16" || game === "valorant";
+};
+
+const getSeriesOptionsForGame = (gameKey: string): readonly SeriesType[] => {
+    const game = String(gameKey || "").toLowerCase();
+    if (isCsStyleGame(game)) return ["BO1", "BO3", "BO5"] as const;
+    if (game === "tekken8") return ["BO7", "BO20", "BO40"] as const;
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return ["BO3", "BO5", "BO10"] as const;
+    return ["BO1", "BO3", "BO5"] as const;
+};
+
+const getDefaultSeriesForGame = (gameKey: string): SeriesType => {
+    const game = String(gameKey || "").toLowerCase();
+    if (isCsStyleGame(game)) return "BO1";
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return "BO3";
+    if (game === "tekken8") return "BO7";
+    return "BO1";
+};
+
+const formatSeriesLabel = (series: SeriesType) => {
+    if (series === "BO1") return "Best of 1";
+    if (series === "BO3") return "Best of 3";
+    if (series === "BO5") return "Best of 5";
+    if (series === "BO10") return "Best of 10";
+    if (series === "BO7") return "Best of 7";
+    if (series === "BO20") return "Best of 20";
+    return "Best of 40";
+};
+
+const getSeriesHours = (gameKey: string, seriesType: SeriesType) => {
+    const game = String(gameKey || "").toLowerCase();
+    const series = String(seriesType || "BO1").toUpperCase() as SeriesType;
+    if (isCsStyleGame(game)) return series === "BO3" ? 3 : series === "BO5" ? 5 : 1;
+    if (game === "fc26" || game === "fc25" || game === "padel" || game === "pickleball") return series === "BO3" ? 1 : series === "BO5" ? 2 : 3;
+    if (game === "tekken8") return series === "BO7" ? 1 : series === "BO20" ? 2 : 3;
+    return series === "BO3" ? 2 : series === "BO5" ? 3 : 1;
 };
 
 const getEstimatedPlayers = (gameKey: string, challenger?: Team | null, opponent?: Team | null) => {
@@ -86,6 +186,13 @@ const getPreferredConsolePrice = (tier: any, estimatedPlayers: number) => {
     return toPositiveNumber(preferred) || toPositiveNumber(tier?.price1v1) || toPositiveNumber(tier?.price2v2) || toPositiveNumber(tier?.price);
 };
 
+const formatCategoryLabel = (value: string) =>
+    String(value || "")
+        .split(/[_-]/g)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+
 const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlayers: number): ZoneRateOption[] => {
     const game = String(gameKey || "").toLowerCase();
     const pricingSources = getZonePricingSources(zone);
@@ -98,19 +205,47 @@ const buildZoneRateOptions = (zone: Zone | null, gameKey: string, estimatedPlaye
     };
 
     for (const pricing of pricingSources) {
-        if (game === "cs2" || game === "cs16" || game === "valorant") {
-            addOption("pc-regular", "Regular", toPositiveNumber(pricing?.pc?.regular?.price));
-            addOption("pc-premium", "Premium", toPositiveNumber(pricing?.pc?.premium?.price));
-            addOption("pc-elite", "Elite", toPositiveNumber(pricing?.pc?.elite?.price));
+        if (isCsStyleGame(game)) {
+            addOption("pc:regular", "Regular", toPositiveNumber(pricing?.pc?.regular?.price));
+            addOption("pc:premium", "Premium", toPositiveNumber(pricing?.pc?.premium?.price));
+            addOption("pc:elite", "Elite", toPositiveNumber(pricing?.pc?.elite?.price));
         }
 
         if (game === "fc26" || game === "fc25" || game === "tekken8") {
             const formatLabel = estimatedPlayers > 2 ? "2v2" : "1v1";
-            addOption("console-regular", `Regular (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.regular, estimatedPlayers));
-            addOption("console-premium", `Premium (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.premium, estimatedPlayers));
-            addOption("console-elite", `Elite (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.elite, estimatedPlayers));
-            addOption("console-ps5", `PS5 (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.ps5, estimatedPlayers));
-            addOption("console-xbox", `Xbox (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.xbox, estimatedPlayers));
+            addOption("console:regular", `Regular (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.regular, estimatedPlayers));
+            addOption("console:premium", `Premium (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.premium, estimatedPlayers));
+            addOption("console:elite", `Elite (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.elite, estimatedPlayers));
+            addOption("console:ps5", `PS5 (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.ps5, estimatedPlayers));
+            addOption("console:xbox", `Xbox (${formatLabel})`, getPreferredConsolePrice(pricing?.console?.xbox, estimatedPlayers));
+        }
+
+        if (game === "futsal") {
+            const futsal = pricing?.futsal || {};
+            Object.entries(futsal || {}).forEach(([key, val]: any) => {
+                addOption(`futsal:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "indoor_cricket") {
+            const cricket = pricing?.indoorCricket || pricing?.indoor_cricket || {};
+            Object.entries(cricket || {}).forEach(([key, val]: any) => {
+                addOption(`cricket:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "padel") {
+            const padel = pricing?.padel || {};
+            Object.entries(padel || {}).forEach(([key, val]: any) => {
+                addOption(`padel:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
+        }
+
+        if (game === "pickleball") {
+            const pickleball = pricing?.pickleball || {};
+            Object.entries(pickleball || {}).forEach(([key, val]: any) => {
+                addOption(`pickleball:${key}`, formatCategoryLabel(String(key)), toPositiveNumber(val?.price));
+            });
         }
     }
 
@@ -152,7 +287,7 @@ export default function TeamChallengeCreateScreen() {
     const [challengerTeamId, setChallengerTeamId] = useState<string>("");
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
     const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
-    const [seriesType, setSeriesType] = useState<(typeof SERIES_OPTIONS)[number]>("BO1");
+    const [seriesType, setSeriesType] = useState<SeriesType>("BO1");
     const [pricePerPlayer, setPricePerPlayer] = useState(0);
     const [formData, setFormData] = useState({
         title: "",
@@ -182,6 +317,7 @@ export default function TeamChallengeCreateScreen() {
 
             const opponent = opponentResult.data;
             setOpponentTeam(opponent);
+            setSeriesType(getDefaultSeriesForGame(String(opponent.game || "")));
             setFormData((prev) => ({
                 ...prev,
                 title: prev.title || `Challenge: ${opponent.name}`,
@@ -231,10 +367,15 @@ export default function TeamChallengeCreateScreen() {
 
     const areBothTeamsFilled = isTeamFilled(challengerTeam) && isTeamFilled(opponentTeam);
     const challengeGameKey = String(opponentTeam?.game || "").toLowerCase();
+    const seriesOptions = useMemo(() => getSeriesOptionsForGame(challengeGameKey), [challengeGameKey]);
 
     const estimatedPlayers = useMemo(
         () => getEstimatedPlayers(challengeGameKey, challengerTeam, opponentTeam),
         [challengeGameKey, challengerTeam, opponentTeam],
+    );
+    const challengerActivePlayers = useMemo(
+        () => Math.max(1, Number(challengerTeam?.mainRosterSize || getTeamMainRosterSize(challengerTeam?.game || challengeGameKey))),
+        [challengeGameKey, challengerTeam],
     );
 
     const zoneRateOptions = useMemo(
@@ -268,10 +409,13 @@ export default function TeamChallengeCreateScreen() {
             return;
         }
         const hours = getSeriesHours(challengeGameKey, seriesType);
-        const totalCost = baseRate * hours;
-        const perPlayer = estimatedPlayers > 0 ? Math.ceil(totalCost / estimatedPlayers) : 0;
-        setPricePerPlayer(perPlayer);
+        setPricePerPlayer(Math.ceil(baseRate * hours));
     }, [challengeGameKey, selectedZone, selectedZoneRate, seriesType, estimatedPlayers]);
+
+    const captainPaymentAmount = useMemo(
+        () => Math.max(0, Math.ceil(pricePerPlayer * challengerActivePlayers)),
+        [challengerActivePlayers, pricePerPlayer],
+    );
 
     const canSubmit = !!challengerTeam &&
         !!opponentTeam &&
@@ -320,6 +464,43 @@ export default function TeamChallengeCreateScreen() {
         }
 
         setSubmitting(true);
+        const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
+            Alert.alert(
+                "Team payment required",
+                `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
+                [
+                    { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+                    { text: "Pay Now", onPress: () => resolve("pay_now") },
+                    { text: "Pay with Wallet", onPress: () => resolve("wallet") },
+                ],
+            );
+        });
+        if (paymentChoice === "cancel") {
+            setSubmitting(false);
+            return;
+        }
+        if (paymentChoice === "pay_now") {
+            setSubmitting(false);
+            Alert.alert(
+                "Pay now",
+                "Online payment for team challenges is not wired directly here yet. Add funds to your wallet, then return and send the challenge with Pay with Wallet.",
+                [
+                    { text: "Open Wallet", onPress: () => router.push("/(player)/wallet" as any) },
+                    { text: "OK" },
+                ],
+            );
+            return;
+        }
+        const walletPayment = await payTeamChallengeWithWallet({
+            amount: captainPaymentAmount,
+            side: "teamA",
+            reference: `team_challenge:create:${challengerTeam.id}:${Date.now()}`,
+        });
+        if (!walletPayment.ok) {
+            setSubmitting(false);
+            showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
+            return;
+        }
         const result = await sendTeamMatchChallenge({
             challengerTeamId: challengerTeam.id!,
             opponentTeamId: opponentTeam.id!,
@@ -328,6 +509,10 @@ export default function TeamChallengeCreateScreen() {
             pricePerPlayer,
             seriesType,
             message: formData.description.trim(),
+            zoneRateKey: selectedZoneRate?.key || null,
+            zoneRateLabel: selectedZoneRate?.label || null,
+            zoneRatePrice: selectedZoneRate?.price || null,
+            teamAPaymentAmount: captainPaymentAmount,
             proposedVenueByCaptainA: {
                 zoneId: selectedZone.id,
                 venueName: selectedZone.venueBrandName,
@@ -371,54 +556,57 @@ export default function TeamChallengeCreateScreen() {
 
     const gameKey = challengeGameKey;
     const gameLabel = getCanonicalGameLabel(opponentTeam.game);
+    const submitDisabled = !canSubmit || !areBothTeamsFilled || !hasVerifiedEmail(authUser);
 
     return (
-        <Screen style={styles.screen}>
+        <Screen style={styles.screen} scroll={false}>
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "padding"}
+                keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+                style={localStyles.keyboardShell}
+            >
             <AppHeader title="Challenge Team" onBack={() => router.back()} inlineTitle />
             {loading ? (
                 <View style={styles.centered}>
                     <ActivityIndicator color={styles.accentText.color as string} />
                 </View>
             ) : (
-                <ScrollView style={{ paddingHorizontal: 20 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    <View style={styles.header}>
-                        <Text style={styles.headerTitle}>Create Team Challenge</Text>
-                        <Text style={styles.headerSubtitle}>Reuse matchroom flow with challenge approval.</Text>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Selected Game / Sport</Text>
-                        <View style={styles.gameGrid}>
-                            <View style={[styles.gameCard, styles.gameCardActive]}>
+                <>
+                <ScrollView
+                    style={localStyles.scroll}
+                    contentContainerStyle={[styles.createScrollContent, localStyles.scrollContent]}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={localStyles.matchupCard}>
+                        <View style={localStyles.matchupTopRow}>
+                            <View style={localStyles.gamePill}>
                                 <AppIcon
                                     name={(GAME_ICONS[gameKey] as any) || "sports-esports"}
-                                    size={32}
+                                    size={16}
                                     color={styles.accentText.color as string}
-                                    style={styles.gameIcon}
                                 />
-                                <Text style={[styles.gameName, styles.gameNameActive]}>{gameLabel}</Text>
+                                <Text style={localStyles.gamePillText}>{gameLabel}</Text>
                             </View>
                         </View>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Match Setup</Text>
-                        <View style={styles.infoBox}>
-                            <Text style={styles.infoBoxText}>
-                                {challengerTeam?.name || "Your Team"} vs {opponentTeam.name} - {gameLabel}
-                            </Text>
-                            <Text style={styles.infoBoxSmall}>Team B will review your date, time, series, zone and pricing context.</Text>
-                            <Text style={styles.infoBoxSmall}>
-                                Team A filled: {isTeamFilled(challengerTeam) ? "Yes" : "No"} | Team B filled: {isTeamFilled(opponentTeam) ? "Yes" : "No"}
-                            </Text>
+                        <Text style={localStyles.matchupTitle} numberOfLines={2}>
+                            {challengerTeam?.name || "Select your team"} vs {opponentTeam.name}
+                        </Text>
+                        <View style={localStyles.teamFillRow}>
+                            <View style={localStyles.teamFillPill}>
+                                <Text style={localStyles.teamFillText}>Your team: {getTeamCountLabel(challengerTeam)}</Text>
+                            </View>
+                            <View style={localStyles.teamFillPill}>
+                                <Text style={localStyles.teamFillText}>Opponent: {getTeamCountLabel(opponentTeam)}</Text>
+                            </View>
                         </View>
                         {!areBothTeamsFilled ? (
-                            <Text style={styles.submitHintText}>Team challenge can only be sent when both teams are full.</Text>
+                            <Text style={styles.submitHintText}>Both teams must be full before a challenge can be sent.</Text>
                         ) : null}
                     </View>
 
                     <View style={styles.section}>
-                        <Text style={styles.sectionLabel}>Select Your Captain Team<Text style={styles.requiredAsterisk}>*</Text></Text>
+                        <Text style={styles.sectionLabel}>Captain Team<Text style={styles.requiredAsterisk}>*</Text></Text>
                         <View style={styles.chipRow}>
                             {captainedTeams.map((team) => (
                                 <Pressable
@@ -455,14 +643,14 @@ export default function TeamChallengeCreateScreen() {
                     <View style={styles.section}>
                         <Text style={styles.sectionLabel}>Series Type<Text style={styles.requiredAsterisk}>*</Text></Text>
                         <View style={styles.chipRow}>
-                            {SERIES_OPTIONS.map((type) => (
+                            {seriesOptions.map((type) => (
                                 <Pressable
                                     key={type}
                                     style={[styles.optionChip, seriesType === type && styles.optionChipActive]}
                                     onPress={() => setSeriesType(type)}
                                 >
                                     <Text style={[styles.optionChipText, seriesType === type && styles.optionChipTextActive]}>
-                                        {type === "BO1" ? "Best of 1" : type === "BO3" ? "Best of 3" : "Best of 5"}
+                                        {formatSeriesLabel(type)}
                                     </Text>
                                 </Pressable>
                             ))}
@@ -489,7 +677,7 @@ export default function TeamChallengeCreateScreen() {
                                         onPress={() => setSelectedZoneRateKey(option.key)}
                                     >
                                         <Text style={[styles.optionChipText, selectedZoneRate?.key === option.key && styles.optionChipTextActive]}>
-                                            {option.label} · PKR {option.price}/hr
+                                            {option.label} | PKR {option.price}/hr
                                         </Text>
                                     </Pressable>
                                 ))}
@@ -503,50 +691,54 @@ export default function TeamChallengeCreateScreen() {
                             <TextInput
                                 style={[styles.input, styles.flex1, styles.mutedText]}
                                 value={pricePerPlayer > 0 ? String(pricePerPlayer) : ""}
-                                placeholder="Calculated from zone rate & series"
+                                placeholder="Calculated from zone rate and series"
                                 placeholderTextColor="#757575"
                                 editable={false}
                             />
                             <AppIcon name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
                         </View>
                         <Text style={styles.helperTextTiny}>
-                            Computed using selected zone hourly rate, series duration, and expected players ({estimatedPlayers}).
+                            Based on selected zone rate and series duration. Captain pays PKR {captainPaymentAmount} for {challengerActivePlayers} players.
                         </Text>
+                        {selectedZoneRate ? (
+                            <Text style={styles.helperTextTiny}>
+                                Resource type: {selectedZoneRate.label} at PKR {selectedZoneRate.price}/hr.
+                            </Text>
+                        ) : null}
                         {pricePerPlayer <= 0 ? (
                             <Text style={styles.submitHintText}>Selected zone pricing is missing for this game/series.</Text>
                         ) : null}
                     </View>
 
-                    <View style={styles.buttonWrapper}>
-                        <Pressable
-                            style={({ pressed }) => [
-                                styles.primaryButton,
-                                (submitting || !hasVerifiedEmail(authUser)) &&
-                                    styles.primaryButtonDisabled,
-                                pressed &&
-                                    canSubmit &&
-                                    !submitting &&
-                                    hasVerifiedEmail(authUser) &&
-                                    styles.primaryButtonPressed,
-                            ]}
-                            onPress={() => {
-                                if (!hasVerifiedEmail(authUser)) {
-                                    showEmailVerificationRequiredAlert();
-                                    return;
-                                }
-                                handleCreateChallenge();
-                            }}
-                            disabled={submitting}
-                        >
-                            {submitting ? (
-                                <ActivityIndicator color="#FFF" />
-                            ) : (
-                                <Text style={styles.primaryButtonText}>Send Challenge</Text>
-                            )}
-                        </Pressable>
-                    </View>
                 </ScrollView>
+
+                <BottomActionBar>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.primaryButton,
+                            submitDisabled && styles.primaryButtonDisabled,
+                            pressed && !submitDisabled && styles.primaryButtonPressed,
+                        ]}
+                        onPress={() => {
+                            if (!hasVerifiedEmail(authUser)) {
+                                showEmailVerificationRequiredAlert();
+                                return;
+                            }
+                            handleCreateChallenge();
+                        }}
+                        disabled={submitting}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                        {submitting ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <Text style={styles.primaryButtonText}>Send Challenge</Text>
+                        )}
+                    </Pressable>
+                </BottomActionBar>
+                </>
             )}
+            </KeyboardAvoidingView>
         </Screen>
     );
 }

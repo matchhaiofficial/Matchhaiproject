@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     RefreshControl,
@@ -13,6 +13,7 @@ import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
+import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
 import {
     getChallengesForCaptain,
@@ -20,6 +21,7 @@ import {
     type TeamMatchChallenge,
 } from "../../src/services/teamMatchService";
 import { COLORS } from "../../src/theme";
+import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import styles from "./challenges.styles";
 
 const toMillis = (value: any) => {
@@ -31,12 +33,34 @@ const toMillis = (value: any) => {
     return 0;
 };
 
+type ChallengeTab = "pending" | "history";
+
+const isPendingChallenge = (item: TeamMatchChallenge) => {
+    const status = String(item.status || "pending");
+    return status === "pending" || status === "venue_proposed";
+};
+
+const getEmptyCopy = (tab: ChallengeTab) => {
+    if (tab === "pending") {
+        return {
+            title: "No pending challenges",
+            text: "Requested challenges and captain responses waiting for action will show here.",
+        };
+    }
+    return {
+        title: "No challenge history",
+        text: "Confirmed, completed, rejected, failed, or expired challenges will show here.",
+    };
+};
+
 export default function TeamChallengesScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [rows, setRows] = useState<TeamMatchChallenge[]>([]);
+    const [activeTab, setActiveTab] = useState<ChallengeTab>("pending");
+    const [now, setNow] = useState(() => Date.now());
 
     const fetchRows = useCallback(async () => {
         if (!user?._id) {
@@ -64,6 +88,25 @@ export default function TeamChallengesScreen() {
         fetchRows();
     };
 
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(id);
+    }, []);
+
+    const pendingRows = useMemo(() => rows.filter(isPendingChallenge), [rows]);
+    const historyRows = useMemo(() => rows.filter((item) => !isPendingChallenge(item)), [rows]);
+    const visibleRows = activeTab === "pending" ? pendingRows : historyRows;
+    const emptyCopy = getEmptyCopy(activeTab);
+
+    const formatCountdown = (ms: number) => {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const minutes = Math.floor(total / 60);
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        if (hours <= 0) return `${mins}m`;
+        return `${hours}h ${mins}m`;
+    };
+
     if (loading) {
         return (
             <Screen style={styles.screen} scroll={false}>
@@ -82,14 +125,23 @@ export default function TeamChallengesScreen() {
                 showsVerticalScrollIndicator={false}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />}
             >
-                {rows.length === 0 ? (
+                <SegmentedTabs<ChallengeTab>
+                    value={activeTab}
+                    onChange={setActiveTab}
+                    items={[
+                        { key: "pending", label: "Pending", badge: pendingRows.length || undefined },
+                        { key: "history", label: "History", badge: historyRows.length || undefined },
+                    ]}
+                    compact
+                />
+                {visibleRows.length === 0 ? (
                     <AppCard variant="empty" style={styles.emptyCard}>
                         <AppIcon name="sports-esports" size={28} tone="muted" />
-                        <Text style={styles.emptyTitle}>No challenges yet</Text>
-                        <Text style={styles.emptyText}>Send or accept a team challenge to see it here.</Text>
+                        <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+                        <Text style={styles.emptyText}>{emptyCopy.text}</Text>
                     </AppCard>
                 ) : (
-                    rows.map((item) => {
+                    visibleRows.map((item) => {
                         const created = toMillis(item.createdAt);
                         return (
                             <Pressable
@@ -110,6 +162,23 @@ export default function TeamChallengesScreen() {
                                 <Text style={styles.meta}>
                                     Common areas: {(item.commonAreas || []).length > 0 ? item.commonAreas.join(", ") : "None"}
                                 </Text>
+                                {item.pricePerPlayer ? (
+                                    <Text style={styles.meta}>
+                                        Price: PKR {item.pricePerPlayer}/player{item.zoneRateLabel ? ` | ${item.zoneRateLabel}` : ""}
+                                    </Text>
+                                ) : null}
+                                {activeTab === "pending" ? (() => {
+                                    const scheduledAtMs = toMillis((item as any).scheduledAt) || (() => {
+                                        const parsed = parseScheduledDateTime(item.scheduledDate || "", item.scheduledTime || "");
+                                        return parsed ? parsed.getTime() : 0;
+                                    })();
+                                    if (!scheduledAtMs || scheduledAtMs <= now) return null;
+                                    return (
+                                        <Text style={styles.meta}>
+                                            Time left: {formatCountdown(scheduledAtMs - now)}
+                                        </Text>
+                                    );
+                                })() : null}
                                 <Text style={styles.meta}>
                                     {created ? new Date(created).toLocaleString() : "Just now"}
                                 </Text>

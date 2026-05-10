@@ -239,12 +239,24 @@ export default function ZoneProfile() {
                 title="Profile"
                 inlineTitle
                 rightAction={(
-                    <Pressable
-                        style={styles.headerIcon}
-                        onPress={() => router.push("/zone/profile/edit" as any)}
-                    >
-                        <AppIcon name="settings" size={24} color={COLORS.text} />
-                    </Pressable>
+                    <View style={styles.headerActions}>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={() => router.push("/zone/modules/ai-support" as any)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open Help and Support"
+                        >
+                            <AppIcon name="support" size={22} color={COLORS.text} />
+                        </Pressable>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={() => router.push("/zone/profile/edit" as any)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open profile settings"
+                        >
+                            <AppIcon name="settings" size={24} color={COLORS.text} />
+                        </Pressable>
+                    </View>
                 )}
             />
 

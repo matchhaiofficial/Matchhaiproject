@@ -38,6 +38,11 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
         backgroundColor: COLORS.cardDark,
     },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
     scrollContent: {
         paddingTop: 0,
     },

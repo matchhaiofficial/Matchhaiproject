@@ -852,6 +852,13 @@ export default defineSchema({
     scheduledDate: v.optional(v.string()),
     scheduledTime: v.optional(v.string()),
     pricePerPlayer: v.optional(v.number()),
+    zoneRateKey: v.optional(v.string()),
+    zoneRateLabel: v.optional(v.string()),
+    zoneRatePrice: v.optional(v.number()),
+    teamAPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
+    teamBPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
+    teamAPaymentAmount: v.optional(v.number()),
+    teamBPaymentAmount: v.optional(v.number()),
     commonAreas: v.optional(v.array(v.string())),
     proposedVenueByCaptainA: v.optional(
       v.object({

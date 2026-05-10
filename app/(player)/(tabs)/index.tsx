@@ -526,6 +526,11 @@ export default function PlayerDashboard() {
                   onPress: () => router.push("/(player)/wallet" as any),
                 },
                 {
+                  label: "My Challenges",
+                  icon: "challenge" as const,
+                  onPress: () => router.push("/teams/challenges" as any),
+                },
+                {
                   label: "My Friends",
                   icon: "players" as const,
                   onPress: () => router.push("/(player)/friends" as any),

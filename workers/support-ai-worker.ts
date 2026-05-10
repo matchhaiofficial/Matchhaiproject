@@ -5,9 +5,12 @@ export interface Env {
   SUPPORT_EMAIL?: string;
 }
 
+const BULLET = "\u2022";
+
 type AgentContextPatch = {
   userRole?: "player" | "zone_admin" | "super_admin" | "unknown";
   currentIssueCategory?: string;
+  subIssue?: string;
   currentIssueSummary?: string;
   knownNonSensitiveDetails?: Record<string, string | number | boolean>;
   lastAssistantQuestion?: string;
@@ -28,6 +31,7 @@ const SYSTEM_PROMPT = [
   "Do not claim you checked database, payment, account, or admin status unless the safe app context explicitly contains that information.",
   "If safe app context is unavailable or insufficient, say what the user can check and offer to create a support request.",
   "For payment deducted, account access/profile sync, backend-sync, missing matchroom, or admin dashboard data issues, offer to create a support request when unresolved.",
+  "For completed matchroom/lobby result issues, use category matchroom_results and explain that completed matchrooms can show Final Result, Verifying Results, or Result Dispute while captains submit results and participants may vote if captains disagree.",
   "If the user asks to write/draft an email, generate a draft only.",
   "If the user asks to send/email directly/contact support/create ticket, set pendingAction to create_ticket and ask for confirmation unless the user has already clearly confirmed.",
   "Format mobile chat replies with short paragraphs and bullets only when helpful.",
@@ -147,6 +151,7 @@ function isGreeting(message: string) {
 function isCorrection(message: string) {
   const text = normalize(message);
   return (
+    /\bi already told you\b/.test(text) ||
     /\b(no|nope|nah)\b.*\b(not what i wanted|not what i meant|wrong|misunderstood)\b/.test(text) ||
     /\b(that'?s wrong|you misunderstood|not what i wanted|not what i meant)\b/.test(text)
   );
@@ -176,18 +181,46 @@ function wantsDirectAction(message: string) {
   );
 }
 
+function detectMatchroomResultSubIssue(message: string, previousCategory?: string) {
+  const text = normalize(message);
+  const mentionsResult = /\b(results?|scores?|stats?)\b/.test(text);
+  const mentionsCompleted = /\b(completed|complete|after match|match ended|ended|finished|finish)\b/.test(text);
+  const mentionsMissing = /\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score|not displayed|not appear)\b/.test(text);
+  const verification = /\b(result verification|verification)\b.*\b(stuck|pending|not showing|missing)\b/.test(text);
+  const captainConfirmed = /\b(captain|captains?)\b.*\b(confirmed|submitted)\b.*\b(result|score)\b/.test(text);
+
+  if ((mentionsResult && mentionsCompleted) || (mentionsResult && mentionsMissing) || verification || captainConfirmed) {
+    if (verification) return "result_verification_pending";
+    if (captainConfirmed) return "captain_confirmed_result_not_visible";
+    if (/\bstats?\b/.test(text)) return "completed_matchroom_stats_missing";
+    if (mentionsMissing || mentionsCompleted) return "completed_matchroom_result_not_visible";
+    return "score_not_showing";
+  }
+
+  if (previousCategory === "matchroom_results" && mentionsResult) {
+    return "completed_matchroom_result_not_visible";
+  }
+
+  return undefined;
+}
+
 function inferPatch(message: string, context: any): AgentContextPatch {
   const text = normalize(message);
   const details = { ...(context?.knownNonSensitiveDetails || {}) };
   let userRole = context?.userRole;
   let category = context?.currentIssueCategory;
+  let subIssue = context?.subIssue;
 
   if (/\bsuper\s*admin\b/.test(text)) userRole = "super_admin";
   else if (/\b(zone owner|zone admin|venue owner)\b/.test(text)) userRole = "zone_admin";
   else if (/\b(user|player)\b/.test(text)) userRole = userRole || "player";
 
-  if (/\b(payment|wallet|refund|deducted|money|paid|pending|easypaisa)\b/.test(text)) category = "payments_wallet_refunds";
-  if (/\b(matchroom|match room|lobby|slot|invite|team)\b/.test(text)) {
+  const resultSubIssue = detectMatchroomResultSubIssue(message, category);
+  if (resultSubIssue) {
+    category = "matchroom_results";
+    subIssue = resultSubIssue;
+  } else if (/\b(payment|wallet|refund|deducted|money|paid|pending|easypaisa)\b/.test(text)) category = "payments_wallet_refunds";
+  if (!resultSubIssue && /\b(matchroom|match room|lobby|slot|invite|team)\b/.test(text)) {
     category = category === "payments_wallet_refunds" ? "payments_matchroom" : "matchroom_lobby";
     details.paymentType = "matchroom";
   }
@@ -201,15 +234,25 @@ function inferPatch(message: string, context: any): AgentContextPatch {
 
   if (/\b(deducted|debited|charged|money left)\b/.test(text)) details.moneyDeducted = true;
   if (/\b(profile missing|empty profile|account missing)\b/.test(text)) details.profileMissing = true;
+  if (/\b(completed|complete|match ended|ended|finished)\b/.test(text)) details.matchroomCompleted = true;
+  if (/\b(results?|scores?)\b/.test(text)) details.resultArea = true;
+  if (/\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score)\b/.test(text)) details.resultNotVisible = true;
+  if (/\b(history|completed history|completed list)\b/.test(text)) details.completedHistory = true;
+  if (/\b(verification|verifying|pending)\b/.test(text) && /\b(result|score)\b/.test(text)) details.resultVerificationPending = true;
+  if (/\b(captain|captains?)\b.*\b(confirmed|submitted)\b/.test(text)) details.captainConfirmed = true;
   const timeMatch = message.match(/\b(yesterday|today|last night|this morning|this evening|around\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
   if (timeMatch) details.approximateTime = timeMatch[0];
   if (/\b(cs2|counter[-\s]?strike|counter strike)\b/.test(text)) details.game = "CS2";
 
   const summaryParts = [
     category,
+    subIssue,
     details.paymentType ? `${details.paymentType} flow` : null,
     details.moneyDeducted ? "money deducted" : null,
     details.profileMissing ? "profile/account missing" : null,
+    details.matchroomCompleted ? "completed matchroom" : null,
+    details.resultNotVisible ? "result not visible" : null,
+    details.completedHistory ? "still in completed history" : null,
     details.game,
     details.approximateTime,
   ].filter(Boolean);
@@ -217,6 +260,7 @@ function inferPatch(message: string, context: any): AgentContextPatch {
   return {
     userRole,
     currentIssueCategory: category,
+    subIssue,
     currentIssueSummary: summaryParts.length ? summaryParts.join(", ") : context?.currentIssueSummary,
     knownNonSensitiveDetails: details,
   };
@@ -235,6 +279,36 @@ function hasMeaningfulIssue(context: any) {
   return summary.length >= 12 && /\b(issue|problem|stuck|error|not working|can't|cant|cannot|unable|missing|deducted|pending|login|profile|payment|matchroom|booking|notification|report|zone|admin)\b/.test(summary);
 }
 
+function isMatchroomResultContext(context: any, message?: string) {
+  return (
+    context?.currentIssueCategory === "matchroom_results" ||
+    Boolean(context?.subIssue && String(context.subIssue).includes("result")) ||
+    Boolean(message && detectMatchroomResultSubIssue(message, context?.currentIssueCategory))
+  );
+}
+
+function buildMatchroomResultAnswer(context: any, correction = false) {
+  const canOpenKnown = Boolean(context?.knownNonSensitiveDetails?.completedHistory);
+  return [
+    correction
+      ? "Sorry, you're right - you already said the matchroom is completed but the result is missing."
+      : "Got it - the matchroom was completed, but the result is not visible.",
+    "",
+    "In MatchHai, completed matchrooms can still show as verifying until result verification is finished. Captains submit the winner, and if captain reports disagree, participants may need to vote on the dispute.",
+    "",
+    "Please check:",
+    `${BULLET} Open the completed matchroom/lobby details`,
+    `${BULLET} Look for the result status: Final Result, Verifying Results, or Result Dispute`,
+    `${BULLET} If you are a captain, check whether both captains submitted the result`,
+    `${BULLET} If it says Result Dispute, use Vote on Dispute if it appears`,
+    "",
+    canOpenKnown
+      ? "Since it is still in completed history but the result area is empty, this may need support review if refreshing/opening the lobby again does not show a status."
+      : "Can you still open that completed matchroom, or is the whole matchroom missing from your history?",
+    canOpenKnown ? "I can create a support ticket for the MatchHai team if it stays empty." : "",
+  ].filter(Boolean).join("\n");
+}
+
 function buildDraft(context: any, supportEmail?: string) {
   const email = String(supportEmail || "").trim();
   if (!email) {
@@ -244,7 +318,7 @@ function buildDraft(context: any, supportEmail?: string) {
   const details = context?.knownNonSensitiveDetails || {};
   const detailLines = Object.entries(details)
     .slice(0, 8)
-    .map(([key, value]) => `• ${key}: ${String(value)}`)
+    .map(([key, value]) => `${BULLET} ${key}: ${String(value)}`)
     .join("\n");
 
   return [
@@ -260,7 +334,7 @@ function buildDraft(context: any, supportEmail?: string) {
     context?.userRole ? `Account role: ${context.userRole}` : "",
     "",
     "Known details:",
-    detailLines || "• No extra details captured yet",
+    detailLines || `${BULLET} No extra details captured yet`,
     "",
     "Please check and advise on the next step.",
     "",
@@ -291,6 +365,12 @@ function fallbackAgentAnswer(message: string, context: any, appContext: any, sup
   }
 
   if (isCorrection(message)) {
+    if (isMatchroomResultContext(nextContext, message)) {
+      return {
+        answer: buildMatchroomResultAnswer(nextContext, true),
+        contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "completed_matchroom_access_scope" },
+      };
+    }
     return {
       answer: "Sorry, I misunderstood. Please tell me the issue you're facing in MatchHai, and I'll guide you.",
       contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "clarify_issue" },
@@ -324,6 +404,13 @@ function fallbackAgentAnswer(message: string, context: any, appContext: any, sup
     return {
       answer: "Sure - what MatchHai issue are you facing right now?",
       contextPatch: { ...patch, pendingAction: "none" },
+    };
+  }
+
+  if (isMatchroomResultContext(nextContext, message)) {
+    return {
+      answer: buildMatchroomResultAnswer(nextContext),
+      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "completed_matchroom_access_scope" },
     };
   }
 
@@ -422,6 +509,7 @@ export default {
 
     const needsLocalAgentGuardrail =
       isRoleOnly(message) ||
+      inferredPatch.currentIssueCategory === "matchroom_results" ||
       inferredPatch.currentIssueCategory === "super_admin" ||
       inferredPatch.currentIssueCategory === "notifications" ||
       (inferredPatch.currentIssueCategory === "zone_admin" && /\b(register|registration|new zone|create zone)\b/.test(normalize(message))) ||

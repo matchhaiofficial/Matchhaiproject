@@ -15,6 +15,7 @@ import { useToast } from "../../src/hooks/useToast";
 import {
     acceptTeamMatchChallenge,
     getTeamMatchChallengeById,
+    payTeamChallengeWithWallet,
     proposeTeamChallengeVenue,
     repairTeamMatchChallenge,
     rejectTeamMatchChallenge,
@@ -201,7 +202,48 @@ export default function TeamMatchChallengeDetails() {
             return;
         }
         setSubmitting(true);
-        const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept });
+        const paymentAmount = Math.max(0, Math.ceil(Number(challenge?.pricePerPlayer || 0) * activeLineupSize));
+        if (isCaptainB && paymentAmount > 0 && challenge?.teamBPaymentStatus !== "paid") {
+            const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
+                Alert.alert(
+                    "Team payment required",
+                    `Pay PKR ${paymentAmount} for your team (${activeLineupSize} players) before accepting this challenge.`,
+                    [
+                        { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+                        { text: "Pay Now", onPress: () => resolve("pay_now") },
+                        { text: "Pay with Wallet", onPress: () => resolve("wallet") },
+                    ],
+                );
+            });
+            if (paymentChoice === "cancel") {
+                setSubmitting(false);
+                return;
+            }
+            if (paymentChoice === "pay_now") {
+                setSubmitting(false);
+                Alert.alert(
+                    "Pay now",
+                    "Online payment for team challenge acceptance is not wired directly here yet. Add funds to your wallet, then return and accept with Pay with Wallet.",
+                    [
+                        { text: "Open Wallet", onPress: () => router.push("/(player)/wallet" as any) },
+                        { text: "OK" },
+                    ],
+                );
+                return;
+            }
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: paymentAmount,
+                challengeId,
+                side: "teamB",
+                reference: `team_challenge:accept:${challengeId}:${Date.now()}`,
+            });
+            if (!walletPayment.ok) {
+                setSubmitting(false);
+                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
+                return;
+            }
+        }
+        const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept, teamBPaymentAmount: paymentAmount });
         setSubmitting(false);
         if (!result.ok) {
             if ((result.message || "").toLowerCase().includes("resolved")) {
@@ -325,6 +367,9 @@ export default function TeamMatchChallengeDetails() {
                     <Text style={styles.meta}>Date: {challenge.scheduledDate || "TBD"}</Text>
                     <Text style={styles.meta}>Time: {challenge.scheduledTime || "TBD"}</Text>
                     <Text style={styles.meta}>Price per player: {challenge.pricePerPlayer ? `PKR ${challenge.pricePerPlayer}` : "TBD"}</Text>
+                    {challenge.zoneRateLabel ? <Text style={styles.meta}>Resource type: {challenge.zoneRateLabel}</Text> : null}
+                    <Text style={styles.meta}>Team A payment: {challenge.teamAPaymentStatus === "paid" ? "Paid" : "Unpaid"}{challenge.teamAPaymentAmount ? ` (PKR ${challenge.teamAPaymentAmount})` : ""}</Text>
+                    <Text style={styles.meta}>Team B payment: {challenge.teamBPaymentStatus === "paid" ? "Paid" : "Pending"}{challenge.teamBPaymentAmount ? ` (PKR ${challenge.teamBPaymentAmount})` : ""}</Text>
                     <Text style={styles.meta}>Team A proposed venue: {proposalFromA?.venueName || "Not selected"}</Text>
                     {proposalFromA?.areaLabel ? <Text style={styles.meta}>Area: {proposalFromA.areaLabel}</Text> : null}
                     {alternativeFromB?.venueName ? (

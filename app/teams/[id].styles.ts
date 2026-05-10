@@ -581,6 +581,10 @@ export default StyleSheet.create({
         justifyContent: "center",
         marginBottom: SPACING.sm,
     },
+    challengeButtonDisabled: {
+        opacity: 0.55,
+        borderColor: COLORS.divider,
+    },
     challengeButtonText: {
         color: COLORS.successBright,
         fontFamily: FONTS.heading,

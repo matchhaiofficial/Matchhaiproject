@@ -44,6 +44,8 @@ export default StyleSheet.create({
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
         padding: SPACING.md,
+        width: "100%",
+        alignSelf: "stretch",
         ...SHADOWS.cardElevated,
     },
     cardPressed: {

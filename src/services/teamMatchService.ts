@@ -10,6 +10,7 @@ export type {
 export {
     sendTeamMatchChallenge,
     acceptTeamMatchChallenge,
+    payTeamChallengeWithWallet,
     rejectTeamMatchChallenge,
     suggestTeamMatchChallengeAlternativeZone,
     respondToTeamMatchChallenge,

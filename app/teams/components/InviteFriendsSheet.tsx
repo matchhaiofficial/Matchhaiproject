@@ -1,4 +1,3 @@
-import { useQuery } from "convex/react";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -8,6 +7,7 @@ import {
     View
 } from "react-native";
 
+import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from "../../../src/components/AppModalPrimitives";
@@ -23,6 +23,8 @@ import styles from "./InviteFriendsSheet.styles";
 interface Friend {
     uid: string;
     username: string;
+    inTeam?: boolean;
+    teamName?: string | null;
 }
 
 interface InviteFriendsSheetProps {
@@ -49,6 +51,8 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
         .map((f: any) => ({
             uid: f.friendId,
             username: f.username,
+            inTeam: Boolean(f.inTeam),
+            teamName: f.teamName || null,
         }))
         .filter((f) => !membersSet.has(f.uid));
     const loading = visible && friendsData === undefined;
@@ -84,6 +88,8 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
 
     const renderFriendRow = (item: Friend) => {
         const isInvited = invitingIds.has(item.uid);
+        const disabledByTeam = Boolean(item.inTeam);
+        const disabled = isInvited || disabledByTeam;
 
         return (
             <View style={styles.friendItem}>
@@ -91,17 +97,32 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                     <View style={styles.avatar}>
                         <Text style={styles.avatarText}>{item.username.charAt(0).toUpperCase()}</Text>
                     </View>
-                    <Text style={styles.friendName}>{item.username}</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName} numberOfLines={1}>{item.username}</Text>
+                        {disabledByTeam ? (
+                            <View style={styles.inTeamBadge}>
+                                <Text style={styles.inTeamBadgeText} numberOfLines={1}>
+                                    Already in a team{item.teamName ? `: ${item.teamName}` : ""}
+                                </Text>
+                            </View>
+                        ) : null}
+                    </View>
                 </View>
                 <Pressable
-                    style={[styles.inviteBtn, isInvited && styles.inviteBtnDisabled]}
-                    onPress={() => handleInvite(item.uid)}
-                    disabled={isInvited}
+                    style={[styles.inviteBtn, disabled && styles.inviteBtnDisabled]}
+                    onPress={() => {
+                        if (disabledByTeam) {
+                            showToast({ type: "info", title: "Already in a team", message: "This player is already in a team for this game and can't be invited." });
+                            return;
+                        }
+                        handleInvite(item.uid);
+                    }}
+                    disabled={disabled}
                 >
                     {isInvited ? (
                         <AppIcon name="check" size={16} color={COLORS.muted} />
                     ) : (
-                        <Text style={styles.inviteBtnText}>Invite</Text>
+                        <Text style={styles.inviteBtnText}>{disabledByTeam ? "Unavailable" : "Invite"}</Text>
                     )}
                 </Pressable>
             </View>

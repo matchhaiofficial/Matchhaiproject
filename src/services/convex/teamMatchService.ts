@@ -18,7 +18,8 @@ export type TeamMatchChallengeStatus =
     | "venue_proposed"
     | "venue_confirmed"
     | "admin_pending"
-    | "completed";
+    | "completed"
+    | "expired";
 
 export interface TeamChallengeVenueChoice {
     zoneId: string;
@@ -43,6 +44,13 @@ export interface TeamMatchChallenge {
     scheduledDate?: string;
     scheduledTime?: string;
     pricePerPlayer?: number | null;
+    zoneRateKey?: string | null;
+    zoneRateLabel?: string | null;
+    zoneRatePrice?: number | null;
+    teamAPaymentStatus?: "unpaid" | "pending" | "paid" | null;
+    teamBPaymentStatus?: "unpaid" | "pending" | "paid" | null;
+    teamAPaymentAmount?: number | null;
+    teamBPaymentAmount?: number | null;
     message?: string;
     status: TeamMatchChallengeStatus;
     commonAreas: string[];
@@ -181,15 +189,15 @@ const computeChallengePricePerPlayer = async (input: {
     gameKey: string;
     seriesType?: string | null;
     maxPlayers: number;
+    zoneRatePrice?: number | null;
 }) => {
     try {
         const zone = await getZoneForChallenge(input.zoneId);
         if (!zone) return 0;
-        const baseRate = getZoneRateForChallenge(zone, input.gameKey, input.maxPlayers);
+        const baseRate = toPositiveNumber(input.zoneRatePrice) || getZoneRateForChallenge(zone, input.gameKey, input.maxPlayers);
         if (!baseRate) return 0;
         const hours = getSeriesHours(input.gameKey, input.seriesType);
-        const totalCost = baseRate * hours;
-        return input.maxPlayers > 0 ? Math.ceil(totalCost / input.maxPlayers) : 0;
+        return Math.ceil(baseRate * hours);
     } catch {
         return 0;
     }
@@ -264,6 +272,10 @@ export const sendTeamMatchChallenge = async (input: {
     seriesType?: string | null;
     proposedVenueByCaptainA: TeamChallengeVenueChoice;
     maxPlayers?: number;
+    zoneRateKey?: string | null;
+    zoneRateLabel?: string | null;
+    zoneRatePrice?: number | null;
+    teamAPaymentAmount?: number;
 }): Promise<ServerResponse> => {
     try {
         const verificationGate = await ensureVerifiedEmailAccess();
@@ -316,6 +328,7 @@ export const sendTeamMatchChallenge = async (input: {
             gameKey: teamA.game,
             seriesType: input.seriesType,
             maxPlayers,
+            zoneRatePrice: input.zoneRatePrice,
         });
         if (computedPricePerPlayer <= 0) {
             return { ok: false, message: "Unable to derive price per player from selected zone and series." };
@@ -340,7 +353,14 @@ export const sendTeamMatchChallenge = async (input: {
             maxPlayers,
             scheduledDate: input.scheduledDate,
             scheduledTime: input.scheduledTime,
+            scheduledAt: scheduledAt.getTime(),
             pricePerPlayer: computedPricePerPlayer,
+            zoneRateKey: input.zoneRateKey || undefined,
+            zoneRateLabel: input.zoneRateLabel || undefined,
+            zoneRatePrice: toPositiveNumber(input.zoneRatePrice) || undefined,
+            teamAPaymentStatus: "paid",
+            teamBPaymentStatus: "unpaid",
+            teamAPaymentAmount: toPositiveNumber(input.teamAPaymentAmount) || undefined,
             proposedVenueByCaptainA: input.proposedVenueByCaptainA,
             commonAreas: [],
             lineupA: getDefaultLineup(teamA, teamAMembers),
@@ -357,6 +377,7 @@ export const sendTeamMatchChallenge = async (input: {
 export const acceptTeamMatchChallenge = async (input: {
     challengeId: string;
     lineupB?: string[];
+    teamBPaymentAmount?: number;
 }): Promise<ServerResponse> => {
     try {
         const me = await getCurrentUserInfo();
@@ -383,6 +404,8 @@ export const acceptTeamMatchChallenge = async (input: {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: true,
             lineupB,
+            teamBPaymentStatus: "paid",
+            teamBPaymentAmount: toPositiveNumber(input.teamBPaymentAmount) || undefined,
             actorUid: me.convexId,
         });
 
@@ -397,6 +420,37 @@ export const acceptTeamMatchChallenge = async (input: {
     } catch (error: any) {
         Logger.error("teamMatchService", "acceptTeamMatchChallenge failed", error);
         return { ok: false, message: error?.message || "Failed to accept challenge." };
+    }
+};
+
+export const payTeamChallengeWithWallet = async (input: {
+    amount: number;
+    challengeId?: string | null;
+    side: "teamA" | "teamB";
+    reference?: string;
+}): Promise<ServerResponse> => {
+    try {
+        const me = await getCurrentUserInfo();
+        if (!me) return { ok: false, message: "Not authenticated." };
+        const amount = Math.ceil(Number(input.amount || 0));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return { ok: false, message: "Payment amount is missing." };
+        }
+        await convex.mutation(api.wallet.deductFunds, {
+            amount,
+            userId: me.convexId,
+            source: "team_challenge",
+            reference: input.reference || `team_challenge:${input.side}:${input.challengeId || Date.now()}`,
+            metadata: {
+                flow: "team_challenge",
+                challengeId: input.challengeId || null,
+                side: input.side,
+            },
+        });
+        return { ok: true, amount };
+    } catch (error: any) {
+        Logger.error("teamMatchService", "payTeamChallengeWithWallet failed", error);
+        return { ok: false, message: error?.message || "Failed to pay from wallet." };
     }
 };
 
@@ -689,7 +743,6 @@ export const getChallengesForCaptain = async (uid: string): Promise<ServerRespon
             captainUid: uid,
         });
         const rows = challenges
-            .filter((c: any) => c.status !== "rejected")
             .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0))
             .map((c: any) => ({ ...c, id: c._id }));
         return { ok: true, data: rows };

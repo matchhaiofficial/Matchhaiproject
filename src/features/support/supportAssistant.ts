@@ -5,6 +5,7 @@ export type SupportUserRole = "player" | "zone_admin" | "super_admin" | "unknown
 export type SupportConversationContext = {
   userRole?: SupportUserRole;
   currentIssueCategory?: string;
+  subIssue?: string;
   currentIssueSummary?: string;
   knownNonSensitiveDetails: Record<string, string | number | boolean>;
   lastUserIntent?: string;
@@ -70,6 +71,9 @@ export const SUPPORT_BOT_COPY = {
   sensitiveReminder: "Please do not share OTPs, PINs, passwords, tokens, raw provider payloads, or secrets.",
   missingEmail: "Support email is not configured yet. I can still create a support request if you want human review.",
 };
+
+const MATCHROOM_RESULT_CATEGORY = "matchroom_results";
+const COMPLETED_RESULT_NOT_VISIBLE = "completed_matchroom_result_not_visible";
 
 const SUPPORT_TOPICS = [
   "matchhai",
@@ -144,6 +148,7 @@ export function isGreeting(input: string) {
 export function isCorrection(input: string) {
   const text = normalize(input);
   return (
+    /\bi already told you\b/.test(text) ||
     /\b(no|nope|nah)\b.*\b(not what i wanted|not what i meant|wrong|misunderstood)\b/.test(text) ||
     /\b(that'?s wrong|you misunderstood|not what i wanted|not what i meant)\b/.test(text)
   );
@@ -172,6 +177,7 @@ function roleFromText(input: string): SupportUserRole | undefined {
 
 function detectCategory(input: string, previous?: string) {
   const text = normalize(input);
+  if (detectMatchroomResultSubIssue(input, previous)) return MATCHROOM_RESULT_CATEGORY;
   if (/\b(payment|wallet|refund|deducted|paid|money|pending|easypaisa)\b/.test(text)) return "payments_wallet_refunds";
   if (/\b(matchroom|match room|lobby|invite|team|slot)\b/.test(text)) return "matchroom_lobby";
   if (/\b(zone|venue|branch|zone owner|zone admin|approval)\b/.test(text)) return "zone_admin";
@@ -182,6 +188,29 @@ function detectCategory(input: string, previous?: string) {
   if (/\b(report|moderation|complaint)\b/.test(text)) return "reports_moderation";
   if (/\b(crash|bug|error|not working|submit button)\b/.test(text)) return "technical_issue";
   return previous;
+}
+
+function detectMatchroomResultSubIssue(input: string, previousCategory?: string) {
+  const text = normalize(input);
+  const mentionsResult = /\b(results?|scores?|stats?)\b/.test(text);
+  const mentionsCompleted = /\b(completed|complete|after match|match ended|ended|finished|finish)\b/.test(text);
+  const mentionsMissing = /\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score|not displayed|not appear)\b/.test(text);
+  const verification = /\b(result verification|verification)\b.*\b(stuck|pending|not showing|missing)\b/.test(text);
+  const captainConfirmed = /\b(captain|captains?)\b.*\b(confirmed|submitted)\b.*\b(result|score)\b/.test(text);
+
+  if ((mentionsResult && mentionsCompleted) || (mentionsResult && mentionsMissing) || verification || captainConfirmed) {
+    if (verification) return "result_verification_pending";
+    if (captainConfirmed) return "captain_confirmed_result_not_visible";
+    if (/\bstats?\b/.test(text)) return "completed_matchroom_stats_missing";
+    if (mentionsMissing || mentionsCompleted) return COMPLETED_RESULT_NOT_VISIBLE;
+    return "score_not_showing";
+  }
+
+  if (previousCategory === MATCHROOM_RESULT_CATEGORY && mentionsResult) {
+    return COMPLETED_RESULT_NOT_VISIBLE;
+  }
+
+  return undefined;
 }
 
 function detectIntent(input: string, context?: SupportConversationContext) {
@@ -204,6 +233,12 @@ function detectDetails(input: string, existing: Record<string, string | number |
   if (/\b(pubg)\b/.test(text)) details.game = "PUBG";
   if (/\b(fifa|fc 24|fc24|fc 25|fc25|fc26|fc 26)\b/.test(text)) details.game = "EA FC";
   if (/\b(matchroom|match room)\b/.test(text)) details.paymentType = "matchroom";
+  if (/\b(completed|complete|match ended|ended|finished)\b/.test(text)) details.matchroomCompleted = true;
+  if (/\b(results?|scores?)\b/.test(text)) details.resultArea = true;
+  if (/\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score)\b/.test(text)) details.resultNotVisible = true;
+  if (/\b(history|completed history|completed list)\b/.test(text)) details.completedHistory = true;
+  if (/\b(verification|verifying|pending)\b/.test(text) && /\b(result|score)\b/.test(text)) details.resultVerificationPending = true;
+  if (/\b(captain|captains?)\b.*\b(confirmed|submitted)\b/.test(text)) details.captainConfirmed = true;
   if (/\b(wallet)\b/.test(text)) details.paymentType = "wallet";
   if (/\b(booking)\b/.test(text)) details.paymentType = "booking";
   if (/\b(deducted|debited|charged|money left)\b/.test(text)) details.moneyDeducted = true;
@@ -211,7 +246,20 @@ function detectDetails(input: string, existing: Record<string, string | number |
   return details;
 }
 
-function summarizeIssue(category?: string, details: Record<string, string | number | boolean> = {}, latest?: string) {
+function summarizeIssue(category?: string, details: Record<string, string | number | boolean> = {}, latest?: string, subIssue?: string) {
+  if (category === MATCHROOM_RESULT_CATEGORY || subIssue) {
+    const parts = [
+      category,
+      subIssue,
+      details.matchroomCompleted ? "completed matchroom" : null,
+      details.resultNotVisible ? "result not visible" : null,
+      details.resultVerificationPending ? "result verification pending" : null,
+      details.captainConfirmed ? "captain submitted/confirmed" : null,
+      details.completedHistory ? "still in completed history" : null,
+    ].filter(Boolean);
+    return parts.join(", ") || "completed matchroom result not visible";
+  }
+
   const parts = [
     category,
     details.paymentType ? `${details.paymentType} flow` : null,
@@ -237,6 +285,40 @@ export function hasMeaningfulSupportIssue(context?: SupportConversationContext) 
     return false;
   }
   return summary.length >= 12 && /\b(issue|problem|stuck|error|not working|can't|cant|cannot|unable|missing|deducted|pending|login|profile|payment|matchroom|booking|notification|report|zone|admin)\b/.test(summary);
+}
+
+function isMatchroomResultContext(context?: SupportConversationContext, input?: string) {
+  return (
+    context?.currentIssueCategory === MATCHROOM_RESULT_CATEGORY ||
+    Boolean(context?.subIssue && String(context.subIssue).includes("result")) ||
+    Boolean(input && detectMatchroomResultSubIssue(input, context?.currentIssueCategory))
+  );
+}
+
+function buildMatchroomResultResponse(context: SupportConversationContext, isUserCorrection = false) {
+  const canOpenKnown = context.knownNonSensitiveDetails.completedHistory;
+  const intro = isUserCorrection
+    ? "Sorry, you're right - you already said the matchroom is completed but the result is missing."
+    : "Got it - the matchroom was completed, but the result is not visible.";
+
+  return lines([
+    intro,
+    "",
+    "In MatchHai, completed matchrooms can still show as verifying until result verification is finished. Captains submit the winner, and if captain reports disagree, participants may need to vote on the dispute.",
+    "",
+    "Please check:",
+    bullets([
+      "Open the completed matchroom/lobby details",
+      "Look for the result status: Final Result, Verifying Results, or Result Dispute",
+      "If you are a captain, check whether both captains submitted the result",
+      "If it says Result Dispute, use Vote on Dispute if it appears",
+    ]),
+    "",
+    canOpenKnown
+      ? "Since it is still in completed history but the result area is empty, this may need support review if refreshing/opening the lobby again does not show a status."
+      : "Can you still open that completed matchroom, or is the whole matchroom missing from your history?",
+    canOpenKnown ? "I can create a support ticket for the MatchHai team if it stays empty." : null,
+  ]);
 }
 
 export function isObviousOffTopic(input: string, context?: SupportConversationContext) {
@@ -286,13 +368,14 @@ export function updateSupportContext(
 ): SupportConversationContext {
   const userRole = patch?.userRole || roleFromText(userMessage) || context.userRole || roleFromModuleLabel(meta?.moduleLabel) || "unknown";
   const currentIssueCategory = patch?.currentIssueCategory || detectCategory(userMessage, context.currentIssueCategory);
+  const subIssue = patch?.subIssue || detectMatchroomResultSubIssue(userMessage, currentIssueCategory) || context.subIssue;
   const knownNonSensitiveDetails = {
     ...detectDetails(userMessage, context.knownNonSensitiveDetails),
     ...(patch?.knownNonSensitiveDetails || {}),
   };
   const currentIssueSummary =
     patch?.currentIssueSummary ||
-    summarizeIssue(currentIssueCategory, knownNonSensitiveDetails, userMessage);
+    summarizeIssue(currentIssueCategory, knownNonSensitiveDetails, userMessage, subIssue);
 
   const recentMessages = [
     ...context.recentMessages,
@@ -310,6 +393,7 @@ export function updateSupportContext(
     ...patch,
     userRole,
     currentIssueCategory,
+    subIssue,
     currentIssueSummary,
     knownNonSensitiveDetails,
     lastUserIntent: patch?.lastUserIntent || detectIntent(userMessage, context),
@@ -322,6 +406,7 @@ export function shouldCallSupportAi(input: string, context?: SupportConversation
   if (isSensitiveInput(input)) return false;
   if (isObviousOffTopic(input, context)) return false;
   if (isGreeting(input) || isCorrection(input)) return false;
+  if (detectMatchroomResultSubIssue(input, context?.currentIssueCategory)) return false;
   return SUPPORT_AI_ENABLED && Boolean(SUPPORT_AI_ENDPOINT.trim());
 }
 
@@ -382,7 +467,10 @@ export function buildLocalSupportFallback(input: string, context: SupportConvers
   const text = normalize(input);
 
   if (isGreeting(input)) return SUPPORT_BOT_COPY.greetingFallback;
-  if (isCorrection(input)) return SUPPORT_BOT_COPY.correctionFallback;
+  if (isCorrection(input)) {
+    if (isMatchroomResultContext(context, input)) return buildMatchroomResultResponse(context, true);
+    return SUPPORT_BOT_COPY.correctionFallback;
+  }
 
   if (/^(help|i need help|can you help|please help)$/.test(text)) {
     return SUPPORT_BOT_COPY.clarificationFallback;
@@ -394,6 +482,10 @@ export function buildLocalSupportFallback(input: string, context: SupportConvers
 
   const category = detectCategory(input, context.currentIssueCategory);
   const role = roleFromText(input) || context.userRole;
+
+  if (category === MATCHROOM_RESULT_CATEGORY || isMatchroomResultContext(context, input)) {
+    return buildMatchroomResultResponse(context);
+  }
 
   if (role && !category && !hasMeaningfulSupportIssue(context)) {
     return "Got it. What MatchHai issue are you facing with that account?";
@@ -436,6 +528,14 @@ export function buildLocalSupportFallback(input: string, context: SupportConvers
   return SUPPORT_BOT_COPY.clarificationFallback;
 }
 
+export function buildRepeatedResponseFallback(context: SupportConversationContext = EMPTY_SUPPORT_CONTEXT) {
+  if (isMatchroomResultContext(context)) {
+    return "I may need one more detail to help: can you still open the completed matchroom, or is it missing from your completed/history list?";
+  }
+
+  return "I may need one more detail to help. What screen are you on, and what happens when you try again?";
+}
+
 export function redactSupportText(input: string) {
   return input
     .replace(/\b(?:otp|pin|password|token|secret)\s*[:=]?\s*[A-Z0-9@#$%^&*._-]{3,}\b/gi, "[redacted-secret]")
@@ -466,6 +566,7 @@ export async function askSupportAi(
       context: {
         userRole: context.userRole,
         currentIssueCategory: context.currentIssueCategory,
+        subIssue: context.subIssue,
         currentIssueSummary: context.currentIssueSummary,
         knownNonSensitiveDetails: context.knownNonSensitiveDetails,
         lastUserIntent: context.lastUserIntent,

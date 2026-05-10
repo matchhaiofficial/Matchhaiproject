@@ -33,7 +33,7 @@ export default function SuperAdminProfileTab() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader title="Profile" subtitle="Super Admin account and support." inlineTitle />
+      <AppHeader title="Profile" subtitle="Super Admin account." inlineTitle />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]} showsVerticalScrollIndicator={false}>
         <AppCard style={styles.card}>
           <View style={styles.avatar}>
@@ -47,14 +47,6 @@ export default function SuperAdminProfileTab() {
             <AdminInfoLine label="Account type" value={user?.accountType || "N/A"} />
             <AdminInfoLine label="Role" value={user?.role || "super-admin"} />
           </View>
-        </AppCard>
-
-        <AppCard style={styles.card}>
-          <Text style={styles.sectionTitle}>Support</Text>
-          <Text style={styles.helperText}>Open Help & Support for MatchHai admin usage, reports, payments, and troubleshooting.</Text>
-          <AppButton variant="secondary" onPress={() => router.push("/super-admin/support" as any)} leadingIcon="support">
-            Help & Support
-          </AppButton>
         </AppCard>
 
         <AppCard style={styles.card}>

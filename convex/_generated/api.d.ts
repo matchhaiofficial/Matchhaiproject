@@ -17,6 +17,7 @@ import type * as chatIdentity from "../chatIdentity.js";
 import type * as dashboard from "../dashboard.js";
 import type * as demoSeed from "../demoSeed.js";
 import type * as devReset from "../devReset.js";
+import type * as devTeamSeed from "../devTeamSeed.js";
 import type * as discover from "../discover.js";
 import type * as easypaisa from "../easypaisa.js";
 import type * as easypaisaNode from "../easypaisaNode.js";
@@ -63,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   dashboard: typeof dashboard;
   demoSeed: typeof demoSeed;
   devReset: typeof devReset;
+  devTeamSeed: typeof devTeamSeed;
   discover: typeof discover;
   easypaisa: typeof easypaisa;
   easypaisaNode: typeof easypaisaNode;

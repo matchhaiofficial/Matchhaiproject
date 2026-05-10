@@ -13,6 +13,7 @@ import {
   SUPPORT_BOT_COPY,
   askSupportAi,
   buildLocalSupportFallback,
+  buildRepeatedResponseFallback,
   buildSupportEmailDraft,
   getSupportActionIntent,
   hasMeaningfulSupportIssue,
@@ -30,6 +31,7 @@ type SupportChatScreenProps = {
 
 const SUPPORT_BOT_ID = "matchhai-support-ai";
 const SUPPORT_TYPING_DELAY_MS = 3000;
+const SUPPORT_DEBUG = process.env.EXPO_PUBLIC_SUPPORT_DEBUG === "1";
 
 function createMessage(
   text: string,
@@ -107,6 +109,15 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       return SUPPORT_BOT_COPY.missingIssueForTicket;
     }
 
+    if (SUPPORT_DEBUG) {
+      console.log("[SupportChat] creating support ticket", {
+        category: context.currentIssueCategory,
+        subIssue: context.subIssue,
+        summary: context.currentIssueSummary,
+        historyLength: context.recentMessages.length,
+      });
+    }
+
     const result = await createSupportTicket({
       userRole: context.userRole,
       category: context.currentIssueCategory,
@@ -149,6 +160,16 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       let contextPatch: Partial<SupportConversationContext> | undefined;
       const actionIntent = getSupportActionIntent(trimmed, conversationContext);
 
+      if (SUPPORT_DEBUG) {
+        console.log("[SupportChat] message received", {
+          message: trimmed,
+          actionIntent,
+          currentIssueCategory: nextContext.currentIssueCategory,
+          subIssue: nextContext.subIssue,
+          historyLength: nextContext.recentMessages.length,
+        });
+      }
+
       if (actionIntent === "draft_email") {
         if (hasMeaningfulSupportIssue(nextContext)) {
           assistantText = buildSupportEmailDraft(nextContext);
@@ -189,9 +210,23 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
         contextPatch = { pendingAction: "none" };
       } else {
         if (shouldCallSupportAi(trimmed, nextContext)) {
+          if (SUPPORT_DEBUG) {
+            console.log("[SupportChat] calling support worker", {
+              endpointConfigured: true,
+              category: nextContext.currentIssueCategory,
+              subIssue: nextContext.subIssue,
+              historyLength: nextContext.recentMessages.length,
+            });
+          }
           const ai = await askSupportAi(trimmed, nextContext, supportContext || null);
           assistantText = ai.answer;
           contextPatch = ai.contextPatch;
+          if (SUPPORT_DEBUG) {
+            console.log("[SupportChat] worker response received", {
+              answerLength: assistantText.length,
+              contextPatchKeys: ai.contextPatch ? Object.keys(ai.contextPatch) : [],
+            });
+          }
 
           if (isRepeatedResponse(conversationContext, assistantText)) {
             assistantText = [
@@ -202,9 +237,21 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
             contextPatch = { pendingAction: "create_ticket", escalationOffered: true };
           }
         } else {
+          if (SUPPORT_DEBUG) {
+            console.log("[SupportChat] using local fallback", {
+              category: nextContext.currentIssueCategory,
+              subIssue: nextContext.subIssue,
+              historyLength: nextContext.recentMessages.length,
+            });
+          }
           assistantText = buildLocalSupportFallback(trimmed, nextContext);
           contextPatch = { pendingAction: "none" };
         }
+      }
+
+      if (assistantText && isRepeatedResponse(conversationContext, assistantText)) {
+        assistantText = buildRepeatedResponseFallback({ ...responseContext, ...(contextPatch || {}) });
+        contextPatch = { ...(contextPatch || {}), pendingAction: "none", lastAssistantQuestion: "clarify_without_repeating" };
       }
 
       const elapsed = Date.now() - startedAt;

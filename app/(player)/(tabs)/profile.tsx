@@ -275,6 +275,7 @@ export default function Profile() {
     };
 
     const handleSettings = () => router.push("/profile/edit");
+    const handleSupport = () => router.push("/(player)/support" as any);
 
     const handleAddGame = (gameKey: string) => {
         const rules = GAME_RULES[gameKey];
@@ -406,16 +407,28 @@ export default function Profile() {
                 title="Profile"
                 inlineTitle
                 rightAction={(
-                    <Pressable
-                        style={styles.headerIcon}
-                        onPress={handleSettings}
-                        onPressIn={settingsPressIn}
-                        onPressOut={settingsPressOut}
-                    >
-                        <Animated.View style={settingsPressStyle}>
-                            <AppIcon name="settings" size={24} color={COLORS.text} />
-                        </Animated.View>
-                    </Pressable>
+                    <View style={styles.headerActions}>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={handleSupport}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open Help and Support"
+                        >
+                            <AppIcon name="support" size={22} color={COLORS.text} />
+                        </Pressable>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={handleSettings}
+                            onPressIn={settingsPressIn}
+                            onPressOut={settingsPressOut}
+                            accessibilityRole="button"
+                            accessibilityLabel="Open profile settings"
+                        >
+                            <Animated.View style={settingsPressStyle}>
+                                <AppIcon name="settings" size={24} color={COLORS.text} />
+                            </Animated.View>
+                        </Pressable>
+                    </View>
                 )}
             />
 
@@ -697,15 +710,6 @@ export default function Profile() {
                         Open Perf Debug
                     </AppButton>
                 ) : null}
-
-                <AppButton
-                    variant="secondary"
-                    style={[styles.logoutButton, { marginBottom: 12 }]}
-                    onPress={() => router.push("/(player)/support" as any)}
-                    leadingIcon="support"
-                >
-                    Help & Support
-                </AppButton>
 
                 <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
                     <AppIcon name="logout" size={20} color={COLORS.error} />

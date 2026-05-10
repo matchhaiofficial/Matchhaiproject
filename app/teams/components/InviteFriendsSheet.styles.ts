@@ -83,6 +83,22 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
     },
+    inTeamBadge: {
+        marginTop: 4,
+        alignSelf: "flex-start",
+        borderRadius: RADII.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: "rgba(255, 193, 7, 0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(255, 193, 7, 0.22)",
+        maxWidth: 220,
+    },
+    inTeamBadgeText: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+    },
     inviteBtn: {
         backgroundColor: 'rgba(66, 165, 245, 0.1)',
         borderWidth: 1,

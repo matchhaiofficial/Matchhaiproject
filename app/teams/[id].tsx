@@ -557,6 +557,18 @@ export default function TeamDetails() {
             showToast({ type: "warning", title: "Captain team required", message: `Captain a ${String(team.game || "").toUpperCase()} team first to challenge.` });
             return;
         }
+        const hasFullCandidate = candidates.some((candidate: any) => {
+            const required = Number(candidate.mainRosterSize || getTeamMainRosterSize(candidate.game));
+            const memberCount = Math.max(
+                Number(candidate.memberCount || 0),
+                Array.isArray(candidate.memberUids) ? candidate.memberUids.length : 0,
+            );
+            return Number.isFinite(required) && required > 0 && memberCount >= required;
+        });
+        if (!hasFullCandidate) {
+            Alert.alert("Team not full", "Your team is not full yet. Fill your roster before challenging another team.");
+            return;
+        }
         router.push({
             pathname: "/teams/challenge-create" as any,
             params: { opponentTeamId: team.id },
@@ -631,8 +643,20 @@ export default function TeamDetails() {
         );
     }
 
+    const hasChallengeCandidateTeam = !isMember && (buttonState === 'eligible' || buttonState === 'full') && captainedTeams.some(
+        (item: any) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+    );
     const canChallengeTeam = !isMember && (buttonState === 'eligible' || buttonState === 'full') && captainedTeams.some(
-        (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
+        (item: any) => {
+            if (item.id === team.id) return false;
+            if (String(item.game || "").toLowerCase() !== String(team.game || "").toLowerCase()) return false;
+            const required = Number(item.mainRosterSize || getTeamMainRosterSize(item.game));
+            const memberCount = Math.max(
+                Number(item.memberCount || 0),
+                Array.isArray(item.memberUids) ? item.memberUids.length : 0,
+            );
+            return Number.isFinite(required) && required > 0 && memberCount >= required;
+        },
     );
     const showBottomActionBar = !isDeleted && ((isMember && !isCaptain) || !isMember);
 
@@ -903,14 +927,18 @@ export default function TeamDetails() {
                             <View style={styles.actionBarContent}>
                                 {buttonState === 'eligible' && (
                                     <>
-                                        {canChallengeTeam ? (
+                                        {hasChallengeCandidateTeam ? (
                                           <View style={styles.footerActionRow}>
                                             <AppButton
                                                 variant="success"
                                                 size="lg"
                                                 onPress={handleChallenge}
                                                 disabled={submitting}
-                                                style={[styles.challengeButton, styles.footerActionButton]}
+                                                style={[
+                                                    styles.challengeButton,
+                                                    styles.footerActionButton,
+                                                    !canChallengeTeam && styles.challengeButtonDisabled,
+                                                ]}
                                             >
                                                 <Text style={styles.challengeButtonText}>Challenge Team</Text>
                                             </AppButton>
@@ -954,13 +982,13 @@ export default function TeamDetails() {
                                     </AppCard>
                                 )}
                                 {buttonState === 'full' && (
-                                    canChallengeTeam ? (
+                                    hasChallengeCandidateTeam ? (
                                         <AppButton
                                             variant="success"
                                             size="lg"
                                             onPress={handleChallenge}
                                             disabled={submitting}
-                                            style={styles.challengeButton}
+                                            style={[styles.challengeButton, !canChallengeTeam && styles.challengeButtonDisabled]}
                                         >
                                             <Text style={styles.challengeButtonText}>Challenge Team</Text>
                                         </AppButton>
