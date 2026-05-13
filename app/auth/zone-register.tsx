@@ -387,7 +387,9 @@ export default function AdminRegisterStep1() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
-        <Text style={styles.helperText}>Used for sign in, password reset, venue notices, and admin emails. Didit verifies identity separately.</Text>
+        <Text style={[styles.helperText, styles.helperOk]}>
+          Used for sign in, password reset, venue notices, and admin emails. Didit verifies identity separately.
+        </Text>
         {contactEmail.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>
         ) : null}

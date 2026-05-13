@@ -10,6 +10,7 @@ import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { BlockingLoader } from "../../../src/components/BlockingLoader";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -333,6 +334,7 @@ export default function PlayerDashboard() {
   const kycBannerMessage = formatKycBannerMessage(kycStatus, currentKyc?.rejectionReason);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const didLogInitialQueryCountRef = useRef(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
@@ -430,13 +432,19 @@ export default function PlayerDashboard() {
   }, [dashboardSummary, pendingNotifications, user?._id]);
 
   const handleLogout = useCallback(async () => {
-    const result = await signOutUser();
-    if (!result.ok) {
-      Logger.error("Dashboard", "Logout failed", result.message);
-      return;
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      const result = await signOutUser();
+      if (!result.ok) {
+        Logger.error("Dashboard", "Logout failed", result.message);
+        return;
+      }
+      router.replace("/auth/login");
+    } finally {
+      setLoggingOut(false);
     }
-    router.replace("/auth/login");
-  }, []);
+  }, [loggingOut]);
 
   const handleStartVerification = useCallback(async () => {
     const result = await startDiditKyc("player");
@@ -452,6 +460,7 @@ export default function PlayerDashboard() {
       contentStyle={styles.screenContent}
       edges={["top"]}
     >
+      <BlockingLoader visible={loggingOut} label="Logging out..." />
       <AppHeader
         title="Home"
         inlineTitle

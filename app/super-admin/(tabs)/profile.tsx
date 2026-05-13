@@ -1,9 +1,10 @@
 import { router } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminInfoLine } from "../../../src/components/AdminSurface";
+import { BlockingLoader } from "../../../src/components/BlockingLoader";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -16,6 +17,7 @@ export default function SuperAdminProfileTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { user } = useAuth();
   const { showToast } = useToast();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -24,8 +26,13 @@ export default function SuperAdminProfileTab() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
-          await signOutUser();
-          router.replace("/auth/login");
+          setLoggingOut(true);
+          try {
+            await signOutUser();
+            router.replace("/auth/login");
+          } finally {
+            setLoggingOut(false);
+          }
         },
       },
     ]);
@@ -33,6 +40,7 @@ export default function SuperAdminProfileTab() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
+      <BlockingLoader visible={loggingOut} label="Logging out..." />
       <AppHeader title="Profile" subtitle="Super Admin account." inlineTitle />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]} showsVerticalScrollIndicator={false}>
         <AppCard style={styles.card}>

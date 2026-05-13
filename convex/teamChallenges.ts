@@ -152,9 +152,9 @@ async function createChallengeNotification(
 
 // Get challenge by ID
 export const getById = query({
-  args: { challengeId: v.id("teamChallenges") },
+  args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const userId = await getAuthenticatedUserId(ctx);
+    const userId = await getAuthenticatedUserId(ctx, args.actorUid);
     const challenge = await ctx.db.get(args.challengeId);
     if (!challenge) return null;
     if (!isCaptain(challenge, userId)) {
@@ -166,9 +166,9 @@ export const getById = query({
 
 // Get challenge with teams
 export const getWithTeams = query({
-  args: { challengeId: v.id("teamChallenges") },
+  args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
   handler: async (ctx, args) => {
-    const userId = await getAuthenticatedUserId(ctx);
+    const userId = await getAuthenticatedUserId(ctx, args.actorUid);
     const challenge = await ctx.db.get(args.challengeId);
     if (!challenge || !isCaptain(challenge, userId)) return null;
 

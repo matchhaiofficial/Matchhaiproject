@@ -20,6 +20,7 @@ import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { BlockingLoader } from "../../../src/components/BlockingLoader";
 import Screen from "../../../src/components/Screen";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -130,6 +131,7 @@ interface FullUserProfile {
 export default function Profile() {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const [loggingOut, setLoggingOut] = useState(false);
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
     const bottomChromeClearance = getBottomChromeClearance({
@@ -265,9 +267,14 @@ export default function Profile() {
                     text: "Logout",
                     style: "destructive",
                     onPress: async () => {
-                        const res = await signOutUser();
-                        if (res.ok) router.replace("/auth/login");
-                        else showToast({ type: "error", title: "Logout Failed", message: res.message });
+                        setLoggingOut(true);
+                        try {
+                            const res = await signOutUser();
+                            if (res.ok) router.replace("/auth/login");
+                            else showToast({ type: "error", title: "Logout Failed", message: res.message });
+                        } finally {
+                            setLoggingOut(false);
+                        }
                     }
                 }
             ]
@@ -403,6 +410,7 @@ export default function Profile() {
             contentStyle={styles.screenContent}
             edges={['top']}
         >
+            <BlockingLoader visible={loggingOut} label="Logging out..." />
             <AppHeader
                 title="Profile"
                 inlineTitle

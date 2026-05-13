@@ -227,6 +227,10 @@ export const AppIcons = {
   // Existing MaterialIcon name compatibility aliases.
   "access-time": Clock3,
   "account-balance-wallet": Wallet,
+  "keyboard-voice": Mic,
+  mic: Mic,
+  "play-arrow": Play,
+  play_arrow: Play,
   add: Plus,
   "add-circle": PlusCircle,
   "add-circle-outline": PlusCircle,

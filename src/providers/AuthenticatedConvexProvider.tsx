@@ -16,6 +16,8 @@ function useBetterAuthConvexAuth() {
   const effectiveSession = session ?? sessionSnapshot;
   const effectiveSessionId = effectiveSession?.session?.id ?? null;
   const warnedTokenFailureForSessionRef = useRef<string | null>(null);
+  const lastGoodTokenRef = useRef<string | null>(null);
+  const lastGoodTokenSessionIdRef = useRef<string | null>(null);
   const sessionSnapshotRef = useRef<AuthSession | null>(null);
 
   useEffect(() => {
@@ -106,10 +108,26 @@ function useBetterAuthConvexAuth() {
 
   const fetchAccessToken = useCallback(async () => {
     try {
+      if (!effectiveSessionId) {
+        lastGoodTokenRef.current = null;
+        lastGoodTokenSessionIdRef.current = null;
+        return null;
+      }
+
       const result = await (authClient as any).convex?.token({
         fetchOptions: { throw: false },
       });
       const token = result?.data?.token ?? null;
+
+      if (token) {
+        lastGoodTokenRef.current = token;
+        lastGoodTokenSessionIdRef.current = effectiveSessionId;
+      } else if (lastGoodTokenSessionIdRef.current === effectiveSessionId && lastGoodTokenRef.current) {
+        // Avoid auth thrash on transient token fetch failures (offline, cold start race).
+        // Returning a cached token keeps Convex from briefly de-authing and resetting state.
+        return lastGoodTokenRef.current;
+      }
+
       if (!token && effectiveSessionId && warnedTokenFailureForSessionRef.current !== effectiveSessionId) {
         warnedTokenFailureForSessionRef.current = effectiveSessionId;
         Logger.warn("ConvexAuthBridge", "Convex token fetch returned no token for active session", {
@@ -127,6 +145,9 @@ function useBetterAuthConvexAuth() {
       }
       return token;
     } catch (error) {
+      if (effectiveSessionId && lastGoodTokenSessionIdRef.current === effectiveSessionId && lastGoodTokenRef.current) {
+        return lastGoodTokenRef.current;
+      }
       if (effectiveSessionId && warnedTokenFailureForSessionRef.current !== effectiveSessionId) {
         warnedTokenFailureForSessionRef.current = effectiveSessionId;
         Logger.warn("ConvexAuthBridge", "Convex token fetch failed for active session", {

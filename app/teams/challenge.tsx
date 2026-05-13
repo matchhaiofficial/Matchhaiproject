@@ -14,12 +14,10 @@ import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
 import {
     acceptTeamMatchChallenge,
-    getTeamMatchChallengeById,
     payTeamChallengeWithWallet,
     proposeTeamChallengeVenue,
     repairTeamMatchChallenge,
     rejectTeamMatchChallenge,
-    subscribeTeamMatchChallenge,
     type TeamMatchChallenge,
 } from "../../src/services/teamMatchService";
 import type { Zone } from "../../src/services/convex/zoneService";
@@ -43,15 +41,23 @@ const formatStatusLabel = (value?: string | null) =>
 export default function TeamMatchChallengeDetails() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { showToast } = useToast();
     const challengeId = Array.isArray(params.id) ? params.id[0] : params.id;
 
-    const [challenge, setChallenge] = useState<TeamMatchChallenge | null>(null);
-    const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
     const [selectedLineup, setSelectedLineup] = useState<string[]>([]);
+    const challenge = useQuery(
+        api.teamChallenges.getById,
+        challengeId && user?._id
+            ? {
+                challengeId: challengeId as Id<"teamChallenges">,
+                actorUid: user._id as Id<"users">,
+            }
+            : "skip",
+    ) as TeamMatchChallenge | null | undefined;
+    const loading = authLoading || (!!challengeId && !!user?._id && challenge === undefined);
 
     const opponentTeamWithMembers = useQuery(
         api.teams.getWithMembers,
@@ -61,37 +67,9 @@ export default function TeamMatchChallengeDetails() {
     );
 
     useEffect(() => {
-        if (!challengeId) return;
-        let mounted = true;
-        repairTeamMatchChallenge(challengeId).finally(() => {
-            getTeamMatchChallengeById(challengeId).then((result) => {
-                if (!mounted) return;
-                if (!result.ok || !result.data) {
-                    showToast({ type: "error", title: "Not found", message: result.message || "Challenge not found." });
-                    router.back();
-                    return;
-                }
-                setChallenge(result.data);
-                setLoading(false);
-            });
-        });
-
-        const unsub = subscribeTeamMatchChallenge(challengeId, (data) => {
-            if (!mounted) return;
-            if (!data) {
-                setChallenge(null);
-                setLoading(false);
-                return;
-            }
-            setChallenge(data);
-            setLoading(false);
-        });
-
-        return () => {
-            mounted = false;
-            unsub();
-        };
-    }, [challengeId, router, showToast]);
+        if (!challengeId || !user?._id) return;
+        void repairTeamMatchChallenge(challengeId);
+    }, [challengeId, user?._id]);
 
     const isCaptain = useMemo(() => {
         if (!challenge || !user?._id) return false;
@@ -246,10 +224,6 @@ export default function TeamMatchChallengeDetails() {
         const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept, teamBPaymentAmount: paymentAmount });
         setSubmitting(false);
         if (!result.ok) {
-            if ((result.message || "").toLowerCase().includes("resolved")) {
-                const latest = await getTeamMatchChallengeById(challengeId);
-                if (latest.ok && latest.data) setChallenge(latest.data);
-            }
             showToast({ type: "error", title: "Accept failed", message: result.message || "Failed to accept challenge." });
             return;
         }
@@ -267,10 +241,6 @@ export default function TeamMatchChallengeDetails() {
         const result = await rejectTeamMatchChallenge({ challengeId });
         setSubmitting(false);
         if (!result.ok) {
-            if ((result.message || "").toLowerCase().includes("resolved")) {
-                const latest = await getTeamMatchChallengeById(challengeId);
-                if (latest.ok && latest.data) setChallenge(latest.data);
-            }
             showToast({ type: "error", title: "Reject failed", message: result.message || "Failed to reject challenge." });
             return;
         }

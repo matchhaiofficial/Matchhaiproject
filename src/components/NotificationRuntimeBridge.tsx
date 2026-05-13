@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
@@ -25,22 +25,21 @@ function getResponseKey(response: any) {
   return identifier;
 }
 
-async function routeFromResponse(response: any) {
+function getHrefFromResponse(response: any) {
   const data: any = response?.notification?.request?.content?.data || {};
   const href = typeof data?.route === "string" && data.route
     ? data.route
     : typeof data?.href === "string"
       ? data.href
       : "";
-  if (href) {
-    router.push(href as any);
-  }
+  return typeof href === "string" ? href : "";
 }
 
-async function handleNotificationResponse(response: any) {
+async function handleNotificationResponse(response: any, onHref: (href: string) => void) {
   const key = getResponseKey(response);
+  const href = getHrefFromResponse(response);
   if (!key) {
-    await routeFromResponse(response);
+    if (href) onHref(href);
     return;
   }
 
@@ -48,12 +47,14 @@ async function handleNotificationResponse(response: any) {
   if (lastHandled === key) return;
 
   await AsyncStorage.setItem(LAST_HANDLED_RESPONSE_KEY, key);
-  await routeFromResponse(response);
+  if (href) onHref(href);
 }
 
 export default function NotificationRuntimeBridge() {
   const { user } = useAuth();
+  const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const [appStateTick, setAppStateTick] = useState(0);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const userId = user?._id as Id<"users"> | undefined;
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
@@ -68,13 +69,13 @@ export default function NotificationRuntimeBridge() {
       .catch(() => null);
 
     const responseSub = addNotificationResponseReceivedListener((response) => {
-      void handleNotificationResponse(response);
+      void handleNotificationResponse(response, (href) => setPendingHref(href));
     });
 
     void getLastNotificationResponseAsync()
       .then((response) => {
         if (response) {
-          return handleNotificationResponse(response);
+          return handleNotificationResponse(response, (href) => setPendingHref(href));
         }
         return null;
       })
@@ -91,6 +92,16 @@ export default function NotificationRuntimeBridge() {
       appStateSub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!pendingHref) return;
+    if (!user?._id) return;
+    if (convexAuthLoading) return;
+    if (!isAuthenticated) return;
+
+    router.push(pendingHref as any);
+    setPendingHref(null);
+  }, [convexAuthLoading, isAuthenticated, pendingHref, user?._id]);
 
   useEffect(() => {
     if (!user?._id) {

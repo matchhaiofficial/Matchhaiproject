@@ -63,6 +63,8 @@ export default StyleSheet.create({
     friendInfo: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+        minWidth: 0,
     },
     avatar: {
         width: 36,
@@ -82,6 +84,8 @@ export default StyleSheet.create({
         color: COLORS.text,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,
+        flexShrink: 1,
+        minWidth: 0,
     },
     inTeamBadge: {
         marginTop: 4,
@@ -106,6 +110,9 @@ export default StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: RADII.sm,
+        marginLeft: SPACING.sm,
+        alignSelf: 'flex-start',
+        maxWidth: 120,
     },
     inviteBtnDisabled: {
         borderColor: 'transparent',
