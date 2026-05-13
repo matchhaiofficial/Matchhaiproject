@@ -7,6 +7,8 @@ import {
   easypaisaPaths,
   easypaisaTokenHandler,
 } from "./easypaisa";
+import { diditWebhook } from "./kyc";
+import { supportAgentTools } from "./support";
 
 const http = httpRouter();
 
@@ -36,6 +38,21 @@ http.route({
   path: easypaisaPaths.ipn,
   method: "GET",
   handler: easypaisaIpnHandler,
+});
+http.route({
+  path: "/support/agentTools",
+  method: "POST",
+  handler: supportAgentTools,
+});
+http.route({
+  path: "/support/agentTools",
+  method: "OPTIONS",
+  handler: supportAgentTools,
+});
+http.route({
+  path: "/kyc/didit/webhook",
+  method: "POST",
+  handler: diditWebhook,
 });
 
 export default http;

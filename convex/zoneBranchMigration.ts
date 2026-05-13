@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { recordZoneAuditEvent } from "./zoneAudit";
+import { requireKycVerified } from "./kycGate";
 
 // ============================================
 // QUERIES
@@ -209,6 +210,7 @@ export const migrateZoneBranches = mutation({
     ownerUid: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found.");
 

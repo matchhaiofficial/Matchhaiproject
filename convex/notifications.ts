@@ -2,6 +2,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
 
 const notificationStatus = v.union(
   v.literal("pending"),
@@ -497,8 +498,12 @@ async function enforceAuthGate(ctx: any, type: string) {
   }
   const authUser = await authComponent.getAuthUser(ctx);
   if (!authUser?.userId) throw new Error("Not authenticated");
-  if (authUser.emailVerified !== true) {
-    throw new Error("Please verify your email to unlock matchrooms and team actions.");
+  const profile = await ctx.db
+    .query("users")
+    .withIndex("by_authId", (q: any) => q.eq("authId", authUser.userId))
+    .unique();
+  if (!isKycAccessAllowed(profile?.kycVerificationStatus)) {
+    throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
   }
 }
 

@@ -1,4 +1,5 @@
 import { Redirect, Tabs } from "expo-router";
+import { useQuery } from "convex/react";
 import React from "react";
 import {
     View,
@@ -19,7 +20,8 @@ import {
     isSuperAdminProfile,
     isZoneAccount,
 } from "../../../src/utils/accountRouting";
-import { hasVerifiedEmail } from "../../../src/utils/emailVerificationGate";
+import { isKycAccessAllowed } from "../../../src/utils/verificationGate";
+import { api } from "../../../convex/_generated/api";
 
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
@@ -132,11 +134,17 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export default function PlayerTabsLayout() {
-    const { user, authUser, loading } = useAuth();
+    const { user, loading } = useAuth();
 
     const isSuperAdmin = isSuperAdminProfile(user);
     const isZoneUser = isZoneAccount(user);
-    const emailVerified = hasVerifiedEmail(authUser);
+    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const verificationDocLoading = Boolean(user?.identityVerificationId) && currentKyc === undefined;
+    const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
+    const kycAccessAllowed =
+        isKycAccessAllowed(kycStatus) &&
+        !verificationDocLoading &&
+        (!currentKyc || isKycAccessAllowed(currentKyc.status));
 
     if (!loading && (isSuperAdmin || isZoneUser)) {
         return <Redirect href={getDefaultSignedInRoute(user) as any} />;
@@ -154,7 +162,7 @@ export default function PlayerTabsLayout() {
             <Tabs.Screen
                 name="discover"
                 options={{
-                    href: emailVerified ? undefined : null,
+                    href: kycAccessAllowed ? undefined : null,
                     title: "Discover",
                 }}
             />

@@ -65,6 +65,9 @@ export default StyleSheet.create({
     addButtonPressed: {
         opacity: 0.9,
     },
+    addButtonDisabled: {
+        opacity: 0.45,
+    },
     addButtonText: {
         color: "#fff",
         fontFamily: FONTS.heading,
@@ -94,6 +97,9 @@ export default StyleSheet.create({
     },
     branchCardPressed: {
         opacity: 0.9,
+    },
+    branchCardDisabled: {
+        opacity: 0.48,
     },
     branchCardRow: {
         flexDirection: "row",
@@ -160,6 +166,39 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.xs + 1,
         marginTop: 2,
+    },
+    verificationBanner: {
+        borderWidth: 1,
+        borderColor: "rgba(255, 193, 7, 0.35)",
+        backgroundColor: "rgba(255, 193, 7, 0.1)",
+        borderRadius: RADII.md,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    verificationBannerHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    verificationBannerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    verificationBannerText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+    },
+    verificationBannerActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    verificationActionButton: {
+        flex: 1,
     },
 });
 

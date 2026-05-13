@@ -1,7 +1,7 @@
 import { query, mutation, action, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
 
 function normalizeEmail(email: string) {
@@ -30,6 +30,14 @@ function normalizePhone(phone: string) {
 
 function normalizeUsername(username: string) {
   return String(username || "").trim().toLowerCase();
+}
+
+async function sha256(value: string) {
+  const input = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ============================================
@@ -203,6 +211,10 @@ export const validateRegistrationIdentity = action({
     phoneValidationProvider: string;
     phoneValidationCheckedAt: number;
     phoneType: string | null;
+    phoneOtpVerified?: boolean;
+    phoneOtpVerifiedAt?: number;
+    phoneNumberMasked?: string;
+    phoneNumberHash?: string;
   }> => {
     const email = normalizeEmail(args.email);
     const phone = normalizePhone(args.phone);
@@ -227,6 +239,29 @@ export const validateRegistrationIdentity = action({
     if (!phoneAvailable) throw new Error("This phone number is already registered.");
     if (!usernameAvailable) throw new Error("This username is already in use.");
 
+    let phoneOtpVerified = false;
+    let phoneOtpVerifiedAt: number | undefined;
+    let phoneNumberMasked: string | undefined;
+    let phoneNumberHash: string | undefined;
+    if (args.accountType === "player") {
+      const phoneHash = await sha256(phone);
+      const verified: {
+        phoneMasked: string;
+        updatedAt: number;
+      } | null = await ctx.runQuery(internal.phoneOtp.getRecentVerified, {
+        phoneHash,
+        since: Date.now() - 24 * 60 * 60 * 1000,
+      });
+
+      if (!verified) {
+        throw new Error("Please verify your phone number.");
+      }
+      phoneOtpVerified = true;
+      phoneOtpVerifiedAt = verified.updatedAt;
+      phoneNumberMasked = verified.phoneMasked;
+      phoneNumberHash = phoneHash;
+    }
+
     const validation: any = await ctx.runAction(api.externalApis.validatePhoneNumber, {
       phone,
       countryCode: "PK",
@@ -245,6 +280,14 @@ export const validateRegistrationIdentity = action({
       phoneValidationProvider: "antideo",
       phoneValidationCheckedAt: Date.now(),
       phoneType: validation.type || null,
+      ...(phoneOtpVerified
+        ? {
+            phoneOtpVerified,
+            phoneOtpVerifiedAt,
+            phoneNumberMasked,
+            phoneNumberHash,
+          }
+        : {}),
     };
   },
 });
@@ -403,6 +446,10 @@ export const create = mutation({
     phoneValidated: v.optional(v.boolean()),
     phoneValidationProvider: v.optional(v.string()),
     phoneValidationCheckedAt: v.optional(v.number()),
+    phoneOtpVerified: v.optional(v.boolean()),
+    phoneOtpVerifiedAt: v.optional(v.number()),
+    phoneNumberMasked: v.optional(v.string()),
+    phoneNumberHash: v.optional(v.string()),
     city: v.optional(v.string()),
     ageRange: v.optional(v.string()),
     accountType: v.union(v.literal("player"), v.literal("zone")),
@@ -450,10 +497,15 @@ export const create = mutation({
       phoneValidated: args.phoneValidated ?? false,
       phoneValidationProvider: args.phoneValidationProvider,
       phoneValidationCheckedAt: args.phoneValidationCheckedAt,
+      phoneOtpVerified: args.phoneOtpVerified ?? false,
+      phoneOtpVerifiedAt: args.phoneOtpVerifiedAt,
+      phoneNumberMasked: args.phoneNumberMasked,
+      phoneNumberHash: args.phoneNumberHash,
       accountType: args.accountType,
       isOnline: true,
       onboardingCompleted: false,
       onboardingStep: 1,
+      kycVerificationStatus: "not_started",
       createdAt: now,
       updatedAt: now,
     };

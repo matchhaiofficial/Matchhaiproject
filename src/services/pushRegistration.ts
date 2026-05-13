@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import { convex } from "../lib/convex";
@@ -11,6 +10,13 @@ const INSTALLATION_ID_KEY = "push_registration.installation_id.v1";
 
 const createInstallationId = () =>
   `inst_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+async function loadExpoNotifications() {
+  if (Constants.appOwnership === "expo") {
+    return null;
+  }
+  return await import("expo-notifications");
+}
 
 export const getOrCreateInstallationId = async () => {
   const existing = await AsyncStorage.getItem(INSTALLATION_ID_KEY);
@@ -42,6 +48,22 @@ export async function syncPushRegistration(input: {
   }
 
   if (Constants.appOwnership === "expo") {
+    await convex.mutation((api as any).pushNotifications.upsertDevice, {
+      userId: input.userId,
+      installationId,
+      provider: "expo",
+      platform: Platform.OS,
+      projectId: getProjectId() || undefined,
+      deviceName: String(Constants.deviceName || ""),
+      appVersion: String(Constants.expoConfig?.version || ""),
+      permissionStatus: "undetermined",
+    });
+
+    return { ok: true as const, skipped: "expo_go" as const };
+  }
+
+  const Notifications = await loadExpoNotifications();
+  if (!Notifications) {
     await convex.mutation((api as any).pushNotifications.upsertDevice, {
       userId: input.userId,
       installationId,

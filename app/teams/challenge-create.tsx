@@ -11,7 +11,7 @@ import { useToast } from "../../src/hooks/useToast";
 import { getCaptainedTeams, payTeamChallengeWithWallet, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { Team, getTeamById } from "../../src/services/convex/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
-import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
@@ -458,8 +458,8 @@ export default function TeamChallengeCreateScreen() {
             return;
         }
 
-        if (!hasVerifiedEmail(authUser)) {
-            showEmailVerificationRequiredAlert();
+        if (!isUserFullyVerified(authUser, user)) {
+            showKycVerificationRequiredAlert();
             return;
         }
 
@@ -556,7 +556,7 @@ export default function TeamChallengeCreateScreen() {
 
     const gameKey = challengeGameKey;
     const gameLabel = getCanonicalGameLabel(opponentTeam.game);
-    const submitDisabled = !canSubmit || !areBothTeamsFilled || !hasVerifiedEmail(authUser);
+    const submitDisabled = !canSubmit || !areBothTeamsFilled || !isUserFullyVerified(authUser, user);
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -720,8 +720,8 @@ export default function TeamChallengeCreateScreen() {
                             pressed && !submitDisabled && styles.primaryButtonPressed,
                         ]}
                         onPress={() => {
-                            if (!hasVerifiedEmail(authUser)) {
-                                showEmailVerificationRequiredAlert();
+                            if (!isUserFullyVerified(authUser, user)) {
+                                showKycVerificationRequiredAlert();
                                 return;
                             }
                             handleCreateChallenge();

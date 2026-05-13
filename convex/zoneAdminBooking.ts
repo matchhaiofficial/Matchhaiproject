@@ -7,6 +7,7 @@ import {
   confirmBroadcastVenue,
   finalizeBroadcastFailure,
 } from "./matchroomBroadcast";
+import { requireKycVerified } from "./kycGate";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -759,6 +760,7 @@ export const acceptBookingRequest = mutation({
     }),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const bookingRequest = await ctx.db.get(args.requestId);
     if (!bookingRequest) {
@@ -981,6 +983,7 @@ export const rejectBookingRequest = mutation({
     alternative: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const request = await ctx.db.get(args.requestId);
 
@@ -1079,6 +1082,7 @@ export const sendCounterOffer = mutation({
     expiresInMinutes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const currency = args.currency || "PKR";
     const request = await ctx.db.get(args.requestId);
@@ -1523,6 +1527,7 @@ export const createWalkInMatchroom = mutation({
     walkIn: v.any(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
 

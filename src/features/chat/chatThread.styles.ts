@@ -242,6 +242,51 @@ export default StyleSheet.create({
         fontSize: 14,
         lineHeight: 20,
     },
+    messageLineGap: {
+        height: 8,
+    },
+    messageBulletLine: {
+        marginTop: 2,
+    },
+    supportCardsWrap: {
+        gap: 8,
+        marginTop: 10,
+    },
+    supportMatchroomCard: {
+        borderRadius: 14,
+        padding: SPACING.sm,
+        backgroundColor: COLORS.cardDark,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+    },
+    supportCardHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+    },
+    supportCardTitle: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: 13,
+    },
+    supportCardStatus: {
+        color: COLORS.accent,
+        fontFamily: FONTS.body,
+        fontSize: 11,
+        textTransform: "capitalize",
+    },
+    supportCardMetaGrid: {
+        gap: 3,
+        marginTop: 6,
+    },
+    supportCardMeta: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 11,
+        lineHeight: 15,
+    },
     bubbleFooter: {
         flexDirection: "row",
         alignItems: "center",

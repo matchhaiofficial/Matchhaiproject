@@ -1,4 +1,5 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
+import { v } from "convex/values";
 import { components } from "./_generated/api";
 
 const APP_TABLES_IN_DELETE_ORDER = [
@@ -38,9 +39,15 @@ const AUTH_DELETE_PAGINATION = {
   numItems: 100000,
 };
 
-export const resetDevelopmentData = mutation({
-  args: {},
-  handler: async (ctx) => {
+export const resetDevelopmentData = internalMutation({
+  args: { confirm: v.string() },
+  handler: async (ctx, args) => {
+    // Hard guard to prevent accidental use from client code.
+    if (args.confirm !== "DELETE_ALL_MATCHHAI_DEV_DATA") {
+      throw new Error(
+        'Pass confirm: "DELETE_ALL_MATCHHAI_DEV_DATA" to run resetDevelopmentData.'
+      );
+    }
     const deleted: Record<string, number> = {};
 
     for (const tableName of APP_TABLES_IN_DELETE_ORDER) {

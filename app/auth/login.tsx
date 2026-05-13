@@ -26,6 +26,7 @@ import { getUserProfile } from "../../src/services/convex/userService";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { APP_ROUTES } from "../../src/navigation/routes";
+import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import styles from "./login.styles";
 
 // 📱 Pakistani phone formatter
@@ -520,10 +521,11 @@ export default function Login() {
       const accountType = profileRes.data.accountType;
       const inputEmail = emailOrPhone.trim().toLowerCase();
       const userEmail = (res.user.email || inputEmail).toLowerCase();
-      const SUPER_ADMIN_EMAIL = "superadmin@matchhai.com";
-
-      // ✅ Robust Super Admin Check
-      const isSuperAdmin = userEmail === SUPER_ADMIN_EMAIL || profileRes.data.role === "super-admin";
+      const isSuperAdmin = isSuperAdminProfile({
+        _id: profileRes.data._id,
+        email: userEmail || profileRes.data.email,
+        role: profileRes.data.role,
+      } as any);
 
       Logger.info("Login", "Resolved account role", {
         accountType,

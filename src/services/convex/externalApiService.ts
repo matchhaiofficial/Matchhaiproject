@@ -32,7 +32,13 @@ export async function fetchSteamProfileFromUrl(
   url: string
 ): Promise<SteamResult> {
   try {
-    const result = await convex.action(api.externalApis.fetchSteamProfile, { url });
+    const result: any = await convex.action(api.externalApis.fetchSteamProfile, { url });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+      };
+    }
     return {
       ok: true,
       data: {
@@ -45,7 +51,6 @@ export async function fetchSteamProfileFromUrl(
       },
     };
   } catch (error: any) {
-    console.error("[externalApiService] fetchSteamProfile error:", error);
     return {
       ok: false,
       message: error?.message || "Failed to fetch Steam profile",

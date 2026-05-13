@@ -18,7 +18,6 @@ import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
-import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
 import { useToast } from "../../../src/hooks/useToast";
 import { authClient } from "../../../src/lib/auth-client";
 import { convex } from "../../../src/lib/convex";
@@ -83,7 +82,7 @@ const resolveZoneUsername = (input: {
 };
 
 export default function ZoneEditProfile() {
-    const { user, authUser, refreshSession, refreshUser } = useAuth();
+    const { user, authUser, refreshUser } = useAuth();
     const { zone, loading: zoneLoading } = useZoneData();
     const { showToast } = useToast();
 
@@ -208,7 +207,7 @@ export default function ZoneEditProfile() {
         return emailRegex.test(trimmedNew) && trimmedNew !== email;
     }, [newEmail, email]);
 
-    const isEmailVerified = Boolean(authUser?.emailVerified) && !pendingEmail;
+    const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
 
     useEffect(() => {
         let mounted = true;
@@ -270,43 +269,6 @@ export default function ZoneEditProfile() {
         };
     }, [showToast, user?._id, zone?.id, zoneLoading]);
 
-    useSessionRefreshPolling({
-        enabled: Boolean(user?._id && pendingEmail),
-        refreshSession,
-    });
-
-    useEffect(() => {
-        if (!user?._id || !zone?.id || !pendingEmail) return;
-
-        const checkEmailUpdate = async () => {
-            try {
-                const session = await authClient.getSession();
-                const currentEmail = session?.data?.user?.email || "";
-                if (currentEmail !== pendingEmail) return;
-
-                await convex.mutation(api.users.updateFullProfile, {
-                    userId: user._id as Id<"users">,
-                    updates: { pendingEmail: null, email: currentEmail },
-                });
-
-                await updateZone(zone.id, { contactEmail: currentEmail });
-                setEmail(currentEmail);
-                setPendingEmail("");
-                await refreshUser();
-
-                showToast({
-                    type: "success",
-                    title: "Email Updated",
-                    message: "Your email has been successfully updated.",
-                });
-            } catch (error) {
-                console.error("Error checking email update", error);
-            }
-        };
-
-        void checkEmailUpdate();
-    }, [pendingEmail, refreshUser, showToast, user?._id, zone?.id]);
-
     const handlePhoneBlur = async () => {
         const phoneTrimmed = phone.trim();
         const normalizedPhone = phoneTrimmed.replace(/\s|-/g, "");
@@ -336,31 +298,22 @@ export default function ZoneEditProfile() {
 
         try {
             setEmailUpdating(true);
-            const result = await (authClient as any).changeEmail({
-                newEmail: newEmail.trim(),
-            });
-
-            if (result?.error) throw result.error;
-
-            await convex.mutation(api.users.updateFullProfile, {
-                userId: user._id as Id<"users">,
-                updates: { pendingEmail: newEmail.trim() },
-            });
+            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim() });
 
             setPendingEmail(newEmail.trim());
             setIsEmailChanging(false);
             setNewEmail("");
             showToast({
-                type: "success",
-                title: "Verification Sent",
-                message: "Check your new email for the verification link.",
+                type: "info",
+                title: "Email change requested",
+                message: "Complete CNIC & face verification again before this email becomes active.",
             });
         } catch (error: any) {
             console.error("Email update failed", error);
             showToast({
                 type: "error",
                 title: "Error",
-                message: error?.message || "Failed to send verification email.",
+                message: error?.message || "Failed to request email change.",
             });
         } finally {
             setEmailUpdating(false);

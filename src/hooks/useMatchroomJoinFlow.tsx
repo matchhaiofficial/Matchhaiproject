@@ -18,7 +18,7 @@ import {
 } from "../services/convex/matchService";
 import { GameKey, GameSkillScore } from "../services/skillRatingService";
 import { getUserProfile, getUserSportRoleLabel } from "../services/userService";
-import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../utils/emailVerificationGate";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../utils/verificationGate";
 import { Perf, PerfScope } from "../utils/perfInstrumentation";
 
 type StartJoinArgs = {
@@ -144,9 +144,9 @@ export function useMatchroomJoinFlow() {
             showToastRef.current({ type: "warning", title: "Login Required", message: "Please login to join matchrooms." });
             return "blocked";
           }
-          if (!hasVerifiedEmail(authUser)) {
-            showToastRef.current({ type: "warning", title: "Verify Email", message: "Verify your email before joining matchrooms." });
-            showEmailVerificationRequiredAlert();
+          if (!isUserFullyVerified(authUser, user)) {
+            showToastRef.current({ type: "warning", title: "Verify your identity", message: "Please complete CNIC & face verification to unlock MatchHai features." });
+            showKycVerificationRequiredAlert();
             return "blocked";
           }
 

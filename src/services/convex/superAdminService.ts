@@ -90,9 +90,18 @@ export type SuperAdminSupportTicket = {
   reference: string;
   userRole?: string;
   category?: string;
+  subcategory?: string;
+  intent?: string;
+  priority?: "low" | "medium" | "high" | "urgent";
   issueSummary: string;
+  suggestedAdminAction?: string;
+  relatedMatchroomId?: string;
+  relatedPaymentId?: string;
+  relatedBookingId?: string;
+  relatedZoneId?: string;
+  conversationId?: string;
   status: SuperAdminSupportTicketStatus;
-  source: "help_support_chat";
+  source: "help_support_chat" | "help_support_ai_agent";
   createdAt: number;
   updatedAt: number;
   userDisplayName?: string;
@@ -104,6 +113,8 @@ export type SuperAdminSupportTicket = {
   }>;
   metadataSummary?: {
     knownNonSensitiveDetails?: Record<string, unknown>;
+    emailStatus?: string;
+    aiSummary?: string;
     user?: Record<string, unknown>;
     zones?: Array<Record<string, unknown>>;
     recentPayments?: Array<Record<string, unknown>>;
@@ -178,6 +189,43 @@ export type SuperAdminMatchroom = {
   updatedAt: number;
 };
 
+export type SuperAdminIdentityVerification = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string | null;
+  role: string;
+  provider: "didit";
+  workflowId: string;
+  status: string;
+  submittedAt: number;
+  verifiedAt?: number | null;
+  rejectedAt?: number | null;
+  rejectionReason?: string | null;
+  emailVerificationStatus?: string | null;
+  idVerificationStatus?: string | null;
+  livenessStatus?: string | null;
+  faceMatchStatus?: string | null;
+  amlStatus?: string | null;
+  ipAnalysisStatus?: string | null;
+};
+
+export type SuperAdminAuditLog = {
+  id: string;
+  superAdminUserId?: string | null;
+  superAdminAuthId?: string | null;
+  superAdminName: string;
+  superAdminEmail: string;
+  action: string;
+  module: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  status: "success" | "failed" | "denied";
+  reason?: string | null;
+  metadataSafe?: Record<string, unknown> | null;
+  createdAt: number;
+};
+
 type Result<T> = { ok: true; data: T } | { ok: false; message: string };
 type BasicResult = { ok: true } | { ok: false; message: string };
 
@@ -219,6 +267,51 @@ function clearSuperAdminCache() {
   superAdminCache.clear();
 }
 
+async function recordSuperAdminAuditSafe(input: {
+  action: string;
+  module: string;
+  targetType?: string;
+  targetId?: string;
+  status?: "success" | "failed" | "denied";
+  reason?: string;
+  metadataSafe?: Record<string, unknown>;
+}) {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.recordSuperAdminAudit, {
+      sessionToken,
+      action: input.action,
+      module: input.module,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      status: input.status || "success",
+      reason: input.reason,
+      metadataSafe: input.metadataSafe,
+    });
+  } catch {
+    // Audit failures must not break admin read flows.
+  }
+}
+
+export async function recordSuperAdminRouteAccess(route = "/super-admin"): Promise<void> {
+  await recordSuperAdminAuditSafe({
+    action: "super_admin_route_access",
+    module: "super_admin",
+    status: "success",
+    metadataSafe: { route },
+  });
+}
+
+export async function recordSuperAdminAccessDenied(route = "/super-admin", reason = "not_authorized"): Promise<void> {
+  await recordSuperAdminAuditSafe({
+    action: "super_admin_access_denied",
+    module: "super_admin",
+    status: "denied",
+    reason,
+    metadataSafe: { route },
+  });
+}
+
 async function getCachedOrLoad<T>(key: string, loader: () => Promise<T>) {
   const cached = readCache<T>(key);
   if (cached) {
@@ -246,6 +339,7 @@ export async function getDashboardSummary(): Promise<Result<SuperAdminSummary>> 
       `summary:${sessionToken}`,
       () => convex.query(api.admin.getDashboardSummary, { sessionToken })
     );
+    await recordSuperAdminAuditSafe({ action: "super_admin_route_access", module: "super_admin", metadataSafe: { screen: "dashboard" } });
     return { ok: true, data: summary };
   } catch (error: any) {
     console.error("[superAdminService] getDashboardSummary error", error);
@@ -267,6 +361,7 @@ export async function getZones(
           limit: 100,
         })
     );
+    await recordSuperAdminAuditSafe({ action: "view_zone", module: "zones", metadataSafe: { status: status || "all", count: zones.length } });
     return { ok: true, data: zones.map(mapZone) };
   } catch (error: any) {
     console.error("[superAdminService] getZones error", error);
@@ -292,10 +387,76 @@ export async function getUsers(
           limit: 150,
         })
     );
+    await recordSuperAdminAuditSafe({ action: "view_user", module: "users", metadataSafe: { accountType: accountType || "all", count: users.length } });
     return { ok: true, data: users as SuperAdminUser[] };
   } catch (error: any) {
     console.error("[superAdminService] getUsers error", error);
     return { ok: false, message: "Failed to load users." };
+  }
+}
+
+export async function getIdentityVerifications(input?: {
+  status?: string;
+  role?: string;
+}): Promise<Result<SuperAdminIdentityVerification[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const rows = await getCachedOrLoad(
+      `identityVerifications:${sessionToken}:${input?.status || "all"}:${input?.role || "all"}`,
+      () =>
+        convex.query(api.admin.listIdentityVerifications, {
+          sessionToken,
+          status: input?.status,
+          role: input?.role,
+          limit: 150,
+        }),
+    );
+    await recordSuperAdminAuditSafe({
+      action: "view_identity_verifications",
+      module: "identity",
+      metadataSafe: { status: input?.status || "all", role: input?.role || "all", count: rows.length },
+    });
+    return { ok: true, data: rows as SuperAdminIdentityVerification[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getIdentityVerifications error", error);
+    return { ok: false, message: "Failed to load identity verifications." };
+  }
+}
+
+export async function getSuperAdminAuditLogs(input?: {
+  superAdminEmail?: string;
+  action?: string;
+  module?: string;
+  status?: "success" | "failed" | "denied";
+  targetId?: string;
+  from?: number;
+  to?: number;
+}): Promise<Result<SuperAdminAuditLog[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const rows = await convex.query(api.admin.listSuperAdminAuditLogs, {
+      sessionToken,
+      superAdminEmail: input?.superAdminEmail || undefined,
+      action: input?.action || undefined,
+      module: input?.module || undefined,
+      status: input?.status,
+      targetId: input?.targetId || undefined,
+      from: input?.from,
+      to: input?.to,
+      limit: 150,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_super_admin_audit_logs",
+      module: "super_admin",
+      metadataSafe: {
+        filtered: Boolean(input?.superAdminEmail || input?.action || input?.module || input?.status || input?.targetId),
+        count: rows.length,
+      },
+    });
+    return { ok: true, data: rows as SuperAdminAuditLog[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminAuditLogs error", error);
+    return { ok: false, message: "Failed to load audit logs." };
   }
 }
 
@@ -313,6 +474,7 @@ export async function getReports(
           limit: 100,
         })
     );
+    await recordSuperAdminAuditSafe({ action: "view_reports", module: "reports", metadataSafe: { status: status || "all", count: reports.length } });
     return { ok: true, data: reports as SuperAdminReport[] };
   } catch (error: any) {
     console.error("[superAdminService] getReports error", error);
@@ -334,6 +496,7 @@ export async function getSupportTickets(
           limit: 100,
         })
     );
+    await recordSuperAdminAuditSafe({ action: "view_support_tickets", module: "support", metadataSafe: { status: status || "all", count: tickets.length } });
     return { ok: true, data: tickets as SuperAdminSupportTicket[] };
   } catch (error: any) {
     console.error("[superAdminService] getSupportTickets error", error);
@@ -347,6 +510,13 @@ export async function getSupportTicketById(ticketId: string): Promise<Result<Sup
     const ticket = await convex.query(api.admin.getSupportTicketById, {
       sessionToken,
       ticketId: ticketId as Id<"supportTickets">,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_support_ticket_detail",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: ticketId,
+      metadataSafe: { found: Boolean(ticket) },
     });
     return { ok: true, data: ticket as SuperAdminSupportTicket | null };
   } catch (error: any) {
@@ -384,6 +554,11 @@ export async function getEasypaisaTransactions(
       orderRefNum,
       limit: 20,
     });
+    await recordSuperAdminAuditSafe({
+      action: "view_payment_transaction",
+      module: "payments",
+      metadataSafe: { orderRefNum: orderRefNum ? "filtered" : "all", count: transactions.length },
+    });
     return { ok: true, data: transactions as EasypaisaAdminTransaction[] };
   } catch (error: any) {
     console.error("[superAdminService] getEasypaisaTransactions error", error);
@@ -398,6 +573,7 @@ export async function getSuperAdminMatchrooms(): Promise<Result<SuperAdminMatchr
       sessionToken,
       limit: 150,
     });
+    await recordSuperAdminAuditSafe({ action: "view_matchrooms", module: "matchrooms", metadataSafe: { count: rooms.length } });
     return { ok: true, data: rooms as SuperAdminMatchroom[] };
   } catch (error: any) {
     console.error("[superAdminService] getSuperAdminMatchrooms error", error);
@@ -412,6 +588,13 @@ export async function getSuperAdminMatchroomById(matchroomId: string): Promise<R
       sessionToken,
       matchroomId: matchroomId as Id<"matchrooms">,
     });
+    await recordSuperAdminAuditSafe({
+      action: "view_matchroom",
+      module: "matchrooms",
+      targetType: "matchroom",
+      targetId: matchroomId,
+      metadataSafe: { found: Boolean(room) },
+    });
     return { ok: true, data: room as SuperAdminMatchroom | null };
   } catch (error: any) {
     console.error("[superAdminService] getSuperAdminMatchroomById error", error);
@@ -425,6 +608,13 @@ export async function getReportById(reportId: string): Promise<Result<SuperAdmin
     const report = await convex.query(api.admin.getReportById, {
       sessionToken,
       reportId: reportId as Id<"reports">,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_report",
+      module: "reports",
+      targetType: "report",
+      targetId: reportId,
+      metadataSafe: { found: Boolean(report) },
     });
     return { ok: true, data: report as SuperAdminReport | null };
   } catch (error: any) {

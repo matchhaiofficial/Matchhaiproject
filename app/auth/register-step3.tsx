@@ -23,6 +23,7 @@ import {
 } from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
+import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
 import styles from "./register.styles";
 
@@ -47,7 +48,7 @@ const FACEIT_URL_REGEX =
   /^(?:https?:\/\/)?(?:www\.)?faceit\.com\/[a-z]{2}\/players\/([a-zA-Z0-9_-]+)/i;
 
 export default function RegisterStep3() {
-  const { step2, step3, setStep3, setCurrentStep } = useOnboardingStore();
+  const { step1, step2, step3, setStep3, setCurrentStep } = useOnboardingStore();
   const { showToast } = useToast();
   const isFocused = useIsFocused();
 
@@ -105,6 +106,15 @@ export default function RegisterStep3() {
 
   useEffect(() => {
     if (!isFocused) return;
+    const { phoneE164 } = normalizePakistaniPhone(step1.phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (!phoneVerified) {
+      router.replace("/auth/register");
+      return;
+    }
     const hasActivity =
       playsCs2 ||
       playsCs16 ||
@@ -116,6 +126,7 @@ export default function RegisterStep3() {
     }
   }, [
     isFocused,
+    step1,
     playsCs2,
     playsCs16,
     playsFc,
@@ -147,36 +158,53 @@ export default function RegisterStep3() {
 
   const handleSteamLookup = async () => {
     const query = extractSteamId(steamProfileUrl);
-    if (!query) return;
-
-    setSteamStatus("verifying");
-    const result = await fetchSteamProfileFromUrl(query);
-    if (!result.ok) {
-      setSteamStatus("failed");
-      setSteamCooldown(10);
-      showToast({ type: "error", title: "Steam lookup failed", message: result.message });
-      return;
-    }
-
-    const available = await isSteamIdAvailable(result.data.steamId);
-    if (!available) {
-      setSteamStatus("failed");
-      setSteamCooldown(10);
+    if (!query) {
       showToast({
-        type: "warning",
-        title: "Steam taken",
-        message: "This Steam account is already linked to another user.",
+        type: "info",
+        title: "Steam profile",
+        message: "Enter a Steam profile URL, vanity name, or SteamID64.",
       });
       return;
     }
 
-    setSteamStatus("verified");
-    setSteamProfile(result.data);
-    showToast({
-      type: "success",
-      title: "Steam linked",
-      message: `Found ${result.data.personaName}`,
-    });
+    setSteamStatus("verifying");
+    try {
+      const result = await fetchSteamProfileFromUrl(query);
+      if (!result.ok) {
+        setSteamStatus("failed");
+        setSteamCooldown(10);
+        showToast({ type: "error", title: "Steam lookup failed", message: result.message });
+        return;
+      }
+
+      const available = await isSteamIdAvailable(result.data.steamId);
+      if (!available) {
+        setSteamStatus("failed");
+        setSteamCooldown(10);
+        showToast({
+          type: "warning",
+          title: "Steam taken",
+          message: "This Steam account is already linked to another user.",
+        });
+        return;
+      }
+
+      setSteamStatus("verified");
+      setSteamProfile(result.data);
+      showToast({
+        type: "success",
+        title: "Steam linked",
+        message: `Found ${result.data.personaName}`,
+      });
+    } catch {
+      setSteamStatus("failed");
+      setSteamCooldown(10);
+      showToast({
+        type: "error",
+        title: "Steam lookup failed",
+        message: "Check the Steam profile URL or skip this optional step for now.",
+      });
+    }
   };
 
   const handleFaceitLookup = async () => {

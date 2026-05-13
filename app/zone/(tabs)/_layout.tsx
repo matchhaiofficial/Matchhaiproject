@@ -11,8 +11,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
+import { useAuth } from "../../../src/context/AuthContext";
 import { COLORS, FONTS } from "../../../src/theme";
 import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
+import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 
 // Responsive helpers (mirrors PlayerTabsLayout)
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -42,9 +44,11 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
     if (hideZoneTabBar) return null;
 
     // Only render routes that exist in our TABS list (hides style files etc.)
-    const visibleRoutes = state.routes.filter((route) =>
-        TABS.some((t) => t.name === route.name)
-    );
+    const visibleRoutes = state.routes.filter((route) => {
+        if (!TABS.some((t) => t.name === route.name)) return false;
+        const opts = descriptors[route.key]?.options as any;
+        return opts?.href !== null;
+    });
 
     const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
 
@@ -122,6 +126,9 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
 
 // Layout
 export default function ZoneTabsLayout() {
+    const { authUser, user } = useAuth();
+    const kycVerified = isUserFullyVerified(authUser, user);
+
     return (
         <Tabs
             tabBar={(props) => <ZoneCustomTabBar {...props} />}
@@ -136,7 +143,7 @@ export default function ZoneTabsLayout() {
             />
             <Tabs.Screen
                 name="branches"
-                options={{ title: "Branches" }}
+                options={{ title: "Branches", href: kycVerified ? undefined : null }}
             />
             <Tabs.Screen
                 name="profile"

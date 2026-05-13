@@ -58,6 +58,9 @@ type ChatThreadProps = {
     onClearReply?: () => void;
     seenReceiptsByMessageId?: Record<string, ChatSeenReceipt[]>;
     showComposer?: boolean;
+    composerDisabled?: boolean;
+    composerPlaceholder?: string;
+    composerStatus?: React.ReactNode;
     onPickImage?: () => void;
     onPickFile?: () => void;
     typingNames?: string[];
@@ -212,6 +215,53 @@ function TypingBubble({ label = "typing" }: { label?: string }) {
                     {".".repeat(dotCount)}
                 </Text>
             </View>
+        </View>
+    );
+}
+
+function FormattedMessageText({ text, mine }: { text: string; mine: boolean }) {
+    const textStyle = mine ? styles.bubbleTextMine : styles.bubbleTextOther;
+    const lines = String(text || "").split("\n");
+    return (
+        <View>
+            {lines.map((line, index) => {
+                const trimmed = line.trim();
+                const bullet = trimmed.match(/^[-•]\s+(.*)$/);
+                if (!trimmed) {
+                    return <View key={`space-${index}`} style={styles.messageLineGap} />;
+                }
+                return (
+                    <Text key={`${trimmed}-${index}`} style={[textStyle, bullet && styles.messageBulletLine]}>
+                        {bullet ? `• ${bullet[1]}` : trimmed}
+                    </Text>
+                );
+            })}
+        </View>
+    );
+}
+
+function SupportMatchroomCards({ cards }: { cards?: ChatThreadMessage["supportCards"] }) {
+    const matchrooms = cards?.matchrooms || [];
+    if (!matchrooms.length) return null;
+    return (
+        <View style={styles.supportCardsWrap}>
+            {matchrooms.slice(0, 3).map((room) => (
+                <View key={room.id} style={styles.supportMatchroomCard}>
+                    <View style={styles.supportCardHeader}>
+                        <Text style={styles.supportCardTitle} numberOfLines={1}>
+                            {room.title || "Matchroom"}
+                        </Text>
+                        {room.status ? <Text style={styles.supportCardStatus}>{room.status}</Text> : null}
+                    </View>
+                    <View style={styles.supportCardMetaGrid}>
+                        {room.game ? <Text style={styles.supportCardMeta}>Game: {room.game}</Text> : null}
+                        {room.scheduledAt ? <Text style={styles.supportCardMeta}>Time: {new Date(room.scheduledAt).toLocaleString()}</Text> : null}
+                        {room.bookingStatus ? <Text style={styles.supportCardMeta}>Booking: {room.bookingStatus}</Text> : null}
+                        {room.paymentStatus ? <Text style={styles.supportCardMeta}>Payment: {room.paymentStatus}</Text> : null}
+                        {room.resultStatus ? <Text style={styles.supportCardMeta}>Result: {room.resultStatus}</Text> : null}
+                    </View>
+                </View>
+            ))}
         </View>
     );
 }
@@ -417,9 +467,10 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
                                     <AppIcon name="file-download" size={20} color={mine ? "rgba(255,255,255,0.7)" : COLORS.textSecondary} />
                                 </Pressable>
                             ) : (
-                                <Text style={mine ? styles.bubbleTextMine : styles.bubbleTextOther}>
-                                    {item.text}
-                                </Text>
+                                <>
+                                    <FormattedMessageText text={item.text} mine={mine} />
+                                    {!mine ? <SupportMatchroomCards cards={item.supportCards} /> : null}
+                                </>
                             )}
                         </View>
                     </Pressable>
@@ -476,6 +527,9 @@ export default function ChatThread({
     onClearReply,
     seenReceiptsByMessageId = {},
     showComposer = true,
+    composerDisabled = false,
+    composerPlaceholder = "Type message...",
+    composerStatus,
     onPickImage,
     onPickFile,
     typingNames = [],
@@ -559,7 +613,7 @@ export default function ChatThread({
         : trimmedInput
             ? "send"
             : "mic";
-    const trailingActionDisabled = sending || (!recording && trailingAction === "send" && !trimmedInput);
+    const trailingActionDisabled = composerDisabled || sending || (!recording && trailingAction === "send" && !trimmedInput);
     const handleTrailingActionPress = () => {
         dismissReactionPicker();
         if (recording) {
@@ -846,6 +900,8 @@ export default function ChatThread({
                                                 </View>
                                             ) : null}
 
+                                            {composerStatus ? composerStatus : null}
+
                                             {recording ? (
                                                 <View style={styles.recordingPill}>
                                                     <Text style={styles.recordingText}>
@@ -874,8 +930,9 @@ export default function ChatThread({
                                                         value={input}
                                                         onChangeText={onInputChange}
                                                         style={styles.composerInput}
-                                                        placeholder="Type message..."
+                                                        placeholder={composerPlaceholder}
                                                         placeholderTextColor={COLORS.textSecondary}
+                                                        editable={!composerDisabled && !sending}
                                                         onFocus={() => {
                                                             dismissReactionPicker();
                                                             maybeScrollToBottom(true);
@@ -887,6 +944,7 @@ export default function ChatThread({
                                                             dismissReactionPicker();
                                                             setEmojiOpen(true);
                                                         }}
+                                                        disabled={composerDisabled || sending}
                                                         style={styles.composerEmojiAction}
                                                         accessibilityRole="button"
                                                         accessibilityLabel="Emoji picker"

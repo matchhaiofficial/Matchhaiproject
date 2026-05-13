@@ -1,346 +1,204 @@
 export interface Env {
-  CLOUDFLARE_ACCOUNT_ID: string;
-  CLOUDFLARE_WORKERS_AI_API_TOKEN: string;
-  SUPPORT_AI_MODEL?: string;
+  DEEPSEEK_API_KEY: string;
+  DEEPSEEK_MODEL?: string;
+  DEEPSEEK_BASE_URL?: string;
+  SUPPORT_AI_SHARED_SECRET: string;
+  SUPPORT_AGENT_TOOLS_URL: string;
+  SUPPORT_ALLOWED_ORIGIN?: string;
   SUPPORT_EMAIL?: string;
 }
 
-const BULLET = "\u2022";
-
-type AgentContextPatch = {
-  userRole?: "player" | "zone_admin" | "super_admin" | "unknown";
-  currentIssueCategory?: string;
-  subIssue?: string;
-  currentIssueSummary?: string;
-  knownNonSensitiveDetails?: Record<string, string | number | boolean>;
-  lastAssistantQuestion?: string;
-  escalationOffered?: boolean;
-  pendingAction?: "none" | "create_ticket" | "send_email";
+type AgentActionStatus = "executed" | "denied" | "failed" | "rate_limited";
+type AgentAction = {
+  type: string;
+  reason?: string;
+  payload?: Record<string, unknown>;
 };
 
+const MAX_USER_MESSAGE_CHARS = 2000;
+const MAX_RECENT_MESSAGES_SENT = 12;
+const MAX_TOOL_CALLS_PER_TURN = 5;
+const MAX_CONTEXT_CHARS = 12000;
+const DEFAULT_MODEL = "deepseek-v4-pro";
+const DANGEROUS_ACTIONS = new Set([
+  "refund_payment",
+  "modify_wallet_balance",
+  "ban_user",
+  "suspend_user",
+  "release_venue_payout",
+  "override_match_result",
+  "delete_account",
+  "cancel_confirmed_matchroom",
+]);
+const ALLOWED_ACTIONS = new Set([
+  "create_support_ticket",
+  "create_admin_escalation",
+  "create_moderation_report",
+  "add_support_ticket_note",
+  "prepare_email_draft",
+]);
+
 const SYSTEM_PROMPT = [
-  "You are MatchHai Support Assistant.",
-  "You help players, zone admins, and super admins with MatchHai app issues.",
-  "You are not a generic chatbot. Refuse off-topic requests briefly, then invite the user back to MatchHai support.",
-  "Understand the issue naturally from the current message, conversation history, safe app context, and user role.",
-  "Reason silently. Do not expose chain of thought.",
-  "Do not repeat templates or the same answer from earlier messages.",
-  "Ask only 1-2 focused follow-up questions at a time.",
-  "Do not dump long generic checklists unless the user asks for a summary or email draft.",
-  "Never ask for OTPs, PINs, passwords, tokens, raw provider payloads, checkout tokens, auth tokens, or internal debug data.",
-  "Do not claim you checked database, payment, account, or admin status unless the safe app context explicitly contains that information.",
-  "If safe app context is unavailable or insufficient, say what the user can check and offer to create a support request.",
-  "For payment deducted, account access/profile sync, backend-sync, missing matchroom, or admin dashboard data issues, offer to create a support request when unresolved.",
-  "For completed matchroom/lobby result issues, use category matchroom_results and explain that completed matchrooms can show Final Result, Verifying Results, or Result Dispute while captains submit results and participants may vote if captains disagree.",
-  "If the user asks to write/draft an email, generate a draft only.",
-  "If the user asks to send/email directly/contact support/create ticket, set pendingAction to create_ticket and ask for confirmation unless the user has already clearly confirmed.",
-  "Format mobile chat replies with short paragraphs and bullets only when helpful.",
-  "Return only valid JSON with shape: {\"answer\":\"...\",\"contextPatch\":{...}}.",
+  "You are MatchHai AI Support Agent.",
+  "You help players, zone admins, and super admins with MatchHai app support issues only.",
+  "You can inspect only safe tool context provided to you. Never claim you checked data that is not in safe context.",
+  "Never ask for OTPs, PINs, passwords, tokens, auth headers, CNIC, card numbers, wallet numbers, or payment gateway payloads.",
+  "Never perform or recommend direct execution of refunds, wallet balance changes, bans, suspensions, venue payouts, result overrides, account deletion, or confirmed matchroom cancellation. Escalate those.",
+  "For low or medium priority ticket creation, ask for user confirmation before creating a ticket.",
+  "For urgent deducted-payment or failed-booking issues, you may request create_support_ticket.",
+  "For reports about players, teams, venues, zones, cheating, harassment, abuse, unsafe venue behavior, or moderation, collect safe facts and use create_moderation_report when the user clearly wants to file a report.",
+  "The support chat cannot upload attachments. Never ask users to attach documents, screenshots, images, videos, receipts, or files. Ask for short text details only.",
+  "Format answer as clean short paragraphs with bullets when listing steps. Do not use markdown tables. Keep the tone human, direct, and supportive.",
+  "Return only JSON with this shape: {\"answer\":\"...\",\"intent\":\"payment_issue|matchroom_issue|account_issue|zone_admin_issue|general_help|bug_report|dispute|refund_request\",\"confidence\":0.0,\"priority\":\"low|medium|high|urgent\",\"neededFollowUp\":null,\"actions\":[],\"contextPatch\":{}}.",
 ].join("\n");
-
-const SUPPORT_TOPICS = [
-  "matchhai",
-  "help",
-  "support",
-  "user",
-  "player",
-  "owner",
-  "account",
-  "login",
-  "profile",
-  "password",
-  "register",
-  "registration",
-  "signup",
-  "matchroom",
-  "match room",
-  "lobby",
-  "booking",
-  "payment",
-  "wallet",
-  "refund",
-  "money",
-  "deducted",
-  "pending",
-  "paid",
-  "report",
-  "moderation",
-  "notification",
-  "zone",
-  "admin",
-  "super admin",
-  "venue",
-  "branch",
-  "approval",
-  "dashboard",
-  "ticket",
-  "email",
-  "send",
-  "issue",
-  "problem",
-  "stuck",
-  "error",
-  "bug",
-  "not working",
-  "unable",
-];
-
-const OFF_TOPIC_HINTS = [
-  "biryani",
-  "recipe",
-  "weather",
-  "movie",
-  "song",
-  "homework",
-  "capital of",
-];
 
 function normalize(value: string) {
   return value.trim().toLowerCase();
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-    },
+function requestId() {
+  return `support-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function json(body: unknown, status = 200, origin?: string | null) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+function getAllowedOrigin(request: Request, env: Env) {
+  const origin = request.headers.get("Origin");
+  const allowed = String(env.SUPPORT_ALLOWED_ORIGIN || "").trim();
+  if (!origin || !allowed) return null;
+  return origin === allowed ? origin : null;
+}
+
+function redactSupportText(input: string) {
+  return String(input || "")
+    .replace(/\b(?:otp|pin|password|token|secret)\s*[:=]?\s*[A-Z0-9@#$%^&*._-]{3,}\b/gi, "[redacted-secret]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/g, "[redacted-phone]")
+    .replace(/\b(?:\d[ -]?){13,19}\b/g, "[redacted-card]")
+    .replace(/\b(?:easypaisa|jazzcash|wallet)\s*[:=]?\s*(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/gi, "[redacted-wallet]")
+    .replace(/\b\d{5}[-\s]?\d{7}[-\s]?\d\b/g, "[redacted-cnic]")
+    .replace(/\b(?:EP|TXN|TRX|PAY|ORD|REF)[-_]?(?=[A-Z0-9-]*\d)[A-Z0-9-]{6,}\b/gi, "[redacted-reference]")
+    .replace(/\b[A-F0-9]{12,}\b/gi, "[redacted-id]");
+}
+
+function bytesToBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
   });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function isSupportTopic(message: string, hasSupportContext: boolean) {
-  const text = normalize(message);
-  if (hasSupportContext && isContextualFollowUp(message)) return true;
-  return SUPPORT_TOPICS.some((topic) => text.includes(topic));
+function base64UrlToBytes(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }
 
-function isContextualFollowUp(message: string) {
-  const text = normalize(message);
-  return /\b(it|this|that|same|still|again|yes|no|yesterday|today|tomorrow|around|for|was|doesn'?t|didn'?t|write|send|directly|login|profile|account)\b/.test(text);
+async function sign(payloadBase64: string, secret: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
+  return bytesToBase64Url(new Uint8Array(signature));
 }
 
-function isOffTopic(message: string, hasSupportContext: boolean) {
-  const text = normalize(message);
-  if (isSupportTopic(message, hasSupportContext)) return false;
-  return OFF_TOPIC_HINTS.some((hint) => text.includes(hint));
-}
-
-function isAmbiguous(message: string) {
-  const text = normalize(message).replace(/[.!?]+$/g, "");
-  return text.length <= 2 || /^(hi|hello|hey|help|support|i need help|need help)$/.test(text);
-}
-
-function isRoleOnly(message: string) {
-  const text = normalize(message).replace(/[.!?]+$/g, "");
-  return /^(i am|i'm|im|as)\s+(a\s+)?(user|player|zone owner|zone admin|venue owner|super admin)$/.test(text);
+async function verifySupportToken(token: string, secret: string) {
+  const [payloadBase64, signature] = String(token || "").split(".");
+  if (!payloadBase64 || !signature) throw new Error("invalid_token");
+  if (await sign(payloadBase64, secret) !== signature) throw new Error("invalid_token");
+  const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payloadBase64)));
+  if (!payload?.expMs || Number(payload.expMs) <= Date.now()) throw new Error("expired_token");
+  return payload;
 }
 
 function isAffirmative(message: string) {
+  return /^(yes|y|yeah|yep|sure|ok|okay)$/i.test(message.trim());
+}
+
+function isOffTopic(message: string, hasContext: boolean) {
   const text = normalize(message);
-  return /^(yes|y|yeah|yep|sure|ok|okay)$/.test(text);
+  if (hasContext) return false;
+  const supportTerms = ["matchhai", "account", "profile", "matchroom", "booking", "payment", "wallet", "refund", "zone", "venue", "admin", "report", "notification", "support", "ticket", "login"];
+  if (supportTerms.some((term) => text.includes(term))) return false;
+  return ["biryani", "recipe", "weather", "movie", "song", "homework", "capital of"].some((term) => text.includes(term));
 }
 
-function isGreeting(message: string) {
-  const text = normalize(message).replace(/[.!?]+$/g, "");
-  return /^(hi|hello|hey|salam|assalamualaikum|asalamualaikum|assalamu alaikum|how are you|how r u|how are u)$/.test(text);
-}
-
-function isCorrection(message: string) {
-  const text = normalize(message);
-  return (
-    /\bi already told you\b/.test(text) ||
-    /\b(no|nope|nah)\b.*\b(not what i wanted|not what i meant|wrong|misunderstood)\b/.test(text) ||
-    /\b(that'?s wrong|you misunderstood|not what i wanted|not what i meant)\b/.test(text)
-  );
-}
-
-function wantsDraft(message: string) {
-  const text = normalize(message);
-  return (
-    /\b(write|draft|compose)\b.*\b(email|message)\b/.test(text) ||
-    text.includes("what should i send") ||
-    text.includes("what do i send")
-  );
-}
-
-function wantsDirectAction(message: string) {
-  const text = normalize(message);
-  return (
-    text.includes("email it directly") ||
-    text.includes("send it directly") ||
-    text.includes("send to support") ||
-    text.includes("send this to support") ||
-    text.includes("contact admin") ||
-    text.includes("contact support") ||
-    text.includes("create ticket") ||
-    text.includes("create support request") ||
-    text.includes("support request")
-  );
-}
-
-function detectMatchroomResultSubIssue(message: string, previousCategory?: string) {
-  const text = normalize(message);
-  const mentionsResult = /\b(results?|scores?|stats?)\b/.test(text);
-  const mentionsCompleted = /\b(completed|complete|after match|match ended|ended|finished|finish)\b/.test(text);
-  const mentionsMissing = /\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score|not displayed|not appear)\b/.test(text);
-  const verification = /\b(result verification|verification)\b.*\b(stuck|pending|not showing|missing)\b/.test(text);
-  const captainConfirmed = /\b(captain|captains?)\b.*\b(confirmed|submitted)\b.*\b(result|score)\b/.test(text);
-
-  if ((mentionsResult && mentionsCompleted) || (mentionsResult && mentionsMissing) || verification || captainConfirmed) {
-    if (verification) return "result_verification_pending";
-    if (captainConfirmed) return "captain_confirmed_result_not_visible";
-    if (/\bstats?\b/.test(text)) return "completed_matchroom_stats_missing";
-    if (mentionsMissing || mentionsCompleted) return "completed_matchroom_result_not_visible";
-    return "score_not_showing";
-  }
-
-  if (previousCategory === "matchroom_results" && mentionsResult) {
-    return "completed_matchroom_result_not_visible";
-  }
-
-  return undefined;
-}
-
-function inferPatch(message: string, context: any): AgentContextPatch {
+function inferPatch(message: string, context: any) {
   const text = normalize(message);
   const details = { ...(context?.knownNonSensitiveDetails || {}) };
-  let userRole = context?.userRole;
   let category = context?.currentIssueCategory;
-  let subIssue = context?.subIssue;
-
+  let userRole = context?.userRole;
   if (/\bsuper\s*admin\b/.test(text)) userRole = "super_admin";
-  else if (/\b(zone owner|zone admin|venue owner)\b/.test(text)) userRole = "zone_admin";
-  else if (/\b(user|player)\b/.test(text)) userRole = userRole || "player";
-
-  const resultSubIssue = detectMatchroomResultSubIssue(message, category);
-  if (resultSubIssue) {
-    category = "matchroom_results";
-    subIssue = resultSubIssue;
-  } else if (/\b(payment|wallet|refund|deducted|money|paid|pending|easypaisa)\b/.test(text)) category = "payments_wallet_refunds";
-  if (!resultSubIssue && /\b(matchroom|match room|lobby|slot|invite|team)\b/.test(text)) {
-    category = category === "payments_wallet_refunds" ? "payments_matchroom" : "matchroom_lobby";
-    details.paymentType = "matchroom";
-  }
-  if (/\b(super admin|dashboard|filters)\b/.test(text)) category = "super_admin";
-  if (/\b(zone|venue|branch|approval|register a new zone)\b/.test(text)) category = "zone_admin";
-  if (/\b(login|log in|account|profile|password)\b/.test(text)) {
-    category = category === "zone_admin" ? "zone_admin_onboarding_account" : "account_profile";
-  }
-  if (/\b(notifications?|push|inbox|alert)\b/.test(text)) category = "notifications";
-  if (/\b(report|moderation|complaint)\b/.test(text)) category = "reports_moderation";
-
-  if (/\b(deducted|debited|charged|money left)\b/.test(text)) details.moneyDeducted = true;
-  if (/\b(profile missing|empty profile|account missing)\b/.test(text)) details.profileMissing = true;
-  if (/\b(completed|complete|match ended|ended|finished)\b/.test(text)) details.matchroomCompleted = true;
-  if (/\b(results?|scores?)\b/.test(text)) details.resultArea = true;
-  if (/\b(couldn'?t see|cant see|can't see|cannot see|not visible|not showing|missing|empty|no result|no score)\b/.test(text)) details.resultNotVisible = true;
-  if (/\b(history|completed history|completed list)\b/.test(text)) details.completedHistory = true;
-  if (/\b(verification|verifying|pending)\b/.test(text) && /\b(result|score)\b/.test(text)) details.resultVerificationPending = true;
-  if (/\b(captain|captains?)\b.*\b(confirmed|submitted)\b/.test(text)) details.captainConfirmed = true;
-  const timeMatch = message.match(/\b(yesterday|today|last night|this morning|this evening|around\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
-  if (timeMatch) details.approximateTime = timeMatch[0];
-  if (/\b(cs2|counter[-\s]?strike|counter strike)\b/.test(text)) details.game = "CS2";
-
-  const summaryParts = [
-    category,
-    subIssue,
-    details.paymentType ? `${details.paymentType} flow` : null,
-    details.moneyDeducted ? "money deducted" : null,
-    details.profileMissing ? "profile/account missing" : null,
-    details.matchroomCompleted ? "completed matchroom" : null,
-    details.resultNotVisible ? "result not visible" : null,
-    details.completedHistory ? "still in completed history" : null,
-    details.game,
-    details.approximateTime,
-  ].filter(Boolean);
-
+  if (/\b(zone owner|zone admin|venue owner|venue)\b/.test(text)) userRole = "zone_admin";
+  if (/\b(payment|wallet|refund|deducted|charged|paid|pending|easypaisa)\b/.test(text)) category = "payments_wallet_refunds";
+  else if (/\b(matchroom|match room|lobby|captain|result|dispute)\b/.test(text)) category = "matchroom_lobby";
+  else if (/\b(zone|venue|branch|pricing|resource|payout)\b/.test(text)) category = "zone_admin";
+  else if (/\b(login|account|profile|verification|steam|faceit|psn)\b/.test(text)) category = "account_profile";
+  else if (/\b(notification|push|inbox)\b/.test(text)) category = "notifications";
+  if (/\b(deducted|charged|money left|debited)\b/.test(text)) details.moneyDeducted = true;
+  if (/\b(refund)\b/.test(text)) details.refundRequested = true;
   return {
     userRole,
     currentIssueCategory: category,
-    subIssue,
-    currentIssueSummary: summaryParts.length ? summaryParts.join(", ") : context?.currentIssueSummary,
     knownNonSensitiveDetails: details,
+    currentIssueSummary: category || redactSupportText(message).slice(0, 160),
   };
 }
 
-function hasMeaningfulIssue(context: any) {
-  const details = Object.keys(context?.knownNonSensitiveDetails || {});
-  if (details.length > 0) return true;
-  const category = String(context?.currentIssueCategory || "");
-  if (category && category !== "unknown") return true;
-  const summary = normalize(String(context?.currentIssueSummary || ""));
-  if (!summary || summary === "matchhai support issue") return false;
-  if (/^(hi|hello|hey|salam|assalamualaikum|how are you|user|player|zone owner|zone admin|super admin)$/.test(summary)) {
-    return false;
+function fallbackAgentAnswer(message: string, context: any, safeContext?: any) {
+  const text = normalize(message);
+  const patch = inferPatch(message, context);
+  if (isOffTopic(message, Boolean(context?.currentIssueCategory))) {
+    return {
+      answer: "I can help with MatchHai support only. Tell me what is stuck in your account, matchroom, booking, payment, report, notification, or admin screen.",
+      contextPatch: { pendingAction: "none" },
+      intent: "general_help",
+      priority: "low",
+    };
   }
-  return summary.length >= 12 && /\b(issue|problem|stuck|error|not working|can't|cant|cannot|unable|missing|deducted|pending|login|profile|payment|matchroom|booking|notification|report|zone|admin)\b/.test(summary);
-}
-
-function isMatchroomResultContext(context: any, message?: string) {
-  return (
-    context?.currentIssueCategory === "matchroom_results" ||
-    Boolean(context?.subIssue && String(context.subIssue).includes("result")) ||
-    Boolean(message && detectMatchroomResultSubIssue(message, context?.currentIssueCategory))
-  );
-}
-
-function buildMatchroomResultAnswer(context: any, correction = false) {
-  const canOpenKnown = Boolean(context?.knownNonSensitiveDetails?.completedHistory);
-  return [
-    correction
-      ? "Sorry, you're right - you already said the matchroom is completed but the result is missing."
-      : "Got it - the matchroom was completed, but the result is not visible.",
-    "",
-    "In MatchHai, completed matchrooms can still show as verifying until result verification is finished. Captains submit the winner, and if captain reports disagree, participants may need to vote on the dispute.",
-    "",
-    "Please check:",
-    `${BULLET} Open the completed matchroom/lobby details`,
-    `${BULLET} Look for the result status: Final Result, Verifying Results, or Result Dispute`,
-    `${BULLET} If you are a captain, check whether both captains submitted the result`,
-    `${BULLET} If it says Result Dispute, use Vote on Dispute if it appears`,
-    "",
-    canOpenKnown
-      ? "Since it is still in completed history but the result area is empty, this may need support review if refreshing/opening the lobby again does not show a status."
-      : "Can you still open that completed matchroom, or is the whole matchroom missing from your history?",
-    canOpenKnown ? "I can create a support ticket for the MatchHai team if it stays empty." : "",
-  ].filter(Boolean).join("\n");
-}
-
-function buildDraft(context: any, supportEmail?: string) {
-  const email = String(supportEmail || "").trim();
-  if (!email) {
-    return "Support email is not configured yet. I can still help create a support request in the app.";
+  if (/\b(refund|cancel confirmed|ban|wallet balance|payout|override result|delete account)\b/.test(text)) {
+    return {
+      answer: "I cannot perform that action directly. I can check safe status details and create a support ticket for admin review.",
+      contextPatch: { ...patch, pendingAction: "create_ticket", escalationOffered: true },
+      intent: text.includes("refund") ? "refund_request" : "general_help",
+      priority: "high",
+    };
   }
-
-  const details = context?.knownNonSensitiveDetails || {};
-  const detailLines = Object.entries(details)
-    .slice(0, 8)
-    .map(([key, value]) => `${BULLET} ${key}: ${String(value)}`)
-    .join("\n");
-
-  return [
-    "Sure - here's a draft:",
-    "",
-    "Subject:",
-    `MatchHai ${context?.currentIssueCategory || "support"} request`,
-    "",
-    "Body:",
-    "Hi MatchHai Support,",
-    "",
-    `I need help with this issue: ${context?.currentIssueSummary || "MatchHai support issue"}.`,
-    context?.userRole ? `Account role: ${context.userRole}` : "",
-    "",
-    "Known details:",
-    detailLines || `${BULLET} No extra details captured yet`,
-    "",
-    "Please check and advise on the next step.",
-    "",
-    "Send to:",
-    email,
-  ].filter(Boolean).join("\n");
+  if (text.includes("deducted") || (text.includes("payment") && text.includes("pending"))) {
+    const recentPayment = Array.isArray(safeContext?.recentPayments) ? safeContext.recentPayments[0] : null;
+    return {
+      answer: [
+        "This sounds like a payment sync issue.",
+        "",
+        recentPayment ? `I can see a recent safe payment summary with status \"${recentPayment.status}\" for ${recentPayment.currency || "PKR"} ${recentPayment.amount}.` : "I do not have a matching payment summary in the safe context available to this chat.",
+        "I can create a high-priority support ticket for the MatchHai team if this is still unresolved.",
+      ].filter(Boolean).join("\n"),
+      contextPatch: { ...patch, pendingAction: "create_ticket", escalationOffered: true },
+      intent: "payment_issue",
+      priority: "high",
+    };
+  }
+  return {
+    answer: "I understand. What screen are you on, and what happens when you try the action?",
+    contextPatch: { ...patch, pendingAction: "none" },
+    intent: patch.currentIssueCategory || "general_help",
+    priority: "medium",
+  };
 }
 
 function extractJsonObject(text: string) {
@@ -352,228 +210,321 @@ function extractJsonObject(text: string) {
   return "";
 }
 
-function fallbackAgentAnswer(message: string, context: any, appContext: any, supportEmail?: string) {
+function isUrgentPaymentIssue(message: string, planner: any) {
   const text = normalize(message);
-  const patch = inferPatch(message, context);
-  const nextContext = { ...context, ...patch };
+  return (
+    planner?.priority === "urgent" ||
+    ((text.includes("deducted") || text.includes("charged") || text.includes("money left")) &&
+      (text.includes("payment") || text.includes("matchroom") || text.includes("booking")))
+  );
+}
 
-  if (isGreeting(message)) {
-    return {
-      answer: "Hi, I'm MatchHai Support. What's stuck in the app?",
-      contextPatch: { ...patch, pendingAction: "none" },
-    };
-  }
+function wantsTicket(message: string, context: any) {
+  const text = normalize(message);
+  return (
+    text.includes("create ticket") ||
+    text.includes("create support request") ||
+    text.includes("contact support") ||
+    text.includes("send to support") ||
+    (isAffirmative(message) && context?.pendingAction === "create_ticket")
+  );
+}
 
-  if (isCorrection(message)) {
-    if (isMatchroomResultContext(nextContext, message)) {
-      return {
-        answer: buildMatchroomResultAnswer(nextContext, true),
-        contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "completed_matchroom_access_scope" },
-      };
-    }
-    return {
-      answer: "Sorry, I misunderstood. Please tell me the issue you're facing in MatchHai, and I'll guide you.",
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "clarify_issue" },
-    };
-  }
+function wantsModerationReport(message: string) {
+  const text = normalize(message);
+  return /\b(report|complaint|complain|abuse|harassment|toxic|cheat|cheating|unsafe|scam|fraud)\b/.test(text) &&
+    /\b(player|user|team|venue|zone|branch|matchroom|captain|opponent|admin)\b/.test(text);
+}
 
-  if (wantsDraft(message)) {
-    if (!hasMeaningfulIssue(nextContext)) {
-      return {
-        answer: "Sure - what issue should the email be about?",
-        contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "email_issue_scope" },
-      };
-    }
-    return { answer: buildDraft(nextContext, supportEmail), contextPatch: { ...patch, pendingAction: "none" } };
-  }
+function inferReportType(message: string) {
+  const text = normalize(message);
+  if (/\b(venue|zone|branch)\b/.test(text)) return "zone_complaint";
+  if (/\b(matchroom|match room|captain|opponent)\b/.test(text)) return "matchroom_complaint";
+  return "user_report";
+}
 
-  if (wantsDirectAction(message)) {
-    if (!hasMeaningfulIssue(nextContext)) {
-      return {
-        answer: "I can create a support request after I understand the issue. What is stuck in MatchHai?",
-        contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "ticket_issue_scope" },
-      };
-    }
-    return {
-      answer: "I can create a support request for the MatchHai team with this conversation. Should I do that?",
-      contextPatch: { ...patch, pendingAction: "create_ticket", escalationOffered: true, lastAssistantQuestion: "confirm_create_ticket" },
-    };
-  }
-
-  if (isAmbiguous(message) || isRoleOnly(message)) {
-    return {
-      answer: "Sure - what MatchHai issue are you facing right now?",
-      contextPatch: { ...patch, pendingAction: "none" },
-    };
-  }
-
-  if (isMatchroomResultContext(nextContext, message)) {
-    return {
-      answer: buildMatchroomResultAnswer(nextContext),
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "completed_matchroom_access_scope" },
-    };
-  }
-
-  const recentPayments = Array.isArray(appContext?.recentPayments) ? appContext.recentPayments : [];
-  const recentMatchrooms = Array.isArray(appContext?.recentMatchrooms) ? appContext.recentMatchrooms : [];
-  if (text.includes("deducted") || (text.includes("payment") && text.includes("pending"))) {
-    const pendingPayment = recentPayments.find((payment: any) => ["created", "redirected", "token_received", "pending"].includes(String(payment.status)));
-    const pendingRoom = recentMatchrooms.find((room: any) => String(room.paymentStatus || "").toLowerCase() !== "paid");
-    return {
-      answer: [
-        "This sounds like a payment-to-matchroom sync issue.",
-        "",
-        pendingPayment
-          ? `I can see a recent safe payment summary with status "${pendingPayment.status}" for PKR ${pendingPayment.amount}.`
-          : "I do not have a matching pending payment summary in the safe context available to this chat.",
-        pendingRoom
-          ? `I also see a recent matchroom summary: ${pendingRoom.title || pendingRoom.game || pendingRoom.id}, payment status "${pendingRoom.paymentStatus || "unknown"}".`
-          : "",
-        "",
-        "This may need support review. I can create a support request for you. Should I do that?",
-      ].filter(Boolean).join("\n"),
-      contextPatch: { ...patch, pendingAction: "create_ticket", escalationOffered: true, lastAssistantQuestion: "confirm_create_ticket" },
-    };
-  }
-
-  if (patch.currentIssueCategory === "super_admin") {
-    return {
-      answer: "For a Super Admin payments view issue, first check whether a date/status filter is active. Are payments missing from the dashboard total, the transaction list, or only after applying filters?",
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "super_admin_payment_scope" },
-    };
-  }
-
-  if (patch.currentIssueCategory === "zone_admin" && /\b(register|registration|new zone|create zone)\b/.test(text)) {
-    return {
-      answer: "Got it - you are trying to register a new zone. What is stuck right now: account/login, venue details, branch/location, resources/pricing, or final submission?",
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "zone_registration_step" },
-    };
-  }
-
-  if (patch.currentIssueCategory === "notifications") {
-    return {
-      answer: "Got it - notifications are not coming through. Are you missing push notifications on the phone, in-app inbox notifications, or both?",
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "notification_scope" },
-    };
-  }
-
-  if (detailsIndicateProfileSync(patch.knownNonSensitiveDetails)) {
-    return {
-      answer: "Got it. Since you mentioned the account/profile is missing, this sounds more like an account sync/profile issue than a password issue. Are you logged in but seeing an empty profile, or can you not access the account at all?",
-      contextPatch: { ...patch, pendingAction: "none", lastAssistantQuestion: "profile_sync_scope" },
-    };
-  }
-
+function trimContext(payload: unknown) {
+  const text = JSON.stringify(payload);
+  if (text.length <= MAX_CONTEXT_CHARS) return payload;
   return {
-    answer: "I understand. What screen are you on, and what happens when you try the action?",
-    contextPatch: { ...patch, pendingAction: "none" },
+    truncated: true,
+    currentSupportContext: (payload as any)?.currentSupportContext,
+    inferredPatch: (payload as any)?.inferredPatch,
+    safeAppContext: (payload as any)?.safeAppContext
+      ? {
+          user: (payload as any).safeAppContext.user,
+          recentPayments: ((payload as any).safeAppContext.recentPayments || []).slice(0, 2),
+          recentMatchrooms: ((payload as any).safeAppContext.recentMatchrooms || []).slice(0, 2),
+          zones: ((payload as any).safeAppContext.zones || []).slice(0, 2),
+        }
+      : null,
   };
 }
 
-function detailsIndicateProfileSync(details: any) {
-  return Boolean(details?.profileMissing);
+async function callToolGateway(env: Env, body: {
+  requestId: string;
+  identityToken: string;
+  ipKey?: string;
+  tools: AgentAction[];
+}) {
+  const response = await fetch(env.SUPPORT_AGENT_TOOLS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Support-Agent-Service": env.SUPPORT_AI_SHARED_SECRET,
+    },
+    body: JSON.stringify({
+      requestId: body.requestId,
+      identityToken: body.identityToken,
+      ipKey: body.ipKey,
+      tools: body.tools.slice(0, MAX_TOOL_CALLS_PER_TURN),
+    }),
+  });
+  if (!response.ok) return { ok: false, rateLimited: false, results: [] as any[] };
+  return await response.json() as { ok: boolean; rateLimited?: boolean; results: any[] };
+}
+
+async function recordAgentEvent(env: Env, identityToken: string, id: string, actionType: string, actionStatus: AgentActionStatus, reasonCategory: string) {
+  await callToolGateway(env, {
+    requestId: id,
+    identityToken,
+    tools: [{ type: "record_agent_event", payload: { actionType, actionStatus, reasonCategory } }],
+  }).catch(() => null);
+}
+
+async function callDeepSeek(env: Env, messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) {
+  const baseUrl = String(env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.DEEPSEEK_MODEL || DEFAULT_MODEL,
+      messages,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!response.ok) throw new Error("deepseek_unavailable");
+  const payload = await response.json() as any;
+  const raw = String(payload?.choices?.[0]?.message?.content || "").trim();
+  const jsonText = extractJsonObject(raw);
+  const parsed = JSON.parse(jsonText);
+  if (!parsed?.answer) throw new Error("deepseek_invalid_json");
+  return parsed;
+}
+
+function validateActions(actions: unknown): AgentAction[] {
+  if (!Array.isArray(actions)) return [];
+  const valid: AgentAction[] = [];
+  for (const action of actions.slice(0, MAX_TOOL_CALLS_PER_TURN) as any[]) {
+    const type = String(action?.type || "").slice(0, 80);
+    if (!type) continue;
+    if (DANGEROUS_ACTIONS.has(type)) {
+      valid.push({ type, reason: "dangerous_action_blocked", payload: {} });
+      continue;
+    }
+    if (ALLOWED_ACTIONS.has(type)) {
+      valid.push({
+        type,
+        reason: action?.reason ? redactSupportText(String(action.reason)).slice(0, 200) : undefined,
+        payload: typeof action?.payload === "object" && action.payload ? action.payload : {},
+      });
+    }
+  }
+  return valid;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "OPTIONS") return json({});
-    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    const origin = getAllowedOrigin(request, env);
+    if (request.method === "OPTIONS") return json({}, 200, origin);
+    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, origin);
+
+    const id = requestId();
+    const auth = request.headers.get("Authorization") || "";
+    const identityToken = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length).trim() : "";
+    if (!identityToken || !env.SUPPORT_AI_SHARED_SECRET) return json({ error: "Unauthorized" }, 401, origin);
+
+    let identity: any;
+    try {
+      identity = await verifySupportToken(identityToken, env.SUPPORT_AI_SHARED_SECRET);
+    } catch {
+      return json({ error: "Unauthorized" }, 401, origin);
+    }
 
     const body = await request.json().catch(() => null) as {
       message?: string;
       context?: any;
-      appContext?: any;
-      supportEmail?: string;
       history?: Array<{ role?: string; text?: string }>;
+      supportEmail?: string;
     } | null;
+    const userMessage = redactSupportText(String(body?.message || "").trim()).slice(0, MAX_USER_MESSAGE_CHARS);
+    if (!userMessage) return json({ error: "Message is required" }, 400, origin);
 
-    const message = String(body?.message || "").trim().slice(0, 2000);
-    if (!message) return json({ error: "Message is required" }, 400);
-
+    const ipKey = request.headers.get("CF-Connecting-IP") || undefined;
     const context = body?.context || {};
-    const appContext = body?.appContext || null;
-    const supportEmail = body?.supportEmail || env.SUPPORT_EMAIL;
-    const hasSupportContext = Boolean(context.currentIssueCategory || context.currentIssueSummary);
-    const inferredPatch = inferPatch(message, context);
+    const inferredPatch = inferPatch(userMessage, context);
 
-    if (isOffTopic(message, hasSupportContext)) {
+    const initialTools = await callToolGateway(env, {
+      requestId: id,
+      identityToken,
+      ipKey,
+      tools: [
+        { type: "check_rate_limit", reason: "new_ai_turn" },
+        { type: "get_user_support_context", reason: "safe_context_for_ai" },
+      ],
+    });
+    if (!initialTools.ok || initialTools.rateLimited) {
+      return json({
+        answer: "Support AI is receiving too many requests right now. Please wait a minute and try again.",
+        contextPatch: { pendingAction: "none" },
+        agentMeta: { requestId: id, actionStatus: "rate_limited" },
+      }, 429, origin);
+    }
+    const safeContext = initialTools.results?.find((result) => result.type === "get_user_support_context" && result.ok)?.data || null;
+
+    if (isOffTopic(userMessage, Boolean(context?.currentIssueCategory))) {
+      await recordAgentEvent(env, identityToken, id, "off_topic", "denied", "support_scope");
       return json({
         answer: "I can help with MatchHai support only. Tell me what is stuck in your account, matchroom, booking, payment, report, notification, or admin screen.",
         contextPatch: { pendingAction: "none" },
-      });
+        agentMeta: { requestId: id, intent: "general_help", priority: "low" },
+      }, 200, origin);
     }
 
-    if (wantsDraft(message) || wantsDirectAction(message)) {
-      return json(fallbackAgentAnswer(message, context, appContext, supportEmail));
-    }
+    const recentHistory = (body?.history || [])
+      .slice(-MAX_RECENT_MESSAGES_SENT)
+      .map((item) => ({
+        role: item.role === "assistant" ? "assistant" as const : "user" as const,
+        content: redactSupportText(String(item.text || "")).slice(0, 700),
+      }));
 
-    const needsLocalAgentGuardrail =
-      isRoleOnly(message) ||
-      inferredPatch.currentIssueCategory === "matchroom_results" ||
-      inferredPatch.currentIssueCategory === "super_admin" ||
-      inferredPatch.currentIssueCategory === "notifications" ||
-      (inferredPatch.currentIssueCategory === "zone_admin" && /\b(register|registration|new zone|create zone)\b/.test(normalize(message))) ||
-      detailsIndicateProfileSync(inferredPatch.knownNonSensitiveDetails) ||
-      normalize(message).includes("deducted") ||
-      (normalize(message).includes("payment") && normalize(message).includes("pending"));
-
-    if (needsLocalAgentGuardrail) {
-      return json(fallbackAgentAnswer(message, context, appContext, supportEmail));
-    }
-
-    const accountId = env.CLOUDFLARE_ACCOUNT_ID;
-    const token = env.CLOUDFLARE_WORKERS_AI_API_TOKEN;
-    const model = env.SUPPORT_AI_MODEL || "@cf/meta/llama-3.1-8b-instruct";
-    if (!accountId || !token) return json(fallbackAgentAnswer(message, context, appContext, supportEmail));
-
-    const aiResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "system",
-            content: JSON.stringify({
-              currentSupportContext: context,
-              inferredPatch,
-              safeAppContext: appContext,
-              supportEmailConfigured: Boolean(String(supportEmail || "").trim()),
-            }),
-          },
-          ...(body?.history || []).slice(-8).map((item) => ({
-            role: item.role === "assistant" ? "assistant" : "user",
-            content: String(item.text || "").slice(0, 700),
-          })),
-          { role: "user", content: message },
-        ],
-        temperature: 0.2,
-      }),
-    });
-
-    if (!aiResponse.ok) return json(fallbackAgentAnswer(message, context, appContext, supportEmail));
-
-    const payload = await aiResponse.json() as any;
-    const raw = String(payload?.result?.response || payload?.result?.text || "").trim();
-    const jsonText = extractJsonObject(raw);
-
+    let planner: any;
     try {
-      const parsed = JSON.parse(jsonText);
-      const answer = String(parsed?.answer || "").trim();
-      if (!answer) throw new Error("Missing answer");
+      planner = await callDeepSeek(env, [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: JSON.stringify(trimContext({
+            currentSupportContext: context,
+            inferredPatch,
+            safeAppContext: safeContext,
+            supportEmailConfigured: Boolean(String(body?.supportEmail || env.SUPPORT_EMAIL || "").trim()),
+            requestLimits: {
+              maxRecentMessages: MAX_RECENT_MESSAGES_SENT,
+              maxToolCalls: MAX_TOOL_CALLS_PER_TURN,
+            },
+          })),
+        },
+        ...recentHistory,
+        { role: "user", content: userMessage },
+      ]);
+    } catch {
+      await recordAgentEvent(env, identityToken, id, "deepseek_call", "failed", "fallback");
+      const fallback = fallbackAgentAnswer(userMessage, context, safeContext);
       return json({
-        answer,
-        contextPatch: {
-          ...inferredPatch,
-          ...(typeof parsed.contextPatch === "object" && parsed.contextPatch ? parsed.contextPatch : {}),
+        answer: fallback.answer,
+        contextPatch: fallback.contextPatch,
+        agentMeta: { requestId: id, intent: fallback.intent, priority: fallback.priority, fallback: true },
+      }, 200, origin);
+    }
+
+    const priority = ["low", "medium", "high", "urgent"].includes(planner.priority) ? planner.priority : "medium";
+    const intent = String(planner.intent || inferredPatch.currentIssueCategory || "general_help").slice(0, 80);
+    let actions = validateActions(planner.actions);
+    if (wantsModerationReport(userMessage) && !actions.some((action) => action.type === "create_moderation_report")) {
+      actions.push({
+        type: "create_moderation_report",
+        reason: "User requested a moderation report through support chat.",
+        payload: {
+          type: inferReportType(userMessage),
+          reason: inferredPatch.currentIssueSummary || "Report submitted through MatchHai support chat",
+          description: userMessage,
         },
       });
-    } catch {
-      const fallback = fallbackAgentAnswer(message, context, appContext, supportEmail);
-      return json(fallback);
     }
+    const hadDangerousAction = actions.some((action) => DANGEROUS_ACTIONS.has(action.type));
+    if (hadDangerousAction) {
+      await recordAgentEvent(env, identityToken, id, "dangerous_action", "denied", "dangerous_action_blocked");
+      actions = actions.filter((action) => !DANGEROUS_ACTIONS.has(action.type));
+    }
+
+    actions = actions.map((action) => {
+      if (action.type === "create_support_ticket" || action.type === "create_admin_escalation") {
+        return {
+          ...action,
+          payload: {
+            ...action.payload,
+            intent,
+            priority,
+            category: inferredPatch.currentIssueCategory || intent,
+            issueSummary: inferredPatch.currentIssueSummary || userMessage,
+            suggestedAdminAction: action.payload?.suggestedAdminAction || action.reason || "Review safe support context and follow up with the user.",
+            safeContextSnapshot: safeContext,
+          },
+        };
+      }
+      return action;
+    });
+
+    const createTicketAction = actions.find((action) => action.type === "create_support_ticket" || action.type === "create_admin_escalation");
+    const shouldAutoCreateTicket = Boolean(createTicketAction && (isUrgentPaymentIssue(userMessage, planner) || wantsTicket(userMessage, context)));
+    if (createTicketAction && !shouldAutoCreateTicket && (priority === "low" || priority === "medium")) {
+      actions = actions.filter((action) => action !== createTicketAction);
+      planner.contextPatch = { ...(planner.contextPatch || {}), pendingAction: "create_ticket", escalationOffered: true };
+    }
+
+    let executedResults: any[] = [];
+    if (actions.length) {
+      const toolResult = await callToolGateway(env, {
+        requestId: id,
+        identityToken,
+        ipKey,
+        tools: actions,
+      });
+      executedResults = toolResult.results || [];
+    }
+
+    const createdTicket = executedResults.find((result) => result?.reference);
+    const createdReport = executedResults.find((result) => result?.type === "create_moderation_report" && result?.ok);
+    const answerParts = [String(planner.answer || "").trim()];
+    if (createdTicket?.reference) {
+      answerParts.push("", `Support ticket created: ${createdTicket.reference}`);
+      answerParts.push("Email sending is not configured, so this is an in-app support ticket for the MatchHai team.");
+    }
+    if (createdReport?.reportId) {
+      answerParts.push("", createdReport.created === false
+        ? "A similar moderation report already exists and is pending review."
+        : "Moderation report created and sent to the Super Admin reports queue.");
+    } else if (hadDangerousAction) {
+      answerParts.push("", "I cannot perform high-risk account, payment, payout, dispute, or matchroom actions directly. I can escalate this for admin review.");
+    }
+
+    return json({
+      answer: answerParts.filter(Boolean).join("\n"),
+      contextPatch: {
+        ...inferredPatch,
+        ...(typeof planner.contextPatch === "object" && planner.contextPatch ? planner.contextPatch : {}),
+        supportTicketReference: createdTicket?.reference,
+        supportTicketEmailSent: false,
+        moderationReportCreated: Boolean(createdReport?.reportId),
+      },
+      agentMeta: {
+        requestId: id,
+        intent,
+        priority,
+        confidence: Number(planner.confidence || 0),
+        actions: executedResults.map((result) => ({
+          type: result.type,
+          ok: Boolean(result.ok),
+          denied: Boolean(result.denied),
+          reference: result.reference,
+          reportId: result.reportId,
+        })),
+      },
+    }, 200, origin);
   },
 };

@@ -26,7 +26,7 @@ import { logFlowEvent, useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
 import { createTeamAction, inviteToTeamAction } from "../../src/services/convex/teamActionService";
 import { COLORS } from "../../src/theme";
-import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import Logger from "../../src/utils/logger";
 import styles from "./create.styles";
 
@@ -166,8 +166,8 @@ export default function CreateTeam() {
             showToast({ type: "warning", title: "Team size required", message: "Please select a team size." });
             return;
         }
-        if (!hasVerifiedEmail(authUser)) {
-            showEmailVerificationRequiredAlert();
+        if (!isUserFullyVerified(authUser, user)) {
+            showKycVerificationRequiredAlert();
             return;
         }
 

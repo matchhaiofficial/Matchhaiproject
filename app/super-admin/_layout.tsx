@@ -1,15 +1,30 @@
 // app/super-admin/_layout.tsx
 import { Redirect, Stack } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { COLORS } from "../../src/theme";
 import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import Logger from "../../src/utils/logger";
+import {
+    recordSuperAdminAccessDenied,
+    recordSuperAdminRouteAccess,
+} from "../../src/services/convex/superAdminService";
 
 export default function SuperAdminLayout() {
     const { user, loading: authLoading } = useAuth();
+    const isSuperAdmin = isSuperAdminProfile(user);
+
+    useEffect(() => {
+        if (authLoading || !user) return;
+        if (isSuperAdmin) {
+            void recordSuperAdminRouteAccess("/super-admin");
+            return;
+        }
+        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: user?.role });
+        void recordSuperAdminAccessDenied("/super-admin", "not_authorized");
+    }, [authLoading, isSuperAdmin, user]);
 
     // Show loading while checking auth state or profile
     if (authLoading) {
@@ -25,11 +40,7 @@ export default function SuperAdminLayout() {
         return <Redirect href="/auth/login" />;
     }
 
-    // Redirect if not super-admin
-    const isSuperAdmin = isSuperAdminProfile(user);
-
     if (!isSuperAdmin) {
-        Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: user?.role });
         return <Redirect href="/auth/login" />;
     }
 
@@ -46,6 +57,7 @@ export default function SuperAdminLayout() {
             <Stack.Screen name="report/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="support-tickets" options={{ headerShown: false }} />
             <Stack.Screen name="support-ticket/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            <Stack.Screen name="audit-logs" options={{ headerShown: false }} />
             <Stack.Screen name="matchrooms" options={{ headerShown: false }} />
             <Stack.Screen name="matchroom/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="support" options={{ presentation: 'modal', headerShown: false }} />

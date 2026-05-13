@@ -128,9 +128,8 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
       convex({ authConfig }),
       phoneNumber({
         // OTP sending - placeholder for now (user wants to skip OTP initially)
-        sendOTP: async ({ phoneNumber: phone, code }, request) => {
-          // TODO: Implement SMS sending when ready
-          console.log(`[Auth] OTP for ${phone}: ${code}`);
+        sendOTP: async () => {
+          console.warn("[Auth] Better Auth phone OTP sending is not configured; use VeevoTech OTP flow.");
         },
         // When verification happens, create user with phone as identifier
         signUpOnVerification: {
@@ -199,6 +198,7 @@ export const linkAuthToUser = mutation({
       accountType: args.accountType,
       isOnline: true,
       onboardingCompleted: false,
+      kycVerificationStatus: "not_started",
       createdAt: now,
       updatedAt: now,
     });

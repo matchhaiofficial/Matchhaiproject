@@ -22,12 +22,14 @@ import { Matchroom } from "../../../src/services/convex/matchService";
 import { Team } from "../../../src/services/convex/teamService";
 import { formatSupportedGameLabels, Zone } from "../../../src/services/convex/zoneService";
 import { signOutUser } from "../../../src/services/convex/authService";
+import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { COLORS, SPACING } from "../../../src/theme";
 import {
-  EMAIL_VERIFICATION_DASHBOARD_DETAIL_MESSAGE,
-  hasVerifiedEmail,
-  resendVerificationEmailWithAlert,
-} from "../../../src/utils/emailVerificationGate";
+  KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE,
+  KYC_VERIFICATION_PENDING_MESSAGE,
+  isKycAccessAllowed,
+  isKycReviewActive,
+} from "../../../src/utils/verificationGate";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import Logger from "../../../src/utils/logger";
@@ -296,6 +298,18 @@ const getTeamGameLabel = (game?: string) => {
   return label.toUpperCase();
 };
 
+const formatKycBannerMessage = (status?: string | null, reason?: string | null) => {
+  if (isKycReviewActive(status)) return KYC_VERIFICATION_PENDING_MESSAGE;
+  if (status !== "rejected") return KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE;
+  if (reason === "LOW_FACE_MATCH_SIMILARITY") {
+    return "Verification was declined because face match did not pass. Retry with the same person as the CNIC photo, good lighting, and no glare.";
+  }
+  if (reason === "QR_VALIDATION_FAILED") {
+    return "Verification was declined because document validation needs another attempt. Retake clear front/back CNIC photos.";
+  }
+  return "Verification was declined. Retry CNIC & face verification to unlock MatchHai features.";
+};
+
 export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
@@ -306,8 +320,18 @@ export default function PlayerDashboard() {
     distance: 10,
     initialScale: 0.995,
   });
+  const startDiditKyc = useStartDiditKyc();
+  const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+  const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
 
-  const emailVerified = hasVerifiedEmail(authUser);
+  const verificationDocLoading = Boolean(user?.identityVerificationId) && currentKyc === undefined;
+  const kycAccessAllowed =
+    isKycAccessAllowed(kycStatus) &&
+    !verificationDocLoading &&
+    (!currentKyc || isKycAccessAllowed(currentKyc.status));
+  const kycReviewActive = isKycReviewActive(kycStatus);
+  const showKycBanner = !kycAccessAllowed || kycReviewActive;
+  const kycBannerMessage = formatKycBannerMessage(kycStatus, currentKyc?.rejectionReason);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const didLogInitialQueryCountRef = useRef(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -392,7 +416,7 @@ export default function PlayerDashboard() {
   );
 
   useSessionRefreshPolling({
-    enabled: Boolean(authUser?.id) && !emailVerified,
+    enabled: Boolean(authUser?.id) && (!kycAccessAllowed || kycReviewActive),
     refreshSession,
   });
 
@@ -422,9 +446,12 @@ export default function PlayerDashboard() {
     }
   }, [loggingOut]);
 
-  const handleResendVerification = useCallback(async () => {
-    await resendVerificationEmailWithAlert();
-  }, []);
+  const handleStartVerification = useCallback(async () => {
+    const result = await startDiditKyc("player");
+    if (!result.ok) {
+      Logger.error("Dashboard", "Could not start KYC", result.message);
+    }
+  }, [startDiditKyc]);
 
   return (
     <Screen
@@ -448,10 +475,10 @@ export default function PlayerDashboard() {
             <Pressable
               style={[
                 styles.friendBell,
-                !emailVerified && styles.headerActionDisabled,
+                !kycAccessAllowed && styles.headerActionDisabled,
               ]}
-              onPress={emailVerified ? () => router.push("/(player)/friends" as any) : undefined}
-              disabled={!emailVerified}
+              onPress={kycAccessAllowed ? () => router.push("/(player)/friends" as any) : undefined}
+              disabled={!kycAccessAllowed}
             >
               <AppIcon name="players" size={22} color={COLORS.text} />
               {friendCount > 0 ? (
@@ -465,10 +492,10 @@ export default function PlayerDashboard() {
             <Pressable
               style={[
                 styles.notificationBell,
-                !emailVerified && styles.headerActionDisabled,
+                !kycAccessAllowed && styles.headerActionDisabled,
               ]}
-              onPress={emailVerified ? () => router.push("/(player)/inbox") : undefined}
-              disabled={!emailVerified}
+              onPress={kycAccessAllowed ? () => router.push("/(player)/inbox") : undefined}
+              disabled={!kycAccessAllowed}
             >
               <AppIcon name="notifications" size={24} color={COLORS.text} />
               {notificationCount > 0 ? (
@@ -490,7 +517,7 @@ export default function PlayerDashboard() {
         visible={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         items={
-          emailVerified
+          kycAccessAllowed
             ? [
                 {
                   label: "Discover",
@@ -579,42 +606,46 @@ export default function PlayerDashboard() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {!emailVerified ? (
+          {showKycBanner ? (
             <AppCard style={styles.verificationBanner}>
               <View style={styles.verificationBannerHeader}>
                 <AppIcon name="mailVerified" size={20} color={COLORS.warning} />
-                <Text style={styles.verificationBannerTitle}>Verify your email</Text>
+                <Text style={styles.verificationBannerTitle}>
+                  {kycReviewActive ? "Verification pending" : "Verify your identity"}
+                </Text>
               </View>
               <Text style={styles.verificationBannerText}>
-                {EMAIL_VERIFICATION_DASHBOARD_DETAIL_MESSAGE}
+                {kycBannerMessage}
               </Text>
-              <View style={styles.verificationBannerActions}>
-                <AppButton
-                  style={styles.verificationPrimaryButton}
-                  onPress={handleResendVerification}
-                >
-                  Resend Email
-                </AppButton>
-                <AppButton
-                  variant="secondary"
-                  style={styles.verificationSecondaryButton}
-                  onPress={() => router.push("/profile/edit" as any)}
-                >
-                  Profile Settings
-                </AppButton>
-              </View>
+              {!kycReviewActive ? (
+                <View style={styles.verificationBannerActions}>
+                  <AppButton
+                    style={styles.verificationPrimaryButton}
+                    onPress={handleStartVerification}
+                  >
+                    Start Verification
+                  </AppButton>
+                  <AppButton
+                    variant="secondary"
+                    style={styles.verificationSecondaryButton}
+                    onPress={() => router.push("/profile/edit" as any)}
+                  >
+                    Profile Settings
+                  </AppButton>
+                </View>
+              ) : null}
             </AppCard>
           ) : null}
 
           <View
-            style={!emailVerified ? styles.dashboardLocked : undefined}
-            pointerEvents={!emailVerified ? "none" : "auto"}
+            style={!kycAccessAllowed ? styles.dashboardLocked : undefined}
+            pointerEvents={!kycAccessAllowed ? "none" : "auto"}
           >
-            {!emailVerified ? (
+            {!kycAccessAllowed ? (
               <View style={styles.dashboardLockState}>
                 <AppIcon name="password" size={16} color={COLORS.textSecondary} />
                 <Text style={styles.dashboardLockStateText}>
-                  Dashboard locked until your email is verified
+                  Dashboard locked until identity verification is complete
                 </Text>
               </View>
             ) : null}

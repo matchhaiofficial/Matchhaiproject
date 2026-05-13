@@ -169,6 +169,9 @@ export const createZoneWithdrawalTransaction = mutation({
     branchId: v.string(),
     branchName: v.string(),
     amount: v.number(),
+    bankName: v.string(),
+    accountNumberMasked: v.string(),
+    accountNumberLast4: v.string(),
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
@@ -179,6 +182,12 @@ export const createZoneWithdrawalTransaction = mutation({
     }
 
     const user = await getWalletUserRecord(ctx, args.userId);
+    if (args.zoneId) {
+      const zone = await ctx.db.get(args.zoneId as Id<"zones">);
+      if (zone && zone.ownerUid !== user._id) {
+        throw new Error("Not authorized.");
+      }
+    }
     const walletBalance = Number(user.walletBalance || 0);
     if (walletBalance < args.amount) {
       throw new Error("Withdrawal amount cannot exceed wallet balance.");
@@ -197,6 +206,9 @@ export const createZoneWithdrawalTransaction = mutation({
         zoneId: args.zoneId || null,
         branchId: args.branchId,
         branchName: args.branchName,
+        bankName: args.bankName,
+        accountNumberMasked: args.accountNumberMasked,
+        accountNumberLast4: args.accountNumberLast4,
         ownerName: args.ownerName || user.fullName || user.username || null,
         ownerEmail: args.ownerEmail || user.email || null,
         venueName: args.venueName || null,

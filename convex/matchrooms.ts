@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
 import {
   dispatchBroadcastZoneRequestsForMatchroom,
   finalizeBroadcastFailure,
@@ -140,20 +141,18 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
   console.log("[matchrooms] auth gate", {
     authId: authUser?.userId ?? null,
-    emailVerified: authUser?.emailVerified ?? null,
     email: authUser?.email ?? null,
     expectedUid: expectedUid ?? null,
     expectedAuthId: expectedUser?.authId ?? null,
   });
 
   if (authUser?.userId) {
-    if (authUser.emailVerified !== true) {
-      throw new Error("Please verify your email to unlock matchrooms and team actions.");
-    }
-
     const authUserRecord = await resolveUserByAnyId(ctx, authUser.userId);
     if (!authUserRecord) {
       throw new Error("User profile not found");
+    }
+    if (!isKycAccessAllowed(authUserRecord.kycVerificationStatus)) {
+      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
     }
 
     if (expectedUser && expectedUser._id !== authUserRecord._id) {
@@ -162,16 +161,19 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
     return {
       userId: authUser.userId,
-      emailVerified: authUser.emailVerified,
+      kycVerified: true,
       email: authUser.email ?? null,
       convexUser: authUserRecord,
     };
   }
 
   if (expectedUser) {
+    if (!isKycAccessAllowed(expectedUser.kycVerificationStatus)) {
+      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
+    }
     return {
       userId: expectedUser.authId || String(expectedUser._id),
-      emailVerified: true,
+      kycVerified: isKycAccessAllowed(expectedUser.kycVerificationStatus),
       email: expectedUser.email ?? null,
       convexUser: expectedUser,
     };

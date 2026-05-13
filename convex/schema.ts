@@ -156,15 +156,38 @@ export default defineSchema({
     phoneValidated: v.optional(v.boolean()),
     phoneValidationProvider: v.optional(v.string()),
     phoneValidationCheckedAt: v.optional(v.number()),
+    phoneOtpVerified: v.optional(v.boolean()),
+    phoneOtpVerifiedAt: v.optional(v.number()),
+    phoneNumberMasked: v.optional(v.string()),
+    phoneNumberHash: v.optional(v.string()),
+    pendingEmail: v.optional(v.union(v.string(), v.null())),
+    pendingPhone: v.optional(v.union(v.string(), v.null())),
     accountType: v.union(v.literal("player"), v.literal("zone")),
 
     // Profile
     photoURL: v.optional(v.string()),
+    profileImageStorageId: v.optional(v.id("_storage")),
+    profileImageUpdatedAt: v.optional(v.number()),
     bio: v.optional(v.string()),
 
     // Status
     isOnline: v.boolean(),
     isVerified: v.optional(v.boolean()),
+    kycVerificationStatus: v.optional(v.union(
+      v.literal("not_started"),
+      v.literal("pending"),
+      v.literal("in_progress"),
+      v.literal("in_review"),
+      v.literal("verified"),
+      v.literal("rejected"),
+      v.literal("expired")
+    )),
+    kycVerifiedAt: v.optional(v.number()),
+    kycProvider: v.optional(v.literal("didit")),
+    identityVerificationId: v.optional(v.string()),
+    emailVerificationStatus: v.optional(v.string()),
+    emailVerifiedAt: v.optional(v.number()),
+    cnicMasked: v.optional(v.string()),
 
     // Location preferences (Step 2)
     areasPreferred: v.optional(v.array(v.string())),
@@ -291,6 +314,59 @@ export default defineSchema({
     .index("by_accountType_updatedAt", ["accountType", "updatedAt"]),
 
   // ============================================
+  // IDENTITY VERIFICATIONS
+  // ============================================
+  identityVerifications: defineTable({
+    userId: v.id("users"),
+    type: v.literal("kyc"),
+    role: v.union(
+      v.literal("player"),
+      v.literal("zone_owner"),
+      v.literal("venue_admin"),
+      v.literal("high_risk_dispute"),
+      v.literal("tournament_organizer")
+    ),
+    provider: v.literal("didit"),
+    providerSessionId: v.optional(v.string()),
+    providerReference: v.optional(v.string()),
+    vendorData: v.string(),
+    workflowId: v.string(),
+    startTokenHash: v.optional(v.string()),
+    startTokenExpiresAt: v.optional(v.number()),
+    status: v.union(
+      v.literal("not_started"),
+      v.literal("pending"),
+      v.literal("in_progress"),
+      v.literal("in_review"),
+      v.literal("verified"),
+      v.literal("rejected"),
+      v.literal("expired")
+    ),
+    decision: v.optional(v.string()),
+    rejectionReason: v.optional(v.string()),
+    emailVerificationStatus: v.optional(v.string()),
+    idVerificationStatus: v.optional(v.string()),
+    livenessStatus: v.optional(v.string()),
+    faceMatchStatus: v.optional(v.string()),
+    amlStatus: v.optional(v.string()),
+    ipAnalysisStatus: v.optional(v.string()),
+    cnicMasked: v.optional(v.string()),
+    cnicHash: v.optional(v.string()),
+    submittedAt: v.number(),
+    verifiedAt: v.optional(v.number()),
+    rejectedAt: v.optional(v.number()),
+    reviewedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId_and_status", ["userId", "status"])
+    .index("by_providerSessionId", ["providerSessionId"])
+    .index("by_vendorData", ["vendorData"])
+    .index("by_status_and_submittedAt", ["status", "submittedAt"])
+    .index("by_role_and_status", ["role", "status"])
+    .index("by_type_and_role_and_status", ["type", "role", "status"]),
+
+  // ============================================
   // FRIENDSHIPS
   // ============================================
   friendships: defineTable({
@@ -338,6 +414,28 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"])
     .index("by_reference", ["reference"]),
+
+  phoneVerifications: defineTable({
+    userId: v.optional(v.id("users")),
+    phoneHash: v.string(),
+    phoneMasked: v.string(),
+    otpHash: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("verified"),
+      v.literal("expired"),
+      v.literal("failed")
+    ),
+    attempts: v.number(),
+    resendCount: v.number(),
+    provider: v.literal("veevotech"),
+    providerMessageId: v.optional(v.string()),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_phoneHash_and_createdAt", ["phoneHash", "createdAt"])
+    .index("by_phoneHash_and_status_and_updatedAt", ["phoneHash", "status", "updatedAt"]),
 
   paymentTransactions: defineTable({
     provider: v.union(v.literal("easypaisa")),
@@ -1438,6 +1536,16 @@ export default defineSchema({
     userId: v.id("users"),
     userRole: v.optional(v.string()),
     category: v.optional(v.string()),
+    subcategory: v.optional(v.string()),
+    intent: v.optional(v.string()),
+    priority: v.optional(
+      v.union(
+        v.literal("low"),
+        v.literal("medium"),
+        v.literal("high"),
+        v.literal("urgent")
+      )
+    ),
     issueSummary: v.string(),
     conversationExcerpt: v.array(
       v.object({
@@ -1445,6 +1553,12 @@ export default defineSchema({
         text: v.string(),
       })
     ),
+    suggestedAdminAction: v.optional(v.string()),
+    relatedMatchroomId: v.optional(v.id("matchrooms")),
+    relatedPaymentId: v.optional(v.id("paymentTransactions")),
+    relatedBookingId: v.optional(v.id("bookingIntents")),
+    relatedZoneId: v.optional(v.id("zones")),
+    conversationId: v.optional(v.id("supportConversations")),
     metadata: v.optional(v.any()),
     status: v.union(
       v.literal("open"),
@@ -1452,13 +1566,109 @@ export default defineSchema({
       v.literal("resolved"),
       v.literal("closed")
     ),
-    source: v.literal("help_support_chat"),
+    source: v.union(v.literal("help_support_chat"), v.literal("help_support_ai_agent")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_reference", ["reference"])
     .index("by_userId", ["userId"])
+    .index("by_conversationId", ["conversationId"])
+    .index("by_conversationId_createdAt", ["conversationId", "createdAt"])
     .index("by_status_createdAt", ["status", "createdAt"]),
+
+  supportConversations: defineTable({
+    userId: v.id("users"),
+    module: v.union(
+      v.literal("player"),
+      v.literal("zone_admin"),
+      v.literal("super_admin")
+    ),
+    status: v.union(v.literal("open"), v.literal("closed")),
+    activeTicketId: v.optional(v.id("supportTickets")),
+    summary: v.optional(v.string()),
+    priority: v.optional(
+      v.union(
+        v.literal("low"),
+        v.literal("medium"),
+        v.literal("high"),
+        v.literal("urgent")
+      )
+    ),
+    lastIntent: v.optional(v.string()),
+    lastMessageAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId_updatedAt", ["userId", "updatedAt"])
+    .index("by_userId_status_updatedAt", ["userId", "status", "updatedAt"])
+    .index("by_status_updatedAt", ["status", "updatedAt"]),
+
+  supportMessages: defineTable({
+    conversationId: v.id("supportConversations"),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    textRedacted: v.string(),
+    metadata: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_conversationId_createdAt", ["conversationId", "createdAt"]),
+
+  supportTicketNotes: defineTable({
+    ticketId: v.id("supportTickets"),
+    author: v.union(v.literal("agent"), v.literal("admin"), v.literal("system")),
+    textRedacted: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_ticketId_createdAt", ["ticketId", "createdAt"]),
+
+  supportAgentAuditLogs: defineTable({
+    requestId: v.string(),
+    userId: v.optional(v.id("users")),
+    conversationId: v.optional(v.id("supportConversations")),
+    actionType: v.string(),
+    actionStatus: v.union(
+      v.literal("executed"),
+      v.literal("denied"),
+      v.literal("failed"),
+      v.literal("rate_limited")
+    ),
+    reasonCategory: v.optional(v.string()),
+    ticketId: v.optional(v.id("supportTickets")),
+    ticketReference: v.optional(v.string()),
+    timestamp: v.number(),
+  })
+    .index("by_userId_timestamp", ["userId", "timestamp"])
+    .index("by_conversationId_timestamp", ["conversationId", "timestamp"])
+    .index("by_actionType_timestamp", ["actionType", "timestamp"]),
+
+  supportAgentRateLimits: defineTable({
+    key: v.string(),
+    windowStart: v.number(),
+    count: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_key", ["key"]),
+
+  superAdminAuditLogs: defineTable({
+    superAdminUserId: v.optional(v.id("users")),
+    superAdminAuthId: v.optional(v.string()),
+    superAdminName: v.string(),
+    superAdminEmail: v.string(),
+    action: v.string(),
+    module: v.string(),
+    targetType: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    status: v.union(v.literal("success"), v.literal("failed"), v.literal("denied")),
+    reason: v.optional(v.string()),
+    metadataSafe: v.optional(v.any()),
+    ipHash: v.optional(v.string()),
+    userAgentSafe: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_superAdminUserId_createdAt", ["superAdminUserId", "createdAt"])
+    .index("by_action_createdAt", ["action", "createdAt"])
+    .index("by_module_createdAt", ["module", "createdAt"])
+    .index("by_targetType_targetId", ["targetType", "targetId"]),
 
   // ============================================
   // PSN TOKEN CACHE (for PSN API authentication)

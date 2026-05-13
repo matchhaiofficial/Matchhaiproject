@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 // Auth operations handled via Better Auth
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -31,7 +32,6 @@ import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
-import { useSessionRefreshPolling } from "../../../src/hooks/useSessionRefreshPolling";
 import { useToast } from "../../../src/hooks/useToast";
 import {
     FaceitProfileSummary,
@@ -41,6 +41,7 @@ import {
     fetchSteamProfileFromUrl,
     verifyPsnProfile,
 } from "../../../src/services/convex/externalApiService";
+import { uploadFileToConvex } from "../../../src/services/convex/storageService";
 import Logger from "../../../src/utils/logger";
 import {
     isFaceitIdAvailable,
@@ -49,6 +50,7 @@ import {
     isSteamIdAvailable,
     isUsernameAvailable,
 } from "../../../src/services/userService";
+import { sendPhoneOtp, verifyPhoneOtp } from "../../../src/services/convex/phoneOtpService";
 import { COLORS } from "../../../src/theme";
 import styles from "./edit.styles";
 
@@ -119,7 +121,7 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: 
 };
 
 export default function EditProfile() {
-    const { user, authUser, refreshSession, refreshUser } = useAuth();
+    const { user, authUser, refreshUser } = useAuth();
     const params = useLocalSearchParams<{ focus?: string }>();
     const { showToast } = useToast();
     const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === '1';
@@ -128,6 +130,7 @@ export default function EditProfile() {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [imageUploading, setImageUploading] = useState(false);
 
     // Form State
     const [fullName, setFullName] = useState("");
@@ -176,6 +179,10 @@ export default function EditProfile() {
     const [faceitStatus, setFaceitStatus] = useState<"idle" | "available" | "taken">("idle");
     const [psnStatus, setPsnStatus] = useState<"idle" | "available" | "taken">("idle");
     const [phoneVerified, setPhoneVerified] = useState(false);
+    const [phoneOtp, setPhoneOtp] = useState("");
+    const [phoneOtpSending, setPhoneOtpSending] = useState(false);
+    const [phoneOtpVerifying, setPhoneOtpVerifying] = useState(false);
+    const [pendingPhoneMasked, setPendingPhoneMasked] = useState("");
 
     // Validation
     const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
@@ -246,7 +253,7 @@ export default function EditProfile() {
         return emailRegex.test(trimmedNew) && trimmedNew !== email;
     }, [newEmail, email]);
 
-    const isEmailVerified = Boolean(authUser?.emailVerified) && !pendingEmail;
+    const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
 
     useEffect(() => {
         const fetchProfile = async () => {
@@ -328,56 +335,6 @@ export default function EditProfile() {
 
         return () => cancelAnimationFrame(frame);
     }, [loading, params.focus, preferredAreasSectionY]);
-
-    useSessionRefreshPolling({
-        enabled: Boolean(user?._id && pendingEmail),
-        refreshSession,
-    });
-
-    // Auto-refresh auth state to check for email verification
-    useEffect(() => {
-        if (!user?._id || !pendingEmail) return;
-
-        const checkEmailUpdate = async () => {
-            try {
-                const session = await authClient.getSession();
-                if (!session?.data?.user) return;
-
-                const currentEmail = session.data.user.email || "";
-                if (currentEmail === pendingEmail) {
-                    await convex.mutation(api.users.updateFullProfile, {
-                        userId: user._id as Id<"users">,
-                        updates: { pendingEmail: null },
-                    });
-
-                    setEmail(currentEmail);
-                    setOriginalEmail(currentEmail);
-                    setPendingEmail("");
-                    await refreshUser();
-
-                    showToast({
-                        type: "success",
-                        title: "Email Updated",
-                        message: "Your email has been successfully updated."
-                    });
-                }
-            } catch (e: any) {
-                if (e?.code === 'auth/user-token-expired' || e?.code === 'auth/requires-recent-login') {
-                    setPendingEmail("");
-                    showToast({
-                        type: "info",
-                        title: "Email Verified",
-                        message: "Your email was updated. Please log out and log back in to continue."
-                    });
-                    return;
-                }
-                console.error("Error checking email update:", e);
-            }
-        };
-
-        void checkEmailUpdate();
-    }, [pendingEmail, refreshUser, showToast, user?._id]);
-
 
     // Username check (unchanged)
     const handleUsernameBlur = async () => {
@@ -623,32 +580,22 @@ export default function EditProfile() {
 
         try {
             setEmailUpdating(true);
-            // Use Better Auth to change email
-            const result = await (authClient as any).changeEmail({
-                newEmail: newEmail.trim(),
-            });
-            if (result?.error) throw result.error;
-
-            // Store pending email in Convex
-            await convex.mutation(api.users.updateFullProfile, {
-                userId: user._id as Id<"users">,
-                updates: { pendingEmail: newEmail.trim() },
-            });
+            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim() });
 
             // Update local state
             setPendingEmail(newEmail.trim());
 
             showToast({
-                type: "success",
-                title: "Verification Sent",
-                message: "Check your new email for the verification link. Click it to complete the change."
+                type: "info",
+                title: "Email change requested",
+                message: "Complete CNIC & face verification again before this email becomes active."
             });
 
             setIsEmailChanging(false);
             setNewEmail("");
         } catch (e: any) {
             console.error("Email update failed", e);
-            let msg = "Failed to send verification email";
+            let msg = "Failed to request email change.";
             if (e.code === 'auth/invalid-email') msg = "Invalid email format.";
             if (e.code === 'auth/email-already-in-use') msg = "This email is already in use.";
             if (e.code === 'auth/requires-recent-login') msg = "Please re-login to change your email.";
@@ -656,6 +603,85 @@ export default function EditProfile() {
         } finally {
             setEmailUpdating(false);
         }
+    };
+
+    const handleChangeProfileImage = async () => {
+        try {
+            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permission.granted) {
+                showToast({ type: "info", title: "Permission required", message: "Allow photo access to update your profile image." });
+                return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.85,
+            });
+            if (result.canceled || !result.assets?.[0]) return;
+            const asset = result.assets[0];
+            const mimeType = asset.mimeType || "image/jpeg";
+            if (!["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mimeType)) {
+                showToast({ type: "error", title: "Unsupported image", message: "Upload a JPG, PNG, or WebP image." });
+                return;
+            }
+            if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+                showToast({ type: "error", title: "Image too large", message: "Profile image must be 5MB or smaller." });
+                return;
+            }
+            setImageUploading(true);
+            const upload = await uploadFileToConvex({
+                uri: asset.uri,
+                mimeType,
+                fileName: asset.fileName || "profile-image.jpg",
+            });
+            await convex.mutation(api.kyc.markProfileImage, { storageId: upload.storageId });
+            await refreshUser();
+            showToast({ type: "success", title: "Profile image updated", message: "Your profile picture was updated." });
+        } catch (error: any) {
+            showToast({ type: "error", title: "Upload failed", message: error?.message || "Could not update profile image." });
+        } finally {
+            setImageUploading(false);
+        }
+    };
+
+    const handleSendPhoneOtp = async () => {
+        if (!isPhoneFormatValid || phoneStatus === "taken") {
+            showToast({ type: "error", title: "Invalid phone", message: "Enter an available Pakistani mobile number." });
+            return;
+        }
+        setPhoneOtpSending(true);
+        const result = await sendPhoneOtp(phone);
+        setPhoneOtpSending(false);
+        if (!result.ok) {
+            showToast({ type: "error", title: "Could not send code", message: result.message });
+            return;
+        }
+        setPendingPhoneMasked(result.phoneMasked);
+        showToast({ type: "success", title: "Code sent", message: `Enter the OTP sent to ${result.phoneMasked}.` });
+    };
+
+    const handleVerifyPhoneOtp = async () => {
+        setPhoneOtpVerifying(true);
+        const result = await verifyPhoneOtp(phone, phoneOtp);
+        setPhoneOtpVerifying(false);
+        if (!result.ok) {
+            showToast({ type: "error", title: "Could not verify phone", message: result.message });
+            return;
+        }
+        await convex.mutation(api.kyc.requestPhoneChange, {
+            phoneE164: result.phoneE164,
+            phoneMasked: result.phoneMasked,
+            phoneHash: result.phoneHash,
+            verifiedAt: result.verifiedAt,
+        });
+        setOriginalPhone(result.phoneE164);
+        setPhone(result.phoneE164);
+        setPhoneVerified(true);
+        setPhoneOtp("");
+        setPendingPhoneMasked("");
+        await refreshUser();
+        showToast({ type: "success", title: "Phone verified", message: "Your phone number was updated." });
     };
 
     const handleSave = async () => {
@@ -673,6 +699,10 @@ export default function EditProfile() {
 
         if (phone.trim() !== originalPhone && phoneStatus === "taken") {
             showToast({ type: "error", title: "Invalid Phone", message: "Phone is taken or invalid format (03...)" });
+            return;
+        }
+        if (phone.trim() !== originalPhone) {
+            showToast({ type: "info", title: "Verify phone", message: "Send and verify an OTP before saving a new phone number." });
             return;
         }
 
@@ -713,7 +743,7 @@ export default function EditProfile() {
                 fullName: fullName.trim(),
                 city: DEFAULT_CITY,
                 ageRange,
-                phone: phone.trim(),
+                phone: originalPhone,
                 areasPreferred: selectedDisplayAreas,
                 steamProfileUrl: steamProfileUrl.trim() || null,
                 faceitProfileUrl: faceitProfileUrl.trim() || null,
@@ -855,6 +885,30 @@ export default function EditProfile() {
                 >
 
                     <Text style={styles.sectionTitle}>Basic Info</Text>
+
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.label}>Profile Image</Text>
+                        <View style={styles.flexRowCentered}>
+                            <AppImage
+                                source={{
+                                    uri:
+                                        user?.photoURL ||
+                                        `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.fullName || "Player")}&background=42a5f5&color=fff&size=96`,
+                                }}
+                                containerStyle={{ width: 72, height: 72, borderRadius: 36, overflow: "hidden", marginRight: 12 }}
+                                contentFit="cover"
+                            />
+                            <Pressable
+                                onPress={handleChangeProfileImage}
+                                disabled={imageUploading}
+                                style={styles.platformButton}
+                            >
+                                <Text style={styles.platformButtonText}>
+                                    {imageUploading ? "Uploading..." : "Change Photo"}
+                                </Text>
+                            </Pressable>
+                        </View>
+                    </View>
 
                     {/* Full Name */}
                     <View style={styles.fieldGroup}>
@@ -1072,6 +1126,42 @@ export default function EditProfile() {
                         {phoneStatus === "taken" && (
                             <Text style={[styles.helperText, styles.helperError]}>This phone number is already in use.</Text>
                         )}
+                        {phone.trim() !== originalPhone ? (
+                            <View style={styles.gapMd}>
+                                <Pressable
+                                    onPress={handleSendPhoneOtp}
+                                    disabled={phoneOtpSending}
+                                    style={styles.platformButton}
+                                >
+                                    <Text style={styles.platformButtonText}>
+                                        {phoneOtpSending ? "Sending..." : "Send OTP"}
+                                    </Text>
+                                </Pressable>
+                                {pendingPhoneMasked ? (
+                                    <>
+                                        <View style={styles.inputBox}>
+                                            <TextInput
+                                                value={phoneOtp}
+                                                onChangeText={(value) => setPhoneOtp(value.replace(/\D/g, "").slice(0, 6))}
+                                                style={styles.input}
+                                                placeholder="Enter 6-digit OTP"
+                                                placeholderTextColor={COLORS.muted}
+                                                keyboardType="number-pad"
+                                            />
+                                        </View>
+                                        <Pressable
+                                            onPress={handleVerifyPhoneOtp}
+                                            disabled={phoneOtp.length !== 6 || phoneOtpVerifying}
+                                            style={styles.platformButton}
+                                        >
+                                            <Text style={styles.platformButtonText}>
+                                                {phoneOtpVerifying ? "Verifying..." : "Verify Phone"}
+                                            </Text>
+                                        </Pressable>
+                                    </>
+                                ) : null}
+                            </View>
+                        ) : null}
                     </View>
 
                     {/* Password Section */}

@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { recordZoneAuditEvent } from "./zoneAudit";
+import { requireKycVerified } from "./kycGate";
 
 function toPositiveNumber(value: unknown) {
   const parsed = Number(value);
@@ -266,6 +267,7 @@ export const update = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const { zoneId, ...updates } = args;
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
@@ -311,6 +313,7 @@ export const addBranch = mutation({
     branch: v.any(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found");
 
@@ -345,6 +348,7 @@ export const updateBranch = mutation({
     updates: v.any(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found");
 
@@ -380,6 +384,7 @@ export const deleteBranch = mutation({
     branchId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found");
 
@@ -410,6 +415,7 @@ export const deleteBranch = mutation({
 export const approve = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     await ctx.db.patch(args.zoneId, {
       status: "active",
       approvedAt: Date.now(),
@@ -426,6 +432,7 @@ export const reject = mutation({
     rejectionReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     await ctx.db.patch(args.zoneId, {
       status: "rejected",
       rejectedAt: Date.now(),
@@ -440,6 +447,7 @@ export const reject = mutation({
 export const suspend = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     await ctx.db.patch(args.zoneId, {
       status: "suspended",
       updatedAt: Date.now(),
@@ -487,6 +495,7 @@ export const createPricingRule = mutation({
     createdByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
 
     const ruleId = await ctx.db.insert("pricingRules", {
@@ -547,6 +556,7 @@ export const updatePricingRule = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const { ruleId, ...updates } = args;
     const existingRule = await ctx.db.get(ruleId);
     if (!existingRule) {
@@ -599,6 +609,7 @@ export const deletePricingRule = mutation({
     deletedByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const existingRule = await ctx.db.get(args.ruleId);
     if (!existingRule) {
       throw new Error("Pricing rule not found.");
@@ -666,6 +677,7 @@ export const createResource = mutation({
     hourlyRate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
 
     const resourceId = await ctx.db.insert("zoneResources", {
@@ -692,6 +704,7 @@ export const updateResourceStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: Date.now(),
@@ -704,6 +717,7 @@ export const updateResourceStatus = mutation({
 export const deleteResource = mutation({
   args: { resourceId: v.id("zoneResources") },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     await ctx.db.delete(args.resourceId);
     return true;
   },

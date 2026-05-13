@@ -14,9 +14,9 @@ import {
 } from "../../../../src/services/convex/teamService";
 import { COLORS } from "../../../../src/theme";
 import {
-  hasVerifiedEmail,
-  showEmailVerificationRequiredAlert,
-} from "../../../../src/utils/emailVerificationGate";
+  isUserFullyVerified,
+  showKycVerificationRequiredAlert,
+} from "../../../../src/utils/verificationGate";
 import Logger from "../../../../src/utils/logger";
 import { recordPayloadMetric } from "../../../../src/utils/perfInstrumentation";
 import { getTeamMainDisplayRoster } from "../../../../src/utils/teamRosterDisplay";
@@ -186,8 +186,8 @@ export default function DiscoverTeamList({
   const handleRequestToJoin = useCallback(
     async (teamId: string) => {
       if (actionLoading || !teamId) return;
-      if (!hasVerifiedEmail(authUser)) {
-        showEmailVerificationRequiredAlert();
+      if (!isUserFullyVerified(authUser, user)) {
+        showKycVerificationRequiredAlert();
         return;
       }
 

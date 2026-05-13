@@ -15,6 +15,7 @@ import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useToast } from "../../src/hooks/useToast";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
+import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import { Perf } from "../../src/utils/perfInstrumentation";
 import styles from "./register.styles";
 
@@ -56,7 +57,18 @@ export default function RegisterStep2() {
   }, [setCurrentStep]);
 
   useEffect(() => {
-    if (!step1.fullName.trim() || !step1.username.trim() || !step1.email.trim() || !step1.password) {
+    const { phoneE164 } = normalizePakistaniPhone(step1.phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (
+      !step1.fullName.trim() ||
+      !step1.username.trim() ||
+      !step1.email.trim() ||
+      !step1.password ||
+      !phoneVerified
+    ) {
       router.replace("/auth/register");
     }
   }, [step1]);

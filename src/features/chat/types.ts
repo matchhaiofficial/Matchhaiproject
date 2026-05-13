@@ -27,6 +27,18 @@ export type ChatThreadMessage = {
     senderName: string;
     createdAt: number;
     type: "text" | "voice" | "image" | "file";
+    supportCards?: {
+        matchrooms?: Array<{
+            id: string;
+            title?: string;
+            game?: string;
+            status?: string;
+            scheduledAt?: number;
+            bookingStatus?: string;
+            paymentStatus?: string;
+            resultStatus?: string;
+        }>;
+    };
     audioUrl?: string | null;
     audioDurationMs?: number | null;
     attachment?: ChatAttachment | null;

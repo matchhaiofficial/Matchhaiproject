@@ -125,10 +125,26 @@ export default function SuperAdminSupportTicketDetail() {
             {ticket.userEmail ? <AdminInfoLine label="Email" value={ticket.userEmail} /> : null}
             <AdminInfoLine label="User role" value={formatValue(ticket.userRole)} />
             <AdminInfoLine label="Category" value={formatValue(ticket.category)} />
+            {ticket.subcategory ? <AdminInfoLine label="Subcategory" value={formatValue(ticket.subcategory)} /> : null}
+            {ticket.intent ? <AdminInfoLine label="AI intent" value={formatValue(ticket.intent)} /> : null}
+            {ticket.priority ? <AdminInfoLine label="Priority" value={formatValue(ticket.priority)} /> : null}
             <AdminInfoLine label="Source" value={formatValue(ticket.source)} />
+            <AdminInfoLine label="Email status" value={formatValue(ticket.metadataSummary?.emailStatus || "not_configured")} />
             <AdminInfoLine label="Created" value={formatDate(ticket.createdAt)} />
             <AdminInfoLine label="Updated" value={formatDate(ticket.updatedAt)} />
           </View>
+
+          {(ticket.suggestedAdminAction || ticket.relatedMatchroomId || ticket.relatedPaymentId || ticket.relatedBookingId || ticket.relatedZoneId || ticket.metadataSummary?.aiSummary) ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>AI Triage</Text>
+              {ticket.metadataSummary?.aiSummary ? <AdminInfoLine label="Summary" value={String(ticket.metadataSummary.aiSummary)} /> : null}
+              {ticket.suggestedAdminAction ? <AdminInfoLine label="Suggested action" value={ticket.suggestedAdminAction} /> : null}
+              {ticket.relatedMatchroomId ? <AdminInfoLine label="Matchroom ID" value={ticket.relatedMatchroomId} /> : null}
+              {ticket.relatedPaymentId ? <AdminInfoLine label="Payment ID" value={ticket.relatedPaymentId} /> : null}
+              {ticket.relatedBookingId ? <AdminInfoLine label="Booking ID" value={ticket.relatedBookingId} /> : null}
+              {ticket.relatedZoneId ? <AdminInfoLine label="Zone ID" value={ticket.relatedZoneId} /> : null}
+            </View>
+          ) : null}
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Conversation Excerpt</Text>

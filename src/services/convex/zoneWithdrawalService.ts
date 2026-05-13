@@ -9,6 +9,8 @@ export async function requestZoneWithdrawal(input: {
   branchId: string;
   branchName: string;
   amount: number;
+  bankName: string;
+  accountNumber: string;
   ownerName?: string;
   ownerEmail?: string;
   venueName?: string;
@@ -20,6 +22,8 @@ export async function requestZoneWithdrawal(input: {
       branchId: input.branchId,
       branchName: input.branchName,
       amount: input.amount,
+      bankName: input.bankName,
+      accountNumber: input.accountNumber,
       ownerName: input.ownerName,
       ownerEmail: input.ownerEmail,
       venueName: input.venueName,

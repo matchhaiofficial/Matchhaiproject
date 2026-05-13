@@ -17,7 +17,7 @@ import {
     AdminSectionHeader,
 } from "../../../src/components/AdminSurface";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
-import { StatusPill } from "../../../src/components/AppPrimitives";
+import { AppButton, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useEntrance } from "../../../src/motion/useEntrance";
@@ -32,6 +32,7 @@ import { isPendingZoneAdminNotification } from "../../../src/features/zoneAdmin/
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
+import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -48,7 +49,10 @@ import { type Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
+import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import styles from "./dashboard.styles";
+
+const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 
 const MODULE_ICON_COLORS = [
     COLORS.accent,
@@ -122,8 +126,10 @@ const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: 
 export default function ZoneDashboardHome() {
     const router = useRouter();
     const { zone, loading } = useZoneData();
-    const { user } = useAuth();
+    const { user, authUser } = useAuth();
     const { showToast } = useToast();
+    const startDiditKyc = useStartDiditKyc();
+    const kycVerified = isUserFullyVerified(authUser, user);
     const bottomContentPadding = useTabBarClearance(16);
 
     useRouteLogger("ZoneDashboardHome", {
@@ -344,19 +350,44 @@ export default function ZoneDashboardHome() {
         router.replace("/auth/login");
     };
 
+    const handleStartVerification = async () => {
+        const result = await startDiditKyc("zone_owner");
+        showToast({
+            type: result.ok ? "info" : "error",
+            title: result.ok ? "Verification opened" : "Could not start verification",
+            message: result.ok ? "Complete CNIC & face verification to unlock Zone Admin features." : result.message,
+        });
+    };
+
+    const handleLockedAction = () => {
+        showToast({
+            type: "info",
+            title: "Verify your identity",
+            message: ZONE_KYC_VERIFICATION_MESSAGE,
+        });
+    };
+
     const sidebarItems = useMemo(
-        () => [
-            { label: "Dashboard", icon: "dashboard" as const, onPress: () => router.push("/zone/(tabs)" as any) },
-            { label: "Branches", icon: "branch" as const, onPress: () => router.push("/zone/(tabs)/branches" as any) },
-            ...sidebarModules.map((module) => ({
-                label: module.title,
-                icon: module.icon,
-                onPress: () => router.push(module.route as any),
-            })),
-            { label: "Withdraw Request", icon: "wallet" as const, onPress: () => router.push({ pathname: "/zone/(tabs)/profile", params: { withdraw: "1" } } as any) },
-            { label: "Logout", icon: "logout" as const, onPress: handleLogout },
-        ],
-        [router, sidebarModules],
+        () =>
+            kycVerified
+                ? [
+                    { label: "Dashboard", icon: "dashboard" as const, onPress: () => router.push("/zone/(tabs)" as any) },
+                    { label: "Branches", icon: "branch" as const, onPress: () => router.push("/zone/(tabs)/branches" as any) },
+                    ...sidebarModules.map((module) => ({
+                        label: module.title,
+                        icon: module.icon,
+                        onPress: () => router.push(module.route as any),
+                    })),
+                    { label: "Withdraw Request", icon: "wallet" as const, onPress: () => router.push({ pathname: "/zone/(tabs)/profile", params: { withdraw: "1" } } as any) },
+                    { label: "Logout", icon: "logout" as const, onPress: handleLogout },
+                ]
+                : [
+                    { label: "Dashboard", icon: "dashboard" as const, onPress: () => router.push("/zone/(tabs)" as any) },
+                    { label: "Profile Settings", icon: "settings" as const, onPress: () => router.push("/zone/profile/edit" as any) },
+                    { label: "Start Verification", icon: "status" as const, onPress: handleStartVerification },
+                    { label: "Logout", icon: "logout" as const, onPress: handleLogout },
+                ],
+        [kycVerified, router, sidebarModules],
     );
 
     if (loading) {
@@ -418,7 +449,7 @@ export default function ZoneDashboardHome() {
     const rightAction = (
         <View style={styles.headerActionsRow}>
             <Pressable
-                onPress={() => router.push("/zone/modules/notifications" as any)}
+                onPress={kycVerified ? () => router.push("/zone/modules/notifications" as any) : handleLockedAction}
                 style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
             >
                 <AppIcon name="notifications" size="lg" />
@@ -454,95 +485,133 @@ export default function ZoneDashboardHome() {
                     ]}
                     showsVerticalScrollIndicator={false}
                 >
-                    <View style={styles.heroCard}>
-                        <View style={styles.heroRow}>
-                            <View style={styles.avatarIconWrap}>
-                                <AppIcon
-                                    name={zone.type === "sports" ? "zone" : zone.type === "hybrid" ? "business" : "matchroom"}
-                                    size="lg"
-                                    tone="accent"
-                                />
+                    {!kycVerified ? (
+                        <View style={styles.verificationBanner}>
+                            <View style={styles.verificationBannerHeader}>
+                                <AppIcon name="mailVerified" size={20} color={COLORS.warning} />
+                                <Text style={styles.verificationBannerTitle}>Verify your identity</Text>
                             </View>
-                            <View style={styles.heroTextWrap}>
-                                <Text style={styles.heroEyebrow}>Venue Profile</Text>
-                                <Text style={styles.heroTitle}>{summary.venueName}</Text>
-                                <Text style={styles.heroSubtitle}>{summary.ownerName}</Text>
+                            <Text style={styles.verificationBannerText}>
+                                {ZONE_KYC_VERIFICATION_MESSAGE}
+                            </Text>
+                            <View style={styles.verificationBannerActions}>
+                                <AppButton style={styles.verificationActionButton} onPress={handleStartVerification}>
+                                    Start Verification
+                                </AppButton>
+                                <AppButton
+                                    variant="secondary"
+                                    style={styles.verificationActionButton}
+                                    onPress={() => router.push("/zone/profile/edit" as any)}
+                                >
+                                    Profile Settings
+                                </AppButton>
                             </View>
                         </View>
-                        <View style={styles.tagsRow}>
-                            <StatusPill tone="neutral" label={summary.zoneType} />
-                            <StatusPill tone={getZoneStatusTone(zone.status)} label={summary.status} />
-                            <StatusPill tone="neutral" label={`${summary.branchCount} branches`} />
-                        </View>
-                    </View>
+                    ) : null}
 
-                    <View style={styles.snapshotPanel}>
-                        {snapshotMetrics.map((metric, index) => (
-                            <View
-                                key={metric.key}
-                                style={[
-                                    styles.snapshotItem,
-                                    index % 2 === 0 && styles.snapshotItemLeft,
-                                    index < 2 && styles.snapshotItemTop,
-                                ]}
-                            >
-                                <View style={[styles.snapshotIconWrap, subtleIconStyle(metric.color)]}>
-                                    <AppIcon name={metric.icon} size={16} color={metric.color} />
-                                </View>
-                                <View style={styles.snapshotTextWrap}>
-                                    <Text style={styles.snapshotLabel}>{metric.label}</Text>
-                                    <Text style={styles.snapshotValue}>{metric.value}</Text>
-                                </View>
+                    <View
+                        style={!kycVerified ? styles.dashboardLocked : undefined}
+                        pointerEvents={!kycVerified ? "none" : "auto"}
+                    >
+                        {!kycVerified ? (
+                            <View style={styles.dashboardLockState}>
+                                <AppIcon name="password" size={16} color={COLORS.textSecondary} />
+                                <Text style={styles.dashboardLockStateText}>
+                                    Zone Admin features locked until identity verification is complete
+                                </Text>
                             </View>
-                        ))}
-                    </View>
+                        ) : null}
 
-                    <View style={styles.section}>
-                        <AdminSectionHeader title="Admin Modules" subtitle="Core flows" compact />
-                        <View style={styles.moduleGrid}>
-                            {dashboardModules.map((module, index) => {
-                                const iconColor = MODULE_ICON_COLORS[index % MODULE_ICON_COLORS.length];
-                                return (
-                                    <AdminQuickActionCard
-                                        key={module.id}
-                                        title={module.title}
-                                        description={module.description}
-                                        icon={module.icon}
-                                        badgeLabel={module.tag}
-                                        iconColor={iconColor}
-                                        onPress={() => router.push(module.route as any)}
-                                        cardStyle={styles.moduleCard}
-                                        iconStyle={subtleIconStyle(iconColor)}
+                        <View style={styles.heroCard}>
+                            <View style={styles.heroRow}>
+                                <View style={styles.avatarIconWrap}>
+                                    <AppIcon
+                                        name={zone.type === "sports" ? "zone" : zone.type === "hybrid" ? "business" : "matchroom"}
+                                        size="lg"
+                                        tone="accent"
                                     />
-                                );
-                            })}
+                                </View>
+                                <View style={styles.heroTextWrap}>
+                                    <Text style={styles.heroEyebrow}>Venue Profile</Text>
+                                    <Text style={styles.heroTitle}>{summary.venueName}</Text>
+                                    <Text style={styles.heroSubtitle}>{summary.ownerName}</Text>
+                                </View>
+                            </View>
+                            <View style={styles.tagsRow}>
+                                <StatusPill tone="neutral" label={summary.zoneType} />
+                                <StatusPill tone={getZoneStatusTone(zone.status)} label={summary.status} />
+                                <StatusPill tone="neutral" label={`${summary.branchCount} branches`} />
+                            </View>
                         </View>
-                    </View>
 
-                    <View style={styles.section}>
-                        <AdminSectionHeader
-                            title="Upcoming Matchrooms"
-                            subtitle={`${upcomingMatchrooms.length} in queue`}
-                            compact
-                        />
-                        <View style={styles.matchroomsWrap}>
-                            {upcomingMatchrooms.length === 0 ? (
-                                <AdminEmptyStateCard
-                                    title="No upcoming matchrooms"
-                                    description="Zone-created and approved sessions will appear here."
-                                    icon="matchroom"
-                                />
-                            ) : (
-                                upcomingMatchrooms.map((room) => (
-                                    <MatchroomCard
-                                        key={room.id}
-                                        room={mapZoneRoomToMatchroom(
-                                            room,
-                                            zone.primaryBranch?.areaLabel || zone.venueBrandName || "Zone Venue",
-                                        )}
+                        <View style={styles.snapshotPanel}>
+                            {snapshotMetrics.map((metric, index) => (
+                                <View
+                                    key={metric.key}
+                                    style={[
+                                        styles.snapshotItem,
+                                        index % 2 === 0 && styles.snapshotItemLeft,
+                                        index < 2 && styles.snapshotItemTop,
+                                    ]}
+                                >
+                                    <View style={[styles.snapshotIconWrap, subtleIconStyle(metric.color)]}>
+                                        <AppIcon name={metric.icon} size={16} color={metric.color} />
+                                    </View>
+                                    <View style={styles.snapshotTextWrap}>
+                                        <Text style={styles.snapshotLabel}>{metric.label}</Text>
+                                        <Text style={styles.snapshotValue}>{metric.value}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+
+                        <View style={styles.section}>
+                            <AdminSectionHeader title="Admin Modules" subtitle="Core flows" compact />
+                            <View style={styles.moduleGrid}>
+                                {dashboardModules.map((module, index) => {
+                                    const iconColor = MODULE_ICON_COLORS[index % MODULE_ICON_COLORS.length];
+                                    return (
+                                        <AdminQuickActionCard
+                                            key={module.id}
+                                            title={module.title}
+                                            description={module.description}
+                                            icon={module.icon}
+                                            badgeLabel={module.tag}
+                                            iconColor={iconColor}
+                                            onPress={() => router.push(module.route as any)}
+                                            cardStyle={styles.moduleCard}
+                                            iconStyle={subtleIconStyle(iconColor)}
+                                        />
+                                    );
+                                })}
+                            </View>
+                        </View>
+
+                        <View style={styles.section}>
+                            <AdminSectionHeader
+                                title="Upcoming Matchrooms"
+                                subtitle={`${upcomingMatchrooms.length} in queue`}
+                                compact
+                            />
+                            <View style={styles.matchroomsWrap}>
+                                {upcomingMatchrooms.length === 0 ? (
+                                    <AdminEmptyStateCard
+                                        title="No upcoming matchrooms"
+                                        description="Zone-created and approved sessions will appear here."
+                                        icon="matchroom"
                                     />
-                                ))
-                            )}
+                                ) : (
+                                    upcomingMatchrooms.map((room) => (
+                                        <MatchroomCard
+                                            key={room.id}
+                                            room={mapZoneRoomToMatchroom(
+                                                room,
+                                                zone.primaryBranch?.areaLabel || zone.venueBrandName || "Zone Venue",
+                                            )}
+                                        />
+                                    ))
+                                )}
+                            </View>
                         </View>
                     </View>
 
