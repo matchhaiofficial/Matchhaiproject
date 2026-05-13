@@ -4,7 +4,7 @@ import { ConvexProviderWithAuth } from "convex/react";
 
 import { authClient } from "../lib/auth-client";
 import { loadCachedAuthSession, saveCachedAuthSession } from "../lib/authSessionCache";
-import { convex } from "../lib/convex";
+import { createConvexClient } from "../lib/convex";
 import Logger from "../utils/logger";
 import type { AuthSession } from "../lib/auth-client";
 
@@ -149,8 +149,12 @@ function useBetterAuthConvexAuth() {
 }
 
 export default function AuthenticatedConvexProvider({ children }: { children: ReactNode }) {
+  const { data: session } = authClient.useSession();
+  const sessionKey = session?.session?.id || "anonymous";
+  const convex = useMemo(() => createConvexClient(), [sessionKey]);
+
   return (
-    <ConvexProviderWithAuth client={convex} useAuth={useBetterAuthConvexAuth}>
+    <ConvexProviderWithAuth key={sessionKey} client={convex} useAuth={useBetterAuthConvexAuth}>
       {children}
     </ConvexProviderWithAuth>
   );

@@ -24,6 +24,19 @@ export type SupportConversationContext = {
 export type SupportAgentResponse = {
   answer: string;
   contextPatch?: Partial<SupportConversationContext>;
+  agentMeta?: {
+    requestId?: string;
+    intent?: string;
+    priority?: "low" | "medium" | "high" | "urgent";
+    confidence?: number;
+    fallback?: boolean;
+    actions?: Array<{
+      type?: string;
+      ok?: boolean;
+      denied?: boolean;
+      reference?: string;
+    }>;
+  };
 };
 
 export type SupportActionIntent = "draft_email" | "create_ticket" | "none";
@@ -36,6 +49,17 @@ export const EMPTY_SUPPORT_CONTEXT: SupportConversationContext = {
 };
 
 const BULLET = "\u2022";
+const SUPPORT_DEBUG = process.env.EXPO_PUBLIC_SUPPORT_DEBUG === "1";
+
+class SupportAiRequestError extends Error {
+  status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "SupportAiRequestError";
+    this.status = status;
+  }
+}
 
 function lines(parts: Array<string | null | undefined | false>) {
   return parts
@@ -58,7 +82,7 @@ export const SUPPORT_BOT_COPY = {
   ]),
   contextTitle: "MatchHai Support",
   contextSafety:
-    "Ask about account, matchrooms, payments, reports, notifications, or admin usage.\n\nNever share OTPs, PINs, passwords, tokens, or raw payment/provider payloads.",
+    "Ask about account, matchrooms, payments, reports, notifications, or admin usage.\n\nNever share OTPs, PINs, passwords, tokens, or raw payment/provider payloads. Support chat accepts text only.",
   emptyTitle: "Ask a MatchHai support question",
   emptySubtitle: "Account, matchroom, payment, report, booking, notification, or admin usage.",
   unavailablePrefix: "Support AI unavailable.",
@@ -178,6 +202,7 @@ function roleFromText(input: string): SupportUserRole | undefined {
 function detectCategory(input: string, previous?: string) {
   const text = normalize(input);
   if (detectMatchroomResultSubIssue(input, previous)) return MATCHROOM_RESULT_CATEGORY;
+  if (/\b(report|reported|complaint|abuse|cheat|cheating|toxic|harassment|player|team|venue)\b/.test(text) && /\b(report|complaint|abuse|cheat|cheating|toxic|harassment)\b/.test(text)) return "reports_moderation";
   if (/\b(payment|wallet|refund|deducted|paid|money|pending|easypaisa)\b/.test(text)) return "payments_wallet_refunds";
   if (/\b(matchroom|match room|lobby|invite|team|slot)\b/.test(text)) return "matchroom_lobby";
   if (/\b(zone|venue|branch|zone owner|zone admin|approval)\b/.test(text)) return "zone_admin";
@@ -522,7 +547,18 @@ export function buildLocalSupportFallback(input: string, context: SupportConvers
   }
 
   if (category === "reports_moderation") {
-    return "Got it - is this about reporting a player, checking a report status, or an admin moderation action?";
+    return lines([
+      "Got it - I can help you report this safely.",
+      "",
+      "Tell me:",
+      bullets([
+        "Who or what you want to report: player, team, venue, or zone",
+        "What happened, without sharing private contact details",
+        "Related matchroom, booking, or approximate time if you know it",
+      ]),
+      "",
+      "Do not attach screenshots, documents, or images here. Describe it in text and I can send it to the MatchHai moderation queue.",
+    ]);
   }
 
   return SUPPORT_BOT_COPY.clarificationFallback;
@@ -541,28 +577,43 @@ export function redactSupportText(input: string) {
     .replace(/\b(?:otp|pin|password|token|secret)\s*[:=]?\s*[A-Z0-9@#$%^&*._-]{3,}\b/gi, "[redacted-secret]")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
     .replace(/(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/g, "[redacted-phone]")
+    .replace(/\b(?:\d[ -]?){13,19}\b/g, "[redacted-card]")
+    .replace(/\b(?:easypaisa|jazzcash|wallet)\s*[:=]?\s*(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/gi, "[redacted-wallet]")
     .replace(/\b\d{5}[-\s]?\d{7}[-\s]?\d\b/g, "[redacted-cnic]")
-    .replace(/\b(?:EP|TXN|TRX|PAY|ORD|REF)[-_]?[A-Z0-9-]{6,}\b/gi, "[redacted-reference]")
+    .replace(/\b(?:EP|TXN|TRX|PAY|ORD|REF)[-_]?(?=[A-Z0-9-]*\d)[A-Z0-9-]{6,}\b/gi, "[redacted-reference]")
     .replace(/\b[A-F0-9]{12,}\b/gi, "[redacted-id]");
 }
 
 export async function askSupportAi(
   input: string,
   context: SupportConversationContext = EMPTY_SUPPORT_CONTEXT,
-  appContext?: unknown,
+  options?: {
+    token: string;
+    conversationId: string;
+    supportEmail?: string;
+  },
 ): Promise<SupportAgentResponse> {
   if (!SUPPORT_AI_ENABLED || !SUPPORT_AI_ENDPOINT.trim()) {
     throw new Error("Support AI unavailable");
+  }
+  if (!options?.token || !options.conversationId) {
+    throw new Error("Support AI unavailable");
+  }
+
+  if (SUPPORT_DEBUG) {
+    console.log("[SupportChat] Worker request started");
   }
 
   const response = await fetch(SUPPORT_AI_ENDPOINT, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${options.token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       message: redactSupportText(input),
       scope: "MatchHai app support only",
+      conversationId: options.conversationId,
       context: {
         userRole: context.userRole,
         currentIssueCategory: context.currentIssueCategory,
@@ -574,16 +625,19 @@ export async function askSupportAi(
         escalationOffered: context.escalationOffered,
         pendingAction: context.pendingAction,
       },
-      supportEmail: SUPPORT_EMAIL.trim(),
-      appContext,
-      history: context.recentMessages.slice(-8).map((message) => ({
+      supportEmail: options.supportEmail || SUPPORT_EMAIL.trim(),
+      history: context.recentMessages.slice(-12).map((message) => ({
         role: message.role,
         text: redactSupportText(message.text).slice(0, 700),
       })),
     }),
   });
 
-  if (!response.ok) throw new Error("Support AI unavailable");
+  if (SUPPORT_DEBUG) {
+    console.log("[SupportChat] Worker request completed", { status: response.status });
+  }
+
+  if (!response.ok) throw new SupportAiRequestError("Support AI unavailable", response.status);
 
   const payload = await response.json();
   const answer = typeof payload?.answer === "string" ? payload.answer.trim() : "";
@@ -592,6 +646,9 @@ export async function askSupportAi(
     answer,
     contextPatch: typeof payload?.contextPatch === "object" && payload.contextPatch
       ? payload.contextPatch
+      : undefined,
+    agentMeta: typeof payload?.agentMeta === "object" && payload.agentMeta
+      ? payload.agentMeta
       : undefined,
   };
 }

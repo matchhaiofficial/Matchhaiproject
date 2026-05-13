@@ -9,6 +9,25 @@ import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 
 const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").trim().toLowerCase();
 const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const SUPER_ADMIN_ALLOWLIST_NAMES = ["Junaid", "Ehteshan", "Zeerak", "Mubeen", "Saad", "Ovais"] as const;
+const SUPER_ADMIN_ALLOWLIST_ENV_KEYS: Record<(typeof SUPER_ADMIN_ALLOWLIST_NAMES)[number], string> = {
+  Junaid: "SUPER_ADMIN_EMAIL_JUNAID",
+  Ehteshan: "SUPER_ADMIN_EMAIL_EHTESHAN",
+  Zeerak: "SUPER_ADMIN_EMAIL_ZEERAK",
+  Mubeen: "SUPER_ADMIN_EMAIL_MUBEEN",
+  Saad: "SUPER_ADMIN_EMAIL_SAAD",
+  Ovais: "SUPER_ADMIN_EMAIL_OVAIS",
+};
+
+type SuperAdminAuditStatus = "success" | "failed" | "denied";
+
+type SuperAdminAllowlistEntry = {
+  displayName: string;
+  email: string;
+  role: "super_admin";
+  permissions?: string[];
+  isActive: boolean;
+};
 
 function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
@@ -27,6 +46,124 @@ function normalizePhone(phone?: string | null) {
   if (digits.startsWith("92")) return `+${digits}`;
   if (digits.startsWith("0")) return `+92${digits.slice(1)}`;
   return `+${digits}`;
+}
+
+function parseSuperAdminAllowlistJson(): SuperAdminAllowlistEntry[] {
+  const raw = String(process.env.SUPER_ADMIN_ALLOWLIST_JSON || "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry: any) => ({
+        displayName: String(entry?.displayName || "").trim(),
+        email: normalizeEmail(entry?.email || ""),
+        role: "super_admin" as const,
+        permissions: Array.isArray(entry?.permissions) ? entry.permissions.map(String) : undefined,
+        isActive: entry?.isActive !== false,
+      }))
+      .filter((entry) => entry.displayName && entry.email);
+  } catch {
+    return [];
+  }
+}
+
+function getSuperAdminAllowlist(): SuperAdminAllowlistEntry[] {
+  const entries: SuperAdminAllowlistEntry[] = [];
+  for (const displayName of SUPER_ADMIN_ALLOWLIST_NAMES) {
+    const email = normalizeEmail(process.env[SUPER_ADMIN_ALLOWLIST_ENV_KEYS[displayName]] || "");
+    if (email) entries.push({ displayName, email, role: "super_admin", isActive: true });
+  }
+  entries.push(...parseSuperAdminAllowlistJson());
+  if (SUPER_ADMIN_EMAIL) {
+    entries.push({ displayName: "MatchHai Super Admin", email: SUPER_ADMIN_EMAIL, role: "super_admin", isActive: true });
+  }
+  const byEmail = new Map<string, SuperAdminAllowlistEntry>();
+  for (const entry of entries) {
+    if (!byEmail.has(entry.email)) byEmail.set(entry.email, entry);
+  }
+  return Array.from(byEmail.values());
+}
+
+function findSuperAdminAllowlistEntry(email?: string | null) {
+  const normalized = normalizeEmail(email || "");
+  if (!normalized) return null;
+  return getSuperAdminAllowlist().find((entry) => entry.email === normalized && entry.isActive) || null;
+}
+
+function isAuthorizedSuperAdmin(profile: any, email: string) {
+  return Boolean(findSuperAdminAllowlistEntry(email) || profile?.role === "super-admin");
+}
+
+function resolveSuperAdminAuditIdentity(authUser: any, profile: any) {
+  const email = normalizeEmail(authUser?.email || profile?.email || "");
+  const allowlistEntry = findSuperAdminAllowlistEntry(email);
+  return {
+    superAdminUserId: profile?._id,
+    superAdminAuthId: String(authUser?._id || authUser?.id || profile?.authId || ""),
+    superAdminName: allowlistEntry?.displayName || profile?.fullName || profile?.username || "Unknown Super Admin",
+    superAdminEmail: email || "unknown",
+  };
+}
+
+function sanitizeAuditMetadata(value: any): any {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "string") return value.slice(0, 240);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map(sanitizeAuditMetadata);
+  if (typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [key, rawValue] of Object.entries(value).slice(0, 30)) {
+      const lowerKey = key.toLowerCase();
+      if (
+        lowerKey.includes("password") ||
+        lowerKey.includes("token") ||
+        lowerKey.includes("secret") ||
+        lowerKey.includes("cnic") ||
+        lowerKey.includes("payload") ||
+        lowerKey.includes("body") ||
+        lowerKey.includes("conversation") ||
+        lowerKey.includes("bankaccount") ||
+        lowerKey.includes("accountnumber") ||
+        lowerKey.includes("phone")
+      ) {
+        continue;
+      }
+      out[key] = sanitizeAuditMetadata(rawValue);
+    }
+    return out;
+  }
+  return undefined;
+}
+
+async function insertSuperAdminAuditLog(
+  ctx: any,
+  admin: { authUser?: any; profile?: any } | null,
+  input: {
+    action: string;
+    module: string;
+    targetType?: string;
+    targetId?: string;
+    status: SuperAdminAuditStatus;
+    reason?: string;
+    metadataSafe?: any;
+  },
+) {
+  const identity = resolveSuperAdminAuditIdentity(admin?.authUser, admin?.profile);
+  await ctx.db.insert("superAdminAuditLogs", {
+    superAdminUserId: identity.superAdminUserId,
+    superAdminAuthId: identity.superAdminAuthId || undefined,
+    superAdminName: identity.superAdminName,
+    superAdminEmail: identity.superAdminEmail,
+    action: input.action,
+    module: input.module,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    status: input.status,
+    reason: input.reason?.slice(0, 240),
+    metadataSafe: sanitizeAuditMetadata(input.metadataSafe),
+    createdAt: Date.now(),
+  });
 }
 
 async function getAuthenticatedAdmin(ctx: any, sessionToken: string) {
@@ -54,12 +191,31 @@ async function getAuthenticatedAdmin(ctx: any, sessionToken: string) {
     .unique();
 
   const email = normalizeEmail(authUser.email || "");
-  const isSuperAdmin = profile?.role === "super-admin" || email === SUPER_ADMIN_EMAIL;
+  const isSuperAdmin = isAuthorizedSuperAdmin(profile, email);
 
   if (!profile || !isSuperAdmin) {
     throw new Error("Super admin access required");
   }
 
+  return { authUser, profile };
+}
+
+async function getAuditIdentityFromSession(ctx: any, sessionToken: string) {
+  const session = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+    model: "session",
+    where: [{ field: "token", operator: "eq", value: sessionToken }],
+  });
+  if (!session?.userId) return { authUser: null, profile: null };
+  const [authUser, profile] = await Promise.all([
+    ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: "user",
+      where: [{ field: "_id", operator: "eq", value: session.userId }],
+    }),
+    ctx.db
+      .query("users")
+      .withIndex("by_authId", (q: any) => q.eq("authId", session.userId))
+      .unique(),
+  ]);
   return { authUser, profile };
 }
 
@@ -82,6 +238,8 @@ function summarizeSupportTicketMetadata(metadata: any) {
   const safeSupportContext = metadata?.safeSupportContext || {};
   return {
     knownNonSensitiveDetails,
+    emailStatus: metadata?.emailStatus || safeSupportContext?.emailStatus || "not_configured",
+    aiSummary: metadata?.aiSummary || metadata?.summary,
     user: safeSupportContext?.user
       ? {
           role: safeSupportContext.user.role,
@@ -112,7 +270,7 @@ function summarizeSupportTicketMetadata(metadata: any) {
           status: payment.status,
           amount: payment.amount,
           currency: payment.currency,
-          orderRefNum: payment.orderRefNum,
+          maskedReference: payment.maskedReference || payment.orderRefNum,
           providerStatus: payment.providerStatus,
           providerReference: payment.providerReference,
           createdAt: payment.createdAt,
@@ -145,7 +303,16 @@ async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = fal
     reference: ticket.reference,
     userRole: ticket.userRole,
     category: ticket.category,
+    subcategory: ticket.subcategory,
+    intent: ticket.intent,
+    priority: ticket.priority,
     issueSummary: ticket.issueSummary,
+    suggestedAdminAction: ticket.suggestedAdminAction,
+    relatedMatchroomId: ticket.relatedMatchroomId ? String(ticket.relatedMatchroomId) : undefined,
+    relatedPaymentId: ticket.relatedPaymentId ? String(ticket.relatedPaymentId) : undefined,
+    relatedBookingId: ticket.relatedBookingId ? String(ticket.relatedBookingId) : undefined,
+    relatedZoneId: ticket.relatedZoneId ? String(ticket.relatedZoneId) : undefined,
+    conversationId: ticket.conversationId ? String(ticket.conversationId) : undefined,
     status: ticket.status,
     source: ticket.source,
     createdAt: ticket.createdAt,
@@ -276,6 +443,150 @@ export const getDashboardSummary = query({
         currency: "PKR",
       },
     };
+  },
+});
+
+export const getSuperAdminAllowlistConfig = query({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    return getSuperAdminAllowlist().map((entry) => ({
+      displayName: entry.displayName,
+      email: entry.email,
+      role: entry.role,
+      permissions: entry.permissions || [],
+      isActive: entry.isActive,
+    }));
+  },
+});
+
+export const recordSuperAdminAudit = mutation({
+  args: {
+    sessionToken: v.string(),
+    action: v.string(),
+    module: v.string(),
+    targetType: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    status: v.union(v.literal("success"), v.literal("failed"), v.literal("denied")),
+    reason: v.optional(v.string()),
+    metadataSafe: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    if (args.status === "denied") {
+      const auditIdentity = await getAuditIdentityFromSession(ctx, args.sessionToken);
+      await insertSuperAdminAuditLog(ctx, auditIdentity, {
+        action: args.action,
+        module: args.module,
+        targetType: args.targetType,
+        targetId: args.targetId,
+        status: "denied",
+        reason: args.reason || "not_authorized",
+        metadataSafe: args.metadataSafe,
+      });
+      return { ok: true };
+    }
+
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: args.action,
+      module: args.module,
+      targetType: args.targetType,
+      targetId: args.targetId,
+      status: args.status,
+      reason: args.reason,
+      metadataSafe: args.metadataSafe,
+    });
+    return { ok: true };
+  },
+});
+
+export const listSuperAdminAuditLogs = query({
+  args: {
+    sessionToken: v.string(),
+    superAdminEmail: v.optional(v.string()),
+    action: v.optional(v.string()),
+    module: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("success"), v.literal("failed"), v.literal("denied"))),
+    targetId: v.optional(v.string()),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 100, 200));
+    let rows = await ctx.db.query("superAdminAuditLogs").withIndex("by_createdAt").order("desc").take(limit * 3);
+    rows = rows.filter((row) => {
+      if (args.superAdminEmail && row.superAdminEmail !== normalizeEmail(args.superAdminEmail)) return false;
+      if (args.action && row.action !== args.action) return false;
+      if (args.module && row.module !== args.module) return false;
+      if (args.status && row.status !== args.status) return false;
+      if (args.targetId && !String(row.targetId || "").toLowerCase().includes(args.targetId.toLowerCase())) return false;
+      if (args.from && row.createdAt < args.from) return false;
+      if (args.to && row.createdAt > args.to) return false;
+      return true;
+    });
+    return rows.slice(0, limit).map((row) => ({
+      id: row._id,
+      superAdminUserId: row.superAdminUserId || null,
+      superAdminAuthId: row.superAdminAuthId || null,
+      superAdminName: row.superAdminName,
+      superAdminEmail: row.superAdminEmail,
+      action: row.action,
+      module: row.module,
+      targetType: row.targetType || null,
+      targetId: row.targetId || null,
+      status: row.status,
+      reason: row.reason || null,
+      metadataSafe: row.metadataSafe || null,
+      createdAt: row.createdAt,
+    }));
+  },
+});
+
+export const listIdentityVerifications = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.string()),
+    role: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 100, 200));
+    const rows = args.status
+      ? await ctx.db
+          .query("identityVerifications")
+          .withIndex("by_status_and_submittedAt", (q) => q.eq("status", args.status as any))
+          .order("desc")
+          .take(limit)
+      : await ctx.db.query("identityVerifications").order("desc").take(limit);
+    const filtered = args.role ? rows.filter((row) => row.role === args.role) : rows;
+    return await Promise.all(
+      filtered.map(async (row) => {
+        const user = await ctx.db.get(row.userId);
+        return {
+          id: row._id,
+          userId: row.userId,
+          userName: user?.fullName || user?.username || "Unknown user",
+          userEmail: user?.email || null,
+          role: row.role,
+          provider: row.provider,
+          workflowId: row.workflowId,
+          status: row.status,
+          submittedAt: row.submittedAt,
+          verifiedAt: row.verifiedAt || null,
+          rejectedAt: row.rejectedAt || null,
+          rejectionReason: row.rejectionReason || null,
+          emailVerificationStatus: row.emailVerificationStatus || null,
+          idVerificationStatus: row.idVerificationStatus || null,
+          livenessStatus: row.livenessStatus || null,
+          faceMatchStatus: row.faceMatchStatus || null,
+          amlStatus: row.amlStatus || null,
+          ipAnalysisStatus: row.ipAnalysisStatus || null,
+        };
+      }),
+    );
   },
 });
 
@@ -641,7 +952,7 @@ export const setZoneStatus = mutation({
     rejectionReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) {
       throw new Error("Zone not found.");
@@ -751,6 +1062,14 @@ export const setZoneStatus = mutation({
         },
       });
     }
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: args.status === "active" ? "approve_zone" : args.status === "rejected" ? "reject_zone" : "update_zone_status",
+      module: "zones",
+      targetType: "zone",
+      targetId: String(args.zoneId),
+      status: "success",
+      metadataSafe: { previousStatus: zone.status, status: args.status },
+    });
     return true;
   },
 });
@@ -761,7 +1080,7 @@ export const retryZoneMigration = mutation({
     zoneId: v.id("zones"),
   },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) {
       throw new Error("Zone not found.");
@@ -793,6 +1112,14 @@ export const retryZoneMigration = mutation({
         },
         updatedAt: Date.now(),
       });
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "retry_zone_migration",
+        module: "zones",
+        targetType: "zone",
+        targetId: String(args.zoneId),
+        status: "success",
+        metadataSafe: { branchCount: result.branchCount, resourceCount: result.resourceCount },
+      });
       return { ok: true };
     } catch (error: any) {
       await ctx.db.patch(args.zoneId, {
@@ -820,7 +1147,8 @@ export const setReportStatus = mutation({
     resolutionSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { profile } = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const { profile } = admin;
 
     const report = await ctx.db.get(args.reportId);
     if (!report) {
@@ -897,6 +1225,14 @@ export const setReportStatus = mutation({
       },
     });
 
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "update_report_status",
+      module: "reports",
+      targetType: "report",
+      targetId: String(args.reportId),
+      status: "success",
+      metadataSafe: { status: args.status },
+    });
     return true;
   },
 });
@@ -908,7 +1244,7 @@ export const updateSupportTicketStatus = mutation({
     status: v.union(v.literal("open"), v.literal("in_review"), v.literal("resolved")),
   },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
 
     const ticket = await ctx.db.get(args.ticketId);
     if (!ticket) {
@@ -920,6 +1256,14 @@ export const updateSupportTicketStatus = mutation({
       updatedAt: Date.now(),
     });
 
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "update_support_ticket_status",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { previousStatus: ticket.status, status: args.status, reference: ticket.reference },
+    });
     return { ok: true };
   },
 });
@@ -931,7 +1275,8 @@ export const setUserRole = mutation({
     role: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { profile } = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const { profile } = admin;
 
     if (profile._id === args.userId && !args.role) {
       throw new Error("You cannot remove your own super admin access.");
@@ -962,6 +1307,14 @@ export const setUserRole = mutation({
       },
     });
 
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "update_user_status",
+      module: "users",
+      targetType: "user",
+      targetId: String(args.userId),
+      status: "success",
+      metadataSafe: { role: args.role || null },
+    });
     return true;
   },
 });
@@ -1014,18 +1367,31 @@ export const bootstrapInitialSuperAdmin = mutation({
     const username = normalizeUsername(args.username || "superadmin");
     const authPassword = await hashPassword(args.password);
 
+    const authUserData: {
+      email: string;
+      name: string;
+      emailVerified: boolean;
+      createdAt: number;
+      updatedAt: number;
+      phoneNumber?: string;
+      phoneNumberVerified?: boolean;
+    } = {
+      email: SUPER_ADMIN_EMAIL,
+      name: args.fullName?.trim() || "MatchHai Super Admin",
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (phone) {
+      authUserData.phoneNumber = phone;
+      authUserData.phoneNumberVerified = false;
+    }
+
     const authUser = await ctx.runMutation(components.betterAuth.adapter.create, {
       input: {
         model: "user",
-        data: {
-          email: SUPER_ADMIN_EMAIL,
-          name: args.fullName?.trim() || "MatchHai Super Admin",
-          emailVerified: true,
-          phoneNumber: phone || null,
-          phoneNumberVerified: false,
-          createdAt: now,
-          updatedAt: now,
-        },
+        data: authUserData,
       },
     });
 

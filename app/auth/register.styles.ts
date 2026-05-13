@@ -127,6 +127,22 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.input,
     paddingVertical: SPACING.sm + 1,
   },
+  otpRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+  },
+  otpInputBox: {
+    flex: 1,
+  },
+  otpSubmitButton: {
+    minHeight: CONTROL_SIZES.inputMd,
+    alignSelf: "stretch",
+  },
+  phoneVerifyButton: {
+    marginLeft: SPACING.sm,
+  },
   inputPlaceholderOverlay: {
     position: "absolute",
     left: 44,

@@ -1,6 +1,6 @@
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 
 import { AGE_RANGES, DEFAULT_CITY } from "../../constants/profileOptions";
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
@@ -15,6 +15,10 @@ import {
   isPhoneAvailable,
   isUsernameAvailable,
 } from "../../src/services/convex/userService";
+import {
+  sendPhoneOtp,
+  verifyPhoneOtp,
+} from "../../src/services/convex/phoneOtpService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import {
@@ -49,6 +53,12 @@ export default function Register() {
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>("idle");
   const [phoneStatus, setPhoneStatus] = useState<AvailabilityStatus>("idle");
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>("idle");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpVisible, setOtpVisible] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpMessage, setOtpMessage] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [latestRequestIds, setLatestRequestIds] = useState({
     username: 0,
     email: 0,
@@ -64,6 +74,20 @@ export default function Register() {
     if (step1.phone) setPhoneStatus("available");
     if (step1.email) setEmailStatus("available");
   }, [step1.username, step1.phone, step1.email]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const { phoneE164: currentPhoneE164 } = normalizePakistaniPhone(phone);
+  const phoneVerified =
+    Boolean(step1.phoneVerified) &&
+    Boolean(currentPhoneE164) &&
+    step1.phoneVerifiedE164 === currentPhoneE164;
 
   const {
     isFullNameValid,
@@ -141,7 +165,8 @@ export default function Register() {
       (usernameStatus === "idle" || usernameStatus === "available");
     const phoneOk =
       phoneFormatValid &&
-      (phoneStatus === "idle" || phoneStatus === "available");
+      phoneStatus === "available" &&
+      phoneVerified;
     const emailOk =
       emailValid && (emailStatus === "idle" || emailStatus === "available");
 
@@ -175,6 +200,7 @@ export default function Register() {
     fullName,
     password,
     phone,
+    phoneVerified,
     phoneStatus,
     username,
     usernameStatus,
@@ -278,10 +304,98 @@ export default function Register() {
       next = formatPakistaniPhone(value);
     }
     setPhone(next);
+    if (step1.phoneVerified) {
+      setStep1({
+        phoneVerified: false,
+        phoneVerifiedAt: null,
+        phoneVerifiedE164: "",
+      });
+    }
+    setOtpCode("");
+    setOtpVisible(false);
+    setOtpMessage(null);
+    setResendCooldown(0);
     if (phoneStatus !== "idle") setPhoneStatus("idle");
     if (next.length >= 10) {
       void checkPhone(next);
     }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    const { phoneE164 } = normalizePakistaniPhone(phone);
+    if (!phoneE164 || !isPhoneFormatValid) {
+      showToast({
+        type: "error",
+        title: "Invalid number",
+        message: "Enter a valid Pakistani mobile number.",
+      });
+      return;
+    }
+    if (phoneStatus !== "available") {
+      showToast({
+        type: "info",
+        title: "Check number",
+        message: "Please wait until this phone number is confirmed available.",
+      });
+      return;
+    }
+
+    setOtpSending(true);
+    setOtpMessage(null);
+    const result = await sendPhoneOtp(phoneE164);
+    setOtpSending(false);
+    if (!result.ok) {
+      setOtpMessage(result.message);
+      showToast({ type: "error", title: "OTP failed", message: result.message });
+      return;
+    }
+
+    setOtpVisible(true);
+    setOtpCode("");
+    setResendCooldown(result.cooldownSeconds || 30);
+    setOtpMessage(`Code sent to ${result.phoneMasked}.`);
+    showToast({
+      type: "success",
+      title: "Code sent",
+      message: "Enter the verification code sent to your phone.",
+    });
+  };
+
+  const handleVerifyPhoneOtp = async () => {
+    const { phoneE164 } = normalizePakistaniPhone(phone);
+    if (!phoneE164) return;
+    const cleanOtp = otpCode.replace(/\D/g, "");
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      setOtpMessage("Enter the 6-digit verification code.");
+      return;
+    }
+
+    setOtpVerifying(true);
+    setOtpMessage(null);
+    const result = await verifyPhoneOtp(phoneE164, cleanOtp);
+    setOtpVerifying(false);
+    if (!result.ok) {
+      setOtpMessage(result.message);
+      showToast({ type: "error", title: "Verification failed", message: result.message });
+      return;
+    }
+
+    setStep1({
+      phone: result.phoneE164,
+      phoneVerified: true,
+      phoneVerifiedAt: result.verifiedAt,
+      phoneVerifiedE164: result.phoneE164,
+    });
+    setPhone(result.phoneE164);
+    setOtpCode("");
+    setOtpVisible(false);
+    setOtpMessage("Phone verified.");
+    setPhoneStatus("available");
+    showToast({
+      type: "success",
+      title: "Phone verified",
+      message: "You can continue registration.",
+    });
   };
 
   const handleNext = () => {
@@ -296,7 +410,17 @@ export default function Register() {
       Perf.measureAsync(
         "Action.player_register_step1_continue",
         () => {
-          if (!isFormValid) {
+          const { phoneE164 } = normalizePakistaniPhone(phone);
+          if (!phoneVerified || step1.phoneVerifiedE164 !== phoneE164) {
+            showToast({
+              type: "info",
+              title: "Verify phone",
+              message: "Please verify your phone number before continuing.",
+            });
+            return;
+          }
+
+          if (!isFormValid || phoneStatus !== "available") {
             showToast({
               type: "info",
               title: "Check details",
@@ -305,12 +429,14 @@ export default function Register() {
             return;
           }
 
-          const { phoneE164 } = normalizePakistaniPhone(phone);
           setStep1({
             fullName: fullName.trim(),
             username: username.trim(),
             email: email.trim(),
             phone: phoneE164,
+            phoneVerified: true,
+            phoneVerifiedAt: step1.phoneVerifiedAt,
+            phoneVerifiedE164: phoneE164,
             password,
             city: DEFAULT_CITY,
             ageRange,
@@ -371,6 +497,13 @@ export default function Register() {
     );
   };
 
+  const canSendOtp =
+    isPhoneFormatValid &&
+    phoneStatus === "available" &&
+    !phoneVerified &&
+    !otpSending &&
+    resendCooldown <= 0;
+
   return (
     <Screen
       scroll
@@ -393,7 +526,7 @@ export default function Register() {
       />
 
       <Text style={styles.heading}>Account details</Text>
-      <Text style={styles.sub}>Play preferences and optional platform links come next.</Text>
+      <Text style={styles.sub}>Use your real login/contact details. Didit identity verification comes after signup.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Full Name" required />
@@ -496,7 +629,7 @@ export default function Register() {
       </View>
 
       <View style={styles.fieldGroup}>
-        <RegistrationFieldLabel label="Email Address" required />
+        <RegistrationFieldLabel label="Login Email" required />
         <View style={styles.inputBox}>
           <View style={styles.inputRow}>
             <AppIcon
@@ -552,6 +685,7 @@ export default function Register() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
+        <Text style={styles.helperText}>Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.</Text>
         {email.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>
         ) : null}
@@ -570,7 +704,7 @@ export default function Register() {
             <TextInput
               placeholder="e.g. 0300 123 4567"
               placeholderTextColor={COLORS.muted}
-              style={styles.input}
+              style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
               selectionColor={COLORS.accent}
               keyboardType="phone-pad"
               autoCapitalize="none"
@@ -607,12 +741,87 @@ export default function Register() {
                 }
               />
             ) : null}
+            <Pressable
+              onPress={handleSendPhoneOtp}
+              disabled={!canSendOtp}
+              style={({ pressed }) => [
+                styles.platformButton,
+                styles.platformButtonInline,
+                styles.phoneVerifyButton,
+                phoneVerified && styles.platformButtonActive,
+                (!canSendOtp || resendCooldown > 0 || otpSending) && !phoneVerified
+                  ? { opacity: 0.5 }
+                  : null,
+                pressed && canSendOtp ? { opacity: 0.8 } : null,
+              ]}
+            >
+              {otpSending ? (
+                <ActivityIndicator size="small" color={COLORS.text} />
+              ) : (
+                <Text style={styles.platformButtonText}>
+                  {phoneVerified
+                    ? "Verified"
+                    : resendCooldown > 0
+                      ? `Resend in ${resendCooldown}s`
+                      : "Verify"}
+                </Text>
+              )}
+            </Pressable>
           </View>
           <View style={[styles.focusBar, { opacity: focused === "phone" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(phoneStatus, "phone")}
         {phone.trim().length > 0 && !isPhoneFormatValid && phoneStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid Pakistani mobile number.</Text>
+        ) : null}
+        {phoneVerified ? (
+          <Text style={[styles.helperText, styles.helperOk, { marginTop: 6 }]}>
+            Phone verified
+          </Text>
+        ) : null}
+        {otpVisible ? (
+          <View style={styles.otpRow}>
+            <View style={[styles.inputBox, styles.otpInputBox]}>
+              <TextInput
+                placeholder="6-digit code"
+                placeholderTextColor={COLORS.muted}
+                style={styles.input}
+                selectionColor={COLORS.accent}
+                keyboardType="number-pad"
+                value={otpCode}
+                maxLength={6}
+                onChangeText={(value) => setOtpCode(value.replace(/\D/g, ""))}
+              />
+            </View>
+            <Pressable
+              onPress={handleVerifyPhoneOtp}
+              disabled={otpVerifying || otpCode.replace(/\D/g, "").length !== 6}
+              style={({ pressed }) => [
+                styles.platformButton,
+                styles.platformButtonInline,
+                styles.otpSubmitButton,
+                (otpVerifying || otpCode.replace(/\D/g, "").length !== 6) && { opacity: 0.5 },
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              {otpVerifying ? (
+                <ActivityIndicator size="small" color={COLORS.text} />
+              ) : (
+                <Text style={styles.platformButtonText}>Verify OTP</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+        {otpMessage ? (
+          <Text
+            style={[
+              styles.helperText,
+              phoneVerified ? styles.helperOk : styles.helperWarning,
+              { marginTop: 6 },
+            ]}
+          >
+            {otpMessage}
+          </Text>
         ) : null}
       </View>
 

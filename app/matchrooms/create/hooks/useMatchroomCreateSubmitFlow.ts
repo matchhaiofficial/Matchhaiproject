@@ -25,9 +25,9 @@ import {
   normalizePakistaniPhone,
 } from "../../../../src/utils/phoneUtils";
 import {
-  hasVerifiedEmail,
-  showEmailVerificationRequiredAlert,
-} from "../../../../src/utils/emailVerificationGate";
+  isUserFullyVerified,
+  showKycVerificationRequiredAlert,
+} from "../../../../src/utils/verificationGate";
 import {
   buildAssignedTeamMembers,
   buildMatchroomPayload,
@@ -454,8 +454,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
   const submit = useCallback(async (options?: SubmitOptions): Promise<boolean> => {
     if (!user) return false;
     const skipPaymentPrompt = options?.skipPaymentPrompt === true;
-    if (!hasVerifiedEmail(authUser) && !isZoneWalkInAdmin) {
-      showEmailVerificationRequiredAlert();
+    if (!isUserFullyVerified(authUser, user) && !isZoneWalkInAdmin) {
+      showKycVerificationRequiredAlert();
       return false;
     }
 

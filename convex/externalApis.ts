@@ -37,80 +37,88 @@ function extractSteamIdOrVanity(input: string): { type: "id" | "vanity"; value: 
 export const fetchSteamProfile = action({
   args: { url: v.string() },
   handler: async (ctx, args) => {
-    if (!STEAM_API_KEY) {
-      throw new Error("STEAM_API_KEY is not configured");
-    }
-
-    const { type, value } = extractSteamIdOrVanity(args.url);
-    let steamId = value;
-
-    // Resolve vanity URL if needed
-    if (type === "vanity") {
-      const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_API_KEY}&vanityurl=${value}`;
-      const resolveRes = await fetch(resolveUrl);
-      const resolveData = await resolveRes.json();
-
-      if (resolveData.response?.success !== 1) {
-        throw new Error("Could not resolve Steam vanity URL");
-      }
-      steamId = resolveData.response.steamid;
-    }
-
-    // Get player summary
-    const summaryUrl = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${STEAM_API_KEY}&steamids=${steamId}`;
-    const summaryRes = await fetch(summaryUrl);
-    const summaryData = await summaryRes.json();
-
-    const player = summaryData.response?.players?.[0];
-    if (!player) {
-      throw new Error("Steam profile not found");
-    }
-
-    // Get owned games for CS2 hours
-    const gamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1`;
-    const gamesRes = await fetch(gamesUrl);
-    const gamesData = await gamesRes.json();
-
-    const cs2Game = gamesData.response?.games?.find(
-      (g: any) => g.appid === 730 // CS2/CSGO AppID
-    );
-    const cs2Hours = cs2Game ? Math.round(cs2Game.playtime_forever / 60) : null;
-
-    // Get CS2 stats
-    let stats = null;
     try {
-      const statsUrl = `https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?key=${STEAM_API_KEY}&steamid=${steamId}&appid=730`;
-      const statsRes = await fetch(statsUrl);
-      const statsData = await statsRes.json();
-
-      if (statsData.playerstats?.stats) {
-        const statMap = new Map(
-          statsData.playerstats.stats.map((s: any) => [s.name, s.value])
-        );
-        const kills = Number(statMap.get("total_kills") || 0);
-        const deaths = Number(statMap.get("total_deaths") || 1);
-
-        stats = {
-          totalKills: kills,
-          totalDeaths: deaths,
-          totalWins: Number(statMap.get("total_wins") || 0),
-          totalDamage: Number(statMap.get("total_damage_done") || 0),
-          kdRatio: deaths > 0 ? (kills / deaths).toFixed(2) : "N/A",
-        };
+      if (!STEAM_API_KEY) {
+        return { ok: false, message: "Steam lookup is not configured." };
       }
-    } catch (e) {
-      // Stats may be private
-      console.log("[Steam] Could not fetch stats - likely private profile");
-    }
 
-    return {
-      steamId,
-      personaName: player.personaname,
-      avatarUrl: player.avatarfull || player.avatar,
-      countryCode: player.loccountrycode || null,
-      cs2Hours,
-      stats,
-    };
+      if (!String(args.url || "").trim()) {
+        return { ok: false, message: "Enter a Steam profile URL, vanity name, or SteamID64." };
+      }
+
+      const { type, value } = extractSteamIdOrVanity(args.url);
+      let steamId = value;
+
+      // Resolve vanity URL if needed
+      if (type === "vanity") {
+        const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${STEAM_API_KEY}&vanityurl=${encodeURIComponent(value)}`;
+        const resolveRes = await fetch(resolveUrl);
+        const resolveData = await resolveRes.json();
+
+        if (resolveData.response?.success !== 1) {
+          return { ok: false, message: "Could not resolve Steam vanity URL. Use a full Steam profile URL or SteamID64." };
+        }
+        steamId = resolveData.response.steamid;
+      }
+
+      // Get player summary
+      const summaryUrl = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${STEAM_API_KEY}&steamids=${encodeURIComponent(steamId)}`;
+      const summaryRes = await fetch(summaryUrl);
+      const summaryData = await summaryRes.json();
+
+      const player = summaryData.response?.players?.[0];
+      if (!player) {
+        return { ok: false, message: "Steam profile not found." };
+      }
+
+      // Get owned games for CS2 hours
+      const gamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${STEAM_API_KEY}&steamid=${encodeURIComponent(steamId)}&include_appinfo=1&include_played_free_games=1`;
+      const gamesRes = await fetch(gamesUrl);
+      const gamesData = await gamesRes.json();
+
+      const cs2Game = gamesData.response?.games?.find(
+        (g: any) => g.appid === 730 // CS2/CSGO AppID
+      );
+      const cs2Hours = cs2Game ? Math.round(cs2Game.playtime_forever / 60) : null;
+
+      // Get CS2 stats
+      let stats = null;
+      try {
+        const statsUrl = `https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?key=${STEAM_API_KEY}&steamid=${encodeURIComponent(steamId)}&appid=730`;
+        const statsRes = await fetch(statsUrl);
+        const statsData = await statsRes.json();
+
+        if (statsData.playerstats?.stats) {
+          const statMap = new Map(
+            statsData.playerstats.stats.map((s: any) => [s.name, s.value])
+          );
+          const kills = Number(statMap.get("total_kills") || 0);
+          const deaths = Number(statMap.get("total_deaths") || 1);
+
+          stats = {
+            totalKills: kills,
+            totalDeaths: deaths,
+            totalWins: Number(statMap.get("total_wins") || 0),
+            totalDamage: Number(statMap.get("total_damage_done") || 0),
+            kdRatio: deaths > 0 ? (kills / deaths).toFixed(2) : "N/A",
+          };
+        }
+      } catch {
+        // Stats may be private; profile linking can still succeed.
+      }
+
+      return {
+        ok: true,
+        steamId,
+        personaName: player.personaname,
+        avatarUrl: player.avatarfull || player.avatar,
+        countryCode: player.loccountrycode || null,
+        cs2Hours,
+        stats,
+      };
+    } catch {
+      return { ok: false, message: "Steam lookup failed. Check the profile URL or try again later." };
+    }
   },
 });
 

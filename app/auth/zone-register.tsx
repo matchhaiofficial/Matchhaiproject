@@ -281,7 +281,7 @@ export default function AdminRegisterStep1() {
       />
 
       <Text style={styles.heading}>Admin account</Text>
-      <Text style={styles.sub}>Add the contact details used for zone access and support.</Text>
+      <Text style={styles.sub}>Use real login/contact details for zone access. Didit verifies owner identity after signup.</Text>
 
       <View style={styles.fieldGroup}>
         <RegistrationFieldLabel label="Owner / primary contact" required />
@@ -352,7 +352,7 @@ export default function AdminRegisterStep1() {
       </View>
 
       <View style={styles.fieldGroup}>
-        <RegistrationFieldLabel label="Contact email" required />
+        <RegistrationFieldLabel label="Login / contact email" required />
         <View style={styles.inputBox}>
           <View style={styles.inputRow}>
             <AppIcon
@@ -387,6 +387,7 @@ export default function AdminRegisterStep1() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
+        <Text style={styles.helperText}>Used for sign in, password reset, venue notices, and admin emails. Didit verifies identity separately.</Text>
         {contactEmail.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>
         ) : null}

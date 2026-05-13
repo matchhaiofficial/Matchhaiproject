@@ -14,6 +14,9 @@ type Step1Data = {
   username: string;
   email: string;
   phone: string;
+  phoneVerified: boolean;
+  phoneVerifiedAt: number | null;
+  phoneVerifiedE164: string;
   password: string;
   city: string;
   ageRange: string;
@@ -125,6 +128,9 @@ const initialState: Omit<
     username: "",
     email: "",
     phone: "",
+    phoneVerified: false,
+    phoneVerifiedAt: null,
+    phoneVerifiedE164: "",
     password: "",
     city: "Karachi",
     ageRange: "",

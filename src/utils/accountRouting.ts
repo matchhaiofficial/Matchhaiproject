@@ -3,11 +3,23 @@ import { APP_ROUTES } from "../navigation/routes";
 
 const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").toLowerCase();
 const LEGACY_SUPER_ADMIN_ID = process.env.EXPO_PUBLIC_SUPER_ADMIN_ID || "jM2JZrPNNNahPb844rHmr0MQKYo1";
+const SUPER_ADMIN_EMAILS = [
+  SUPER_ADMIN_EMAIL,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_JUNAID,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_EHTESHAN,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_ZEERAK,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_MUBEEN,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_SAAD,
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_OVAIS,
+  ...(process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAILS || "").split(","),
+]
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
 
 export function isSuperAdminProfile(user: Pick<UserProfile, "_id" | "email" | "role"> | null | undefined) {
   if (!user) return false;
   return user.role === "super-admin"
-    || String(user.email || "").toLowerCase() === SUPER_ADMIN_EMAIL
+    || SUPER_ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())
     || String(user._id || "") === LEGACY_SUPER_ADMIN_ID;
 }
 

@@ -45,7 +45,7 @@ import {
 import { getZoneById, type Zone } from "../../../src/services/convex/zoneService";
 import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS, FONTS } from "../../../src/theme";
-import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../../src/utils/emailVerificationGate";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../../src/utils/verificationGate";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 
 import Logger from "../../../src/utils/logger";
@@ -243,7 +243,7 @@ export default function CreateMatchroom() {
   );
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const emailVerificationLocked =
-    !isZoneWalkInAdmin && !hasVerifiedEmail(authUser);
+    !isZoneWalkInAdmin && !isUserFullyVerified(authUser, user);
   // Phase 4: CS2 & FC25/26 Specific State
   const [seriesType, setSeriesType] = useState<
     "BO1" | "BO3" | "BO5" | "BO10" | "BO7" | "BO20" | "BO40"
@@ -1474,7 +1474,7 @@ export default function CreateMatchroom() {
                 onPress={() => {
                   setSubmitFeedback(null);
                   if (emailVerificationLocked) {
-                    showEmailVerificationRequiredAlert();
+                    showKycVerificationRequiredAlert();
                     return;
                   }
                   if (!validateForm()) return;
@@ -2135,7 +2135,7 @@ export default function CreateMatchroom() {
             onPress={() => {
               setSubmitFeedback(null);
               if (emailVerificationLocked) {
-                showEmailVerificationRequiredAlert();
+                showKycVerificationRequiredAlert();
                 return;
               }
               if (!canSubmit) {

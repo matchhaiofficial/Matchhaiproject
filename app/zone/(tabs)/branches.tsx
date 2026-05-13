@@ -10,17 +10,28 @@ import {
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
+import { AppButton } from "../../../src/components/AppPrimitives";
+import { useAuth } from "../../../src/context/AuthContext";
 import Screen from "../../../src/components/Screen";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
+import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
+import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { COLORS, SPACING } from "../../../src/theme";
+import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./branches.styles";
 
+const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
+
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
+    const { authUser, user } = useAuth();
+    const { showToast } = useToast();
+    const startDiditKyc = useStartDiditKyc();
     const router = useRouter();
     const bottomContentPadding = useTabBarClearance(SPACING.lg);
+    const kycVerified = isUserFullyVerified(authUser, user);
 
     // Branches are stored as an array on the zone document in Convex.
     // The zone data from useZoneData already includes branches.
@@ -40,6 +51,23 @@ export default function ZoneBranches() {
     }, [zone, branches.length]);
 
     const headerGhostAction = <View style={styles.headerGhostAction} />;
+
+    const handleStartVerification = async () => {
+        const result = await startDiditKyc("zone_owner");
+        showToast({
+            type: result.ok ? "info" : "error",
+            title: result.ok ? "Verification opened" : "Could not start verification",
+            message: result.ok ? "Complete CNIC & face verification to unlock Zone Admin features." : result.message,
+        });
+    };
+
+    const handleLockedAction = () => {
+        showToast({
+            type: "info",
+            title: "Verify your identity",
+            message: ZONE_KYC_VERIFICATION_MESSAGE,
+        });
+    };
 
     if (loading) {
         return (
@@ -67,6 +95,30 @@ export default function ZoneBranches() {
                 contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
                 showsVerticalScrollIndicator={false}
             >
+                {!kycVerified ? (
+                    <View style={styles.verificationBanner}>
+                        <View style={styles.verificationBannerHeader}>
+                            <AppIcon name="mailVerified" size={20} color={COLORS.warning} />
+                            <Text style={styles.verificationBannerTitle}>Verify your identity</Text>
+                        </View>
+                        <Text style={styles.verificationBannerText}>
+                            {ZONE_KYC_VERIFICATION_MESSAGE}
+                        </Text>
+                        <View style={styles.verificationBannerActions}>
+                            <AppButton style={styles.verificationActionButton} onPress={handleStartVerification}>
+                                Start Verification
+                            </AppButton>
+                            <AppButton
+                                variant="secondary"
+                                style={styles.verificationActionButton}
+                                onPress={() => router.push("/zone/profile/edit" as any)}
+                            >
+                                Profile Settings
+                            </AppButton>
+                        </View>
+                    </View>
+                ) : null}
+
                 <Text style={styles.branchCountLabel}>{branches.length} locations</Text>
 
                 {usingLegacyFallback && (
@@ -82,8 +134,16 @@ export default function ZoneBranches() {
 
                 <View style={styles.topRow}>
                     <Pressable
-                        style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}
+                        style={({ pressed }) => [
+                            styles.addButton,
+                            !kycVerified && styles.addButtonDisabled,
+                            pressed && kycVerified && styles.addButtonPressed,
+                        ]}
                         onPress={() => {
+                            if (!kycVerified) {
+                                handleLockedAction();
+                                return;
+                            }
                             router.push("/zone/branch/new");
                         }}
                     >
@@ -100,8 +160,16 @@ export default function ZoneBranches() {
                     branches.map((branch: any) => (
                         <Pressable
                             key={branch.id}
-                            style={({ pressed }) => [styles.branchCard, pressed && styles.branchCardPressed]}
+                            style={({ pressed }) => [
+                                styles.branchCard,
+                                !kycVerified && styles.branchCardDisabled,
+                                pressed && kycVerified && styles.branchCardPressed,
+                            ]}
                             onPress={() => {
+                                if (!kycVerified) {
+                                    handleLockedAction();
+                                    return;
+                                }
                                 router.push(`/zone/branch/${branch.id}`);
                             }}
                         >

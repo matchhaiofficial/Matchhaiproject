@@ -4,6 +4,7 @@ import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
@@ -53,20 +54,18 @@ async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Pr
   console.log("[teamChallenges] auth gate", {
     authId: authRecordId,
     linkedAppUserId,
-    emailVerified: authUser?.emailVerified ?? null,
     email: authUser?.email ?? null,
     expectedUid: expectedUid ?? null,
     expectedAuthId: expectedUser?.authId ?? null,
   });
 
   if (linkedAppUserId || authRecordId) {
-    if (authUser?.emailVerified !== true) {
-      throw new Error("Please verify your email to unlock matchrooms and team actions.");
-    }
-
     const user = await resolveUserByAnyId(ctx, linkedAppUserId) || await resolveUserByAnyId(ctx, authRecordId);
     if (!user) {
       throw new Error("User profile not found");
+    }
+    if (!isKycAccessAllowed(user.kycVerificationStatus)) {
+      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
     }
     if (expectedUser && String(expectedUser._id) !== String(user._id)) {
       throw new Error("You can only perform this action for your own account");
@@ -74,7 +73,12 @@ async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Pr
     return user._id;
   }
 
-  if (expectedUser) return expectedUser._id;
+  if (expectedUser) {
+    if (!isKycAccessAllowed(expectedUser.kycVerificationStatus)) {
+      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
+    }
+    return expectedUser._id;
+  }
 
   throw new Error("Not authenticated");
 }

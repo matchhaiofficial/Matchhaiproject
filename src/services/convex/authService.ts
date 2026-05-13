@@ -59,7 +59,7 @@ function mapAuthError(error?: any): string {
   if (code.includes("invalid-phone") || code.includes("INVALID_PHONE")) {
     return "Invalid phone number.";
   }
-  if (code.includes("email-not-verified") || code.includes("verify your email")) {
+  if (code.includes("email-not-verified")) {
     return EMAIL_VERIFICATION_REQUIRED_MESSAGE;
   }
   if (
@@ -139,7 +139,7 @@ export type SimpleResult =
   | { ok: false; message: string; code?: string };
 
 export const EMAIL_VERIFICATION_REQUIRED_MESSAGE =
-  "Please verify your email to unlock matchrooms and team actions.";
+  "Please complete CNIC & face verification to unlock MatchHai features.";
 const EMAIL_VERIFICATION_CALLBACK_PATH = "/auth/login";
 const AUTH_CALL_TIMEOUT_MS = 15000;
 
@@ -171,6 +171,10 @@ async function ensureConvexUserProfile(args: {
     phoneValidated?: boolean;
     phoneValidationProvider?: string;
     phoneValidationCheckedAt?: number;
+    phoneOtpVerified?: boolean;
+    phoneOtpVerifiedAt?: number;
+    phoneNumberMasked?: string;
+    phoneNumberHash?: string;
   };
   displayName?: string;
   city?: string;
@@ -201,6 +205,10 @@ async function ensureConvexUserProfile(args: {
     phoneValidated: args.identity.phoneValidated,
     phoneValidationProvider: args.identity.phoneValidationProvider,
     phoneValidationCheckedAt: args.identity.phoneValidationCheckedAt,
+    phoneOtpVerified: args.identity.phoneOtpVerified,
+    phoneOtpVerifiedAt: args.identity.phoneOtpVerifiedAt,
+    phoneNumberMasked: args.identity.phoneNumberMasked,
+    phoneNumberHash: args.identity.phoneNumberHash,
     city: args.city?.trim() || undefined,
     ageRange: args.ageRange?.trim() || undefined,
     accountType: args.accountType,
@@ -398,17 +406,6 @@ export async function signUpWithEmail(
         ageRange,
         accountType,
       });
-
-      if (profileResult.ok && !authUserData.emailVerified && trimmedEmail) {
-        try {
-          await sendVerificationEmailWithAppCallback(trimmedEmail);
-        } catch (verificationError) {
-          console.error(
-            "[authService] Failed to send verification email after signup:",
-            verificationError,
-          );
-        }
-      }
 
       return profileResult;
     } catch (e) {
@@ -699,54 +696,11 @@ export async function currentUser(): Promise<AuthUser | null> {
 }
 
 export async function ensureVerifiedEmailAccess(): Promise<SimpleResult> {
-  try {
-    const user = await currentUser();
-    if (!user) {
-      return { ok: false, message: "Please sign in to continue.", code: "auth/not-authenticated" };
-    }
-
-    if (user.emailVerified) {
-      return { ok: true };
-    }
-
-    if (user.email) {
-      try {
-        await sendVerificationEmailWithAppCallback(user.email);
-      } catch {
-        // Keep the gate message stable even if resend fails.
-      }
-    }
-
-    return {
-      ok: false,
-      code: "auth/email-not-verified",
-      message: EMAIL_VERIFICATION_REQUIRED_MESSAGE,
-    };
-  } catch (e: any) {
-    return { ok: false, message: mapAuthError(e), code: e?.code };
-  }
+  return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
 }
 
 export async function sendCurrentUserVerificationEmail(): Promise<SimpleResult> {
-  try {
-    const user = await currentUser();
-    if (!user?.email) {
-      return {
-        ok: false,
-        message: "Please sign in to continue.",
-        code: "auth/not-authenticated",
-      };
-    }
-
-    if (user.emailVerified) {
-      return { ok: true };
-    }
-
-    await sendVerificationEmailWithAppCallback(user.email);
-    return { ok: true };
-  } catch (e: any) {
-    return { ok: false, message: mapAuthError(e), code: e?.code };
-  }
+  return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
 }
 
 /** Subscribe to auth state changes */

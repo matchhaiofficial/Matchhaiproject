@@ -32,7 +32,7 @@ import { Team, deleteTeam, getUserTeams, updateTeamName, uploadTeamLogo } from "
 import { submitUserReport } from "../../src/services/convex/reportService";
 import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
-import { hasVerifiedEmail, showEmailVerificationRequiredAlert } from "../../src/utils/emailVerificationGate";
+import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes } from "../../src/constants/teamRosterRules";
 import Logger from "../../src/utils/logger";
@@ -273,8 +273,8 @@ export default function TeamDetails() {
     const handleJoinRequest = async () => {
         if (!id || submitting || !user) return;
         logFlowEvent("TeamDetails", "Requesting to join team", { teamId: id, userId: user._id });
-        if (!hasVerifiedEmail(authUser)) {
-            showEmailVerificationRequiredAlert();
+        if (!isUserFullyVerified(authUser, user)) {
+            showKycVerificationRequiredAlert();
             return;
         }
 

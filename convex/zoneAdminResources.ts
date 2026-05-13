@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
+import { requireKycVerified } from "./kycGate";
 
 // ============================================
 // QUERIES
@@ -130,6 +131,7 @@ export const updateResourceLifecycleStatus = mutation({
     holdMinutes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const resource = await ctx.db.get(args.resourceId);
     if (!resource) {
@@ -172,6 +174,7 @@ export const syncBranchResourcesFromPricing = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     const now = Date.now();
     const resources = await ctx.db
       .query("zoneResources")
@@ -266,6 +269,7 @@ export const allocateResourcesToRequest = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     if (args.resourceIds.length === 0) {
       throw new Error("Select at least one resource.");
     }
@@ -364,6 +368,7 @@ export const reassignResourcesForRequest = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
     if (!args.newResourceIds.length) {
       throw new Error("Select at least one resource.");
     }

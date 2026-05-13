@@ -22,6 +22,7 @@ import {
     AppModalHeader,
 } from "../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -29,9 +30,11 @@ import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { signOutUser } from "../../../src/services/authService";
+import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { requestZoneWithdrawal } from "../../../src/services/convex/zoneWithdrawalService";
 import { COLORS, SPACING } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
+import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
 import {
@@ -86,15 +89,45 @@ const getBranchInventorySummary = (branch: any) => {
 };
 
 const HIDE_ZONE_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+const BANK_OPTIONS = [
+    "Habib Bank Limited (HBL)",
+    "National Bank of Pakistan (NBP)",
+    "United Bank Limited (UBL)",
+    "MCB Bank Limited (MCB)",
+    "Bank of Punjab (BOP)",
+    "Sindh Bank",
+    "Bank of Khyber (BOK)",
+    "First Women Bank",
+    "Zarai Taraqiati Bank Limited (ZTBL)",
+    "Allied Bank Limited (ABL)",
+    "Askari Bank",
+    "Bank Alfalah Limited",
+    "Bank Al-Habib Limited",
+    "Habib Metropolitan Bank Limited",
+    "JS Bank Limited",
+    "Soneri Bank",
+    "Standard Chartered Pakistan",
+    "Meezan Bank Limited",
+    "Dubai Islamic Bank",
+    "Al Baraka Bank Pakistan",
+    "Bank Makramah Limited (BML)",
+    "BankIslami Pakistan Limited",
+    "Faysal Bank",
+    "Silk Bank",
+] as const;
+
+const normalizeAccountNumberInput = (value: string) =>
+    String(value || "").replace(/[^0-9 -]/g, "").slice(0, 34);
 
 export default function ZoneProfile() {
     const router = useRouter();
     const params = useLocalSearchParams<{ withdraw?: string | string[] }>();
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
-    const { user } = useAuth();
+    const { user, authUser } = useAuth();
     const { zone, loading } = useZoneData();
     const { showToast } = useToast();
+    const startDiditKyc = useStartDiditKyc();
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -108,9 +141,12 @@ export default function ZoneProfile() {
     const [withdrawVisible, setWithdrawVisible] = useState(false);
     const [withdrawAmount, setWithdrawAmount] = useState("");
     const [withdrawBranchId, setWithdrawBranchId] = useState("");
+    const [withdrawBankName, setWithdrawBankName] = useState("");
+    const [withdrawAccountNumber, setWithdrawAccountNumber] = useState("");
     const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
     const tabBarScrollClearance = useTabBarClearance(SPACING.lg);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.lg, tabBarScrollClearance);
+    const kycVerified = isUserFullyVerified(authUser, user);
 
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
@@ -124,9 +160,17 @@ export default function ZoneProfile() {
     useEffect(() => {
         const shouldOpen = Array.isArray(params.withdraw) ? params.withdraw[0] : params.withdraw;
         if (shouldOpen === "1") {
+            if (!kycVerified) {
+                showToast({
+                    type: "info",
+                    title: "Verify your identity",
+                    message: "Please complete CNIC & face verification before requesting withdrawal.",
+                });
+                return;
+            }
             setWithdrawVisible(true);
         }
-    }, [params.withdraw]);
+    }, [kycVerified, params.withdraw, showToast]);
 
     useEffect(() => {
         if (!withdrawBranchId && branches[0]?.id) {
@@ -142,20 +186,38 @@ export default function ZoneProfile() {
     const branchCountLabel = `${branches.length} branch${branches.length === 1 ? "" : "es"}`;
     const selectedWithdrawBranch = branches.find((branch: any) => branch.id === withdrawBranchId) || branches[0] || null;
     const parsedWithdrawAmount = Number(String(withdrawAmount).replace(/[^\d.]/g, ""));
+    const trimmedAccountNumber = withdrawAccountNumber.trim();
+    const accountNumberValid =
+        /^[0-9 -]+$/.test(trimmedAccountNumber) &&
+        trimmedAccountNumber.length >= 6 &&
+        trimmedAccountNumber.length <= 34;
     const canSubmitWithdrawal =
+        kycVerified &&
         Boolean(user?._id) &&
         Boolean(selectedWithdrawBranch) &&
         Number.isFinite(parsedWithdrawAmount) &&
         parsedWithdrawAmount > 0 &&
-        parsedWithdrawAmount <= walletBalance;
+        parsedWithdrawAmount <= walletBalance &&
+        Boolean(withdrawBankName) &&
+        accountNumberValid;
 
     const closeWithdrawModal = () => {
         if (withdrawSubmitting) return;
         setWithdrawVisible(false);
         setWithdrawAmount("");
+        setWithdrawBankName("");
+        setWithdrawAccountNumber("");
     };
 
     const submitWithdrawRequest = async () => {
+        if (!kycVerified) {
+            showToast({
+                type: "info",
+                title: "Verify your identity",
+                message: "Please complete CNIC & face verification before requesting withdrawal.",
+            });
+            return;
+        }
         if (!user?._id || !selectedWithdrawBranch || !canSubmitWithdrawal) return;
         setWithdrawSubmitting(true);
         const result = await requestZoneWithdrawal({
@@ -164,6 +226,8 @@ export default function ZoneProfile() {
             branchId: selectedWithdrawBranch.id,
             branchName: getBranchDisplayName(selectedWithdrawBranch),
             amount: parsedWithdrawAmount,
+            bankName: withdrawBankName,
+            accountNumber: trimmedAccountNumber,
             ownerName,
             ownerEmail: zone?.contactEmail || user?.email,
             venueName,
@@ -197,6 +261,15 @@ export default function ZoneProfile() {
                 },
             },
         ]);
+    };
+
+    const handleStartVerification = async () => {
+        const result = await startDiditKyc("zone_owner");
+        showToast({
+            type: result.ok ? "info" : "error",
+            title: result.ok ? "Verification opened" : "Could not start verification",
+            message: result.ok ? "Complete CNIC & face verification to unlock Zone Admin features and withdrawals." : result.message,
+        });
     };
 
     if (loading) {
@@ -292,6 +365,30 @@ export default function ZoneProfile() {
                     </View>
                 </AppCard>
 
+                <AppCard style={styles.profileCard}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <View>
+                            <Text style={styles.profileName}>Complete CNIC & face verification</Text>
+                            <Text style={styles.profileEmail}>
+                                Verify your identity to unlock Zone Admin features and withdrawals.
+                            </Text>
+                        </View>
+                        <StatusPill
+                            tone={kycVerified ? "success" : "warning"}
+                            label={kycVerified ? "Verified" : String(user?.kycVerificationStatus || "Not started").replace(/_/g, " ")}
+                        />
+                    </View>
+                    {!kycVerified ? (
+                        <AppButton style={styles.logoutButton} onPress={handleStartVerification}>
+                            Start CNIC & Face Verification
+                        </AppButton>
+                    ) : user?.kycVerifiedAt ? (
+                        <Text style={styles.profileMetaText}>
+                            Verified {new Date(user.kycVerifiedAt).toLocaleDateString()}
+                        </Text>
+                    ) : null}
+                </AppCard>
+
                 <View style={styles.section}>
                     <PlayerSectionHeader
                         title="My Branches"
@@ -301,7 +398,17 @@ export default function ZoneProfile() {
                     <View style={styles.branchActionsRow}>
                         <Pressable
                             style={styles.withdrawInlineButton}
-                            onPress={() => setWithdrawVisible(true)}
+                            onPress={() => {
+                                if (!kycVerified) {
+                                    showToast({
+                                        type: "info",
+                                        title: "Verify your identity",
+                                        message: "Please complete CNIC & face verification before requesting withdrawal.",
+                                    });
+                                    return;
+                                }
+                                setWithdrawVisible(true);
+                            }}
                         >
                             <AppIcon name="wallet" size={18} color={COLORS.accent} />
                             <Text style={styles.withdrawInlineText}>Withdraw request</Text>
@@ -421,6 +528,37 @@ export default function ZoneProfile() {
                     </View>
                     {parsedWithdrawAmount > walletBalance ? (
                         <Text style={styles.withdrawWarning}>Amount cannot exceed your wallet balance.</Text>
+                    ) : null}
+                    <CustomSingleSelect
+                        label={<Text style={styles.withdrawLabel}>Bank</Text>}
+                        value={withdrawBankName}
+                        options={BANK_OPTIONS}
+                        onChange={setWithdrawBankName}
+                        icon="payment"
+                        placeholder="Select bank"
+                        containerStyle={styles.withdrawSelectContainer}
+                    />
+                    {!withdrawBankName ? (
+                        <Text style={styles.withdrawWarning}>Select a bank.</Text>
+                    ) : null}
+                    <Text style={styles.withdrawLabel}>Account number</Text>
+                    <View style={styles.withdrawInputBox}>
+                        <AppIcon name="account-balance-wallet" size={18} color={COLORS.accent} />
+                        <TextInput
+                            style={styles.withdrawInput}
+                            value={withdrawAccountNumber}
+                            onChangeText={(value) => setWithdrawAccountNumber(normalizeAccountNumberInput(value))}
+                            keyboardType="default"
+                            placeholder="Enter account number"
+                            placeholderTextColor={COLORS.muted}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
+                    </View>
+                    {trimmedAccountNumber.length > 0 && !accountNumberValid ? (
+                        <Text style={styles.withdrawWarning}>
+                            Account number must be 6 to 34 characters.
+                        </Text>
                     ) : null}
                 </AppModalBody>
                 <AppModalFooter style={styles.withdrawFooter}>

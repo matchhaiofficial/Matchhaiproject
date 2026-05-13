@@ -196,4 +196,51 @@ export default StyleSheet.create({
         minHeight: 122,
         marginBottom: SPACING.md,
     },
+    verificationBanner: {
+        borderWidth: 1,
+        borderColor: "rgba(255, 193, 7, 0.35)",
+        backgroundColor: "rgba(255, 193, 7, 0.1)",
+        borderRadius: CONTROL_SIZES.cardRadius,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+    },
+    verificationBannerHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.sm,
+        marginBottom: SPACING.xs,
+    },
+    verificationBannerTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+    },
+    verificationBannerText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+    },
+    verificationBannerActions: {
+        flexDirection: "row",
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    verificationActionButton: {
+        flex: 1,
+    },
+    dashboardLocked: {
+        opacity: 0.48,
+    },
+    dashboardLockState: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: SPACING.xs,
+        marginBottom: SPACING.sm,
+    },
+    dashboardLockStateText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+    },
 });

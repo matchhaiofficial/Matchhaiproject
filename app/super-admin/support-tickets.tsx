@@ -42,6 +42,12 @@ function statusTone(status: SuperAdminSupportTicketStatus) {
   return "warning" as const;
 }
 
+function priorityTone(priority?: SuperAdminSupportTicket["priority"]) {
+  if (priority === "urgent" || priority === "high") return "warning" as const;
+  if (priority === "low") return "info" as const;
+  return "neutral" as const;
+}
+
 function emptyLabel(status: SuperAdminSupportTicketStatus) {
   if (status === "in_review") return "No in-review support tickets";
   if (status === "resolved") return "No resolved support tickets";
@@ -67,6 +73,12 @@ function TicketCard({ ticket }: { ticket: SuperAdminSupportTicket }) {
           <Text style={styles.metaText}>{formatValue(ticket.category)}</Text>
           <Text style={styles.metaDot}>|</Text>
           <Text style={styles.metaText}>{formatValue(ticket.userRole)}</Text>
+          {ticket.priority ? (
+            <>
+              <Text style={styles.metaDot}>|</Text>
+              <StatusPill tone={priorityTone(ticket.priority)} label={formatValue(ticket.priority)} />
+            </>
+          ) : null}
         </View>
         <Text style={styles.metaText}>Created: {formatDate(ticket.createdAt)}</Text>
         {ticket.userDisplayName ? <Text style={styles.metaText}>User: {ticket.userDisplayName}</Text> : null}

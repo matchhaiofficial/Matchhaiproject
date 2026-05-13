@@ -291,6 +291,9 @@ export default StyleSheet.create({
         paddingHorizontal: SPACING.md,
         gap: SPACING.sm,
     },
+    withdrawSelectContainer: {
+        marginTop: 0,
+    },
     withdrawCurrency: {
         color: COLORS.accent,
         fontFamily: FONTS.interSemiBold,

@@ -108,10 +108,8 @@ export default function RootLayout() {
 
     const handleDeepLink = (event: { url: string }) => {
       const { url } = event;
-      console.log("[Linking] Received URL:", url);
 
       const parsed = Linking.parse(url);
-      console.log("[Linking] Parsed:", parsed);
 
       const path = parsed.path; // e.g. "oauth"
       const params = parsed.queryParams || {};

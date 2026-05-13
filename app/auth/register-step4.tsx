@@ -17,6 +17,7 @@ import {
 } from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
+import { normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 import styles from "./register.styles";
 import { Modal } from "react-native";
 import { DEFAULT_CITY, normalizeKarachiAreaList } from "../../constants/profileOptions";
@@ -40,7 +41,18 @@ export default function RegisterStep4() {
   useEffect(() => {
     // Don't redirect away if we're in success flow
     if (phase === "success" || phase === "submitting") return;
-    if (!step1.fullName.trim() || !step1.username.trim() || !step1.email.trim() || !step1.password) {
+    const { phoneE164 } = normalizePakistaniPhone(step1.phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (
+      !step1.fullName.trim() ||
+      !step1.username.trim() ||
+      !step1.email.trim() ||
+      !step1.password ||
+      !phoneVerified
+    ) {
       router.replace("/auth/register");
       return;
     }
@@ -129,11 +141,16 @@ export default function RegisterStep4() {
     }
 
     const { fullName, username, email, phone, password, ageRange } = step1;
-    if (!fullName.trim() || !username.trim() || !email.trim() || !password) {
+    const { phoneE164 } = normalizePakistaniPhone(phone || "");
+    const phoneVerified =
+      Boolean(step1.phoneVerified) &&
+      Boolean(phoneE164) &&
+      step1.phoneVerifiedE164 === phoneE164;
+    if (!fullName.trim() || !username.trim() || !email.trim() || !password || !phoneVerified) {
       showToast({
         type: "error",
         title: "Missing details",
-        message: "Some of your account details are missing. Please complete Step 1 again.",
+        message: "Some of your account details are missing or your phone is not verified. Please complete Step 1 again.",
       });
       router.replace("/auth/register");
       return;
@@ -231,7 +248,7 @@ export default function RegisterStep4() {
         showToast({
           type: "success",
           title: "Welcome to MatchHai",
-          message: "Account created. Verify your email to unlock matchrooms and team actions.",
+          message: "Account created. Complete CNIC & face verification to unlock MatchHai features.",
         });
         router.replace("/(player)/(tabs)" as any);  // ← navigate FIRST
         resetAll();                                   // ← reset AFTER

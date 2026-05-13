@@ -236,6 +236,8 @@ export default function SuperAdminDashboardTab() {
               <DashboardQuickActionTile icon="reports" label="Reports" color={COLORS.error} onPress={() => router.push("/super-admin/reports" as any)} />
               <DashboardQuickActionTile icon="matchroom" label="Matchrooms" color={COLORS.accent} onPress={() => router.push("/super-admin/matchrooms" as any)} />
               <DashboardQuickActionTile icon="support" label={`Support Tickets (${openTickets.length})`} color={COLORS.success} onPress={() => router.push("/super-admin/support-tickets" as any)} />
+              <DashboardQuickActionTile icon="verified-user" label="Identity Verifications" color={COLORS.accent} onPress={() => router.push("/super-admin/identity-verifications" as any)} />
+              <DashboardQuickActionTile icon="reports" label="Audit Logs" color={COLORS.textSecondary} onPress={() => router.push("/super-admin/audit-logs" as any)} />
             </View>
 
             <PlayerSectionHeader
