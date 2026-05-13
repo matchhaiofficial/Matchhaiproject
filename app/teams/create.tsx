@@ -196,7 +196,10 @@ export default function CreateTeam() {
 
                 router.replace({
                     pathname: `/teams/${result.teamId}`,
-                    params: { showInvite: 'true' }
+                    params:
+                        selectedFriendIds.length === 0
+                            ? { showInvite: "true" }
+                            : {},
                 } as any);
             } else {
                 showToast({

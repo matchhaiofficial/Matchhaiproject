@@ -22,6 +22,7 @@ import {
     AppModalHeader,
 } from "../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { BlockingLoader } from "../../../src/components/BlockingLoader";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -95,6 +96,7 @@ export default function ZoneProfile() {
     const { user } = useAuth();
     const { zone, loading } = useZoneData();
     const { showToast } = useToast();
+    const [loggingOut, setLoggingOut] = useState(false);
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -188,11 +190,16 @@ export default function ZoneProfile() {
                 text: "Logout",
                 style: "destructive",
                 onPress: async () => {
-                    const result = await signOutUser();
-                    if (result.ok) {
-                        router.replace("/auth/login");
-                    } else {
-                        showToast({ type: "error", title: "Logout Failed", message: result.message });
+                    setLoggingOut(true);
+                    try {
+                        const result = await signOutUser();
+                        if (result.ok) {
+                            router.replace("/auth/login");
+                        } else {
+                            showToast({ type: "error", title: "Logout Failed", message: result.message });
+                        }
+                    } finally {
+                        setLoggingOut(false);
                     }
                 },
             },
@@ -235,6 +242,7 @@ export default function ZoneProfile() {
             edges={["top"]}
             scrollProps={{ showsVerticalScrollIndicator: false }}
         >
+            <BlockingLoader visible={loggingOut} label="Logging out..." />
             <AppHeader
                 title="Profile"
                 inlineTitle
