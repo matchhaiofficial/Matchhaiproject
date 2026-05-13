@@ -237,7 +237,6 @@ export default defineSchema({
     faceitId: v.optional(v.union(v.string(), v.null())),
     faceitNickname: v.optional(v.union(v.string(), v.null())),
     faceitGame: v.optional(v.union(v.string(), v.null())),
-    identityVerificationId: v.optional(v.string()),
     psnAccountId: v.optional(v.union(v.string(), v.null())),
     psnOnlineId: v.optional(v.union(v.string(), v.null())),
 

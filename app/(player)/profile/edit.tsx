@@ -887,25 +887,33 @@ export default function EditProfile() {
                     <Text style={styles.sectionTitle}>Basic Info</Text>
 
                     <View style={styles.fieldGroup}>
-                        <Text style={styles.label}>Profile Image</Text>
-                        <View style={styles.flexRowCentered}>
-                            <AppImage
-                                source={{
-                                    uri:
-                                        user?.photoURL ||
-                                        `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.fullName || "Player")}&background=42a5f5&color=fff&size=96`,
-                                }}
-                                containerStyle={{ width: 72, height: 72, borderRadius: 36, overflow: "hidden", marginRight: 12 }}
-                                contentFit="cover"
-                            />
+                        <View style={styles.profilePhotoRow}>
                             <Pressable
                                 onPress={handleChangeProfileImage}
                                 disabled={imageUploading}
-                                style={styles.platformButton}
+                                style={({ pressed }) => [
+                                    styles.avatarPressable,
+                                    pressed && !imageUploading ? { opacity: 0.9 } : null,
+                                    imageUploading ? { opacity: 0.85 } : null,
+                                ]}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             >
-                                <Text style={styles.platformButtonText}>
-                                    {imageUploading ? "Uploading..." : "Change Photo"}
-                                </Text>
+                                <AppImage
+                                    source={{
+                                        uri:
+                                            user?.photoURL ||
+                                            `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.fullName || "Player")}&background=42a5f5&color=fff&size=96`,
+                                    }}
+                                    containerStyle={styles.avatarImage}
+                                    contentFit="cover"
+                                />
+                                <View style={styles.avatarEditBadge}>
+                                    {imageUploading ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <AppIcon name="edit" size={16} color="#fff" />
+                                    )}
+                                </View>
                             </Pressable>
                         </View>
                     </View>

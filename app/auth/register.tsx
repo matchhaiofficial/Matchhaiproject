@@ -685,7 +685,9 @@ export default function Register() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
-        <Text style={styles.helperText}>Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.</Text>
+        <Text style={[styles.helperText, styles.helperOk]}>
+          Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.
+        </Text>
         {email.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>
         ) : null}
@@ -774,7 +776,7 @@ export default function Register() {
         {phone.trim().length > 0 && !isPhoneFormatValid && phoneStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid Pakistani mobile number.</Text>
         ) : null}
-        {phoneVerified ? (
+        {phoneVerified && !otpMessage ? (
           <Text style={[styles.helperText, styles.helperOk, { marginTop: 6 }]}>
             Phone verified
           </Text>
