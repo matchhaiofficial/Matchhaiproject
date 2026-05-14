@@ -11,6 +11,9 @@ import { LogBox, View } from "react-native";
 LogBox.ignoreLogs([
   "Unable to activate keep awake",
   "Uncaught (in promise, id: 0) Error: Unable to activate keep awake",
+  // Easypaisa failures are user-facing via toasts; don't show LogBox overlays for them.
+  "[CONVEX A(easypaisa:startCheckout)]",
+  "[CONVEX A(easypaisa:syncTransactionStatus)]",
 ]);
 
 if (__DEV__) {
@@ -18,6 +21,12 @@ if (__DEV__) {
   console.error = (...args: any[]) => {
     const text = args.map((item) => String(item ?? "")).join(" ");
     if (text.includes("Unable to activate keep awake")) {
+      return;
+    }
+    if (
+      text.includes("[CONVEX A(easypaisa:startCheckout)]") ||
+      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]")
+    ) {
       return;
     }
     originalConsoleError(...args);
