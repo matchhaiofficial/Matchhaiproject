@@ -121,6 +121,7 @@ export function AppModalBody({
         <ScrollView
           style={styles.bodyScroll}
           contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
+          nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -247,7 +248,7 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-        <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
+              <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
           <Animated.View style={entrance.animatedStyle}>
             <View
               style={[
