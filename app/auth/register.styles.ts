@@ -172,6 +172,9 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.caption,
     lineHeight: 16,
   },
+  diditHelperTextMargin: {
+    marginTop: SPACING.xs,
+  },
   helperOk: {
     color: COLORS.success,
   },

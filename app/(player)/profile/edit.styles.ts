@@ -398,6 +398,9 @@ export default StyleSheet.create({
     marginTopSm: {
         marginTop: 8,
     },
+    marginTopMd: {
+        marginTop: 12,
+    },
     gapMdRow: {
         flexDirection: 'row',
         gap: 12,

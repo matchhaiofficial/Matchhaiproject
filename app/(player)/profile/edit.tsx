@@ -14,6 +14,7 @@ import {
     TextInput,
     View
 } from "react-native";
+import { useConvex } from "convex/react";
 
 import {
     AGE_RANGES,
@@ -28,7 +29,6 @@ import { AppImage } from "../../../src/components/AppImage";
 import { CustomSingleSelect } from "../../../src/components/CustomSingleSelect";
 import Screen from "../../../src/components/Screen";
 import { authClient } from "../../../src/lib/auth-client";
-import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -121,6 +121,7 @@ const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: 
 };
 
 export default function EditProfile() {
+    const convex = useConvex();
     const { user, authUser, refreshUser } = useAuth();
     const params = useLocalSearchParams<{ focus?: string }>();
     const { showToast } = useToast();
@@ -254,6 +255,11 @@ export default function EditProfile() {
     }, [newEmail, email]);
 
     const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
+
+    const getSessionToken = async () => {
+        const sessionResult = await authClient.getSession();
+        return String((sessionResult.data as any)?.session?.token || "");
+    };
 
     useEffect(() => {
         const fetchProfile = async () => {
@@ -580,7 +586,9 @@ export default function EditProfile() {
 
         try {
             setEmailUpdating(true);
-            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim() });
+            const sessionToken = await getSessionToken();
+            if (!sessionToken) throw new Error("Please sign in again before changing your email.");
+            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim(), sessionToken });
 
             // Update local state
             setPendingEmail(newEmail.trim());
@@ -630,12 +638,15 @@ export default function EditProfile() {
                 return;
             }
             setImageUploading(true);
+            const sessionToken = await getSessionToken();
+            if (!sessionToken) throw new Error("Please sign in again before updating your profile image.");
             const upload = await uploadFileToConvex({
                 uri: asset.uri,
                 mimeType,
                 fileName: asset.fileName || "profile-image.jpg",
+                convexClient: convex,
             });
-            await convex.mutation(api.kyc.markProfileImage, { storageId: upload.storageId });
+            await convex.mutation(api.kyc.markProfileImage, { storageId: upload.storageId, sessionToken });
             await refreshUser();
             showToast({ type: "success", title: "Profile image updated", message: "Your profile picture was updated." });
         } catch (error: any) {
@@ -669,11 +680,17 @@ export default function EditProfile() {
             showToast({ type: "error", title: "Could not verify phone", message: result.message });
             return;
         }
+        const sessionToken = await getSessionToken();
+        if (!sessionToken) {
+            showToast({ type: "error", title: "Sign in required", message: "Please sign in again before updating your phone number." });
+            return;
+        }
         await convex.mutation(api.kyc.requestPhoneChange, {
             phoneE164: result.phoneE164,
             phoneMasked: result.phoneMasked,
             phoneHash: result.phoneHash,
             verifiedAt: result.verifiedAt,
+            sessionToken,
         });
         setOriginalPhone(result.phoneE164);
         setPhone(result.phoneE164);
@@ -1013,7 +1030,7 @@ export default function EditProfile() {
                                 </View>
                             </Pressable>
                         ) : (
-                            <View style={styles.gapMd}>
+                            <View style={[styles.gapMd, styles.marginTopMd]}>
                                 {/* New Email Input */}
                                 <View style={styles.inputBox}>
                                     <View style={styles.flexRowCentered}>

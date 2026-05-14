@@ -685,7 +685,7 @@ export default function Register() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
-        <Text style={[styles.helperText, styles.helperOk]}>
+        <Text style={[styles.helperText, styles.helperOk, styles.diditHelperTextMargin]}>
           Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.
         </Text>
         {email.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (

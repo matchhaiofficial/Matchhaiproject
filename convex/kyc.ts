@@ -951,11 +951,11 @@ export const recordKycAuditEvent = internalMutation({
 export const markProfileImage = mutation({
   args: {
     storageId: v.id("_storage"),
+    sessionToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const authUser = await authComponent.getAuthUser(ctx);
-    if (!authUser?.userId) throw new Error("Please sign in to continue.");
-    const authId = authUser.userId;
+    const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
+    if (!authId) throw new Error("Please sign in to continue.");
     const profile = await ctx.db
       .query("users")
       .withIndex("by_authId", (q) => q.eq("authId", authId))
@@ -982,11 +982,10 @@ export const markProfileImage = mutation({
 });
 
 export const requestEmailChange = mutation({
-  args: { email: v.string() },
+  args: { email: v.string(), sessionToken: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const authUser = await authComponent.getAuthUser(ctx);
-    if (!authUser?.userId) throw new Error("Please sign in to continue.");
-    const authId = authUser.userId;
+    const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
+    if (!authId) throw new Error("Please sign in to continue.");
     const email = String(args.email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
     const existing = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).unique();
@@ -1008,11 +1007,11 @@ export const requestPhoneChange = mutation({
     phoneMasked: v.string(),
     phoneHash: v.string(),
     verifiedAt: v.number(),
+    sessionToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const authUser = await authComponent.getAuthUser(ctx);
-    if (!authUser?.userId) throw new Error("Please sign in to continue.");
-    const authId = authUser.userId;
+    const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
+    if (!authId) throw new Error("Please sign in to continue.");
     const existing = await ctx.db.query("users").withIndex("by_phone", (q) => q.eq("phone", args.phoneE164)).unique();
     if (existing) throw new Error("This phone number is already registered.");
     const profile = await ctx.db.query("users").withIndex("by_authId", (q) => q.eq("authId", authId)).unique();
