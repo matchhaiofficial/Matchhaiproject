@@ -245,21 +245,30 @@ export const validateRegistrationIdentity = action({
     let phoneNumberHash: string | undefined;
     if (args.accountType === "player") {
       const phoneHash = await sha256(phone);
-      const verified: {
-        phoneMasked: string;
-        updatedAt: number;
-      } | null = await ctx.runQuery(internal.phoneOtp.getRecentVerified, {
-        phoneHash,
-        since: Date.now() - 24 * 60 * 60 * 1000,
-      });
+      const skipOtp = String(process.env.SKIP_PHONE_OTP || "").trim() === "1";
 
-      if (!verified) {
-        throw new Error("Please verify your phone number.");
+      if (skipOtp) {
+        phoneOtpVerified = true;
+        phoneOtpVerifiedAt = Date.now();
+        phoneNumberMasked = phone;
+        phoneNumberHash = phoneHash;
+      } else {
+        const verified: {
+          phoneMasked: string;
+          updatedAt: number;
+        } | null = await ctx.runQuery(internal.phoneOtp.getRecentVerified, {
+          phoneHash,
+          since: Date.now() - 24 * 60 * 60 * 1000,
+        });
+
+        if (!verified) {
+          throw new Error("Please verify your phone number.");
+        }
+        phoneOtpVerified = true;
+        phoneOtpVerifiedAt = verified.updatedAt;
+        phoneNumberMasked = verified.phoneMasked;
+        phoneNumberHash = phoneHash;
       }
-      phoneOtpVerified = true;
-      phoneOtpVerifiedAt = verified.updatedAt;
-      phoneNumberMasked = verified.phoneMasked;
-      phoneNumberHash = phoneHash;
     }
 
     const validation: any = await ctx.runAction(api.externalApis.validatePhoneNumber, {
