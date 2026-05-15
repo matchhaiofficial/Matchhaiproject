@@ -1,7 +1,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { ensureVerifiedEmailAccess, currentUser } from "./authService";
+import { currentUser, requireKycAccess } from "./authService";
 import { GAME_FORMATS } from "../../constants/gameRules";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../constants/teamRosterRules";
 import Logger from "../../utils/logger";
@@ -64,7 +64,7 @@ async function checkUserTeamLimit(uid: string, game: string): Promise<void> {
 
 export async function createTeamAction(data: CreateTeamData): Promise<TeamActionResponse> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message, code: verificationGate.code };
     }
@@ -117,7 +117,7 @@ export async function createTeamAction(data: CreateTeamData): Promise<TeamAction
 
 export async function requestToJoinTeamAction(data: { teamId: string }): Promise<TeamActionResponse> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message, code: verificationGate.code };
     }

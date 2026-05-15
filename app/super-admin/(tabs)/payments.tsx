@@ -1,11 +1,11 @@
 import { useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
-import { AdminInfoLine } from "../../../src/components/AdminSurface";
+import { AdminEmptyStateCard, AdminInfoLine } from "../../../src/components/AdminSurface";
 import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import { DiscoverFilterRow } from "../../../src/features/discover/components/DiscoverShared";
@@ -14,6 +14,8 @@ import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useToast } from "../../../src/hooks/useToast";
 import { EasypaisaAdminTransaction, getEasypaisaTransactions } from "../../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../../src/theme";
+
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 type KindFilter = "Any" | "wallet_topup" | "booking_intent";
 type StatusFilter = "Any" | "created" | "redirected" | "token_received" | "pending" | "paid" | "failed" | "expired" | "cancelled";
@@ -136,10 +138,11 @@ export default function SuperAdminPaymentsTab() {
             );
           })}
           {visible.length === 0 ? (
-            <AppCard variant="empty">
-              <Text style={styles.emptyTitle}>No payments found</Text>
-              <Text style={styles.emptyText}>Try a different search or filter.</Text>
-            </AppCard>
+            <AdminEmptyStateCard
+              title="No payments found"
+              description="Try a different search or filter."
+              icon="paymentWallet"
+            />
           ) : null}
         </ScrollView>
       )}
@@ -174,15 +177,13 @@ const styles = StyleSheet.create({
   filterBadgeText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 10 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },
-  card: { gap: SPACING.sm },
+  card: { gap: SPACING.md },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
   cardTitleWrap: { flex: 1, minWidth: 0 },
   cardTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
-  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13 },
+  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 13 },
   details: { marginTop: SPACING.sm, gap: SPACING.sm },
-  emptyTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18, textAlign: "center" },
-  emptyText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, textAlign: "center", marginTop: SPACING.xs },
-  drawer: { backgroundColor: COLORS.backgroundDark },
+  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },
   drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },

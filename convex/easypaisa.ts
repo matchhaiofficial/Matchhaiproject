@@ -1338,25 +1338,28 @@ export const applyProviderUpdate = internalMutation({
     }
 
     try {
-      if (row.kind === "wallet_topup") {
-        logGatewayDebug("reconcile.wallet_topup.begin", {
+      logGatewayDebug("reconcile.wallet_credit.begin", {
+        transactionId: String(row._id),
+        orderRefNum: row.orderRefNum,
+        userId: String(row.userId),
+        kind: row.kind,
+        amount: row.amount,
+      });
+      await ctx.runMutation(api.wallet.addFunds, {
+        userId: row.userId,
+        amount: row.amount,
+        reference: `easypaisa:${row.orderRefNum}`,
+        metadata: {
+          provider: "easypaisa",
+          source: row.kind === "booking_intent" ? "booking_intent_funding" : "wallet_topup",
           transactionId: String(row._id),
+          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
           orderRefNum: row.orderRefNum,
-          userId: String(row.userId),
-          amount: row.amount,
-        });
-        await ctx.runMutation(api.wallet.addFunds, {
-          userId: row.userId,
-          amount: row.amount,
-          reference: `easypaisa:${row.orderRefNum}`,
-          metadata: {
-            provider: "easypaisa",
-            transactionId: String(row._id),
-            orderRefNum: row.orderRefNum,
-            providerReference,
-          },
-        });
-      } else if (row.bookingIntentId) {
+          providerReference,
+        },
+      });
+
+      if (row.kind === "booking_intent" && row.bookingIntentId) {
         logGatewayDebug("reconcile.booking_intent.begin", {
           transactionId: String(row._id),
           orderRefNum: row.orderRefNum,
@@ -1373,6 +1376,9 @@ export const applyProviderUpdate = internalMutation({
 
       await ctx.db.patch(row._id, {
         ...callbackPatch,
+        providerPayload: row.kind === "booking_intent"
+          ? { ...sourcePayload, bookingFundsMode: "wallet_hold" }
+          : sourcePayload,
         status: "paid",
         processedAt: now,
         lastError: undefined,
@@ -1414,6 +1420,47 @@ export const applyProviderUpdate = internalMutation({
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Payment reconciliation failed.";
+      const walletCreditedBookingFailure =
+        row.kind === "booking_intent" &&
+        /slot is no longer available|payment window expired|matchroom has expired|matchroom is locked/i.test(message);
+
+      if (walletCreditedBookingFailure) {
+        await ctx.db.patch(row._id, {
+          ...callbackPatch,
+          providerPayload: { ...sourcePayload, bookingFundsMode: "wallet_hold" },
+          status: "paid",
+          processedAt: now,
+          lastError: message,
+        });
+
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: "match.payment_result",
+          toUid: row.userId,
+          status: "accepted",
+          dedupeKey: `booking_intent:payment_result:${String(row._id)}:wallet_credit_only`,
+          dedupePolicy: "replace_active",
+          route: "/(player)/wallet",
+          title: "Payment added to wallet",
+          body: "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
+          data: {
+            paymentTransactionId: String(row._id),
+            bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
+            orderRefNum: row.orderRefNum,
+            decision: "wallet_credit_only",
+            href: "/(player)/wallet",
+          },
+        });
+
+        return {
+          appReturnUrl: row.appReturnUrl,
+          orderRefNum: row.orderRefNum,
+          ok: true,
+          shouldRetry: false,
+          status: "paid",
+          message,
+        };
+      }
+
       logGatewayDebug("reconcile.error", {
         transactionId: String(row._id),
         orderRefNum: row.orderRefNum,

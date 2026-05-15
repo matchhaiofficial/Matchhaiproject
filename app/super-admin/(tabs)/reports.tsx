@@ -1,11 +1,11 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
-import { AdminInfoLine } from "../../../src/components/AdminSurface";
+import { AdminEmptyStateCard, AdminInfoLine } from "../../../src/components/AdminSurface";
 import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
@@ -16,6 +16,8 @@ import { useToast } from "../../../src/hooks/useToast";
 import { getReports, SuperAdminReport } from "../../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../../src/theme";
 import { getReportStatusLabel, getReportStatusTone } from "../../../src/utils/statusLabels";
+
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 type ReportTab = "pending" | "reviewed" | "resolved";
 type ReportTypeFilter = "Any" | SuperAdminReport["type"];
@@ -139,10 +141,11 @@ export default function SuperAdminReportsTab() {
             </Pressable>
           ))}
           {visible.length === 0 ? (
-            <AppCard variant="empty">
-              <Text style={styles.emptyTitle}>No reports here</Text>
-              <Text style={styles.emptyText}>Try another tab, search, or filter.</Text>
-            </AppCard>
+            <AdminEmptyStateCard
+              title="No reports here"
+              description="Try another tab, search, or filter."
+              icon="reports"
+            />
           ) : null}
         </ScrollView>
       )}
@@ -184,18 +187,16 @@ const styles = StyleSheet.create({
   supportTicketLinkIcon: { width: 38, height: 38, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: `${COLORS.success}18`, borderWidth: 1, borderColor: `${COLORS.success}44` },
   supportTicketLinkText: { flex: 1, minWidth: 0 },
   supportTicketLinkTitle: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 14 },
-  supportTicketLinkSubtitle: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 12, lineHeight: 18, marginTop: 2 },
+  supportTicketLinkSubtitle: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, lineHeight: 18, marginTop: 2 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },
-  card: { gap: SPACING.sm },
+  card: { gap: SPACING.md },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
   cardTitle: { flex: 1, color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
-  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13 },
+  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 13 },
   infoStack: { gap: SPACING.sm },
   linkHint: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
-  emptyTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18, textAlign: "center" },
-  emptyText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, textAlign: "center", marginTop: SPACING.xs },
-  drawer: { backgroundColor: COLORS.backgroundDark },
+  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },
   drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },

@@ -4,7 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { currentUser, ensureVerifiedEmailAccess } from "./authService";
+import { currentUser, requireKycAccess } from "./authService";
 import { normalizeGameKey } from "../../features/discover/utils/gameKeys";
 import { initializeSkillIfMissing, type GameKey, type GameSkillScore } from "../skillRatingService";
 import { isProfileGameEnabled } from "../userService";
@@ -363,7 +363,7 @@ export async function createMatchroom(
   roomData: Matchroom
 ): Promise<Result<{ id: string }>> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message, code: verificationGate.code };
     }
@@ -566,7 +566,7 @@ export async function joinMatchroom(
   _joinCode?: string
 ): Promise<Result> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message, code: verificationGate.code };
     }

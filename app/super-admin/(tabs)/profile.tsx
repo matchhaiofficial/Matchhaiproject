@@ -9,14 +9,12 @@ import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimi
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
-import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/convex/authService";
 import { COLORS, FONTS, SPACING } from "../../../src/theme";
 
 export default function SuperAdminProfileTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { user } = useAuth();
-  const { showToast } = useToast();
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = () => {
@@ -59,10 +57,10 @@ export default function SuperAdminProfileTab() {
 
         <AppCard style={styles.card}>
           <Text style={styles.sectionTitle}>Moderation Actions</Text>
-          <Text style={styles.helperText}>Warning, temporary suspension, and permanent suspension require backend support before they can be enabled.</Text>
+          <Text style={styles.helperText}>User suspension actions are available from Reports and the Users screen. Every action is audit logged with your Super Admin identity.</Text>
           <View style={styles.actionsRow}>
-            <AppButton variant="secondary" disabled onPress={() => showToast({ type: "info", title: "Coming soon", message: "Requires backend support." })}>Warning - Coming soon</AppButton>
-            <AppButton variant="danger" disabled>Suspension - Requires backend support</AppButton>
+            <AppButton variant="secondary" onPress={() => router.push("/super-admin/users" as any)}>Open Users</AppButton>
+            <AppButton variant="secondary" onPress={() => router.push("/super-admin/audit-logs" as any)}>View Audit Logs</AppButton>
           </View>
         </AppCard>
 

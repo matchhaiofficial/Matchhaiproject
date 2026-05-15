@@ -12,7 +12,7 @@ import { COLORS, FONTS, SPACING } from "../theme";
 
 type AlertButtonConfig = {
   text?: string;
-  onPress?: (() => void) | undefined;
+  onPress?: (() => void | Promise<void>) | undefined;
   style?: "default" | "cancel" | "destructive";
 };
 
@@ -118,7 +118,16 @@ export default function InAppAlertProvider({ children }: { children: React.React
   const dismiss = (button?: AlertButtonConfig) => {
     setActiveAlert(null);
     requestAnimationFrame(() => {
-      button?.onPress?.();
+      try {
+        const result = button?.onPress?.();
+        if (result && typeof (result as Promise<unknown>).catch === "function") {
+          (result as Promise<unknown>).catch((error) => {
+            console.error("[InAppAlertProvider] Alert action failed", error);
+          });
+        }
+      } catch (error) {
+        console.error("[InAppAlertProvider] Alert action failed", error);
+      }
       showNext();
     });
   };

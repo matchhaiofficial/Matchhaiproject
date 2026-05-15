@@ -382,7 +382,9 @@ export const getDashboardSummary = query({
       openMatches,
       inProgressMatches,
       completedMatches,
-      paidPayments,
+      legacyPaidBookingPayments,
+      capturedBookingPayments,
+      legacyBookingWalletPayments,
       teams,
     ] = await Promise.all([
       ctx.db.query("users").collect(),
@@ -398,8 +400,29 @@ export const getDashboardSummary = query({
       ctx.db.query("matchrooms").withIndex("by_status", (q) => q.eq("status", "in-progress")).collect(),
       ctx.db.query("matchrooms").withIndex("by_status", (q) => q.eq("status", "completed")).collect(),
       ctx.db.query("paymentTransactions").withIndex("by_status", (q) => q.eq("status", "paid")).collect(),
+      ctx.db.query("walletTransactions").withIndex("by_type", (q) => q.eq("type", "hold_capture")).collect(),
+      ctx.db.query("walletTransactions").withIndex("by_type", (q) => q.eq("type", "booking_payment")).collect(),
       ctx.db.query("teams").collect(),
     ]);
+
+    const legacyBookingWalletReferences = new Set(
+      legacyBookingWalletPayments
+        .map((row) => String(row.reference || ""))
+        .filter(Boolean),
+    );
+    const legacyPaymentRevenue = legacyPaidBookingPayments
+      .filter((row) => row.kind === "booking_intent")
+      .filter((row) => row.providerPayload?.bookingFundsMode !== "wallet_hold")
+      .filter((row) => !legacyBookingWalletReferences.has(`easypaisa:${row.orderRefNum}`))
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const capturedBookingRevenue = capturedBookingPayments.reduce(
+      (sum, row) => sum + Number(row.amount || 0),
+      0,
+    );
+    const legacyBookingWalletRevenue = legacyBookingWalletPayments.reduce(
+      (sum, row) => sum + Number(row.amount || 0),
+      0,
+    );
 
     const userRoles = toCountMap(allUsers.map((user) => user.role || "none"));
     const accountTypes = toCountMap(allUsers.map((user) => user.accountType || "unknown"));
@@ -439,7 +462,7 @@ export const getDashboardSummary = query({
         completed: completedMatches.length,
       },
       revenue: {
-        total: paidPayments.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        total: capturedBookingRevenue + legacyBookingWalletRevenue + legacyPaymentRevenue,
         currency: "PKR",
       },
     };
@@ -554,13 +577,21 @@ export const listIdentityVerifications = query({
   handler: async (ctx, args) => {
     await getAuthenticatedAdmin(ctx, args.sessionToken);
     const limit = Math.max(1, Math.min(args.limit || 100, 200));
-    const rows = args.status
-      ? await ctx.db
+    const pendingLikeStatuses = new Set(["not_started", "pending", "in_progress", "in_review"]);
+    const rows = args.status === "pending"
+      ? (await ctx.db
+          .query("identityVerifications")
+          .order("desc")
+          .take(Math.min(limit * 4, 500)))
+          .filter((row) => pendingLikeStatuses.has(row.status))
+          .slice(0, limit)
+      : args.status
+        ? await ctx.db
           .query("identityVerifications")
           .withIndex("by_status_and_submittedAt", (q) => q.eq("status", args.status as any))
           .order("desc")
           .take(limit)
-      : await ctx.db.query("identityVerifications").order("desc").take(limit);
+        : await ctx.db.query("identityVerifications").order("desc").take(limit);
     const filtered = args.role ? rows.filter((row) => row.role === args.role) : rows;
     return await Promise.all(
       filtered.map(async (row) => {
@@ -587,6 +618,93 @@ export const listIdentityVerifications = query({
         };
       }),
     );
+  },
+});
+
+export const manuallyVerifyIdentityVerification = mutation({
+  args: {
+    sessionToken: v.string(),
+    verificationId: v.id("identityVerifications"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const reason = String(args.reason || "").trim();
+    if (reason.length < 8) {
+      throw new Error("Manual verification reason is required.");
+    }
+
+    const verification = await ctx.db.get(args.verificationId);
+    if (!verification) throw new Error("Identity verification not found.");
+    const user = await ctx.db.get(verification.userId);
+    if (!user) throw new Error("User profile not found.");
+
+    const now = Date.now();
+    const safeReason = reason.slice(0, 240);
+
+    await ctx.db.patch(args.verificationId, {
+      status: "verified",
+      decision: "manual_super_admin_approved",
+      rejectionReason: undefined,
+      verifiedAt: now,
+      reviewedAt: now,
+      updatedAt: now,
+    });
+
+    const userPatch: Record<string, unknown> = {
+      kycVerificationStatus: "verified",
+      kycVerifiedAt: now,
+      kycProvider: "didit",
+      identityVerificationId: String(args.verificationId),
+      updatedAt: now,
+    };
+
+    let pendingEmailAuthSyncStatus: "not_attempted" | "synced" | "missing_auth_id" | "failed" = "not_attempted";
+    if (user.pendingEmail) {
+      const pendingEmailToSync = normalizeEmail(user.pendingEmail);
+      if (user.authId) {
+        try {
+          await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+            input: {
+              model: "user",
+              where: [{ field: "_id", operator: "eq", value: user.authId }],
+              update: {
+                email: pendingEmailToSync,
+                emailVerified: true,
+                updatedAt: now,
+              },
+            },
+          });
+          userPatch.email = pendingEmailToSync;
+          userPatch.pendingEmail = null;
+          pendingEmailAuthSyncStatus = "synced";
+        } catch {
+          pendingEmailAuthSyncStatus = "failed";
+        }
+      } else {
+        pendingEmailAuthSyncStatus = "missing_auth_id";
+      }
+    }
+
+    await ctx.db.patch(verification.userId, userPatch);
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "manual_kyc_verify",
+      module: "identity",
+      targetType: "identityVerification",
+      targetId: String(args.verificationId),
+      status: "success",
+      reason: safeReason,
+      metadataSafe: {
+        userId: String(verification.userId),
+        previousStatus: verification.status,
+        role: verification.role,
+        provider: verification.provider,
+        pendingEmailAuthSyncStatus,
+      },
+    });
+
+    return { ok: true };
   },
 });
 
@@ -1316,6 +1434,84 @@ export const setUserRole = mutation({
       metadataSafe: { role: args.role || null },
     });
     return true;
+  },
+});
+
+export const setUserSuspension = mutation({
+  args: {
+    sessionToken: v.string(),
+    userId: v.id("users"),
+    status: v.union(v.literal("active"), v.literal("suspended")),
+    reason: v.optional(v.string()),
+    suspendedUntil: v.optional(v.union(v.number(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const target = await ctx.db.get(args.userId);
+    if (!target) {
+      throw new Error("User not found.");
+    }
+
+    if (admin.profile._id === args.userId && args.status === "suspended") {
+      throw new Error("You cannot suspend your own Super Admin account.");
+    }
+
+    const now = Date.now();
+    const reason = args.reason?.trim();
+    const patch: Record<string, unknown> = {
+      accountStatus: args.status,
+      updatedAt: now,
+    };
+
+    if (args.status === "suspended") {
+      patch.suspendedAt = now;
+      patch.suspendedUntil = args.suspendedUntil ?? null;
+      patch.suspensionReason = reason || "Suspended by Super Admin";
+      patch.suspendedByAdminUserId = admin.profile._id;
+    } else {
+      patch.suspendedAt = undefined;
+      patch.suspendedUntil = null;
+      patch.suspensionReason = null;
+      patch.suspendedByAdminUserId = undefined;
+    }
+
+    await ctx.db.patch(args.userId, patch);
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "account.status_updated",
+      toUid: args.userId,
+      status: args.status === "suspended" ? "rejected" : "accepted",
+      dedupeKey: `account.status_updated:${String(args.userId)}:${args.status}`,
+      dedupePolicy: "replace_active",
+      route: "/profile",
+      entity: { kind: "user", id: String(args.userId) },
+      entityId: String(args.userId),
+      title: args.status === "suspended" ? "Account suspended" : "Account reactivated",
+      body: args.status === "suspended"
+        ? "Your MatchHai account has been suspended. Contact support if you believe this is a mistake."
+        : "Your MatchHai account has been reactivated.",
+      data: {
+        userId: String(args.userId),
+        status: args.status,
+        href: "/profile",
+      },
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: args.status === "suspended" ? "suspend_user" : "reactivate_user",
+      module: "users",
+      targetType: "user",
+      targetId: String(args.userId),
+      status: "success",
+      metadataSafe: {
+        previousStatus: target.accountStatus || "active",
+        status: args.status,
+        hasReason: Boolean(reason),
+        suspendedUntil: args.suspendedUntil ?? null,
+      },
+    });
+
+    return { ok: true };
   },
 });
 

@@ -6,7 +6,7 @@ import {
 import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
-import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 
 function doesUserPlayGame(user: any, game: string): boolean {
   switch (game) {
@@ -125,9 +125,7 @@ async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string) {
     if (!user) {
       throw new Error("User profile not found");
     }
-    if (!isKycAccessAllowed(user.kycVerificationStatus)) {
-      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
-    }
+    assertKycAccessAllowed(user, KYC_VERIFICATION_REQUIRED_MESSAGE);
     if (expectedUser && expectedUser._id !== user._id) {
       throw new Error("You can only perform this action for your own account");
     }
@@ -137,9 +135,7 @@ async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string) {
   if (!expectedUser) {
     throw new Error("Not authenticated");
   }
-  if (!isKycAccessAllowed(expectedUser.kycVerificationStatus)) {
-    throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
-  }
+  assertKycAccessAllowed(expectedUser, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
   return expectedUser;
 }

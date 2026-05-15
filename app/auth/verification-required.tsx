@@ -154,7 +154,7 @@ export default function VerificationRequiredScreen() {
 
         <Pressable onPress={() => router.replace("/(player)/(tabs)" as any)} style={{ marginTop: 18 }}>
           <Text style={[styles.bottomText, { color: COLORS.accent, textAlign: "center" }]}>
-            {isVerified ? "Continue to player home" : "Back to locked dashboard"}
+            {isVerified ? "Continue to MatchHai" : "Back to locked dashboard"}
           </Text>
         </Pressable>
       </ScrollView>

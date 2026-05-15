@@ -2,7 +2,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
-import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 
 const notificationStatus = v.union(
   v.literal("pending"),
@@ -513,9 +513,7 @@ async function enforceAuthGate(ctx: any, type: string) {
     .query("users")
     .withIndex("by_authId", (q: any) => q.eq("authId", authUser.userId))
     .unique();
-  if (!isKycAccessAllowed(profile?.kycVerificationStatus)) {
-    throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
-  }
+  assertKycAccessAllowed(profile, KYC_VERIFICATION_REQUIRED_MESSAGE);
 }
 
 async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuthGate = false) {

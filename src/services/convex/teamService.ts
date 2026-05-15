@@ -4,7 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { currentUser, ensureVerifiedEmailAccess } from "./authService";
+import { currentUser, requireKycAccess } from "./authService";
 
 export interface TeamMember {
   uid: string;
@@ -54,7 +54,7 @@ export async function createTeam(
   data: Omit<Team, "id" | "createdAt" | "stats" | "memberUids">
 ): Promise<Result<{ id: string }>> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message };
     }
@@ -151,7 +151,7 @@ export async function joinTeam(
   user: { uid: string; username: string }
 ): Promise<Result> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message };
     }
@@ -254,7 +254,7 @@ export async function getPublicTeams(
  */
 export async function requestToJoinTeam(teamId: string): Promise<Result> {
   try {
-    const verificationGate = await ensureVerifiedEmailAccess();
+    const verificationGate = await requireKycAccess();
     if (!verificationGate.ok) {
       return { ok: false, message: verificationGate.message };
     }

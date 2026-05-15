@@ -4,7 +4,7 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { currentUser, ensureVerifiedEmailAccess } from "./authService";
+import { currentUser, requireKycAccess } from "./authService";
 import { createMatchroom } from "./matchService";
 import Logger from "../../utils/logger";
 import { parseScheduledDateTime } from "../../utils/matchroomTime";
@@ -278,7 +278,7 @@ export const sendTeamMatchChallenge = async (input: {
     teamAPaymentAmount?: number;
 }): Promise<ServerResponse> => {
     try {
-        const verificationGate = await ensureVerifiedEmailAccess();
+        const verificationGate = await requireKycAccess();
         if (!verificationGate.ok) return verificationGate;
 
         const me = await getCurrentUserInfo();

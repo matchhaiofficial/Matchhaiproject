@@ -11,10 +11,10 @@ export const KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE =
   `${KYC_VERIFICATION_REQUIRED_MESSAGE} Only profile settings and help are available right now.`;
 
 export const KYC_VERIFICATION_PENDING_MESSAGE =
-  "Identity verification is being reviewed. You can use MatchHai while Didit finishes; if verification is declined, features will lock again.";
+  "Your verification is pending review. You can use MatchHai while Didit reviews it; access will lock again if verification is declined.";
 
 export function isKycAccessAllowed(status?: string | null): boolean {
-  return status === "verified" || status === "pending" || status === "in_progress" || status === "in_review";
+  return status === "verified" || status === "pending";
 }
 
 export function isKycReviewActive(status?: string | null): boolean {

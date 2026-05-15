@@ -1,9 +1,10 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../src/components/AppHeader";
+import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
 import { AppIcon } from "../../src/components/AppIcon";
 import {
   AppDrawer,
@@ -17,6 +18,8 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useToast } from "../../src/hooks/useToast";
 import { getSuperAdminMatchrooms, SuperAdminMatchroom } from "../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
+
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 type MatchroomFilter = "Any" | SuperAdminMatchroom["lifecycleStatus"];
 
@@ -146,10 +149,11 @@ export default function SuperAdminMatchroomsScreen() {
             </Pressable>
           ))}
           {visibleRooms.length === 0 ? (
-            <AppCard variant="empty">
-              <Text style={styles.emptyTitle}>No matchrooms found</Text>
-              <Text style={styles.emptyText}>Try a different search or status filter.</Text>
-            </AppCard>
+            <AdminEmptyStateCard
+              title="No matchrooms found"
+              description="Try a different search or status filter."
+              icon="matchroom"
+            />
           ) : null}
         </ScrollView>
       )}
@@ -229,13 +233,11 @@ const styles = StyleSheet.create({
   filterBadgeText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 10 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },
-  card: { gap: SPACING.sm },
+  card: { gap: SPACING.md },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
   cardTitle: { flex: 1, color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
-  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13 },
-  emptyTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18, textAlign: "center" },
-  emptyText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, textAlign: "center", marginTop: SPACING.xs },
-  drawer: { backgroundColor: COLORS.backgroundDark },
+  cardMeta: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 13 },
+  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },
   drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },

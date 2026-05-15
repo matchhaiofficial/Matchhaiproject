@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
@@ -94,6 +94,9 @@ export const listHistory = query({
       if (row.type === "withdrawal") title = "Wallet payment";
       if (row.type === "booking_payment") title = "Booking payment";
       if (row.type === "refund") title = "Wallet refund";
+      if (row.type === "hold") title = "Reserved for booking";
+      if (row.type === "hold_release") title = "Booking reservation released";
+      if (row.type === "hold_capture") title = "Booking payment captured";
 
       return {
         id: `wallet:${String(row._id)}`,
@@ -270,6 +273,231 @@ export const addFunds = mutation({
     });
 
     return { newBalance: currentBalance + args.amount };
+  },
+});
+
+export const holdFunds = internalMutation({
+  args: {
+    amount: v.number(),
+    userId: v.optional(v.id("users")),
+    reference: v.string(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    if (args.amount <= 0) {
+      throw new Error("Amount must be positive");
+    }
+
+    const user = await getWalletUserRecord(ctx, args.userId);
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+      .collect();
+    if (existing.length > 0) {
+      return {
+        newBalance: Number(user.walletBalance || 0),
+        heldBalance: Number(user.walletHeldBalance || 0),
+        alreadyApplied: true,
+      };
+    }
+
+    const currentBalance = Number(user.walletBalance || 0);
+    const currentHeldBalance = Number(user.walletHeldBalance || 0);
+    if (!Number.isFinite(currentBalance) || currentBalance < args.amount) {
+      throw new Error("Insufficient wallet balance. Please add funds from Wallet.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      walletBalance: currentBalance - args.amount,
+      walletHeldBalance: currentHeldBalance + args.amount,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("walletTransactions", {
+      userId: user._id,
+      type: "hold",
+      amount: args.amount,
+      status: "completed",
+      reference: args.reference,
+      metadata: args.metadata,
+      createdAt: now,
+    });
+
+    return {
+      newBalance: currentBalance - args.amount,
+      heldBalance: currentHeldBalance + args.amount,
+      alreadyApplied: false,
+    };
+  },
+});
+
+export const releaseHeldFunds = internalMutation({
+  args: {
+    amount: v.number(),
+    userId: v.optional(v.id("users")),
+    reference: v.string(),
+    originalHoldReference: v.string(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    if (args.amount <= 0) {
+      throw new Error("Amount must be positive");
+    }
+
+    const user = await getWalletUserRecord(ctx, args.userId);
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+      .collect();
+    if (existing.length > 0) {
+      return {
+        newBalance: Number(user.walletBalance || 0),
+        heldBalance: Number(user.walletHeldBalance || 0),
+        alreadyApplied: true,
+      };
+    }
+
+    const currentBalance = Number(user.walletBalance || 0);
+    const currentHeldBalance = Number(user.walletHeldBalance || 0);
+    if (!Number.isFinite(currentHeldBalance) || currentHeldBalance < args.amount) {
+      throw new Error("Insufficient held wallet balance.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      walletBalance: currentBalance + args.amount,
+      walletHeldBalance: currentHeldBalance - args.amount,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("walletTransactions", {
+      userId: user._id,
+      type: "hold_release",
+      amount: args.amount,
+      status: "completed",
+      reference: args.reference,
+      metadata: {
+        ...(args.metadata || {}),
+        originalHoldReference: args.originalHoldReference,
+      },
+      createdAt: now,
+    });
+
+    return {
+      newBalance: currentBalance + args.amount,
+      heldBalance: currentHeldBalance - args.amount,
+      alreadyApplied: false,
+    };
+  },
+});
+
+export const captureHeldFunds = internalMutation({
+  args: {
+    amount: v.number(),
+    userId: v.optional(v.id("users")),
+    reference: v.string(),
+    originalHoldReference: v.string(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    if (args.amount <= 0) {
+      throw new Error("Amount must be positive");
+    }
+
+    const user = await getWalletUserRecord(ctx, args.userId);
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+      .collect();
+    if (existing.length > 0) {
+      return {
+        newBalance: Number(user.walletBalance || 0),
+        heldBalance: Number(user.walletHeldBalance || 0),
+        alreadyApplied: true,
+      };
+    }
+
+    const currentBalance = Number(user.walletBalance || 0);
+    const currentHeldBalance = Number(user.walletHeldBalance || 0);
+    if (!Number.isFinite(currentHeldBalance) || currentHeldBalance < args.amount) {
+      throw new Error("Insufficient held wallet balance.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      walletHeldBalance: currentHeldBalance - args.amount,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("walletTransactions", {
+      userId: user._id,
+      type: "hold_capture",
+      amount: args.amount,
+      status: "completed",
+      reference: args.reference,
+      metadata: {
+        ...(args.metadata || {}),
+        originalHoldReference: args.originalHoldReference,
+      },
+      createdAt: now,
+    });
+
+    return {
+      newBalance: currentBalance,
+      heldBalance: currentHeldBalance - args.amount,
+      alreadyApplied: false,
+    };
+  },
+});
+
+export const refundFunds = internalMutation({
+  args: {
+    amount: v.number(),
+    userId: v.optional(v.id("users")),
+    reference: v.string(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    if (args.amount <= 0) {
+      throw new Error("Amount must be positive");
+    }
+
+    const user = await getWalletUserRecord(ctx, args.userId);
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+      .collect();
+    if (existing.length > 0) {
+      return {
+        newBalance: Number(user.walletBalance || 0),
+        heldBalance: Number(user.walletHeldBalance || 0),
+        alreadyApplied: true,
+      };
+    }
+
+    const currentBalance = Number(user.walletBalance || 0);
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      walletBalance: currentBalance + args.amount,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("walletTransactions", {
+      userId: user._id,
+      type: "refund",
+      amount: args.amount,
+      status: "completed",
+      reference: args.reference,
+      metadata: args.metadata,
+      createdAt: now,
+    });
+
+    return {
+      newBalance: currentBalance + args.amount,
+      heldBalance: Number(user.walletHeldBalance || 0),
+      alreadyApplied: false,
+    };
   },
 });
 

@@ -16,6 +16,7 @@ import Screen from "../../../src/components/Screen";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import {
   getReportById,
+  setUserSuspension,
   SuperAdminReport,
   updateReportStatus,
 } from "../../../src/services/convex/superAdminService";
@@ -45,6 +46,7 @@ export default function SuperAdminReportDetail() {
   const [draftStatus, setDraftStatus] = useState<ReportStatus | null>(null);
   const [reviewerNote, setReviewerNote] = useState("");
   const [resolutionSummary, setResolutionSummary] = useState("");
+  const [busyModerationAction, setBusyModerationAction] = useState<string | null>(null);
   useRouteLogger("SuperAdminReportDetail", { reportId });
 
   const loadReport = async () => {
@@ -105,6 +107,33 @@ export default function SuperAdminReportDetail() {
     setBusyStatus(null);
     if (result.ok) {
       closeStatusComposer();
+      await loadReport();
+    } else {
+      setError(result.message);
+    }
+  };
+
+  const handleReportedUserSuspension = async (mode: "temporary" | "permanent") => {
+    const reportedUserId = report?.reportedUserId;
+    if (!report || !reportedUserId) {
+      setError("This report does not include a reported user to suspend.");
+      return;
+    }
+
+    const suspendedUntil = mode === "temporary" ? Date.now() + 7 * 24 * 60 * 60 * 1000 : null;
+    const reason = `${mode === "temporary" ? "7-day suspension" : "Permanent suspension"} from report ${report.id}: ${report.reason}`;
+    setBusyModerationAction(mode);
+    const result = await setUserSuspension(reportedUserId, {
+      status: "suspended",
+      reason,
+      suspendedUntil,
+    });
+    setBusyModerationAction(null);
+    if (result.ok) {
+      setError(null);
+      await updateReportStatus(report.id, "reviewed", {
+        reviewerNote: reason,
+      });
       await loadReport();
     } else {
       setError(result.message);
@@ -205,11 +234,27 @@ export default function SuperAdminReportDetail() {
                 <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
                   <Text style={styles.secondaryButtonText}>Warning - Coming soon</Text>
                 </Pressable>
-                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
-                  <Text style={styles.secondaryButtonText}>Temp ban - Requires backend support</Text>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => handleReportedUserSuspension("temporary")}
+                  disabled={busyModerationAction !== null}
+                >
+                  {busyModerationAction === "temporary" ? (
+                    <ActivityIndicator color={COLORS.text} />
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>Suspend 7 Days</Text>
+                  )}
                 </Pressable>
-                <Pressable style={[styles.secondaryButton, styles.disabledAction]} disabled>
-                  <Text style={styles.secondaryButtonText}>Permanent suspension - Requires backend support</Text>
+                <Pressable
+                  style={styles.dangerButton}
+                  onPress={() => handleReportedUserSuspension("permanent")}
+                  disabled={busyModerationAction !== null}
+                >
+                  {busyModerationAction === "permanent" ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.dangerButtonText}>Suspend Permanently</Text>
+                  )}
                 </Pressable>
               </View>
             ) : null}
@@ -459,6 +504,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryButtonText: {
+    color: "#fff",
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 14,
+  },
+  dangerButton: {
+    minHeight: 44,
+    minWidth: 120,
+    paddingHorizontal: SPACING.lg,
+    borderRadius: RADII.lg,
+    backgroundColor: COLORS.error,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerButtonText: {
     color: "#fff",
     fontFamily: FONTS.interSemiBold,
     fontSize: 14,
