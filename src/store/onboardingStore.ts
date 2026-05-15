@@ -82,8 +82,12 @@ type Step4Data = {
   consentMatchHistory: boolean;
 };
 
+type RegistrationPhase = "idle" | "submitting" | "partial-fail" | "success";
+
 export type OnboardingState = {
   currentStep: number;
+  registrationPhase: RegistrationPhase;
+  registrationSubStep: number;
 
   step1: Step1Data;
   step2: Step2Data;
@@ -92,6 +96,7 @@ export type OnboardingState = {
 
   // step navigation
   setCurrentStep: (step: number) => void;
+  setRegistrationProgress: (phase: RegistrationPhase, subStep?: number) => void;
 
   // original API (used in your screens)
   setStep1: (data: Partial<Step1Data>) => void;
@@ -111,6 +116,7 @@ export type OnboardingState = {
 const initialState: Omit<
   OnboardingState,
   | "setCurrentStep"
+  | "setRegistrationProgress"
   | "setStep1"
   | "setStep2"
   | "setStep3"
@@ -123,6 +129,8 @@ const initialState: Omit<
   | "resetAll"
 > = {
   currentStep: 1,
+  registrationPhase: "idle",
+  registrationSubStep: 0,
   step1: {
     fullName: "",
     username: "",
@@ -197,6 +205,11 @@ export const useOnboardingStore = create<OnboardingState>()(
       ...initialState,
 
       setCurrentStep: (step: number) => set(() => ({ currentStep: step })),
+      setRegistrationProgress: (phase, subStep) =>
+        set((state) => ({
+          registrationPhase: phase,
+          registrationSubStep: subStep ?? state.registrationSubStep,
+        })),
 
       // core helpers
       setStep1: (data) =>

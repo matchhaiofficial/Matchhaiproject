@@ -7,7 +7,7 @@ import { clearCachedAuthSession } from "../../lib/authSessionCache";
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
-import { isKycAccessAllowed } from "../../utils/verificationGate";
+import { isKycAccessAllowed, isKycVerificationBypassEnabled } from "../../utils/verificationGate";
 
 /** Friendly message mapper for common auth errors */
 function mapAuthError(error?: any): string {
@@ -762,6 +762,7 @@ export async function ensureVerifiedEmailAccess(): Promise<SimpleResult> {
 }
 
 export async function sendCurrentUserVerificationEmail(): Promise<SimpleResult> {
+  if (isKycVerificationBypassEnabled()) return { ok: true };
   return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
 }
 

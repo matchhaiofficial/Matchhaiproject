@@ -8,12 +8,28 @@ export const KYC_VERIFICATION_REQUIRED_MESSAGE =
 export const KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL =
   "Please complete CNIC & face verification before requesting withdrawal.";
 
+export function isKycVerificationBypassEnabled(): boolean {
+  return (
+    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1" ||
+    String(process.env.SKIP_PHONE_OTP || "").trim() === "1"
+  );
+}
+
 export function isKycAccessAllowed(status?: string | null): boolean {
-  return status === "verified" || status === "pending";
+  return (
+    status === "verified" ||
+    status === "pending" ||
+    status === "in_progress" ||
+    status === "in_review"
+  );
 }
 
 export function assertKycAccessAllowed(
-  profile?: { kycVerificationStatus?: string | null; accountStatus?: string | null; suspendedUntil?: number | null } | null,
+  profile?: {
+    kycVerificationStatus?: string | null;
+    accountStatus?: string | null;
+    suspendedUntil?: number | null;
+  } | null,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,
 ) {
   if (!profile) {
@@ -21,11 +37,15 @@ export function assertKycAccessAllowed(
   }
 
   if (profile.accountStatus === "suspended") {
-    const suspendedUntil = typeof profile.suspendedUntil === "number" ? profile.suspendedUntil : null;
+    const suspendedUntil =
+      typeof profile.suspendedUntil === "number" ? profile.suspendedUntil : null;
     if (!suspendedUntil || suspendedUntil > Date.now()) {
       throw new Error("Your MatchHai account is suspended. Please contact support.");
     }
   }
+
+  // Safe dev/demo bypass; never bypass suspension checks.
+  if (isKycVerificationBypassEnabled()) return;
 
   if (!isKycAccessAllowed(profile.kycVerificationStatus)) {
     throw new Error(message);

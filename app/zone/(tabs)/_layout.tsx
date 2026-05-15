@@ -127,7 +127,11 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
 // Layout
 export default function ZoneTabsLayout() {
     const { authUser, user } = useAuth();
+    const insets = useSafeAreaInsets();
     const kycVerified = isUserFullyVerified(authUser, user);
+    const hideZoneTabBar = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
+    const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
+    const tabBarClearance = hideZoneTabBar ? 0 : TAB_BAR_H + bottomPad;
 
     return (
         <Tabs
@@ -135,6 +139,10 @@ export default function ZoneTabsLayout() {
             screenOptions={{
                 headerShown: false,
                 tabBarHideOnKeyboard: true,
+                sceneStyle: {
+                    backgroundColor: COLORS.backgroundDark,
+                    paddingBottom: tabBarClearance,
+                },
             }}
         >
             <Tabs.Screen
@@ -194,11 +202,8 @@ const styles = StyleSheet.create({
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: "rgba(255,255,255,0.1)",
         overflow: "hidden",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.45,
-        shadowRadius: 16,
-        elevation: 20,
+        shadowOpacity: 0,
+        elevation: 0,
     },
 
     pillHighlight: {

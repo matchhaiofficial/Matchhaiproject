@@ -428,14 +428,17 @@ export function InboxNotificationCard({
               </Text>
             )}
             {isRequest && " wants to connect with you."}
-            {isTeamInvite && (
-              <>
-                {" invited you to join "}
-                <Text style={styles.inlineLinkText} onPress={handleOpenTeam}>
-                  {item.meta?.teamName || "team"}
-                </Text>
-              </>
-            )}
+            {isTeamInvite &&
+              (isPending ? (
+                <>
+                  {" invited you to join "}
+                  <Text style={styles.inlineLinkText} onPress={handleOpenTeam}>
+                    {item.meta?.teamName || "team"}
+                  </Text>
+                </>
+              ) : (
+                ` ${String(item.message || "This invitation is no longer available.")}`
+              ))}
             {isJoinRequest && (
               <>
                 {" wants to join "}
@@ -611,7 +614,7 @@ export function InboxNotificationCard({
               <Text style={styles.contextChipText}>Profile</Text>
             </Pressable>
           )}
-          {!!teamId && (
+          {!!teamId && !(isTeamInvite && !isPending) && (
             <Pressable style={styles.contextChip} onPress={handleOpenTeam}>
               <AppIcon name="groups-2" size={14} color={COLORS.accent} />
               <Text style={styles.contextChipText}>Team</Text>

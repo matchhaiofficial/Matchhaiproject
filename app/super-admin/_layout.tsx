@@ -4,6 +4,7 @@ import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { COLORS } from "../../src/theme";
 import { isSuperAdminProfile } from "../../src/utils/accountRouting";
 import Logger from "../../src/utils/logger";
@@ -14,17 +15,19 @@ import {
 
 export default function SuperAdminLayout() {
     const { user, loading: authLoading } = useAuth();
+    const resetLoginForm = useLoginFormStore((state) => state.reset);
     const isSuperAdmin = isSuperAdminProfile(user);
 
     useEffect(() => {
         if (authLoading || !user) return;
         if (isSuperAdmin) {
+            resetLoginForm();
             void recordSuperAdminRouteAccess("/super-admin");
             return;
         }
         Logger.warn("SuperAdminLayout", "Access denied: user is not a super-admin", { role: user?.role });
         void recordSuperAdminAccessDenied("/super-admin", "not_authorized");
-    }, [authLoading, isSuperAdmin, user]);
+    }, [authLoading, isSuperAdmin, resetLoginForm, user]);
 
     // Show loading while checking auth state or profile
     if (authLoading) {

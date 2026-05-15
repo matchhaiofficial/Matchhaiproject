@@ -1401,6 +1401,7 @@ export default defineSchema({
     .index("by_toUid_status_createdAt", ["toUid", "status", "createdAt"])
     .index("by_fromUid", ["fromUid"])
     .index("by_fromUid_type_status", ["fromUid", "type", "status"])
+    .index("by_teamId_type_status", ["teamId", "type", "status"])
     .index("by_matchroomId", ["matchroomId"])
     .index("by_matchroomId_type_status", ["matchroomId", "type", "status"])
     .index("by_entityKey", ["entityKey"])
