@@ -84,14 +84,19 @@ export type ZoneStep4Data = {
   agreeRevenueShare: boolean;
 };
 
+type RegistrationPhase = "idle" | "submitting" | "partial-fail" | "success";
+
 export type ZoneOnboardingState = {
   currentStep: number;
+  registrationPhase: RegistrationPhase;
+  registrationSubStep: number;
 
   step1: ZoneStep1Data;
   branches: BranchData[]; // Array of branches
   step4: ZoneStep4Data;
 
   setCurrentStep: (step: number) => void;
+  setRegistrationProgress: (phase: RegistrationPhase, subStep?: number) => void;
 
   setStep1: (data: Partial<ZoneStep1Data>) => void;
 
@@ -110,6 +115,7 @@ export type ZoneOnboardingState = {
 const initialState: Omit<
   ZoneOnboardingState,
   | "setCurrentStep"
+  | "setRegistrationProgress"
   | "setStep1"
   | "addBranch"
   | "updateBranch"
@@ -120,6 +126,8 @@ const initialState: Omit<
   | "resetAll"
 > = {
   currentStep: 1,
+  registrationPhase: "idle",
+  registrationSubStep: 0,
   step1: {
     ownerFullName: "",
     venueBrandName: "",
@@ -141,6 +149,11 @@ export const useZoneOnboardingStore = create<ZoneOnboardingState>()(
       ...initialState,
 
       setCurrentStep: (step: number) => set(() => ({ currentStep: step })),
+      setRegistrationProgress: (phase, subStep) =>
+        set((state) => ({
+          registrationPhase: phase,
+          registrationSubStep: subStep ?? state.registrationSubStep,
+        })),
 
       setStep1: (data) =>
         set((state) => ({ step1: { ...state.step1, ...data } })),

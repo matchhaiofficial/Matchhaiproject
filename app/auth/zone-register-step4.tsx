@@ -1,6 +1,6 @@
 import { Link, router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import RegistrationFieldLabel from "./components/RegistrationFieldLabel";
 import RegistrationStepHeader from "./components/RegistrationStepHeader";
@@ -15,14 +15,22 @@ import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { useToast } from "../../src/hooks/useToast";
 import styles from "./register.styles";
-import { Modal } from "react-native";
 import {
   DEFAULT_CITY,
   normalizeKarachiAreaLabel,
 } from "../../constants/profileOptions";
 
 export default function AdminRegisterStep4() {
-  const { step1, branches, step4, setStep4, setCurrentStep, resetAll } = useZoneOnboardingStore();
+  const {
+    step1,
+    branches,
+    step4,
+    setStep4,
+    setCurrentStep,
+    registrationPhase = "idle",
+    registrationSubStep = 0,
+    setRegistrationProgress,
+  } = useZoneOnboardingStore();
   const { showToast } = useToast();
   const { refreshSession } = useAuth();
 
@@ -30,6 +38,8 @@ export default function AdminRegisterStep4() {
   const [phase, setPhase] = useState<"idle" | "submitting" | "partial-fail" | "success">("idle");
   const [currentSubStep, setCurrentSubStep] = useState(0);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const visiblePhase = phase !== "idle" ? phase : registrationPhase;
+  const visibleSubStep = phase !== "idle" ? currentSubStep : registrationSubStep;
 
   useEffect(() => {
     setCurrentStep(4);
@@ -37,7 +47,7 @@ export default function AdminRegisterStep4() {
 
   useEffect(() => {
         // Don't redirect away if we're in success flow
-    if (phase === "success" || phase === "submitting") return;
+    if (visiblePhase === "success" || visiblePhase === "submitting") return;
     if (
       !step1.ownerFullName.trim() ||
       !step1.venueBrandName.trim() ||
@@ -51,7 +61,7 @@ export default function AdminRegisterStep4() {
     if (!branches.length) {
       router.replace("/auth/zone-register-step2");
     }
-  }, [branches.length, step1,phase]);
+  }, [branches.length, step1, visiblePhase]);
 
   const allAgreementsChecked = step4.agreeTerms && step4.agreeRevenueShare;
 
@@ -96,6 +106,14 @@ export default function AdminRegisterStep4() {
     [branches],
   );
 
+  useEffect(() => {
+    if (registrationPhase !== "success") return;
+    const timer = setTimeout(() => {
+      router.replace(APP_ROUTES.zoneHome as any);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [registrationPhase]);
+
   const handleFinish = async () => {
     if (!allAgreementsChecked) {
       showToast({
@@ -125,11 +143,13 @@ export default function AdminRegisterStep4() {
 
     setSubmitting(true);
     setPhase("submitting");
+    setRegistrationProgress("submitting", 1);
     setErrorDetails(null);
 
     try {
       if (currentSubStep <= 0) {
         setCurrentSubStep(1);
+        setRegistrationProgress("submitting", 1);
         const resSignUp = await signUpWithEmail(
           step1.contactEmail.trim(),
           step1.password,
@@ -154,6 +174,7 @@ export default function AdminRegisterStep4() {
 
       if (currentSubStep <= 1) {
         setCurrentSubStep(2);
+        setRegistrationProgress("submitting", 2);
         const resZone = await saveZoneRegistration({ step1, branches });
         if (!resZone.ok) {
           throw { step: 2, message: resZone.message || "Failed to save zone data." };
@@ -161,14 +182,19 @@ export default function AdminRegisterStep4() {
       }
 
       setCurrentSubStep(3);
+      setRegistrationProgress("submitting", 3);
+      const sessionReady = await refreshSession();
+      if (!sessionReady) {
+        throw {
+          step: 3,
+          message: "Account created, but session was not ready yet. Please try signing in.",
+        };
+      }
+
       setPhase("success");
-      await refreshSession();
+      setRegistrationProgress("success", 3);
 
       setTimeout(() => {
-        setStep4({
-          agreeTerms: true,
-          agreeRevenueShare: true,
-        });
         showToast({
           type: "success",
           title: "Zone account created",
@@ -176,12 +202,12 @@ export default function AdminRegisterStep4() {
             "Your dashboard is ready. The venue stays in review until a super admin approves it.",
         });
         router.replace(APP_ROUTES.zoneHome as any);
-        resetAll();
-      }, 2000);
+      }, 650);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
       setCurrentSubStep(failedAt - 1); 
       setPhase("partial-fail");
+      setRegistrationProgress("partial-fail", failedAt - 1);
       setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
       showToast({
@@ -193,7 +219,7 @@ export default function AdminRegisterStep4() {
   };
 
   const renderLoadingOverlay = () => {
-    if (phase === "idle") return null;
+    if (visiblePhase === "idle") return null;
 
     const steps = [
       { id: 1, label: "Creating administrator account" },
@@ -201,38 +227,31 @@ export default function AdminRegisterStep4() {
     ];
 
     return (
-      <Modal
-        transparent
-        animationType="fade"
-        visible
-        statusBarTranslucent={Platform.OS === "android"}
-        navigationBarTranslucent={false}
-      >
-        <View style={styles.loadingOverlay}>
-          <View style={styles.loadingContent}>
-            {phase !== "partial-fail" && phase !== "success" ? (
+      <View style={styles.loadingOverlay}>
+        <View style={styles.loadingContent}>
+            {visiblePhase !== "partial-fail" && visiblePhase !== "success" ? (
               <ActivityIndicator size="large" color={COLORS.accent} style={styles.loadingSpinner} />
             ) : null}
-            {phase === "success" ? (
+            {visiblePhase === "success" ? (
               <AppIcon name="check-circle" size={64} color={COLORS.success} style={styles.loadingSpinner} />
             ) : null}
-            {phase === "partial-fail" ? (
+            {visiblePhase === "partial-fail" ? (
               <AppIcon name="error" size={64} color={COLORS.error} style={styles.loadingSpinner} />
             ) : null}
 
             <Text style={styles.loadingPhaseTitle}>
-              {phase === "submitting"
+              {visiblePhase === "submitting"
                 ? "Registering your zone..."
-                : phase === "partial-fail"
+                : visiblePhase === "partial-fail"
                   ? "Registration interrupted"
                   : "Zone submitted"}
             </Text>
 
             <View style={{ width: "100%", marginBottom: 20 }}>
               {steps.map((step, index) => {
-                const isDone = currentSubStep > step.id || phase === "success";
-                const isActive = currentSubStep === step.id && phase === "submitting";
-                const isFailed = currentSubStep === step.id && phase === "partial-fail";
+                const isDone = visibleSubStep > step.id || visiblePhase === "success";
+                const isActive = visibleSubStep === step.id && visiblePhase === "submitting";
+                const isFailed = visibleSubStep === step.id && visiblePhase === "partial-fail";
 
                 return (
                   <View key={step.id}>
@@ -269,7 +288,7 @@ export default function AdminRegisterStep4() {
               })}
             </View>
 
-            {phase === "partial-fail" ? (
+            {visiblePhase === "partial-fail" ? (
               <>
                 <Text
                   style={[
@@ -283,22 +302,33 @@ export default function AdminRegisterStep4() {
                 <AppButton onPress={handleFinish} size="lg" style={[styles.primaryBtn, { width: "100%", marginBottom: 12 }]}>
                   Retry submission
                 </AppButton>
-                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); }} style={{ padding: 10 }}>
+                <Pressable onPress={() => { setPhase("idle"); setSubmitting(false); setRegistrationProgress("idle", 0); }} style={{ padding: 10 }}>
                   <Text style={{ color: COLORS.muted }}>Cancel</Text>
                 </Pressable>
               </>
             ) : null}
 
-            {phase === "success" ? (
+            {visiblePhase === "success" ? (
               <Text style={[styles.progressText, { textAlign: "center" }]}>
                 Redirecting to your zone dashboard...
               </Text>
             ) : null}
-          </View>
         </View>
-      </Modal>
+      </View>
     );
   };
+
+  if (visiblePhase !== "idle") {
+    return (
+      <Screen
+        style={styles.screen}
+        contentStyle={styles.loadingScreenContainer}
+        routeKey="/auth/zone-register-step4"
+      >
+        {renderLoadingOverlay()}
+      </Screen>
+    );
+  }
 
   return (
     <Screen

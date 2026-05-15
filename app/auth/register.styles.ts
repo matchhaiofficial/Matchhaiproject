@@ -691,6 +691,12 @@ export default StyleSheet.create({
     justifyContent: "center",
     padding: SPACING.xl,
   },
+  loadingScreenContainer: {
+    flex: 1,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
   loadingContent: {
     width: "100%",
     maxWidth: 320,
