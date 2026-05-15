@@ -3,12 +3,14 @@ import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { useZoneOnboardingStore } from "../../src/store/zoneOnboardingStore";
 import { COLORS } from "../../src/theme";
 import { isSuperAdminProfile, isZoneAccount } from "../../src/utils/accountRouting";
 
 export default function ZoneLayout() {
     const { user, loading } = useAuth();
+    const resetLoginForm = useLoginFormStore((state) => state.reset);
     const registrationPhase = useZoneOnboardingStore((state) => state.registrationPhase);
     const resetOnboarding = useZoneOnboardingStore((state) => state.resetAll);
     const isZoneUser = isZoneAccount(user);
@@ -18,7 +20,10 @@ export default function ZoneLayout() {
         if (!loading && user && isZoneUser && registrationPhase === "success") {
             resetOnboarding();
         }
-    }, [isZoneUser, loading, registrationPhase, resetOnboarding, user]);
+        if (!loading && user && isZoneUser) {
+            resetLoginForm();
+        }
+    }, [isZoneUser, loading, registrationPhase, resetLoginForm, resetOnboarding, user]);
 
     // Show loading while checking auth state
     if (loading) {

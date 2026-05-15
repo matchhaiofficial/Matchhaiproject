@@ -4,12 +4,14 @@ import { ActivityIndicator, View } from "react-native";
 
 import { useAuth } from "../../src/context/AuthContext";
 import { APP_ROUTES } from "../../src/navigation/routes";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
 import { getDefaultSignedInRoute, isZoneAccount, isSuperAdminProfile } from "../../src/utils/accountRouting";
 
 export default function PlayerLayout() {
   const { user, loading } = useAuth();
+  const resetLoginForm = useLoginFormStore((state) => state.reset);
   const registrationPhase = useOnboardingStore((state) => state.registrationPhase);
   const resetOnboarding = useOnboardingStore((state) => state.resetAll);
   const isSuperAdmin = isSuperAdminProfile(user);
@@ -19,7 +21,10 @@ export default function PlayerLayout() {
     if (!loading && user && !isSuperAdmin && !isZoneUser && registrationPhase === "success") {
       resetOnboarding();
     }
-  }, [isSuperAdmin, isZoneUser, loading, registrationPhase, resetOnboarding, user]);
+    if (!loading && user && !isSuperAdmin && !isZoneUser) {
+      resetLoginForm();
+    }
+  }, [isSuperAdmin, isZoneUser, loading, registrationPhase, resetLoginForm, resetOnboarding, user]);
 
   if (loading) {
     return (

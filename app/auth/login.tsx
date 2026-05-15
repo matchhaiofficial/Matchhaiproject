@@ -23,6 +23,7 @@ import {
   signOutUser,
 } from "../../src/services/convex/authService";
 import { getUserProfile } from "../../src/services/convex/userService";
+import { useLoginFormStore } from "../../src/store/loginFormStore";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { APP_ROUTES } from "../../src/navigation/routes";
@@ -121,8 +122,14 @@ async function withLoginTimeout<T>(
 
 export default function Login() {
   useRouteLogger("LoginScreen");
-  const [emailOrPhone, setEmailOrPhone] = useState("");
-  const [password, setPassword] = useState("");
+  const emailOrPhone = useLoginFormStore((state) => state.emailOrPhone);
+  const password = useLoginFormStore((state) => state.password);
+  const userType = useLoginFormStore((state) => state.userType);
+  const loading = useLoginFormStore((state) => state.loading);
+  const setEmailOrPhone = useLoginFormStore((state) => state.setEmailOrPhone);
+  const setPassword = useLoginFormStore((state) => state.setPassword);
+  const setUserType = useLoginFormStore((state) => state.setUserType);
+  const setLoading = useLoginFormStore((state) => state.setLoading);
 
   const [emailFocused, setEmailFocused] = useState(false);
   const [passFocused, setPassFocused] = useState(false);
@@ -133,7 +140,6 @@ export default function Login() {
   const [emailServerError, setEmailServerError] = useState("");
   const [passwordServerError, setPasswordServerError] = useState("");
 
-  const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [modeHelper, setModeHelper] = useState<null | {
     message: string;
@@ -152,9 +158,6 @@ export default function Login() {
 
   const { showToast, hideToast } = useToast();
   const { refreshSession } = useAuth();
-
-  // NEW: user type (player vs zone admin)
-  const [userType, setUserType] = useState<"player" | "zone">("player");
 
   const handleUserTypeChange = (nextType: "player" | "zone") => {
     setUserType(nextType);
@@ -382,6 +385,7 @@ export default function Login() {
     }
     const attemptId = loginAttemptRef.current + 1;
     loginAttemptRef.current = attemptId;
+    let handoffStarted = false;
     const finishAttempt = () => {
       if (loginAttemptRef.current === attemptId) {
         setLoading(false);
@@ -485,7 +489,7 @@ export default function Login() {
           if (recovered.ok) {
             await refreshSession();
             if (loginAttemptRef.current !== attemptId) return;
-            finishAttempt();
+            handoffStarted = true;
             showToast({
               type: "success",
               title: "Profile restored",
@@ -600,7 +604,7 @@ export default function Login() {
       await refreshSession();
       if (loginAttemptRef.current !== attemptId) return;
 
-      finishAttempt();
+      handoffStarted = true;
 
       showToast({
         type: "success",
@@ -635,7 +639,9 @@ export default function Login() {
       });
     } finally {
       clearTimeout(timeout);
-      finishAttempt();
+      if (!handoffStarted) {
+        finishAttempt();
+      }
     }
   };
 
