@@ -8,7 +8,15 @@ export const KYC_VERIFICATION_REQUIRED_MESSAGE =
 export const KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL =
   "Please complete CNIC & face verification before requesting withdrawal.";
 
+export function isKycVerificationBypassEnabled(): boolean {
+  return (
+    String(process.env.SKIP_KYC_VERIFICATION || "").trim() === "1" ||
+    String(process.env.SKIP_PHONE_OTP || "").trim() === "1"
+  );
+}
+
 export function isKycAccessAllowed(status?: string | null): boolean {
+  if (isKycVerificationBypassEnabled()) return true;
   return status === "verified" || status === "pending" || status === "in_progress" || status === "in_review";
 }
 

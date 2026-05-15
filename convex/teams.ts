@@ -74,6 +74,8 @@ function assertActiveTeam<T>(team: T | null | undefined, message = "Team not fou
   if (!isActiveTeam(team)) throw new Error(message);
 }
 
+const TEAM_REMOVED_MESSAGE = "The team was removed or deleted.";
+
 async function getNextRosterRole(ctx: any, team: any) {
   const mainSize = getTeamMainRosterSize(team);
   const members = await ctx.db
@@ -642,6 +644,13 @@ export const remove = mutation({
     if (!team) throw new Error("Team not found");
     if (isTeamDeleted(team)) return true;
 
+    const pendingInvites = await ctx.db
+      .query("notifications")
+      .withIndex("by_teamId_type_status", (q) =>
+        q.eq("teamId", args.teamId).eq("type", "team.invite").eq("status", "pending")
+      )
+      .collect();
+
     const members = await ctx.db
       .query("teamMembers")
       .withIndex("by_teamId", (q) => q.eq("teamId", args.teamId))
@@ -652,6 +661,7 @@ export const remove = mutation({
       team.captainUid,
       ...members.map((member) => member.odxerId),
       ...team.memberUids,
+      ...pendingInvites.map((invite) => invite.toUid),
     ].filter(Boolean);
     const now = Date.now();
     for (const memberId of recipientIds) {
@@ -679,6 +689,15 @@ export const remove = mutation({
           game: team.game,
           href: `/teams/${String(args.teamId)}`,
         },
+      });
+    }
+
+    for (const invite of pendingInvites) {
+      await ctx.db.patch(invite._id, {
+        status: "expired",
+        title: invite.title || "Team Invite",
+        body: TEAM_REMOVED_MESSAGE,
+        updatedAt: now,
       });
     }
 
@@ -860,7 +879,11 @@ export const respondToTeamInvite = mutation({
     if (!teamId) throw new Error("Team reference missing");
 
     const team = await ctx.db.get(teamId);
-    assertActiveTeam(team, "Team no longer exists");
+    if (!isActiveTeam(team)) {
+      await ctx.db.patch(args.notificationId, { status: "expired", updatedAt: now, body: TEAM_REMOVED_MESSAGE });
+      throw new Error(TEAM_REMOVED_MESSAGE);
+    }
+    assertActiveTeam(team, TEAM_REMOVED_MESSAGE);
 
     // Check user not already in a team for this game
     const gameTeams = await ctx.db

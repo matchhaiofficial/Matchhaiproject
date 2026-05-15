@@ -13,7 +13,15 @@ export const KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE =
 export const KYC_VERIFICATION_PENDING_MESSAGE =
   "Identity verification is being reviewed. You can use MatchHai while Didit finishes; if verification is declined, features will lock again.";
 
+export function isKycVerificationBypassEnabled(): boolean {
+  return (
+    process.env.EXPO_PUBLIC_SKIP_KYC_VERIFICATION === "1" ||
+    process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1"
+  );
+}
+
 export function isKycAccessAllowed(status?: string | null): boolean {
+  if (isKycVerificationBypassEnabled()) return true;
   return status === "verified" || status === "pending" || status === "in_progress" || status === "in_review";
 }
 
@@ -26,6 +34,7 @@ export function isUserFullyVerified(_authUser?: AuthUser | null, userProfile?: U
 }
 
 export function showKycVerificationRequiredToast() {
+  if (isKycVerificationBypassEnabled()) return;
   Toast.show({
     type: "warning",
     text1: "Verify your identity",
@@ -37,5 +46,6 @@ export function showKycVerificationRequiredToast() {
 }
 
 export function showKycVerificationRequiredAlert() {
+  if (isKycVerificationBypassEnabled()) return;
   Alert.alert("Verify your identity", KYC_VERIFICATION_REQUIRED_MESSAGE, [{ text: "OK" }]);
 }

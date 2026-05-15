@@ -143,6 +143,15 @@ export const EMAIL_VERIFICATION_REQUIRED_MESSAGE =
 const EMAIL_VERIFICATION_CALLBACK_PATH = "/auth/login";
 const AUTH_CALL_TIMEOUT_MS = 15000;
 
+function isKycVerificationBypassEnabled(): boolean {
+  return (
+    process.env.EXPO_PUBLIC_SKIP_KYC_VERIFICATION === "1" ||
+    process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1" ||
+    process.env.SKIP_KYC_VERIFICATION === "1" ||
+    process.env.SKIP_PHONE_OTP === "1"
+  );
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -696,10 +705,12 @@ export async function currentUser(): Promise<AuthUser | null> {
 }
 
 export async function ensureVerifiedEmailAccess(): Promise<SimpleResult> {
+  if (isKycVerificationBypassEnabled()) return { ok: true };
   return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
 }
 
 export async function sendCurrentUserVerificationEmail(): Promise<SimpleResult> {
+  if (isKycVerificationBypassEnabled()) return { ok: true };
   return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
 }
 
