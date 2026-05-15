@@ -135,6 +135,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
 export default function PlayerTabsLayout() {
     const { user, loading } = useAuth();
+    const insets = useSafeAreaInsets();
 
     const isSuperAdmin = isSuperAdminProfile(user);
     const isZoneUser = isZoneAccount(user);
@@ -145,6 +146,8 @@ export default function PlayerTabsLayout() {
         isKycAccessAllowed(kycStatus) &&
         !verificationDocLoading &&
         (!currentKyc || isKycAccessAllowed(currentKyc.status));
+    const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
+    const tabBarClearance = HIDE_PLAYER_TAB_BAR ? 0 : TAB_BAR_H + bottomPad;
 
     if (!loading && (isSuperAdmin || isZoneUser)) {
         return <Redirect href={getDefaultSignedInRoute(user) as any} />;
@@ -156,6 +159,10 @@ export default function PlayerTabsLayout() {
             screenOptions={{
                 headerShown: false,
                 tabBarHideOnKeyboard: true,
+                sceneStyle: {
+                    backgroundColor: COLORS.backgroundDark,
+                    paddingBottom: tabBarClearance,
+                },
             }}
         >
             <Tabs.Screen name="index" options={{ title: "Home" }} />
@@ -213,11 +220,8 @@ const styles = StyleSheet.create({
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: "rgba(255,255,255,0.1)",
         overflow: "hidden",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.45,
-        shadowRadius: 16,
-        elevation: 20,
+        shadowOpacity: 0,
+        elevation: 0,
     },
 
     pillHighlight: {
