@@ -85,6 +85,14 @@ const getWalletTopupErrorMessage = (error: unknown) => {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
 
+  const cleaned = raw
+    .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
+    .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
+    .replace(/\bServer Error\b/gi, "")
+    .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
+    .split("Called by client")[0]
+    .trim();
+
   if (
     lower.includes("taking too long to respond") ||
     lower.includes("aborted due to timeout") ||
@@ -93,15 +101,18 @@ const getWalletTopupErrorMessage = (error: unknown) => {
     return "Easypaisa is taking too long to respond. Please try again in a moment.";
   }
 
-  if (lower.includes("server error")) {
-    const cleaned = raw
-      .split("Called by client")[0]
-      .split("Server Error")[0]
-      .trim();
-    return cleaned || "Could not start the Easypaisa top-up. Please try again.";
+  if (
+    lower.includes("system error") ||
+    cleaned.toLowerCase() === "system error"
+  ) {
+    return "Easypaisa did not complete the top-up. Please try again.";
   }
 
-  return raw || "Could not start the Easypaisa top-up. Please try again.";
+  if (lower.includes("unauthenticated") || lower.includes("please sign in")) {
+    return "Please sign in to continue.";
+  }
+
+  return cleaned || "Could not start the Easypaisa top-up. Please try again.";
 };
 
 export default function WalletScreen() {
@@ -468,9 +479,10 @@ export default function WalletScreen() {
         message: instruction,
       });
     } catch (error) {
-      Logger.error("Wallet", "Failed to add funds", error);
+      // Avoid triggering LogBox red-screen for expected gateway failures (e.g. user cancels in Easypaisa).
+      Logger.warn("Wallet", "Failed to add funds", error);
       const message = getWalletTopupErrorMessage(error);
-      showToast({ type: "error", title: "Failed", message });
+      showToast({ type: "error", title: "Failed to add funds", message });
     } finally {
       setAddingFunds(false);
     }

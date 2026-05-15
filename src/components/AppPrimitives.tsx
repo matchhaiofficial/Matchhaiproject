@@ -105,13 +105,19 @@ export function AppButton({
       });
     }
 
-    return PerfScope.run(cid, () =>
+    // Press handlers often return promises. If a caller forgets to catch a rejection,
+    // React Native will surface it as a fatal LogBox error. Always swallow and rethrow
+    // inside the originating handler (which should show a toast/UI error).
+    void PerfScope.run(cid, () =>
       Perf.measureAsync(`Action.${perf.actionKey}`, () => Promise.resolve(rest.onPress?.(event)), {
         cid,
         actionKey: perf.actionKey,
         meta: perf.meta,
+      }).catch(() => {
+        // Intentionally no-op: the onPress handler should already handle user-facing errors.
       }),
     );
+    return;
   };
 
   return (

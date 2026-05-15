@@ -64,6 +64,10 @@ function createMessage(
   };
 }
 
+function normalizeMessageSignature(text: string) {
+  return String(text || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -296,14 +300,34 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       type: "text" as const,
       supportCards: message.metadata?.supportCards,
     }));
-    if (mapped.length) return [...mapped, ...transientMessages];
+
+    const recentOutgoingSignatures = new Set(
+      mapped
+        .filter((message) => message.senderUid === currentUserId)
+        .map((message) => `${message.senderUid}:${normalizeMessageSignature(message.text)}`),
+    );
+
+    const visibleTransientMessages = transientMessages.filter((message) => {
+      if (message.senderUid !== currentUserId) return true;
+      const signature = `${message.senderUid}:${normalizeMessageSignature(message.text)}`;
+      if (!recentOutgoingSignatures.has(signature)) return true;
+      const matchingMessage = mapped.find(
+        (persistedMessage) =>
+          persistedMessage.senderUid === currentUserId &&
+          normalizeMessageSignature(persistedMessage.text) === normalizeMessageSignature(message.text) &&
+          Math.abs(persistedMessage.createdAt - message.createdAt) < 10_000,
+      );
+      return !matchingMessage;
+    });
+
+    if (mapped.length) return [...mapped, ...visibleTransientMessages];
     return [
       createMessage(
         SUPPORT_BOT_COPY.initialGreeting,
         SUPPORT_BOT_ID,
         SUPPORT_BOT_COPY.botName,
       ),
-      ...transientMessages,
+      ...visibleTransientMessages,
     ];
   }, [currentUserId, persistedMessages, transientMessages, user?.fullName, user?.username]);
 

@@ -13,9 +13,11 @@ import {
 } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Toast from "react-native-toast-message";
 
 import { useEntrance } from "../motion/useEntrance";
 import { SPACING } from "../theme";
+import { toastConfig } from "../ui/toastConfig";
 import { AppIcon } from "./AppIcon";
 import styles from "./AppModalPrimitives.styles";
 
@@ -119,6 +121,7 @@ export function AppModalBody({
         <ScrollView
           style={styles.bodyScroll}
           contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
+          nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -200,6 +203,9 @@ export function AppDialog({
           </Pressable>
         </Animated.View>
       </Pressable>
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <Toast config={toastConfig} />
+      </View>
     </Modal>
   );
 }
@@ -242,7 +248,7 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-        <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
+              <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
           <Animated.View style={entrance.animatedStyle}>
             <View
               style={[
@@ -256,6 +262,9 @@ export function AppBottomSheet({
             </View>
           </Animated.View>
         </View>
+      </View>
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <Toast config={toastConfig} />
       </View>
     </Modal>
   );
@@ -316,6 +325,9 @@ export function AppDrawer({
           style={styles.drawerBackdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
+      </View>
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <Toast config={toastConfig} />
       </View>
     </Modal>
   );

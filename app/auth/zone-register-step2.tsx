@@ -2,7 +2,7 @@ import { Picker } from "@react-native-picker/picker";
 import { router } from "expo-router";
 import debounce from "lodash.debounce";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import {
   DEFAULT_CITY,
@@ -14,7 +14,6 @@ import RegistrationStepHeader from "./components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import {
   AppBottomSheet,
-  AppModalBody,
   AppModalFooter,
   AppModalHeader,
 } from "../../src/components/AppModalPrimitives";
@@ -35,6 +34,7 @@ type LocationSearchResult = {
 };
 
 export default function AdminRegisterStep2() {
+  const { height: windowHeight } = useWindowDimensions();
   const { step1, branches, addBranch, updateBranch, removeBranch, setBranches, setCurrentStep } =
     useZoneOnboardingStore();
   const { showToast } = useToast();
@@ -87,6 +87,7 @@ export default function AdminRegisterStep2() {
     () => (branches.length === 1 ? "1 branch added" : `${branches.length} branches added`),
     [branches.length],
   );
+  const branchModalBodyHeight = Math.max(300, Math.min(500, Math.floor(windowHeight * 0.58)));
 
   const detectAreaFromLocation = (locationText: string) => {
     const normalized = locationText.toLowerCase();
@@ -469,159 +470,167 @@ export default function AdminRegisterStep2() {
           onClose={() => setModalVisible(false)}
         />
 
-        <AppModalBody scroll contentContainerStyle={{ gap: 14 }}>
-          <View style={styles.fieldGroup}>
-            <RegistrationFieldLabel label="Branch name" required />
-            <View style={styles.inputBox}>
-              <View style={styles.inputRow}>
-                <AppIcon name="store" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Pasha's Arena - Garden"
-                  placeholderTextColor={COLORS.muted}
-                  value={branchDisplayName}
-                  onChangeText={setBranchDisplayName}
-                  selectionColor={COLORS.accent}
-                />
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <RegistrationFieldLabel label="Area" required />
-            <View style={styles.inputBox}>
-              <Picker
-                selectedValue={areaLabel}
-                onValueChange={setAreaLabel}
-                style={{ color: COLORS.text }}
-                dropdownIconColor={COLORS.muted}
-              >
-                {KARACHI_AREAS.map((option) => (
-                  <Picker.Item key={option} label={option} value={option} />
-                ))}
-              </Picker>
-            </View>
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <RegistrationFieldLabel label="Branch phone" optional />
-            <View style={styles.inputBox}>
-              <View style={styles.inputRow}>
-                <AppIcon name="phone" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. 0300 123 4567"
-                  placeholderTextColor={COLORS.muted}
-                  value={contactPhone}
-                  onChangeText={handlePhoneChange}
-                  selectionColor={COLORS.accent}
-                  keyboardType="phone-pad"
-                />
-              </View>
-            </View>
-          </View>
-
-          <View style={[styles.fieldGroup, { zIndex: 10 }]}>
-            <RegistrationFieldLabel label="Address" required />
-            <View style={styles.inputBox}>
-              <View style={styles.inputRow}>
-                <AppIcon name="search" size={20} style={styles.prefixIcon} color={COLORS.muted} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Garden, Karachi"
-                  placeholderTextColor={COLORS.muted}
-                  value={searchQuery}
-                  onChangeText={handleSearchChange}
-                  selectionColor={COLORS.accent}
-                />
-                {isSearching ? (
-                  <View
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 5,
-                      backgroundColor: COLORS.accent,
-                    }}
-                  />
-                ) : null}
-              </View>
-            </View>
-
-            {searchResults.length > 0 ? (
-              <View
-                style={{
-                  backgroundColor: COLORS.cardBackground,
-                  borderWidth: 1,
-                  borderColor: COLORS.inputBorder,
-                  borderRadius: 12,
-                  marginTop: 6,
-                  maxHeight: 220,
-                }}
-              >
-                <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
-                  {searchResults.map((result, index) => (
-                    <Pressable
-                      key={`${result.place_id}-${index}`}
-                      onPress={() => handleSelectLocation(result)}
-                      style={({ pressed }) => ({
-                        paddingVertical: 12,
-                        paddingHorizontal: 14,
-                        borderBottomWidth: index === searchResults.length - 1 ? 0 : 1,
-                        borderBottomColor: COLORS.inputBorder,
-                        backgroundColor: pressed ? COLORS.inputBackground : "transparent",
-                      })}
-                    >
-                      <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>
-                        {result.name || String(result.display_name).split(",")[0]}
-                      </Text>
-                      <Text style={{ color: COLORS.muted, fontSize: 12 }} numberOfLines={1}>
-                        {result.display_name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-            ) : null}
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <RegistrationFieldLabel label="Address Details" optional />
-            <View style={styles.inputBox}>
-              <View style={styles.inputRow}>
-                <AppIcon
-                  name="location-on"
-                  size={20}
-                  style={styles.prefixIcon}
-                  color={COLORS.muted}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Near Pakola Masjid, Garden Road, Karachi"
-                  placeholderTextColor={COLORS.muted}
-                  value={addressLine1}
-                  onChangeText={setAddressLine1}
-                  selectionColor={COLORS.accent}
-                  multiline
-                />
-              </View>
-            </View>
-          </View>
-
-          {googleMapsUrl ? (
+        <View style={[styles.branchModalBody, { height: branchModalBodyHeight }]}>
+          <ScrollView
+            style={styles.branchModalScroller}
+            contentContainerStyle={styles.branchModalContent}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
             <View style={styles.fieldGroup}>
-              <RegistrationFieldLabel label="Google Maps link" optional />
-              <View style={[styles.inputBox, { opacity: 0.75 }]}>
+              <RegistrationFieldLabel label="Branch name" required />
+              <View style={styles.inputBox}>
                 <View style={styles.inputRow}>
-                  <AppIcon name="map" size={20} style={styles.prefixIcon} color={COLORS.success} />
-                  <TextInput style={[styles.input, { color: COLORS.success }]} value={googleMapsUrl} editable={false} />
+                  <AppIcon name="store" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Pasha's Arena - Garden"
+                    placeholderTextColor={COLORS.muted}
+                    value={branchDisplayName}
+                    onChangeText={setBranchDisplayName}
+                    selectionColor={COLORS.accent}
+                  />
                 </View>
               </View>
             </View>
-          ) : null}
-        </AppModalBody>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Area" required />
+              <View style={styles.inputBox}>
+                <Picker
+                  selectedValue={areaLabel}
+                  onValueChange={setAreaLabel}
+                  style={{ color: COLORS.text }}
+                  dropdownIconColor={COLORS.muted}
+                >
+                  {KARACHI_AREAS.map((option) => (
+                    <Picker.Item key={option} label={option} value={option} />
+                  ))}
+                </Picker>
+              </View>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Branch phone" optional />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon name="phone" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 0300 123 4567"
+                    placeholderTextColor={COLORS.muted}
+                    value={contactPhone}
+                    onChangeText={handlePhoneChange}
+                    selectionColor={COLORS.accent}
+                    keyboardType="phone-pad"
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={[styles.fieldGroup, { zIndex: 10 }]}>
+              <RegistrationFieldLabel label="Address" required />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon name="search" size={20} style={styles.prefixIcon} color={COLORS.muted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Garden, Karachi"
+                    placeholderTextColor={COLORS.muted}
+                    value={searchQuery}
+                    onChangeText={handleSearchChange}
+                    selectionColor={COLORS.accent}
+                  />
+                  {isSearching ? (
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: COLORS.accent,
+                      }}
+                    />
+                  ) : null}
+                </View>
+              </View>
+
+              {searchResults.length > 0 ? (
+                <View
+                  style={{
+                    backgroundColor: COLORS.cardBackground,
+                    borderWidth: 1,
+                    borderColor: COLORS.inputBorder,
+                    borderRadius: 12,
+                    marginTop: 6,
+                    maxHeight: 220,
+                  }}
+                >
+                  <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
+                    {searchResults.map((result, index) => (
+                      <Pressable
+                        key={`${result.place_id}-${index}`}
+                        onPress={() => handleSelectLocation(result)}
+                        style={({ pressed }) => ({
+                          paddingVertical: 12,
+                          paddingHorizontal: 14,
+                          borderBottomWidth: index === searchResults.length - 1 ? 0 : 1,
+                          borderBottomColor: COLORS.inputBorder,
+                          backgroundColor: pressed ? COLORS.inputBackground : "transparent",
+                        })}
+                      >
+                        <Text style={{ color: COLORS.text, fontSize: 14, fontWeight: "700" }}>
+                          {result.name || String(result.display_name).split(",")[0]}
+                        </Text>
+                        <Text style={{ color: COLORS.muted, fontSize: 12 }} numberOfLines={1}>
+                          {result.display_name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <RegistrationFieldLabel label="Address Details" optional />
+              <View style={styles.inputBox}>
+                <View style={styles.inputRow}>
+                  <AppIcon
+                    name="location-on"
+                    size={20}
+                    style={styles.prefixIcon}
+                    color={COLORS.muted}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Near Pakola Masjid, Garden Road, Karachi"
+                    placeholderTextColor={COLORS.muted}
+                    value={addressLine1}
+                    onChangeText={setAddressLine1}
+                    selectionColor={COLORS.accent}
+                    multiline
+                  />
+                </View>
+              </View>
+            </View>
+
+            {googleMapsUrl ? (
+              <View style={styles.fieldGroup}>
+                <RegistrationFieldLabel label="Google Maps link" optional />
+                <View style={[styles.inputBox, { opacity: 0.75 }]}>
+                  <View style={styles.inputRow}>
+                    <AppIcon name="map" size={20} style={styles.prefixIcon} color={COLORS.success} />
+                    <TextInput style={[styles.input, { color: COLORS.success }]} value={googleMapsUrl} editable={false} />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
 
         <AppModalFooter>
-          <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={styles.branchModalActions}>
             <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setModalVisible(false)}>
               Cancel
             </AppButton>

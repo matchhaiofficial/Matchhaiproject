@@ -342,24 +342,57 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
   ).trim();
   const combined = `${transactionStatus} ${responseCode} ${responseDesc}`.toUpperCase();
 
+  // IMPORTANT: For MA/OTC flows Easypaisa often returns responseCode=0000 and "SUCCESS"
+  // while the transaction is still pending or even cancelled by the user later. Never
+  // infer a paid settlement from response text alone (prevents false wallet credits).
+  const FAILED_STATUSES = new Set([
+    "FAILED",
+    "REVERSED",
+    "CANCELLED",
+    "CANCELED",
+    "REJECTED",
+    "DECLINED",
+    "DENIED",
+    "VOID",
+  ]);
+  const EXPIRED_STATUSES = new Set(["EXPIRED", "TIMEOUT", "TIMED_OUT"]);
+  const PAID_STATUSES = new Set(["PAID", "SUCCESS", "COMPLETED", "COMPLETE"]);
+  const PENDING_STATUSES = new Set([
+    "PENDING",
+    "BLOCKED",
+    "INITIATED",
+    "CREATED",
+    "REQUESTED",
+    "PROCESSING",
+  ]);
+
   let resolvedStatus: PaymentStatus = "failed";
-  if (transactionStatus === "PAID") {
-    resolvedStatus = "paid";
-  } else if (
-    combined.includes("SUCCESS")
-    || combined.includes("COMPLETE")
-    || combined.includes("PAID")
-  ) {
-    resolvedStatus = source === "initiate" ? "pending" : "paid";
-  } else if (transactionStatus === "EXPIRED") {
-    resolvedStatus = "expired";
-  } else if (transactionStatus === "FAILED" || transactionStatus === "REVERSED") {
+
+  if (FAILED_STATUSES.has(transactionStatus)) {
     resolvedStatus = "failed";
-  } else if (transactionStatus === "PENDING" || transactionStatus === "BLOCKED") {
+  } else if (EXPIRED_STATUSES.has(transactionStatus)) {
+    resolvedStatus = "expired";
+  } else if (PAID_STATUSES.has(transactionStatus)) {
+    resolvedStatus = "paid";
+  } else if (PENDING_STATUSES.has(transactionStatus)) {
     resolvedStatus = "pending";
-  } else if (source === "initiate" && responseCode === "0000") {
-    resolvedStatus = "pending";
+  } else if (!transactionStatus && (source === "ipn" || source === "hosted_finalize")) {
+    // Provider webhooks/finalize responses sometimes omit a normalized transactionStatus.
+    if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE")) {
+      resolvedStatus = "failed";
+    } else if (combined.includes("EXPIRE")) {
+      resolvedStatus = "expired";
+    } else if (combined.includes("PAID") || combined.includes("COMPLETE")) {
+      resolvedStatus = "paid";
+    } else if (responseCode === "0000") {
+      resolvedStatus = "pending";
+    }
+  } else if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE") || combined.includes("FAILED")) {
+    resolvedStatus = "failed";
+  } else if (combined.includes("EXPIRE")) {
+    resolvedStatus = "expired";
   } else if (responseCode === "0000") {
+    // Success code means the request was accepted by gateway, not that it was paid.
     resolvedStatus = "pending";
   } else if (responseDesc.toLowerCase().includes("expire")) {
     resolvedStatus = "expired";

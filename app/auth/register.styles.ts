@@ -172,6 +172,9 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.caption,
     lineHeight: 16,
   },
+  diditHelperTextMargin: {
+    marginTop: SPACING.xs,
+  },
   helperOk: {
     color: COLORS.success,
   },
@@ -326,6 +329,23 @@ export default StyleSheet.create({
     color: COLORS.accent,
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.label - 1,
+  },
+
+  branchModalBody: {
+    minHeight: 0,
+  },
+  branchModalScroller: {
+    flex: 1,
+  },
+  branchModalContent: {
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.xl,
+    paddingTop: SPACING.lg,
+    paddingBottom: SPACING.xl,
+  },
+  branchModalActions: {
+    flexDirection: "row",
+    gap: SPACING.sm,
   },
 
   summaryCard: {

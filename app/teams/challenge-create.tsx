@@ -1,10 +1,13 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useAction, useQuery } from "convex/react";
 
 import AppHeader from "../../src/components/AppHeader";
 import BottomActionBar from "../../src/components/BottomActionBar";
 import { AppIcon } from "../../src/components/AppIcon";
+import { AppButton } from "../../src/components/AppPrimitives";
+import { AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
@@ -17,8 +20,11 @@ import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
+import { api } from "../../convex/_generated/api";
+import { Id } from "../../convex/_generated/dataModel";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../src/theme";
 import styles from "../matchrooms/create/create.styles";
+import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
 
 type SeriesType = "BO1" | "BO3" | "BO5" | "BO7" | "BO10" | "BO20" | "BO40";
 const GAME_ICONS: Record<string, string> = {
@@ -279,6 +285,8 @@ export default function TeamChallengeCreateScreen() {
     const router = useRouter();
     const { user, authUser } = useAuth();
     const { showToast } = useToast();
+    const startCheckout = useAction((api as any).easypaisa.startCheckout);
+    const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -289,6 +297,26 @@ export default function TeamChallengeCreateScreen() {
     const [selectedZoneRateKey, setSelectedZoneRateKey] = useState<string | null>(null);
     const [seriesType, setSeriesType] = useState<SeriesType>("BO1");
     const [pricePerPlayer, setPricePerPlayer] = useState(0);
+
+    const [easypaisaModalVisible, setEasypaisaModalVisible] = useState(false);
+    const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
+    const [startingEasypaisa, setStartingEasypaisa] = useState(false);
+    const [activeEasypaisaOrderRef, setActiveEasypaisaOrderRef] = useState<string | null>(null);
+    const [pendingCreateAfterPayment, setPendingCreateAfterPayment] = useState<{
+        captainPaymentAmount: number;
+        walletReference: string;
+        challengeArgs: Parameters<typeof sendTeamMatchChallenge>[0];
+        challengerTeamName: string;
+        opponentTeamName: string;
+    } | null>(null);
+    const resumedOrderRef = React.useRef<string | null>(null);
+
+    const checkoutStatus = useQuery(
+        api.easypaisa.getCheckoutStatus,
+        user?._id && activeEasypaisaOrderRef
+            ? { userId: user._id as Id<"users">, orderRefNum: activeEasypaisaOrderRef }
+            : "skip",
+    );
     const [formData, setFormData] = useState({
         title: "",
         description: "",
@@ -464,44 +492,8 @@ export default function TeamChallengeCreateScreen() {
         }
 
         setSubmitting(true);
-        const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
-            Alert.alert(
-                "Team payment required",
-                `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
-                [
-                    { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-                    { text: "Pay Now", onPress: () => resolve("pay_now") },
-                    { text: "Pay with Wallet", onPress: () => resolve("wallet") },
-                ],
-            );
-        });
-        if (paymentChoice === "cancel") {
-            setSubmitting(false);
-            return;
-        }
-        if (paymentChoice === "pay_now") {
-            setSubmitting(false);
-            Alert.alert(
-                "Pay now",
-                "Online payment for team challenges is not wired directly here yet. Add funds to your wallet, then return and send the challenge with Pay with Wallet.",
-                [
-                    { text: "Open Wallet", onPress: () => router.push("/(player)/wallet" as any) },
-                    { text: "OK" },
-                ],
-            );
-            return;
-        }
-        const walletPayment = await payTeamChallengeWithWallet({
-            amount: captainPaymentAmount,
-            side: "teamA",
-            reference: `team_challenge:create:${challengerTeam.id}:${Date.now()}`,
-        });
-        if (!walletPayment.ok) {
-            setSubmitting(false);
-            showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-            return;
-        }
-        const result = await sendTeamMatchChallenge({
+        const walletReference = `team_challenge:create:${challengerTeam.id}:${Date.now()}`;
+        const challengeArgs: Parameters<typeof sendTeamMatchChallenge>[0] = {
             challengerTeamId: challengerTeam.id!,
             opponentTeamId: opponentTeam.id!,
             scheduledDate: formData.date,
@@ -519,7 +511,46 @@ export default function TeamChallengeCreateScreen() {
                 areaLabel: selectedZone.primaryBranch?.areaLabel || null,
             },
             maxPlayers: estimatedPlayers,
+        };
+        const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
+            Alert.alert(
+                "Team payment required",
+                `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
+                [
+                    { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+                    { text: "Pay Now", onPress: () => resolve("pay_now") },
+                    { text: "Pay with Wallet", onPress: () => resolve("wallet") },
+                ],
+            );
         });
+        if (paymentChoice === "cancel") {
+            setSubmitting(false);
+            return;
+        }
+        if (paymentChoice === "pay_now") {
+            setSubmitting(false);
+            setPendingCreateAfterPayment({
+                captainPaymentAmount,
+                walletReference,
+                challengeArgs,
+                challengerTeamName: challengerTeam.name,
+                opponentTeamName: opponentTeam.name,
+            });
+            setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
+            setEasypaisaModalVisible(true);
+            return;
+        }
+        const walletPayment = await payTeamChallengeWithWallet({
+            amount: captainPaymentAmount,
+            side: "teamA",
+            reference: walletReference,
+        });
+        if (!walletPayment.ok) {
+            setSubmitting(false);
+            showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
+            return;
+        }
+        const result = await sendTeamMatchChallenge(challengeArgs);
         setSubmitting(false);
 
         if (!result.ok) {
@@ -532,6 +563,99 @@ export default function TeamChallengeCreateScreen() {
             { text: "OK" },
         ]);
     };
+
+    const handleStartEasypaisaTopup = async () => {
+        if (!user?._id || !pendingCreateAfterPayment) return;
+        const amount = Math.max(0, Math.ceil(Number(pendingCreateAfterPayment.captainPaymentAmount || 0)));
+        if (amount <= 0) return;
+        if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
+            showToast({ type: "warning", title: "Invalid number", message: "Enter a valid Pakistani mobile number for Easypaisa." });
+            return;
+        }
+
+        setStartingEasypaisa(true);
+        try {
+            const normalized = normalizePakistaniPhone(easypaisaCheckoutPhone);
+            let checkout: any;
+            try {
+                checkout = await startCheckout({
+                    kind: "wallet_topup",
+                    amount,
+                    userId: user._id as Id<"users">,
+                    phone: normalized.phoneE164 || easypaisaCheckoutPhone,
+                    transactionType: "MA",
+                });
+            } catch (error: any) {
+                const message = String(error?.message || error || "");
+                if (!/ACCOUNT DOES N[O']?T? EXIST/i.test(message) && !/ACCOUNT DOES NO EXIST/i.test(message)) {
+                    throw error;
+                }
+                checkout = await startCheckout({
+                    kind: "wallet_topup",
+                    amount,
+                    userId: user._id as Id<"users">,
+                    phone: normalized.phoneE164 || easypaisaCheckoutPhone,
+                    transactionType: "OTC",
+                });
+            }
+
+            const orderRefNum = String(checkout.orderRefNum || "");
+            setActiveEasypaisaOrderRef(orderRefNum || null);
+            showToast({
+                type: "info",
+                title: "Payment started",
+                message: checkout.transactionType === "OTC"
+                    ? `Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires.`
+                    : "Approve the payment in Easypaisa. MatchHai will keep checking the status.",
+            });
+        } catch (error: any) {
+            showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
+        } finally {
+            setStartingEasypaisa(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef || !checkoutStatus || !pendingCreateAfterPayment) return;
+        const status = String((checkoutStatus as any)?.status || "");
+        if (status !== "paid") return;
+        if (resumedOrderRef.current === activeEasypaisaOrderRef) return;
+        resumedOrderRef.current = activeEasypaisaOrderRef;
+
+        void (async () => {
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: pendingCreateAfterPayment.captainPaymentAmount,
+                side: "teamA",
+                reference: pendingCreateAfterPayment.walletReference,
+            });
+            if (!walletPayment.ok) {
+                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
+                return;
+            }
+            const result = await sendTeamMatchChallenge(pendingCreateAfterPayment.challengeArgs);
+            if (!result.ok) {
+                showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
+                return;
+            }
+
+            setEasypaisaModalVisible(false);
+            setPendingCreateAfterPayment(null);
+            setActiveEasypaisaOrderRef(null);
+
+            Alert.alert("Challenge sent", `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`, [
+                { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${(result as any).challengeId}` as any) },
+                { text: "OK" },
+            ]);
+        })();
+    }, [activeEasypaisaOrderRef, checkoutStatus, pendingCreateAfterPayment, router, showToast]);
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef || !user?._id) return;
+        const timer = setInterval(() => {
+            syncCheckoutStatus({ orderRefNum: activeEasypaisaOrderRef, userId: user._id as Id<"users"> } as any).catch(() => { });
+        }, 2000);
+        return () => clearInterval(timer);
+    }, [activeEasypaisaOrderRef, syncCheckoutStatus, user?._id]);
 
     if (loading) {
         return (
@@ -566,6 +690,65 @@ export default function TeamChallengeCreateScreen() {
                 style={localStyles.keyboardShell}
             >
             <AppHeader title="Challenge Team" onBack={() => router.back()} inlineTitle />
+            <AppDialog
+                visible={easypaisaModalVisible}
+                onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
+                dismissDisabled={startingEasypaisa}
+            >
+                <AppModalHeader
+                    title="Confirm Easypaisa Number"
+                    subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(pendingCreateAfterPayment?.captainPaymentAmount || 0)))} then MatchHai will send the challenge automatically.`}
+                    onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
+                    closeDisabled={startingEasypaisa}
+                />
+                <AppModalBody scroll>
+                    <Text style={{ color: COLORS.textSecondary, marginBottom: 10 }}>
+                        Mobile Account Number
+                    </Text>
+                    <TextInput
+                        style={[
+                            styles.input,
+                            {
+                                backgroundColor: COLORS.inputBackground,
+                                borderRadius: RADII.md,
+                                paddingHorizontal: SPACING.md,
+                                paddingVertical: SPACING.sm,
+                            },
+                        ]}
+                        keyboardType="phone-pad"
+                        value={easypaisaCheckoutPhone}
+                        onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
+                        placeholder="03XX XXX XXXX"
+                        placeholderTextColor={COLORS.textSecondary}
+                        editable={!startingEasypaisa}
+                    />
+                    {activeEasypaisaOrderRef ? (
+                        <Text style={{ color: COLORS.warning, marginTop: 12 }}>
+                            Waiting for payment confirmation...
+                        </Text>
+                    ) : null}
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                        <AppButton
+                            variant="secondary"
+                            style={{ flex: 1 }}
+                            onPress={() => setEasypaisaModalVisible(false)}
+                            disabled={startingEasypaisa}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton
+                            style={{ flex: 1 }}
+                            onPress={handleStartEasypaisaTopup}
+                            loading={startingEasypaisa}
+                            disabled={startingEasypaisa || Boolean(activeEasypaisaOrderRef)}
+                        >
+                            Continue to Pay
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
             {loading ? (
                 <View style={styles.centered}>
                     <ActivityIndicator color={styles.accentText.color as string} />

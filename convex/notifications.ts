@@ -276,6 +276,17 @@ function isNotificationActive(notification: any) {
     && (!notification?.expiresAt || notification.expiresAt > now);
 }
 
+const HIDDEN_INBOX_TYPES_WHEN_REJECTED = new Set([
+  "team.challenge_received",
+  "team.challenge_updated",
+]);
+
+function isHiddenFromInbox(notification: any) {
+  const type = canonicalizeType(String(notification?.type || ""));
+  const status = String(notification?.status || "");
+  return status === "rejected" && HIDDEN_INBOX_TYPES_WHEN_REJECTED.has(type);
+}
+
 function sortByCreatedAtDesc<T = any>(items: T[]) {
   return [...items].sort(
     (a: any, b: any) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0)
@@ -684,7 +695,9 @@ export const listInboxPage = query({
       .order("desc")
       .take(baseLimit * 4);
 
-    const visible = recent.filter(isNotificationActive);
+    const visible = recent
+      .filter(isNotificationActive)
+      .filter((notification: any) => !isHiddenFromInbox(notification));
     if (args.tab === "pending") {
       return collapsePendingMatchJoinDuplicates(visible)
         .filter((notification: any) => notification.status === "pending")
@@ -725,7 +738,10 @@ export const countUnreadFast = query({
         q.eq("toUid", args.userId).eq("isRead", false)
       )
       .collect();
-    return unread.filter(isNotificationActive).length;
+    return unread
+      .filter(isNotificationActive)
+      .filter((notification: any) => !isHiddenFromInbox(notification))
+      .length;
   },
 });
 

@@ -11,6 +11,7 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useConvex } from "convex/react";
 
 import { DEFAULT_CITY } from "../../../constants/profileOptions";
 import { api } from "../../../convex/_generated/api";
@@ -20,7 +21,6 @@ import { AppIcon } from "../../../src/components/AppIcon";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { authClient } from "../../../src/lib/auth-client";
-import { convex } from "../../../src/lib/convex";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { updateZone } from "../../../src/services/convex/zoneService";
 import { isPhoneAvailable, isUsernameAvailable } from "../../../src/services/userService";
@@ -82,6 +82,7 @@ const resolveZoneUsername = (input: {
 };
 
 export default function ZoneEditProfile() {
+    const convex = useConvex();
     const { user, authUser, refreshUser } = useAuth();
     const { zone, loading: zoneLoading } = useZoneData();
     const { showToast } = useToast();
@@ -209,6 +210,11 @@ export default function ZoneEditProfile() {
 
     const isEmailVerified = user?.kycVerificationStatus === "verified" && !pendingEmail;
 
+    const getSessionToken = async () => {
+        const sessionResult = await authClient.getSession();
+        return String((sessionResult.data as any)?.session?.token || "");
+    };
+
     useEffect(() => {
         let mounted = true;
 
@@ -298,7 +304,9 @@ export default function ZoneEditProfile() {
 
         try {
             setEmailUpdating(true);
-            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim() });
+            const sessionToken = await getSessionToken();
+            if (!sessionToken) throw new Error("Please sign in again before changing your email.");
+            await convex.mutation(api.kyc.requestEmailChange, { email: newEmail.trim(), sessionToken });
 
             setPendingEmail(newEmail.trim());
             setIsEmailChanging(false);
@@ -589,7 +597,7 @@ export default function ZoneEditProfile() {
                                 </View>
                             </Pressable>
                         ) : (
-                            <View style={styles.gapMd}>
+                            <View style={[styles.gapMd, styles.marginTopMd]}>
                                 <View style={styles.inputBox}>
                                     <View style={styles.flexRowCentered}>
                                         <AppIcon

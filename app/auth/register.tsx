@@ -41,6 +41,7 @@ type AvailabilityStatus = "idle" | "checking" | "available" | "taken" | "error";
 export default function Register() {
   const { step1, setStep1, setCurrentStep } = useOnboardingStore();
   const { showToast } = useToast();
+  const skipPhoneOtp = __DEV__ && process.env.EXPO_PUBLIC_SKIP_PHONE_OTP === "1";
 
   const [fullName, setFullName] = useState(step1.fullName);
   const [username, setUsername] = useState(step1.username);
@@ -88,6 +89,7 @@ export default function Register() {
     Boolean(step1.phoneVerified) &&
     Boolean(currentPhoneE164) &&
     step1.phoneVerifiedE164 === currentPhoneE164;
+  const effectivePhoneVerified = phoneVerified || skipPhoneOtp;
 
   const {
     isFullNameValid,
@@ -166,7 +168,7 @@ export default function Register() {
     const phoneOk =
       phoneFormatValid &&
       phoneStatus === "available" &&
-      phoneVerified;
+      effectivePhoneVerified;
     const emailOk =
       emailValid && (emailStatus === "idle" || emailStatus === "available");
 
@@ -411,7 +413,7 @@ export default function Register() {
         "Action.player_register_step1_continue",
         () => {
           const { phoneE164 } = normalizePakistaniPhone(phone);
-          if (!phoneVerified || step1.phoneVerifiedE164 !== phoneE164) {
+          if (!effectivePhoneVerified || (!skipPhoneOtp && step1.phoneVerifiedE164 !== phoneE164)) {
             showToast({
               type: "info",
               title: "Verify phone",
@@ -435,7 +437,7 @@ export default function Register() {
             email: email.trim(),
             phone: phoneE164,
             phoneVerified: true,
-            phoneVerifiedAt: step1.phoneVerifiedAt,
+            phoneVerifiedAt: skipPhoneOtp ? Date.now() : step1.phoneVerifiedAt,
             phoneVerifiedE164: phoneE164,
             password,
             city: DEFAULT_CITY,
@@ -500,7 +502,7 @@ export default function Register() {
   const canSendOtp =
     isPhoneFormatValid &&
     phoneStatus === "available" &&
-    !phoneVerified &&
+    !effectivePhoneVerified &&
     !otpSending &&
     resendCooldown <= 0;
 
@@ -685,7 +687,7 @@ export default function Register() {
           <View style={[styles.focusBar, { opacity: focused === "email" ? 1 : 0 }]} />
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
-        <Text style={[styles.helperText, styles.helperOk]}>
+        <Text style={[styles.helperText, styles.helperOk, styles.diditHelperTextMargin]}>
           Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.
         </Text>
         {email.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
@@ -745,13 +747,13 @@ export default function Register() {
             ) : null}
             <Pressable
               onPress={handleSendPhoneOtp}
-              disabled={!canSendOtp}
+              disabled={skipPhoneOtp || !canSendOtp}
               style={({ pressed }) => [
                 styles.platformButton,
                 styles.platformButtonInline,
                 styles.phoneVerifyButton,
-                phoneVerified && styles.platformButtonActive,
-                (!canSendOtp || resendCooldown > 0 || otpSending) && !phoneVerified
+                effectivePhoneVerified && styles.platformButtonActive,
+                (!canSendOtp || resendCooldown > 0 || otpSending || skipPhoneOtp) && !effectivePhoneVerified
                   ? { opacity: 0.5 }
                   : null,
                 pressed && canSendOtp ? { opacity: 0.8 } : null,
@@ -761,8 +763,10 @@ export default function Register() {
                 <ActivityIndicator size="small" color={COLORS.text} />
               ) : (
                 <Text style={styles.platformButtonText}>
-                  {phoneVerified
-                    ? "Verified"
+                  {effectivePhoneVerified
+                    ? skipPhoneOtp
+                      ? "Verified (Dev)"
+                      : "Verified"
                     : resendCooldown > 0
                       ? `Resend in ${resendCooldown}s`
                       : "Verify"}
@@ -776,9 +780,9 @@ export default function Register() {
         {phone.trim().length > 0 && !isPhoneFormatValid && phoneStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid Pakistani mobile number.</Text>
         ) : null}
-        {phoneVerified && !otpMessage ? (
+        {effectivePhoneVerified && !otpMessage ? (
           <Text style={[styles.helperText, styles.helperOk, { marginTop: 6 }]}>
-            Phone verified
+            {skipPhoneOtp ? "Phone verified (dev bypass enabled)" : "Phone verified"}
           </Text>
         ) : null}
         {otpVisible ? (

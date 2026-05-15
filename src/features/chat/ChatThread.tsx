@@ -557,6 +557,7 @@ export default function ChatThread({
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
     const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
     const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
+    const keyboardScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
     const handleEmojiSelected = useCallback(
         (emoji: { emoji: string }) => {
@@ -657,6 +658,15 @@ export default function ChatThread({
         });
     }, []);
 
+    const scrollToLatestMessage = useCallback(() => {
+        maybeScrollToBottom(true);
+        keyboardScrollTimersRef.current.forEach((timer) => clearTimeout(timer));
+        keyboardScrollTimersRef.current = [
+            setTimeout(() => maybeScrollToBottom(false), 90),
+            setTimeout(() => maybeScrollToBottom(false), 220),
+        ];
+    }, [maybeScrollToBottom]);
+
     const ensureInitialScrollToLatest = useCallback(() => {
         if (initialScrollSettledRef.current || initialScrollScheduledRef.current) return;
         if (groupedMessages.length === 0) return;
@@ -685,10 +695,7 @@ export default function ChatThread({
 
     useEffect(() => {
         const onKeyboardShow = () => {
-            // Keep the latest messages visible above the composer.
-            if (isNearBottomRef.current) {
-                maybeScrollToBottom(true);
-            }
+            scrollToLatestMessage();
         };
 
         const subShow = Keyboard.addListener(
@@ -698,8 +705,10 @@ export default function ChatThread({
 
         return () => {
             subShow.remove();
+            keyboardScrollTimersRef.current.forEach((timer) => clearTimeout(timer));
+            keyboardScrollTimersRef.current = [];
         };
-    }, [maybeScrollToBottom]);
+    }, [scrollToLatestMessage]);
 
     const handleContentSizeChange = useCallback(() => {
         if (!initialScrollSettledRef.current) {
@@ -935,7 +944,7 @@ export default function ChatThread({
                                                         editable={!composerDisabled && !sending}
                                                         onFocus={() => {
                                                             dismissReactionPicker();
-                                                            maybeScrollToBottom(true);
+                                                            scrollToLatestMessage();
                                                         }}
                                                         multiline
                                                     />
