@@ -24,7 +24,6 @@ import {
 } from "../../../src/features/discover/filterConfig";
 import { DiscoverSegment } from "../../../src/features/discover/types";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
-import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { usePressScale } from "../../../src/motion/usePressScale";
 import { COLORS } from "../../../src/theme";
@@ -116,9 +115,10 @@ export default function DiscoverScreen() {
   }>();
   const touchDebugEnabled =
     __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
-  const tabBarClearance = useTabBarClearance(0);
   const bottomPadding = 96;
-  const fabBottom = tabBarClearance + 20;
+  // Tab layouts now reserve space for the floating navbar via `sceneStyle.paddingBottom`,
+  // so we should NOT add tab-bar clearance again here.
+  const fabBottom = 20;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);

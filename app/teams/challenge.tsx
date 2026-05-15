@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAction, useQuery } from "convex/react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
@@ -40,6 +40,10 @@ const formatStatusLabel = (value?: string | null) =>
         .replace(/_/g, " ")
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const getEasypaisaStatus = (value: any) => String(value?.status || "").trim().toLowerCase();
+const isEasypaisaPaid = (value: any) => getEasypaisaStatus(value) === "paid";
+const isEasypaisaStopped = (value: any) => ["failed", "cancelled", "expired"].includes(getEasypaisaStatus(value));
+
 export default function TeamMatchChallengeDetails() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
     const router = useRouter();
@@ -56,6 +60,7 @@ export default function TeamMatchChallengeDetails() {
     const [easypaisaModalVisible, setEasypaisaModalVisible] = useState(false);
     const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
     const [startingEasypaisa, setStartingEasypaisa] = useState(false);
+    const [finishingEasypaisa, setFinishingEasypaisa] = useState(false);
     const [activeEasypaisaOrderRef, setActiveEasypaisaOrderRef] = useState<string | null>(null);
     const [pendingAcceptAfterPayment, setPendingAcceptAfterPayment] = useState<{
         paymentAmount: number;
@@ -257,6 +262,97 @@ export default function TeamMatchChallengeDetails() {
         showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Continue with venue confirmation." });
     };
 
+    const handleStoppedEasypaisaPayment = React.useCallback((statusLike: any) => {
+        const status = getEasypaisaStatus(statusLike);
+        setActiveEasypaisaOrderRef(null);
+        resumedOrderRef.current = null;
+        showToast({
+            type: status === "expired" ? "warning" : "error",
+            title: status === "expired" ? "Payment expired" : "Payment failed",
+            message: status === "expired"
+                ? "This Easypaisa payment expired before confirmation."
+                : "Easypaisa did not confirm this payment.",
+        });
+    }, [showToast]);
+
+    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
+        if (!pendingAcceptAfterPayment || !challengeId) return;
+        if (resumedOrderRef.current === orderRefNum) return;
+        resumedOrderRef.current = orderRefNum;
+        setFinishingEasypaisa(true);
+
+        try {
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: pendingAcceptAfterPayment.paymentAmount,
+                challengeId,
+                side: "teamB",
+                reference: pendingAcceptAfterPayment.walletReference,
+            });
+            if (!walletPayment.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingAcceptAfterPayment(null);
+                showToast({
+                    type: "warning",
+                    title: "Payment received",
+                    message: walletPayment.message || "Funds were added to your wallet, but MatchHai could not accept the challenge automatically. Try again using Wallet.",
+                });
+                return;
+            }
+
+            const result = await acceptTeamMatchChallenge({
+                challengeId,
+                lineupB: pendingAcceptAfterPayment.lineupB,
+                teamBPaymentAmount: pendingAcceptAfterPayment.paymentAmount,
+            });
+            if (!result.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingAcceptAfterPayment(null);
+                showToast({ type: "error", title: "Accept failed", message: result.message || "Failed to accept challenge." });
+                return;
+            }
+
+            setEasypaisaModalVisible(false);
+            setPendingAcceptAfterPayment(null);
+            setActiveEasypaisaOrderRef(null);
+
+            if ((result as any).matchroomId) {
+                showToast({ type: "success", title: "Accepted", message: "Challenge accepted and matchroom created." });
+                router.push(`/matchrooms/${(result as any).matchroomId}` as any);
+                return;
+            }
+            showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Continue with venue confirmation." });
+        } catch (error: any) {
+            setActiveEasypaisaOrderRef(null);
+            setEasypaisaModalVisible(false);
+            setPendingAcceptAfterPayment(null);
+            showToast({
+                type: "warning",
+                title: "Payment received",
+                message: error?.message || "Funds were added to your wallet, but MatchHai could not finish accepting the challenge automatically.",
+            });
+        } finally {
+            setFinishingEasypaisa(false);
+        }
+    }, [challengeId, pendingAcceptAfterPayment, router, showToast]);
+
+    const refreshEasypaisaPaymentStatus = React.useCallback(async (orderRefNum: string) => {
+        if (!user?._id || !orderRefNum) return;
+        try {
+            const result = await syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> } as any);
+            if (isEasypaisaPaid(result)) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (isEasypaisaStopped(result)) {
+                handleStoppedEasypaisaPayment(result);
+            }
+        } catch {
+            // Keep polling; transient gateway inquiry errors should not strand the modal.
+        }
+    }, [finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, syncCheckoutStatus, user?._id]);
+
     const handleStartEasypaisaTopup = async () => {
         if (!user?._id || !pendingAcceptAfterPayment) return;
         const amount = Math.max(0, Math.ceil(Number(pendingAcceptAfterPayment.paymentAmount || 0)));
@@ -294,13 +390,25 @@ export default function TeamMatchChallengeDetails() {
 
             const orderRefNum = String(checkout.orderRefNum || "");
             setActiveEasypaisaOrderRef(orderRefNum || null);
+            const paidImmediately = isEasypaisaPaid(checkout);
             showToast({
-                type: "info",
-                title: "Payment started",
-                message: checkout.transactionType === "OTC"
+                type: paidImmediately ? "success" : "info",
+                title: paidImmediately ? "Payment confirmed" : "Payment started",
+                message: paidImmediately
+                    ? "Payment received. Accepting the challenge now."
+                    : checkout.transactionType === "OTC"
                     ? `Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires.`
                     : "Approve the payment in Easypaisa. MatchHai will keep checking the status.",
             });
+            if (paidImmediately && orderRefNum) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (orderRefNum) {
+                setTimeout(() => {
+                    void refreshEasypaisaPaymentStatus(orderRefNum);
+                }, 1200);
+            }
         } catch (error: any) {
             showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
         } finally {
@@ -310,53 +418,38 @@ export default function TeamMatchChallengeDetails() {
 
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !checkoutStatus || !pendingAcceptAfterPayment || !challengeId) return;
-        const status = String((checkoutStatus as any)?.status || "");
-        if (status !== "paid") return;
-        if (resumedOrderRef.current === activeEasypaisaOrderRef) return;
-        resumedOrderRef.current = activeEasypaisaOrderRef;
-
-        void (async () => {
-            const walletPayment = await payTeamChallengeWithWallet({
-                amount: pendingAcceptAfterPayment.paymentAmount,
-                challengeId,
-                side: "teamB",
-                reference: pendingAcceptAfterPayment.walletReference,
-            });
-            if (!walletPayment.ok) {
-                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-                return;
-            }
-
-            const result = await acceptTeamMatchChallenge({
-                challengeId,
-                lineupB: pendingAcceptAfterPayment.lineupB,
-                teamBPaymentAmount: pendingAcceptAfterPayment.paymentAmount,
-            });
-            if (!result.ok) {
-                showToast({ type: "error", title: "Accept failed", message: result.message || "Failed to accept challenge." });
-                return;
-            }
-
-            setEasypaisaModalVisible(false);
-            setPendingAcceptAfterPayment(null);
-            setActiveEasypaisaOrderRef(null);
-
-            if ((result as any).matchroomId) {
-                showToast({ type: "success", title: "Accepted", message: "Challenge accepted and matchroom created." });
-                router.push(`/matchrooms/${(result as any).matchroomId}` as any);
-                return;
-            }
-            showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Continue with venue confirmation." });
-        })();
-    }, [activeEasypaisaOrderRef, checkoutStatus, challengeId, pendingAcceptAfterPayment, router, showToast]);
+        if (isEasypaisaPaid(checkoutStatus)) {
+            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
+            return;
+        }
+        if (isEasypaisaStopped(checkoutStatus)) {
+            handleStoppedEasypaisaPayment(checkoutStatus);
+        }
+    }, [activeEasypaisaOrderRef, checkoutStatus, challengeId, finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, pendingAcceptAfterPayment]);
 
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !user?._id) return;
         const timer = setInterval(() => {
-            syncCheckoutStatus({ orderRefNum: activeEasypaisaOrderRef, userId: user._id as Id<"users"> } as any).catch(() => { });
+            void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
         }, 2000);
         return () => clearInterval(timer);
-    }, [activeEasypaisaOrderRef, syncCheckoutStatus, user?._id]);
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus, user?._id]);
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef) return;
+        const subscription = AppState.addEventListener("change", (state) => {
+            if (state === "active") {
+                void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
+            }
+        });
+        return () => subscription.remove();
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus]);
+
+    const easypaisaStatusMessage = activeEasypaisaOrderRef
+        ? finishingEasypaisa || isEasypaisaPaid(checkoutStatus)
+            ? "Payment confirmed. Accepting challenge..."
+            : "Waiting for payment confirmation..."
+        : null;
 
     const handleRejectChallenge = async () => {
         if (!challengeId || !isPending) return;
@@ -432,14 +525,14 @@ export default function TeamMatchChallengeDetails() {
             />
             <AppDialog
                 visible={easypaisaModalVisible}
-                onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
-                dismissDisabled={startingEasypaisa}
+                onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                dismissDisabled={startingEasypaisa || finishingEasypaisa}
             >
                 <AppModalHeader
                     title="Confirm Easypaisa Number"
                     subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(pendingAcceptAfterPayment?.paymentAmount || 0)))} then MatchHai will accept the challenge automatically.`}
-                    onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
-                    closeDisabled={startingEasypaisa}
+                    onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                    closeDisabled={startingEasypaisa || finishingEasypaisa}
                 />
                 <AppModalBody scroll>
                     <Text style={{ color: COLORS.textSecondary, marginBottom: 10 }}>
@@ -460,11 +553,11 @@ export default function TeamMatchChallengeDetails() {
                         onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
                         placeholder="03XX XXX XXXX"
                         placeholderTextColor={COLORS.textSecondary}
-                        editable={!startingEasypaisa}
+                        editable={!startingEasypaisa && !finishingEasypaisa && !activeEasypaisaOrderRef}
                     />
-                    {activeEasypaisaOrderRef ? (
+                    {easypaisaStatusMessage ? (
                         <Text style={{ color: COLORS.warning, marginTop: 12 }}>
-                            Waiting for payment confirmation...
+                            {easypaisaStatusMessage}
                         </Text>
                     ) : null}
                 </AppModalBody>
@@ -474,15 +567,15 @@ export default function TeamMatchChallengeDetails() {
                             variant="secondary"
                             style={{ flex: 1 }}
                             onPress={() => setEasypaisaModalVisible(false)}
-                            disabled={startingEasypaisa}
+                            disabled={startingEasypaisa || finishingEasypaisa}
                         >
                             Cancel
                         </AppButton>
                         <AppButton
                             style={{ flex: 1 }}
                             onPress={handleStartEasypaisaTopup}
-                            loading={startingEasypaisa}
-                            disabled={startingEasypaisa || Boolean(activeEasypaisaOrderRef)}
+                            loading={startingEasypaisa || finishingEasypaisa}
+                            disabled={startingEasypaisa || finishingEasypaisa || Boolean(activeEasypaisaOrderRef)}
                         >
                             Continue to Pay
                         </AppButton>

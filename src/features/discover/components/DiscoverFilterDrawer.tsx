@@ -1,11 +1,10 @@
 import React from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppButton } from "../../../components/AppPrimitives";
 import {
   AppDrawer,
-  AppModalBody,
   AppModalFooter,
   AppModalHeader,
 } from "../../../components/AppModalPrimitives";
@@ -99,28 +98,36 @@ export default function DiscoverFilterDrawer({
     <AppDrawer visible={visible} onClose={onClose} drawerStyle={styles.drawer}>
       <View style={[styles.drawerContent, { paddingTop: Math.max(insets.top, SPACING.lg) }]}>
         <AppModalHeader title="Filters" subtitle={subtitle} onClose={onClose} compact />
-        <AppModalBody scroll contentContainerStyle={styles.bodyContent}>
-          <FilterSummary count={activeCount} />
+        <View style={styles.bodyScrollArea}>
+          <ScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={styles.bodyContent}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <FilterSummary count={activeCount} />
 
-          {activeSegment === "matchrooms" ? (
-            <MatchroomFiltersView
-              filters={filters.matchrooms}
-              onChange={onUpdateMatchrooms}
-            />
-          ) : null}
+            {activeSegment === "matchrooms" ? (
+              <MatchroomFiltersView
+                filters={filters.matchrooms}
+                onChange={onUpdateMatchrooms}
+              />
+            ) : null}
 
-          {activeSegment === "players" ? (
-            <PlayerFiltersView filters={filters.players} onChange={onUpdatePlayers} />
-          ) : null}
+            {activeSegment === "players" ? (
+              <PlayerFiltersView filters={filters.players} onChange={onUpdatePlayers} />
+            ) : null}
 
-          {activeSegment === "teams" ? (
-            <TeamFiltersView filters={filters.teams} onChange={onUpdateTeams} />
-          ) : null}
+            {activeSegment === "teams" ? (
+              <TeamFiltersView filters={filters.teams} onChange={onUpdateTeams} />
+            ) : null}
 
-          {activeSegment === "zones" ? (
-            <ZoneFiltersView filters={filters.zones} onChange={onUpdateZones} />
-          ) : null}
-        </AppModalBody>
+            {activeSegment === "zones" ? (
+              <ZoneFiltersView filters={filters.zones} onChange={onUpdateZones} />
+            ) : null}
+          </ScrollView>
+        </View>
         <AppModalFooter style={styles.footer}>
           <View style={styles.footerRow}>
             <AppButton
@@ -428,7 +435,16 @@ const styles = StyleSheet.create({
   },
   bodyContent: {
     gap: SPACING.md,
+    paddingHorizontal: SPACING.xl,
+    paddingTop: SPACING.lg,
     paddingBottom: SPACING.lg,
+  },
+  bodyScroll: {
+    flex: 1,
+  },
+  bodyScrollArea: {
+    flex: 1,
+    minHeight: 0,
   },
   summaryRow: {
     flexDirection: "row",

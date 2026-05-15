@@ -124,6 +124,7 @@ export default function TeamDetails() {
     const { user, authUser } = useAuth();
     const { showToast } = useToast();
     const [submitting, setSubmitting] = useState(false);
+    const [logoUploading, setLogoUploading] = useState(false);
     const deletingTeamRef = useRef(false);
 
     // Rename States
@@ -497,6 +498,7 @@ export default function TeamDetails() {
             });
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
+                setLogoUploading(true);
                 setSubmitting(true);
                 const res = await uploadTeamLogo(id as string, result.assets[0].uri);
                 if (!res.ok) {
@@ -507,6 +509,7 @@ export default function TeamDetails() {
             Logger.error("TeamDetails", "Error picking image", e);
             showToast({ type: "error", title: "Error", message: "Could not pick image." });
         } finally {
+            setLogoUploading(false);
             setSubmitting(false);
         }
     };
@@ -749,7 +752,11 @@ export default function TeamDetails() {
                                 )}
                                 {isCaptain && (
                                     <View style={styles.logoEditBadge}>
-                                        <AppIcon name="photo-camera" size={14} color="#FFF" />
+                                        {logoUploading ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <AppIcon name="edit" size={16} color="#FFF" />
+                                        )}
                                     </View>
                                 )}
                             </Pressable>

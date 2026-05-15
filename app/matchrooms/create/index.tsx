@@ -417,11 +417,17 @@ export default function CreateMatchroom() {
     if (!isZoneWalkInAdmin) return;
     if (!adminZone?.id) return;
 
-    setLocationMode("zone");
-    setSelectedZoneId(adminZone.id);
-    setSelectedZoneName(adminZone.venueBrandName || null);
-    setSelectedZone(adminZone as Zone);
-  }, [adminZone, isZoneWalkInAdmin]);
+    setLocationMode((prev) => (prev === "zone" ? prev : "zone"));
+    setSelectedZoneId((prev) => (prev === adminZone.id ? prev : adminZone.id));
+    setSelectedZoneName((prev) => {
+      const nextName = adminZone.venueBrandName || null;
+      return prev === nextName ? prev : nextName;
+    });
+    setSelectedZone((prev) => {
+      const prevId = String((prev as any)?.id || (prev as any)?._id || "");
+      return prevId === String(adminZone.id) ? prev : (adminZone as Zone);
+    });
+  }, [adminZone?.id, adminZone?.venueBrandName, isZoneWalkInAdmin]);
 
   useEffect(() => {
     if (!isVenueDirectBooking) return;
