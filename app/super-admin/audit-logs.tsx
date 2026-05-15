@@ -1,18 +1,26 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../src/components/AppHeader";
+import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
 import { AppIcon } from "../../src/components/AppIcon";
+import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
+import { AppButton } from "../../src/components/AppPrimitives";
 import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
-import SegmentedTabs from "../../src/components/SegmentedTabs";
+import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useToast } from "../../src/hooks/useToast";
 import {
+  getSuperAdminAllowlistConfig,
   getSuperAdminAuditLogs,
+  type SuperAdminAllowlistEntry,
   type SuperAdminAuditLog,
 } from "../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
+
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -20,6 +28,28 @@ const STATUS_FILTERS = [
   { key: "failed", label: "Failed" },
   { key: "denied", label: "Denied" },
 ] as const;
+
+const COMMON_ACTION_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "super_admin_route_access", label: "Route Access" },
+  { key: "view_identity_verifications", label: "View KYC" },
+  { key: "manual_kyc_verify", label: "Manual KYC" },
+  { key: "view_support_tickets", label: "Support" },
+  { key: "view_user", label: "Users" },
+  { key: "view_matchrooms", label: "Matchrooms" },
+  { key: "view_payment_transaction", label: "Payments" },
+];
+
+const MODULE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "super_admin", label: "Super Admin" },
+  { key: "identity", label: "Identity" },
+  { key: "support", label: "Support" },
+  { key: "users", label: "Users" },
+  { key: "matchrooms", label: "Matchrooms" },
+  { key: "payments", label: "Payments" },
+  { key: "reports", label: "Reports" },
+];
 
 function formatDate(value?: number) {
   if (!value) return "N/A";
@@ -85,13 +115,16 @@ function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
 }
 
 export default function SuperAdminAuditLogsScreen() {
+  const insets = useSafeAreaInsets();
   const { showToast } = useToast();
   const [rows, setRows] = useState<SuperAdminAuditLog[]>([]);
+  const [admins, setAdmins] = useState<SuperAdminAllowlistEntry[]>([]);
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["key"]>("all");
-  const [moduleFilter, setModuleFilter] = useState("");
-  const [actionFilter, setActionFilter] = useState("");
-  const [adminFilter, setAdminFilter] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("all");
+  const [adminFilter, setAdminFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -101,9 +134,9 @@ export default function SuperAdminAuditLogsScreen() {
 
     const result = await getSuperAdminAuditLogs({
       status: statusFilter === "all" ? undefined : statusFilter,
-      module: moduleFilter.trim() || undefined,
-      action: actionFilter.trim() || undefined,
-      superAdminEmail: adminFilter.trim().toLowerCase() || undefined,
+      module: moduleFilter === "all" ? undefined : moduleFilter,
+      action: actionFilter === "all" ? undefined : actionFilter,
+      superAdminEmail: adminFilter === "all" ? undefined : adminFilter,
       targetId: search.trim() || undefined,
     });
 
@@ -116,7 +149,23 @@ export default function SuperAdminAuditLogsScreen() {
 
   useFocusEffect(useCallback(() => {
     void load("initial");
+    void getSuperAdminAllowlistConfig().then((result) => {
+      if (result.ok) setAdmins(result.data.filter((entry) => entry.isActive && entry.email));
+    });
   }, [load]));
+
+  const activeFilterCount = Number(statusFilter !== "all")
+    + Number(moduleFilter !== "all")
+    + Number(actionFilter !== "all")
+    + Number(adminFilter !== "all");
+
+  const adminOptions = useMemo(
+    () => [
+      { key: "all", label: "All" },
+      ...admins.map((admin) => ({ key: admin.email, label: admin.displayName || admin.email })),
+    ],
+    [admins],
+  );
 
   const visibleRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -155,42 +204,16 @@ export default function SuperAdminAuditLogsScreen() {
             autoCapitalize="none"
           />
         </View>
-        <View style={styles.filterRow}>
-          <TextInput
-            value={adminFilter}
-            onChangeText={setAdminFilter}
-            placeholder="Filter admin email"
-            placeholderTextColor={COLORS.textSecondary}
-            style={styles.filterInput}
-            autoCapitalize="none"
-          />
-          <TextInput
-            value={actionFilter}
-            onChangeText={setActionFilter}
-            placeholder="Action"
-            placeholderTextColor={COLORS.textSecondary}
-            style={styles.filterInput}
-            autoCapitalize="none"
-          />
-        </View>
-        <View style={styles.filterRow}>
-          <TextInput
-            value={moduleFilter}
-            onChangeText={setModuleFilter}
-            placeholder="Module"
-            placeholderTextColor={COLORS.textSecondary}
-            style={styles.filterInput}
-            autoCapitalize="none"
-          />
-        </View>
+        <Pressable onPress={() => setDrawerOpen(true)} style={styles.filterButton}>
+          <AppIcon name="filters" size={20} color={COLORS.text} />
+          <Text style={styles.filterButtonText}>Filters</Text>
+          {activeFilterCount ? (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
-
-      <SegmentedTabs
-        items={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
-        value={statusFilter}
-        onChange={(value) => setStatusFilter(value as typeof statusFilter)}
-        style={styles.tabs}
-      />
 
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
@@ -202,13 +225,71 @@ export default function SuperAdminAuditLogsScreen() {
         >
           {visibleRows.map((item) => <AuditLogCard key={item.id} item={item} />)}
           {visibleRows.length === 0 ? (
-            <AppCard variant="empty">
-              <Text style={styles.emptyTitle}>No audit logs found</Text>
-              <Text style={styles.emptyText}>Super Admin access and actions will appear here.</Text>
-            </AppCard>
+            <AdminEmptyStateCard
+              title="No audit logs found"
+              description="Super Admin access and actions will appear here."
+              icon="reports"
+            />
           ) : null}
         </ScrollView>
       )}
+
+      <AppDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} drawerStyle={styles.drawer}>
+        <View style={styles.drawerContent}>
+          <AppModalHeader
+            title="Audit filters"
+            subtitle={`${activeFilterCount} active filters`}
+            onClose={() => setDrawerOpen(false)}
+            compact
+          />
+          <AppModalBody scroll contentContainerStyle={styles.drawerBody}>
+            <DiscoverFilterRow
+              label="Super Admin"
+              options={adminOptions}
+              selected={adminFilter}
+              onSelect={setAdminFilter}
+            />
+            <DiscoverFilterRow
+              label="Status"
+              options={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
+              selected={statusFilter}
+              onSelect={(value) => setStatusFilter(value as typeof statusFilter)}
+            />
+            <DiscoverFilterRow
+              label="Action"
+              options={COMMON_ACTION_FILTERS}
+              selected={actionFilter}
+              onSelect={setActionFilter}
+            />
+            <DiscoverFilterRow
+              label="Module"
+              options={MODULE_FILTERS}
+              selected={moduleFilter}
+              onSelect={setModuleFilter}
+            />
+          </AppModalBody>
+          <AppModalFooter>
+            <View style={[styles.drawerFooterRow, { paddingBottom: insets.bottom + 8 }]}>
+              <AppButton
+                variant="secondary"
+                style={styles.drawerFooterButton}
+                onPress={() => {
+                  setAdminFilter("all");
+                  setStatusFilter("all");
+                  setActionFilter("all");
+                  setModuleFilter("all");
+                }}
+                disabled={!activeFilterCount}
+              >
+                Reset
+              </AppButton>
+              <AppButton style={styles.drawerFooterButton} onPress={() => setDrawerOpen(false)}>
+                Done
+              </AppButton>
+            </View>
+          </AppModalFooter>
+        </View>
+      </AppDrawer>
     </Screen>
   );
 }
@@ -216,9 +297,15 @@ export default function SuperAdminAuditLogsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { flex: 1 },
-  filters: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, gap: SPACING.sm },
+  filters: {
+    paddingTop: SPACING.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
   searchBar: {
     minHeight: 48,
+    flex: 1,
     borderRadius: RADII.lg,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
@@ -229,26 +316,45 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   searchInput: { flex: 1, color: COLORS.text, fontFamily: FONTS.montserratRegular },
-  filterRow: { flexDirection: "row", gap: SPACING.sm },
-  filterInput: {
-    flex: 1,
-    minHeight: 44,
+  filterButton: {
+    width: 48,
+    minHeight: 46,
     borderRadius: RADII.md,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     backgroundColor: COLORS.cardDark,
-    color: COLORS.text,
-    fontFamily: FONTS.montserratRegular,
     paddingHorizontal: SPACING.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
   },
-  tabs: { marginHorizontal: SPACING.lg, marginTop: SPACING.md },
+  filterButtonText: {
+    display: "none",
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 13,
+  },
+  filterBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filterBadgeText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 11 },
+  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
+  drawerContent: { flex: 1 },
+  drawerBody: { gap: SPACING.lg },
+  drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
+  drawerFooterButton: { flex: 1 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { padding: SPACING.lg, paddingBottom: SPACING.xxl, gap: SPACING.md },
-  card: { gap: SPACING.sm },
+  content: { paddingBottom: SPACING.xxl, gap: SPACING.md },
+  card: { gap: SPACING.md },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: SPACING.md },
   titleWrap: { flex: 1, minWidth: 0 },
   action: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
-  timestamp: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 12, marginTop: 2 },
+  timestamp: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 2 },
   adminBox: {
     borderRadius: RADII.md,
     borderWidth: 1,
@@ -257,14 +363,12 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
   },
   adminName: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 14 },
-  adminEmail: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 12, marginTop: 2 },
+  adminEmail: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 2 },
   metaGrid: { flexDirection: "row", gap: SPACING.sm },
   metaItem: { flex: 1, minWidth: 0 },
   metaLabel: { color: COLORS.textSecondary, fontFamily: FONTS.interMedium, fontSize: 11, textTransform: "uppercase" },
-  metaValue: { color: COLORS.text, fontFamily: FONTS.martelRegular, fontSize: 13, marginTop: 2 },
-  reason: { color: COLORS.warning, fontFamily: FONTS.martelRegular, fontSize: 13 },
+  metaValue: { color: COLORS.text, fontFamily: FONTS.interRegular, fontSize: 13, marginTop: 2 },
+  reason: { color: COLORS.warning, fontFamily: FONTS.interRegular, fontSize: 13 },
   metadataBox: { borderTopWidth: 1, borderTopColor: COLORS.cardBorder, paddingTop: SPACING.sm, gap: 2 },
-  metadataText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 12 },
-  emptyTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18, textAlign: "center" },
-  emptyText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, textAlign: "center", marginTop: SPACING.xs },
+  metadataText: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
 });

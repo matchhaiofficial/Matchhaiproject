@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
-import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycAccessAllowed } from "./kycGate";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import {
   dispatchBroadcastZoneRequestsForMatchroom,
   finalizeBroadcastFailure,
@@ -151,9 +151,7 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
     if (!authUserRecord) {
       throw new Error("User profile not found");
     }
-    if (!isKycAccessAllowed(authUserRecord.kycVerificationStatus)) {
-      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
-    }
+    assertKycAccessAllowed(authUserRecord, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
     if (expectedUser && expectedUser._id !== authUserRecord._id) {
       throw new Error("You can only perform this action for your own account");
@@ -168,12 +166,10 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
   }
 
   if (expectedUser) {
-    if (!isKycAccessAllowed(expectedUser.kycVerificationStatus)) {
-      throw new Error(KYC_VERIFICATION_REQUIRED_MESSAGE);
-    }
+    assertKycAccessAllowed(expectedUser, KYC_VERIFICATION_REQUIRED_MESSAGE);
     return {
       userId: expectedUser.authId || String(expectedUser._id),
-      kycVerified: isKycAccessAllowed(expectedUser.kycVerificationStatus),
+      kycVerified: true,
       email: expectedUser.email ?? null,
       convexUser: expectedUser,
     };
@@ -450,6 +446,172 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
     reference,
   });
   return { status: "paid", reference, amount: payoutAmount, paidAt: now };
+}
+
+function getBookingHoldReference(intentId: Id<"bookingIntents">, sourceReference?: string | null) {
+  const source = String(sourceReference || "wallet").replace(/[^a-zA-Z0-9:_-]/g, "_");
+  return `hold:booking_intent:${String(intentId)}:${source}`;
+}
+
+function getBookingCaptureReference(intentId: Id<"bookingIntents">) {
+  return `capture:booking_intent:${String(intentId)}`;
+}
+
+function getBookingReleaseReference(intentId: Id<"bookingIntents">, reason: string) {
+  return `release:booking_intent:${String(intentId)}`;
+}
+
+function getBookingRefundReference(intentId: Id<"bookingIntents">, reason: string) {
+  return `refund:booking_intent:${String(intentId)}`;
+}
+
+function getHoldCaptureAt(room: any) {
+  const candidates = [
+    Number(room?.scheduledStartAt || 0),
+    Number(room?.startTime || 0),
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  return candidates[0] || Date.now();
+}
+
+async function scheduleBookingHoldCapture(ctx: any, intentId: Id<"bookingIntents">, room: any) {
+  const captureScheduledAt = getHoldCaptureAt(room);
+  const delayMs = Math.max(0, captureScheduledAt - Date.now());
+  const captureScheduledFnId = await ctx.scheduler.runAfter(
+    delayMs,
+    internal.matchrooms.captureBookingIntentHold,
+    { intentId },
+  );
+  return { captureScheduledAt, captureScheduledFnId: String(captureScheduledFnId) };
+}
+
+async function releaseBookingIntentHold(ctx: any, intent: any, reason: string) {
+  if (!intent || intent.heldStatus !== "held" || !intent.heldReference) {
+    return { released: false, reason: "not_held" };
+  }
+
+  const amount = Number(intent.heldAmount || intent.pricing?.totalCost || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { released: false, reason: "invalid_amount" };
+  }
+
+  const releaseReference = getBookingReleaseReference(intent._id, reason);
+  await ctx.runMutation(internal.wallet.releaseHeldFunds, {
+    userId: intent.createdByUid,
+    amount,
+    reference: releaseReference,
+    originalHoldReference: intent.heldReference,
+    metadata: {
+      source: "booking_hold_release",
+      intentId: String(intent._id),
+      matchroomId: String(intent.matchroomId),
+      reason,
+    },
+  });
+
+  await ctx.db.patch(intent._id, {
+    heldStatus: "released",
+    heldReleasedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  return { released: true, reference: releaseReference, amount };
+}
+
+async function releaseHeldBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, reason: string) {
+  const intents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+
+  let releasedCount = 0;
+  for (const intent of intents) {
+    const result = await releaseBookingIntentHold(ctx, intent, reason);
+    if (result.released) releasedCount += 1;
+  }
+
+  return { releasedCount };
+}
+
+async function refundCapturedBookingIntentHold(ctx: any, intent: any, reason: string) {
+  if (!intent || intent.heldStatus !== "captured") {
+    return { refunded: false, reason: "not_captured" };
+  }
+
+  const amount = Number(intent.heldAmount || intent.pricing?.totalCost || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { refunded: false, reason: "invalid_amount" };
+  }
+
+  const refundReference = getBookingRefundReference(intent._id, reason);
+  await ctx.runMutation(internal.wallet.refundFunds, {
+    userId: intent.createdByUid,
+    amount,
+    reference: refundReference,
+    metadata: {
+      source: "booking_hold_capture_refund",
+      intentId: String(intent._id),
+      matchroomId: String(intent.matchroomId),
+      originalHoldReference: intent.heldReference || null,
+      originalCaptureReference: getBookingCaptureReference(intent._id),
+      reason,
+    },
+  });
+
+  await ctx.db.patch(intent._id, {
+    heldStatus: "refunded",
+    heldReleasedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  return { refunded: true, reference: refundReference, amount };
+}
+
+async function refundCapturedBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, reason: string) {
+  const intents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+
+  let refundedCount = 0;
+  for (const intent of intents) {
+    const result = await refundCapturedBookingIntentHold(ctx, intent, reason);
+    if (result.refunded) refundedCount += 1;
+  }
+
+  return { refundedCount };
+}
+
+async function captureHeldBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">) {
+  const intents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+
+  let capturedCount = 0;
+  for (const intent of intents) {
+    if (intent.heldStatus === "held") {
+      const result: any = await ctx.runMutation(internal.matchrooms.captureBookingIntentHold, {
+        intentId: intent._id,
+      });
+      if (result?.captured) capturedCount += 1;
+    }
+  }
+
+  return { capturedCount };
+}
+
+async function maybeMarkMerchantCapturedAfterHoldCapture(ctx: any, matchroomId: Id<"matchrooms">) {
+  const room = await ctx.db.get(matchroomId);
+  if (!room) return null;
+
+  const intents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+  const hasUncapturedHold = intents.some((intent: any) => intent.heldStatus === "held");
+  if (hasUncapturedHold) return null;
+
+  return await markMerchantCapturedForMatchroom(ctx, matchroomId, room);
 }
 
 async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: Id<"matchrooms">) {
@@ -1515,7 +1677,12 @@ export const updateStatus = mutation({
     await ctx.db.patch(args.matchroomId, updateData);
     if (args.status === "completed") {
       const completedRoom = await ctx.db.get(args.matchroomId);
+      await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
       await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
+    }
+    if (args.status === "cancelled" || args.status === "expired") {
+      await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
+      await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
     }
     return true;
   },
@@ -1537,6 +1704,7 @@ export const startMatch = mutation({
       captainUidB: args.team2Captain,
       updatedAt: Date.now(),
     });
+    await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
 
     return { ok: true };
   },
@@ -1774,6 +1942,8 @@ export const adminCancel = mutation({
       cancelNote: args.note || "",
       updatedAt: Date.now(),
     });
+    await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
+    await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
 
     // Create notifications for all players
     const now = Date.now();
@@ -1981,6 +2151,7 @@ export const syncLifecycleIfDue = mutation({
         },
         updatedAt: now,
       });
+      await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
       const completedRoom = await ctx.db.get(args.matchroomId);
       await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
       changed = true;
@@ -2643,45 +2814,32 @@ export const payMatchroomSeatIntent = mutation({
     );
 
     const now = Date.now();
-    if (isExternalPayment) {
-      await ctx.db.insert("walletTransactions", {
-        userId: actor.convexUser._id,
-        type: "booking_payment",
-        amount,
-        status: "completed",
-        reference: args.externalPaymentReference,
-        metadata: {
-          provider: "easypaisa",
-          matchroomId: String(room._id),
-          slotId,
-          intentId: String(args.intentId),
-        },
-        createdAt: now,
-      });
-    } else {
-      await ctx.db.patch(actor.convexUser._id, {
-        walletBalance: walletBalance - amount,
-        updatedAt: now,
-      });
-      await ctx.db.insert("walletTransactions", {
-        userId: actor.convexUser._id,
-        type: "withdrawal",
-        amount,
-        status: "completed",
-        reference: `matchroom_slot_${String(room._id)}_${slotId}`,
-        metadata: {
-          intentId: String(args.intentId),
-          matchroomId: String(room._id),
-          slotId,
-          paymentMethod: "wallet",
-        },
-        createdAt: now,
-      });
-    }
+    const holdReference = getBookingHoldReference(args.intentId, args.externalPaymentReference);
+    await ctx.runMutation(internal.wallet.holdFunds, {
+      userId: actor.convexUser._id,
+      amount,
+      reference: holdReference,
+      metadata: {
+        source: "booking_intent_payment_hold",
+        provider: isExternalPayment ? "easypaisa" : "matchhai_wallet",
+        externalPaymentReference: args.externalPaymentReference || null,
+        matchroomId: String(room._id),
+        slotId,
+        intentId: String(args.intentId),
+      },
+    });
+
+    const captureSchedule = await scheduleBookingHoldCapture(ctx, args.intentId, room);
     await ctx.db.patch(intent.matchroomId, rosterPatch.patch);
     await ctx.db.patch(args.intentId, {
       status: "confirmed",
       paymentStatus: "paid",
+      heldStatus: "held",
+      heldReference: holdReference,
+      heldAmount: amount,
+      heldCreatedAt: now,
+      captureScheduledAt: captureSchedule.captureScheduledAt,
+      captureScheduledFnId: captureSchedule.captureScheduledFnId,
       updatedAt: now,
     });
     if (intent.sourceNotificationId) {
@@ -2691,8 +2849,6 @@ export const payMatchroomSeatIntent = mutation({
       });
     }
     await closePendingJoinRequestsForJoinedUser(ctx, intent.matchroomId, payerUid, now);
-    const paidRoom = await ctx.db.get(intent.matchroomId);
-    await markMerchantCapturedForMatchroom(ctx, intent.matchroomId, paidRoom);
 
     const relatedPaymentNotifications = await ctx.db
       .query("notifications")
@@ -2986,6 +3142,85 @@ export const checkExpiration = internalMutation({
         status: "expired",
         updatedAt: Date.now(),
       });
+      await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "matchroom_expired");
+      await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "matchroom_expired");
     }
+  },
+});
+
+export const captureBookingIntentHold = internalMutation({
+  args: { intentId: v.id("bookingIntents") },
+  handler: async (ctx, args) => {
+    const intent = await ctx.db.get(args.intentId);
+    if (!intent || intent.heldStatus !== "held" || !intent.heldReference) {
+      return { captured: false, reason: "not_held" };
+    }
+
+    const room = await ctx.db.get(intent.matchroomId);
+    if (!room) {
+      return await releaseBookingIntentHold(ctx, intent, "missing_matchroom");
+    }
+    if (room.status === "cancelled" || room.status === "expired") {
+      return await releaseBookingIntentHold(ctx, intent, `matchroom_${room.status}`);
+    }
+
+    const amount = Number(intent.heldAmount || intent.pricing?.totalCost || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { captured: false, reason: "invalid_amount" };
+    }
+
+    const captureReference = getBookingCaptureReference(args.intentId);
+    await ctx.runMutation(internal.wallet.captureHeldFunds, {
+      userId: intent.createdByUid,
+      amount,
+      reference: captureReference,
+      originalHoldReference: intent.heldReference,
+      metadata: {
+        source: "booking_hold_capture",
+        intentId: String(args.intentId),
+        matchroomId: String(intent.matchroomId),
+      },
+    });
+
+    const now = Date.now();
+    await ctx.db.patch(args.intentId, {
+      heldStatus: "captured",
+      heldCapturedAt: now,
+      updatedAt: now,
+    });
+
+    await maybeMarkMerchantCapturedAfterHoldCapture(ctx, intent.matchroomId);
+    return { captured: true, reference: captureReference, amount };
+  },
+});
+
+export const releaseBookingIntentHoldForReason = internalMutation({
+  args: {
+    intentId: v.id("bookingIntents"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const intent = await ctx.db.get(args.intentId);
+    return await releaseBookingIntentHold(ctx, intent, args.reason);
+  },
+});
+
+export const releaseHoldsForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+  },
+});
+
+export const refundCapturedHoldsForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
   },
 });

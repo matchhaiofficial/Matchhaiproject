@@ -7,6 +7,7 @@ import { clearCachedAuthSession } from "../../lib/authSessionCache";
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import { isKycAccessAllowed } from "../../utils/verificationGate";
 
 /** Friendly message mapper for common auth errors */
 function mapAuthError(error?: any): string {
@@ -142,6 +143,20 @@ export const EMAIL_VERIFICATION_REQUIRED_MESSAGE =
   "Please complete CNIC & face verification to unlock MatchHai features.";
 const EMAIL_VERIFICATION_CALLBACK_PATH = "/auth/login";
 const AUTH_CALL_TIMEOUT_MS = 15000;
+
+function isSuspendedUser(user: any) {
+  if (!user || user.accountStatus !== "suspended") return false;
+  const suspendedUntil = typeof user.suspendedUntil === "number" ? user.suspendedUntil : null;
+  return !suspendedUntil || suspendedUntil > Date.now();
+}
+
+function suspendedAccountResult(): AuthResult {
+  return {
+    ok: false,
+    code: "auth/account-suspended",
+    message: "Your MatchHai account is suspended. Please contact support.",
+  };
+}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -473,6 +488,11 @@ export async function signInWithEmail(
         return { ok: false, message: "User profile not found." };
       }
 
+      if (isSuspendedUser(user)) {
+        await signOutUser().catch(() => null);
+        return suspendedAccountResult();
+      }
+
       if (previousAuthId && previousAuthId !== authUserData.id) {
         await markAuthUserOffline(previousAuthId);
       }
@@ -510,6 +530,10 @@ export async function signInWithEmail(
       };
     }
 
+    if (isSuspendedUser(user)) {
+      return suspendedAccountResult();
+    }
+
     // Sign in with the found email
     const { data, error } = await authClient.signIn.email({
       email: user.email,
@@ -529,6 +553,10 @@ export async function signInWithEmail(
     }
 
     const authUserData = data.user as AuthUser;
+    if (isSuspendedUser(user)) {
+      await signOutUser().catch(() => null);
+      return suspendedAccountResult();
+    }
     if (previousAuthId && previousAuthId !== authUserData.id) {
       await markAuthUserOffline(previousAuthId);
     }
@@ -695,8 +723,42 @@ export async function currentUser(): Promise<AuthUser | null> {
   return (session?.user as AuthUser) || null;
 }
 
+export async function requireKycAccess(): Promise<SimpleResult> {
+  try {
+    const authUser = await currentUser();
+    if (!authUser?.id) {
+      return { ok: false, code: "auth/not-authenticated", message: "Please sign in to continue." };
+    }
+
+    const profile = await convex.query(api.users.getByAuthId, { authId: authUser.id });
+    if (!profile) {
+      return { ok: false, code: "auth/profile-not-found", message: "User profile not found." };
+    }
+
+    if (isSuspendedUser(profile)) {
+      return {
+        ok: false,
+        code: "auth/account-suspended",
+        message: "Your MatchHai account is suspended. Please contact support.",
+      };
+    }
+
+    if (!isKycAccessAllowed(profile.kycVerificationStatus)) {
+      return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
+    }
+
+    return { ok: true };
+  } catch (error: any) {
+    return {
+      ok: false,
+      code: "auth/kyc-check-failed",
+      message: error?.message || "Could not confirm verification status. Please try again.",
+    };
+  }
+}
+
 export async function ensureVerifiedEmailAccess(): Promise<SimpleResult> {
-  return { ok: false, code: "auth/kyc-required", message: EMAIL_VERIFICATION_REQUIRED_MESSAGE };
+  return requireKycAccess();
 }
 
 export async function sendCurrentUserVerificationEmail(): Promise<SimpleResult> {

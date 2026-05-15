@@ -173,6 +173,14 @@ export default defineSchema({
     // Status
     isOnline: v.boolean(),
     isVerified: v.optional(v.boolean()),
+    accountStatus: v.optional(v.union(
+      v.literal("active"),
+      v.literal("suspended")
+    )),
+    suspendedAt: v.optional(v.number()),
+    suspendedUntil: v.optional(v.union(v.number(), v.null())),
+    suspensionReason: v.optional(v.union(v.string(), v.null())),
+    suspendedByAdminUserId: v.optional(v.id("users")),
     kycVerificationStatus: v.optional(v.union(
       v.literal("not_started"),
       v.literal("pending"),
@@ -289,6 +297,7 @@ export default defineSchema({
 
     // Wallet
     walletBalance: v.optional(v.number()),
+    walletHeldBalance: v.optional(v.number()),
 
     // Chat presence & preferences
     lastActiveAt: v.optional(v.number()),
@@ -310,6 +319,7 @@ export default defineSchema({
     .index("by_authId", ["authId"])
     .index("by_role", ["role"])
     .index("by_updatedAt", ["updatedAt"])
+    .index("by_accountStatus_updatedAt", ["accountStatus", "updatedAt"])
     .index("by_accountType_updatedAt", ["accountType", "updatedAt"]),
 
   // ============================================
@@ -398,7 +408,10 @@ export default defineSchema({
       v.literal("deposit"),
       v.literal("withdrawal"),
       v.literal("booking_payment"),
-      v.literal("refund")
+      v.literal("refund"),
+      v.literal("hold"),
+      v.literal("hold_release"),
+      v.literal("hold_capture")
     ),
     amount: v.number(),
     status: v.union(
@@ -412,6 +425,7 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"])
+    .index("by_type", ["type"])
     .index("by_reference", ["reference"]),
 
   phoneVerifications: defineTable({
@@ -729,6 +743,22 @@ export default defineSchema({
 
     // Payment
     paymentStatus: v.union(v.literal("unpaid"), v.literal("paid")),
+    heldStatus: v.optional(
+      v.union(
+        v.literal("none"),
+        v.literal("held"),
+        v.literal("captured"),
+        v.literal("released"),
+        v.literal("refunded")
+      )
+    ),
+    heldReference: v.optional(v.string()),
+    heldAmount: v.optional(v.number()),
+    heldCreatedAt: v.optional(v.number()),
+    heldCapturedAt: v.optional(v.number()),
+    heldReleasedAt: v.optional(v.number()),
+    captureScheduledAt: v.optional(v.number()),
+    captureScheduledFnId: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
 
     createdAt: v.number(),

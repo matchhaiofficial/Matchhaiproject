@@ -1001,6 +1001,16 @@ export const rejectBookingRequest = mutation({
           };
 
     await ctx.db.patch(args.requestId, statusPatch);
+    if (request?.matchroomId) {
+      await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+        matchroomId: request.matchroomId,
+        reason: "booking_request_rejected",
+      });
+      await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+        matchroomId: request.matchroomId,
+        reason: "booking_request_rejected",
+      });
+    }
 
     if (args.requestOwnerUid && request?.requestKind !== "broadcast_fanout") {
       const requestOwner = await resolveUserByAnyId(ctx, args.requestOwnerUid);
@@ -1320,6 +1330,14 @@ export const respondToCounterOffer = mutation({
           closedReason: "counter_offer_rejected",
           updatedAt: now,
         });
+        await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+          matchroomId: request.matchroomId,
+          reason: "counter_offer_rejected",
+        });
+        await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+          matchroomId: request.matchroomId,
+          reason: "counter_offer_rejected",
+        });
         await patchOfferNotifications(ctx, {
           offerId: String(args.offerId),
           recipientUids,
@@ -1454,6 +1472,14 @@ export const respondToCounterOffer = mutation({
         await ctx.db.patch(request.matchroomId, {
           status: "cancelled",
           updatedAt: now,
+        });
+        await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+          matchroomId: request.matchroomId,
+          reason: "zone_schedule_rejected",
+        });
+        await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+          matchroomId: request.matchroomId,
+          reason: "zone_schedule_rejected",
         });
       }
       await patchOfferNotifications(ctx, {

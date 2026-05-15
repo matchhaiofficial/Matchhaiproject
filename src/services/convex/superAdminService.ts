@@ -51,6 +51,10 @@ export type SuperAdminUser = {
   phone?: string;
   accountType: "player" | "zone";
   role?: string;
+  accountStatus?: "active" | "suspended";
+  suspendedAt?: number | null;
+  suspendedUntil?: number | null;
+  suspensionReason?: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -67,6 +71,7 @@ export type SuperAdminReport = {
   updatedAt: number;
   reporterName: string;
   reportedUserName?: string | null;
+  reportedUserId?: string | null;
   zoneName?: string | null;
   branchId?: string | null;
   branchLabel?: string | null;
@@ -224,6 +229,14 @@ export type SuperAdminAuditLog = {
   reason?: string | null;
   metadataSafe?: Record<string, unknown> | null;
   createdAt: number;
+};
+
+export type SuperAdminAllowlistEntry = {
+  displayName: string;
+  email: string;
+  role: "super_admin";
+  permissions: string[];
+  isActive: boolean;
 };
 
 type Result<T> = { ok: true; data: T } | { ok: false; message: string };
@@ -420,6 +433,39 @@ export async function getIdentityVerifications(input?: {
   } catch (error: any) {
     console.error("[superAdminService] getIdentityVerifications error", error);
     return { ok: false, message: "Failed to load identity verifications." };
+  }
+}
+
+export async function manuallyVerifyIdentityVerification(
+  verificationId: string,
+  reason: string
+): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.manuallyVerifyIdentityVerification, {
+      sessionToken,
+      verificationId: verificationId as Id<"identityVerifications">,
+      reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] manuallyVerifyIdentityVerification error", error);
+    return { ok: false, message: error?.message || "Failed to manually verify identity." };
+  }
+}
+
+export async function getSuperAdminAllowlistConfig(): Promise<Result<SuperAdminAllowlistEntry[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const rows = await getCachedOrLoad(
+      `superAdminAllowlist:${sessionToken}`,
+      () => convex.query(api.admin.getSuperAdminAllowlistConfig, { sessionToken }),
+    );
+    return { ok: true, data: rows as SuperAdminAllowlistEntry[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminAllowlistConfig error", error);
+    return { ok: false, message: "Failed to load Super Admin allowlist." };
   }
 }
 
@@ -716,6 +762,31 @@ export async function updateUserRole(
   } catch (error: any) {
     console.error("[superAdminService] updateUserRole error", error);
     return { ok: false, message: "Failed to update user role." };
+  }
+}
+
+export async function setUserSuspension(
+  userId: string,
+  input: {
+    status: "active" | "suspended";
+    reason?: string;
+    suspendedUntil?: number | null;
+  }
+): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.setUserSuspension, {
+      sessionToken,
+      userId: userId as Id<"users">,
+      status: input.status,
+      reason: input.reason,
+      suspendedUntil: input.suspendedUntil ?? null,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] setUserSuspension error", error);
+    return { ok: false, message: error?.message || "Failed to update user suspension." };
   }
 }
 

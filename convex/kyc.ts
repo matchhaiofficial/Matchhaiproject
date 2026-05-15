@@ -115,6 +115,10 @@ function normalizeDiditStatus(value: unknown): KycStatus {
   return "in_progress";
 }
 
+function toSessionCreatedStatus(_status: KycStatus): "in_progress" {
+  return "in_progress";
+}
+
 function extractString(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -451,7 +455,7 @@ export const startDiditKycSession = action({
     }
 
     const diditStatus = normalizeDiditStatus(extractStatus(payload) || "pending");
-    const status = diditStatus === "not_started" ? "pending" : diditStatus;
+    const status = toSessionCreatedStatus(diditStatus);
     await ctx.runMutation(internal.kyc.markKycSessionCreated, {
       verificationId,
       providerSessionId,
@@ -581,7 +585,7 @@ export const startDiditKycSessionFromIntent = action({
     }
 
     const diditStatus = normalizeDiditStatus(extractStatus(payload) || "pending");
-    const status = diditStatus === "not_started" ? "pending" : diditStatus;
+    const status = toSessionCreatedStatus(diditStatus);
     await ctx.runMutation(internal.kyc.markKycSessionCreated, {
       verificationId: args.verificationId,
       providerSessionId: extractSessionId(payload),
@@ -752,8 +756,9 @@ export const markKycSessionCreated = internalMutation({
   handler: async (ctx, args) => {
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
+    const safeStatus = toSessionCreatedStatus(args.status);
     const patch: Record<string, unknown> = {
-      status: args.status,
+      status: safeStatus,
       submittedAt: verification.submittedAt || args.now,
       startTokenHash: undefined,
       startTokenExpiresAt: undefined,
@@ -763,7 +768,7 @@ export const markKycSessionCreated = internalMutation({
     if (args.providerReference) patch.providerReference = args.providerReference;
     await ctx.db.patch(args.verificationId, patch);
     await ctx.db.patch(verification.userId, {
-      kycVerificationStatus: args.status,
+      kycVerificationStatus: safeStatus,
       kycProvider: "didit",
       identityVerificationId: String(args.verificationId),
       updatedAt: args.now,
@@ -829,9 +834,10 @@ export const applyDiditStatusUpdate = internalMutation({
   handler: async (ctx, args) => {
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
+    const effectiveStatus: KycStatus = args.status === "not_started" ? "in_progress" : args.status;
 
     const verificationPatch: Record<string, unknown> = {
-      status: args.status,
+      status: effectiveStatus,
       updatedAt: args.now,
     };
     if (args.providerSessionId || verification.providerSessionId) verificationPatch.providerSessionId = args.providerSessionId || verification.providerSessionId;
@@ -841,14 +847,14 @@ export const applyDiditStatusUpdate = internalMutation({
     Object.entries(args.checkStatuses).forEach(([key, value]) => {
       if (value) verificationPatch[key] = value;
     });
-    if (args.status === "verified") verificationPatch.verifiedAt = args.now;
-    if (args.status === "rejected") verificationPatch.rejectedAt = args.now;
-    if (args.status === "in_review") verificationPatch.reviewedAt = args.now;
+    if (effectiveStatus === "verified") verificationPatch.verifiedAt = args.now;
+    if (effectiveStatus === "rejected") verificationPatch.rejectedAt = args.now;
+    if (effectiveStatus === "in_review") verificationPatch.reviewedAt = args.now;
 
     await ctx.db.patch(args.verificationId, verificationPatch);
 
     const userPatch: Record<string, unknown> = {
-      kycVerificationStatus: args.status,
+      kycVerificationStatus: effectiveStatus,
       kycProvider: "didit",
       identityVerificationId: String(args.verificationId),
       updatedAt: args.now,
@@ -857,7 +863,7 @@ export const applyDiditStatusUpdate = internalMutation({
     if (args.checkStatuses.emailVerificationStatus) {
       userPatch.emailVerificationStatus = args.checkStatuses.emailVerificationStatus;
     }
-    if (args.status === "verified") {
+    if (effectiveStatus === "verified") {
       userPatch.kycVerifiedAt = args.now;
       if (args.checkStatuses.emailVerificationStatus) userPatch.emailVerifiedAt = args.now;
       const profile = await ctx.db.get(verification.userId);
@@ -893,15 +899,15 @@ export const applyDiditStatusUpdate = internalMutation({
       zoneId: "identity",
       module: "kyc",
       actorUid: String(verification.userId),
-      action: args.status === "verified" ? "verified" : args.status === "rejected" ? "rejected" : args.status === "expired" ? "expired" : "webhook_received",
+      action: effectiveStatus === "verified" ? "verified" : effectiveStatus === "rejected" ? "rejected" : effectiveStatus === "expired" ? "expired" : "webhook_received",
       targetType: "identityVerification",
       targetId: String(args.verificationId),
-      summary: `Didit KYC status updated to ${args.status}`,
+      summary: `Didit KYC status updated to ${effectiveStatus}`,
       details: {
         verificationId: String(args.verificationId),
         provider: "didit",
         role: verification.role,
-        status: args.status,
+        status: effectiveStatus,
         decision: args.decision || null,
         rejectionReason: args.rejectionReason || null,
         emailVerificationStatus: args.checkStatuses.emailVerificationStatus || null,

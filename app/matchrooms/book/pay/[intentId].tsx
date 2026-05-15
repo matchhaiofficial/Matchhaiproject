@@ -178,14 +178,16 @@ export default function MockPaymentScreen() {
                         {(intent.pricing as any)?.currency || "PKR"} {intent.pricing?.totalCost}
                     </Text>
                     <Text style={styles.seatCount}>
-                        For {intent.selectedSlots.length} Reserved Seats
+                        Pay now to reserve {intent.selectedSlots.length} seat{intent.selectedSlots.length === 1 ? "" : "s"}
                     </Text>
                 </AppCard>
 
                 {/* Secure Payment Info */}
                 <AppCard style={styles.infoBox}>
                     <AppIcon name="security" size={20} color={COLORS.success} />
-                    <Text style={styles.infoText}>{FEATURE_READINESS.payments.card.walletOnlyInfo}</Text>
+                    <Text style={styles.infoText}>
+                        Your payment reserves your seat first. Funds are captured when the match starts or is confirmed.
+                    </Text>
                 </AppCard>
 
                 {/* Summary */}
@@ -201,7 +203,7 @@ export default function MockPaymentScreen() {
                 {/* Payment Methods (Mock) */}
                 <DetailSectionCard
                     title="Payment Method"
-                    subtitle="Only live payment paths are shown here."
+                    subtitle="Choose how to reserve your seat."
                 >
                     <Pressable
                         style={[
@@ -261,7 +263,7 @@ export default function MockPaymentScreen() {
                     ) : (
                         <>
                             <Text style={styles.payBtnText}>
-                                {paymentMethod === "wallet" ? "Pay with Wallet" : "Continue to Easypaisa"}
+                                {paymentMethod === "wallet" ? "Reserve with Wallet" : "Continue to Easypaisa"}
                             </Text>
                             <AppIcon
                                 name={paymentMethod === "wallet" ? "lock" : "open-in-new"}
@@ -273,8 +275,8 @@ export default function MockPaymentScreen() {
                 </AppButton>
                 <Text style={styles.cancelHint}>
                     {paymentMethod === "wallet"
-                        ? "Wallet payments confirm your seat instantly."
-                        : "Easypaisa will return you to MatchHai after payment confirmation."}
+                        ? "Your Wallet funds are reserved now and captured when the match starts or is confirmed."
+                        : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed."}
                 </Text>
                     </View>
                 </View>

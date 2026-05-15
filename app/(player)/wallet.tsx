@@ -505,7 +505,7 @@ export default function WalletScreen() {
           {activeTab === "overview" ? (
             <>
               <AppCard style={styles.balanceCard}>
-                <Text style={styles.balanceLabel}>Wallet Balance</Text>
+                <Text style={styles.balanceLabel}>Available Wallet Balance</Text>
                 <Text style={styles.balanceValue}>
                   {formatCurrency(walletBalance)}
                 </Text>
@@ -654,7 +654,7 @@ export default function WalletScreen() {
                   {formatCurrency(totals.totalSpent)}
                 </Text>
                 <Text style={styles.summarySubText}>
-                  Across all paid bookings
+                  Captured booking payments. Reserved funds appear in transactions.
                 </Text>
               </AppCard>
 
@@ -733,13 +733,33 @@ export default function WalletScreen() {
                             : ""}
                         </Text>
                       ) : null}
+                      {item.kind === "hold" ? (
+                        <Text style={styles.transactionMeta}>
+                          Funds are reserved for your seat and captured when the match starts or is confirmed.
+                        </Text>
+                      ) : item.kind === "hold_release" ? (
+                        <Text style={styles.transactionMeta}>
+                          The match was cancelled before capture, so funds returned to your MatchHai Wallet.
+                        </Text>
+                      ) : item.kind === "hold_capture" ? (
+                        <Text style={styles.transactionMeta}>
+                          Funds were captured for the match. Approved refunds return to your MatchHai Wallet.
+                        </Text>
+                      ) : item.kind === "refund" ? (
+                        <Text style={styles.transactionMeta}>
+                          Refund added back to your MatchHai Wallet.
+                        </Text>
+                      ) : null}
                       <StatusPill
                         tone={tone}
                         label={
                           item.source === "payment"
                             ? getCheckoutStatusLabel(item.status)
                             : item.kind === "booking_payment" ||
-                                item.kind === "withdrawal"
+                                item.kind === "withdrawal" ||
+                                item.kind === "hold" ||
+                                item.kind === "hold_release" ||
+                                item.kind === "hold_capture"
                               ? getPaymentStatusLabel(item.status)
                               : getCheckoutStatusLabel(item.status)
                         }

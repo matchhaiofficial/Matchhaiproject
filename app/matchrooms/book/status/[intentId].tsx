@@ -175,8 +175,8 @@ export default function BookingStatusScreen() {
     const isZoneMatchroom = Boolean(roomData?.zoneId) || roomData?.locationMode === "zone";
     const isZoneApproved = !isZoneMatchroom || roomData?.zoneAdminApproved === true;
     const isFullyConfirmed = isCompleted && isZoneApproved;
-    const statusTitle = isFullyConfirmed ? "Booking Confirmed!" :
-        isCompleted && isZoneMatchroom && !isZoneApproved ? "Seat Paid" :
+    const statusTitle = isFullyConfirmed ? "Seat Reserved!" :
+        isCompleted && isZoneMatchroom && !isZoneApproved ? "Seat Reserved" :
             isRejected ? "Booking Rejected" :
                 isGatewayPending ? "Payment Processing" :
                     isApproved ? "Ready for Payment" : "Waiting for Approval";
@@ -292,7 +292,7 @@ export default function BookingStatusScreen() {
                                 </View>
                                 {isCompleted ? <View style={[styles.stepLine, isZoneApproved && styles.stepLineActive]} /> : null}
                             </View>
-                            <Text style={[styles.stepLabel, isCompleted && styles.stepLabelActive]}>Payment Confirmation</Text>
+                            <Text style={[styles.stepLabel, isCompleted && styles.stepLabelActive]}>Seat Reserved</Text>
                         </View>
 
                         <View style={styles.stepContainer}>
@@ -326,12 +326,17 @@ export default function BookingStatusScreen() {
 
                     {isApproved && (
                         <Text style={styles.expiredHint}>
-                            Please pay within the timer to secure your seats.
+                            Pay within the timer to reserve your seats.
                         </Text>
                     )}
                     {isGatewayPending ? (
                         <Text style={[styles.expiredHint, { color: COLORS.warning }]}>
-                            Easypaisa payment is pending. Approve it in Easypaisa and MatchHai will keep checking automatically.
+                            Easypaisa payment is pending. Once confirmed, your seat is reserved and funds are kept in your MatchHai Wallet until capture.
+                        </Text>
+                    ) : null}
+                    {isCompleted ? (
+                        <Text style={styles.expiredHint}>
+                            Your seat is reserved. Funds are captured when the match starts or is confirmed. If the match is cancelled before capture, funds return to your MatchHai Wallet.
                         </Text>
                     ) : null}
                     {orderRefNum ? (
@@ -353,21 +358,21 @@ export default function BookingStatusScreen() {
                     ) : null}
                 </DetailSectionCard>
                 {settlementSummary ? (
-                    <DetailSectionCard title="Settlement">
+                    <DetailSectionCard title="Payment">
                         <DetailKeyValueRow
-                            label="MatchHai merchant"
-                            value={settlementSummary.merchantSettlementStatus === "captured" ? "Captured" : "Pending"}
+                            label="Funds"
+                            value={settlementSummary.merchantSettlementStatus === "captured" ? "Captured" : "Reserved"}
                         />
                         <DetailKeyValueRow
-                            label="Merchant reference"
-                            value={settlementSummary.merchantSettlementReference || "Not settled yet"}
+                            label="Refunds"
+                            value="Approved refunds return to your MatchHai Wallet"
                         />
                         <DetailKeyValueRow
-                            label="Venue payout"
+                            label="Venue"
                             value={
                                 settlementSummary.venuePayoutStatus === "paid"
-                                    ? `${settlementSummary.currency || "PKR"} ${Math.round(Number(settlementSummary.venuePayoutAmount || 0))}`
-                                    : "Pending completion"
+                                    ? "Payout completed"
+                                    : "Payout after match completion"
                             }
                             last
                         />

@@ -142,6 +142,7 @@ async function refundBroadcastPayments(ctx: any, room: any, reason: string) {
 
     const refundable = walletTransactions.filter((transaction: any) => {
       if (transaction.type === "refund") return false;
+      if (transaction.type === "hold" || transaction.type === "hold_release" || transaction.type === "hold_capture") return false;
       if (transaction.status !== "completed") return false;
       return belongsToMatchroomPayment(transaction, room._id);
     });
@@ -375,6 +376,14 @@ export async function finalizeBroadcastFailure(
   }
 
   if (room.refundStatus !== "completed") {
+    await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+      matchroomId,
+      reason,
+    });
+    await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+      matchroomId,
+      reason,
+    });
     await refundBroadcastPayments(ctx, room, reason);
     await ctx.db.patch(matchroomId, {
       refundStatus: "completed",

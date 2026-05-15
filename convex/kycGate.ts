@@ -9,7 +9,27 @@ export const KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL =
   "Please complete CNIC & face verification before requesting withdrawal.";
 
 export function isKycAccessAllowed(status?: string | null): boolean {
-  return status === "verified" || status === "pending" || status === "in_progress" || status === "in_review";
+  return status === "verified" || status === "pending";
+}
+
+export function assertKycAccessAllowed(
+  profile?: { kycVerificationStatus?: string | null; accountStatus?: string | null; suspendedUntil?: number | null } | null,
+  message = KYC_VERIFICATION_REQUIRED_MESSAGE,
+) {
+  if (!profile) {
+    throw new Error("User profile not found.");
+  }
+
+  if (profile.accountStatus === "suspended") {
+    const suspendedUntil = typeof profile.suspendedUntil === "number" ? profile.suspendedUntil : null;
+    if (!suspendedUntil || suspendedUntil > Date.now()) {
+      throw new Error("Your MatchHai account is suspended. Please contact support.");
+    }
+  }
+
+  if (!isKycAccessAllowed(profile.kycVerificationStatus)) {
+    throw new Error(message);
+  }
 }
 
 export async function requireKycVerified(
@@ -30,13 +50,7 @@ export async function requireKycVerified(
           .unique()
       : await ctx.runQuery(api.users.getByAuthId, { authId });
 
-  if (!profile) {
-    throw new Error("User profile not found.");
-  }
-
-  if (!isKycAccessAllowed(profile.kycVerificationStatus)) {
-    throw new Error(message);
-  }
+  assertKycAccessAllowed(profile, message);
 
   return { authUser, profile };
 }

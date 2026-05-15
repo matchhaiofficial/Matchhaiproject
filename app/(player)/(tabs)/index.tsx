@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
@@ -320,6 +320,7 @@ export default function PlayerDashboard() {
     initialScale: 0.995,
   });
   const startDiditKyc = useStartDiditKyc();
+  const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
   const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
 
@@ -332,6 +333,7 @@ export default function PlayerDashboard() {
   const showKycBanner = !kycAccessAllowed || kycReviewActive;
   const kycBannerMessage = formatKycBannerMessage(kycStatus, currentKyc?.rejectionReason);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [refreshingKyc, setRefreshingKyc] = useState(false);
   const didLogInitialQueryCountRef = useRef(false);
 
   const dashboardSummary = useQuery(
@@ -444,6 +446,22 @@ export default function PlayerDashboard() {
       Logger.error("Dashboard", "Could not start KYC", result.message);
     }
   }, [startDiditKyc]);
+
+  const handleRefreshVerification = useCallback(async () => {
+    if (!currentKyc?._id) {
+      await refreshSession();
+      return;
+    }
+    setRefreshingKyc(true);
+    try {
+      await refreshDiditStatus({ verificationId: currentKyc._id });
+      await refreshSession();
+    } catch (error: any) {
+      Logger.error("Dashboard", "Could not refresh KYC", error?.message || error);
+    } finally {
+      setRefreshingKyc(false);
+    }
+  }, [currentKyc?._id, refreshDiditStatus, refreshSession]);
 
   return (
     <Screen
@@ -608,23 +626,32 @@ export default function PlayerDashboard() {
               <Text style={styles.verificationBannerText}>
                 {kycBannerMessage}
               </Text>
-              {!kycReviewActive ? (
-                <View style={styles.verificationBannerActions}>
+              <View style={styles.verificationBannerActions}>
+                {kycReviewActive ? (
+                  <AppButton
+                    style={styles.verificationPrimaryButton}
+                    onPress={handleRefreshVerification}
+                    loading={refreshingKyc}
+                    disabled={refreshingKyc}
+                  >
+                    Refresh Status
+                  </AppButton>
+                ) : (
                   <AppButton
                     style={styles.verificationPrimaryButton}
                     onPress={handleStartVerification}
                   >
                     Start Verification
                   </AppButton>
-                  <AppButton
-                    variant="secondary"
-                    style={styles.verificationSecondaryButton}
-                    onPress={() => router.push("/profile/edit" as any)}
-                  >
-                    Profile Settings
-                  </AppButton>
-                </View>
-              ) : null}
+                )}
+                <AppButton
+                  variant="secondary"
+                  style={styles.verificationSecondaryButton}
+                  onPress={() => router.push("/profile/edit" as any)}
+                >
+                  Profile Settings
+                </AppButton>
+              </View>
             </AppCard>
           ) : null}
 

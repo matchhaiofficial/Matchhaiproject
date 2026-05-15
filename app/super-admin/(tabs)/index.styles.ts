@@ -1,6 +1,6 @@
 import { StyleSheet } from "react-native";
 
-import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
+import { COLORS, CONTROL_SIZES, FONTS, RADII, SPACING, TEXT_SIZES } from "../../../src/theme";
 
 export default StyleSheet.create({
   screen: {
@@ -13,11 +13,20 @@ export default StyleSheet.create({
   headerBar: {
     marginBottom: SPACING.sm,
   },
+  headerIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardDark,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   contentWrap: {
     flex: 1,
   },
   container: {
-    gap: SPACING.md,
     paddingTop: SPACING.xs,
   },
   loaderWrap: {
@@ -25,117 +34,174 @@ export default StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  heroCard: {
-    overflow: "hidden",
-    gap: SPACING.md,
+  profileCard: {
+    width: "100%",
+    borderRadius: CONTROL_SIZES.cardRadius + 2,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    padding: SPACING.lg,
+    backgroundColor: COLORS.cardDark,
   },
-  heroAccent: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 4,
-    backgroundColor: COLORS.accent,
-  },
-  heroMain: {
+  profileTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: SPACING.md,
-    paddingLeft: SPACING.xs,
+    marginBottom: SPACING.md,
   },
-  heroAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
+  profileAccentBar: {
+    width: 42,
+    height: 4,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.accent,
+    marginBottom: SPACING.md,
+  },
+  avatarContainer: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: `${COLORS.accent}22`,
+    backgroundColor: COLORS.surfaceHighlight,
     borderWidth: 1,
-    borderColor: `${COLORS.accent}44`,
+    borderColor: `${COLORS.accent}55`,
+    marginRight: SPACING.md,
   },
-  heroAvatarText: {
+  avatarText: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
     fontSize: TEXT_SIZES.lg,
   },
-  heroTextWrap: {
+  onlineIndicator: {
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: COLORS.successBright,
+    borderWidth: 2,
+    borderColor: COLORS.backgroundDark,
+  },
+  profileTextWrap: {
     flex: 1,
     minWidth: 0,
   },
-  heroLabel: {
-    color: COLORS.accent,
-    fontFamily: FONTS.interSemiBold,
-    fontSize: TEXT_SIZES.caption,
-    textTransform: "uppercase",
+  welcomeText: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interMedium,
+    fontSize: 11,
+    marginBottom: 4,
   },
-  heroTitle: {
+  username: {
     color: COLORS.text,
     fontFamily: FONTS.heading,
-    fontSize: TEXT_SIZES.xl,
-    marginTop: 2,
+    fontSize: 21,
   },
-  heroSubtitle: {
+  profileSubtitle: {
     color: COLORS.textSecondary,
-    fontFamily: FONTS.body,
+    fontFamily: FONTS.interRegular,
     fontSize: TEXT_SIZES.caption,
     lineHeight: 18,
     marginTop: 4,
   },
-  heroStatusRow: {
+  tagsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: SPACING.xs,
-    paddingLeft: SPACING.xs,
+    gap: 8,
   },
-  metricGrid: {
+  section: {
+    marginTop: SPACING.xl,
+  },
+  operationsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: SPACING.md,
-  },
-  metricCard: {
-    flexBasis: "47%",
-    flexGrow: 1,
-    minHeight: 132,
     justifyContent: "space-between",
   },
-  metricTopRow: {
-    flexDirection: "row",
+  operationTilePressable: {
+    width: "48.5%",
+    marginBottom: SPACING.md,
+    borderRadius: CONTROL_SIZES.cardRadius + 2,
+  },
+  operationTile: {
+    minHeight: 116,
+    borderRadius: CONTROL_SIZES.cardRadius + 2,
+    justifyContent: "space-between",
+    borderColor: COLORS.cardBorder,
+    padding: SPACING.md + 2,
+  },
+  operationIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    borderWidth: 1,
+    marginBottom: 18,
+  },
+  operationTitle: {
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 16,
+  },
+  operationBadge: {
+    position: "absolute",
+    right: SPACING.md,
+    top: SPACING.md,
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.overlayLight,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  operationBadgeText: {
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 11,
+  },
+  snapshotPanel: {
+    width: "100%",
     gap: SPACING.sm,
   },
+  metricCard: {
+    width: "100%",
+    minHeight: 86,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.md,
+    paddingVertical: SPACING.md,
+  },
   metricIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
   },
-  metricValue: {
+  metricTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  metricLabel: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.label,
+  },
+  metricDetail: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interRegular,
+    fontSize: TEXT_SIZES.caption,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  metricValue: {
+    maxWidth: 96,
     color: COLORS.text,
     fontFamily: FONTS.heading,
     fontSize: TEXT_SIZES.xl,
     textAlign: "right",
-  },
-  metricLabel: {
-    color: COLORS.text,
-    fontFamily: FONTS.interSemiBold,
-    fontSize: TEXT_SIZES.label,
-    marginTop: SPACING.sm,
-  },
-  metricDetail: {
-    color: COLORS.textSecondary,
-    fontFamily: FONTS.body,
-    fontSize: TEXT_SIZES.caption,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  quickActionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: SPACING.md,
   },
   matchList: {
     gap: SPACING.md,
