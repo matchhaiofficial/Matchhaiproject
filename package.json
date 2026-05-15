@@ -72,7 +72,8 @@
     "@types/lodash.debounce": "^4.0.9",
     "@types/react": "~19.1.0",
     "react-test-renderer": "19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "xlsx": "^0.18.5"
   },
   "private": true
 }
