@@ -388,7 +388,7 @@ export default function AdminRegisterStep1() {
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
         <Text style={[styles.helperText, styles.helperOk]}>
-          Used for sign in, password reset, venue notices, and admin emails. Didit verifies identity separately.
+          Used for login and password reset.
         </Text>
         {contactEmail.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>

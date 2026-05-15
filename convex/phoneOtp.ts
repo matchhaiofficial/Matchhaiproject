@@ -22,14 +22,20 @@ function normalizePakistaniPhone(value: string): NormalizedPhone {
   const numeric = raw.replace(/\D/g, "");
   let digits = "";
 
-  if (numeric.startsWith("92")) {
+  if (!numeric) {
+    digits = "";
+  } else if (raw.startsWith("+")) {
+    digits = numeric.startsWith("92") ? numeric.slice(2) : "";
+  } else if (numeric.startsWith("0092")) {
+    digits = numeric.slice(4);
+  } else if (numeric.startsWith("92")) {
     digits = numeric.slice(2);
   } else if (numeric.startsWith("0")) {
     digits = numeric.slice(1);
   } else if (numeric.length === 10) {
     digits = numeric;
   } else {
-    digits = numeric.slice(-10);
+    digits = "";
   }
 
   if (digits.length > 10) digits = digits.slice(-10);
@@ -68,15 +74,103 @@ function generateOtp() {
 function extractProviderMessageId(value: unknown) {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
-  const direct =
-    record.messageId ||
-    record.message_id ||
-    record.id ||
-    record.smsId ||
-    record.sms_id;
+  const direct = getProviderValue(record, [
+    "messageId",
+    "message_id",
+    "MESSAGE_ID",
+    "id",
+    "smsId",
+    "sms_id",
+  ]);
   return typeof direct === "string" || typeof direct === "number"
     ? String(direct)
     : undefined;
+}
+
+function normalizeProviderKey(value: string) {
+  return value.toLowerCase().replace(/[_\s-]/g, "");
+}
+
+function getProviderValue(record: Record<string, unknown>, keys: string[]) {
+  const wanted = new Set(keys.map(normalizeProviderKey));
+  for (const [key, value] of Object.entries(record)) {
+    if (wanted.has(normalizeProviderKey(key))) return value;
+  }
+  return undefined;
+}
+
+function getProviderString(record: Record<string, unknown>, keys: string[]) {
+  const value = getProviderValue(record, keys);
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+}
+
+function getProviderBoolean(record: Record<string, unknown>, keys: string[]) {
+  const value = getProviderValue(record, keys);
+  return typeof value === "boolean" ? value : null;
+}
+
+function isProviderFailureResponse(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const successFlag = getProviderBoolean(record, ["success", "ok"]);
+  if (successFlag === false) return true;
+
+  const errorCode = getProviderString(record, ["ERROR_CODE", "errorCode", "error_code"]);
+  const errorFilter = getProviderString(record, ["ERROR_FILTER", "errorFilter", "error_filter"]);
+  if (errorCode || errorFilter) return true;
+
+  const status = getProviderString(record, ["STATUS", "status"]).toLowerCase();
+  return ["failed", "failure", "error", "invalid", "rejected", "unsuccessful"].includes(status);
+}
+
+function isProviderSuccessResponse(value: unknown) {
+  if (!value || typeof value !== "object" || isProviderFailureResponse(value)) return false;
+  const record = value as Record<string, unknown>;
+  const successFlag = getProviderBoolean(record, ["success", "ok"]);
+  if (successFlag === true) return true;
+
+  const status = getProviderString(record, ["STATUS", "status"]).toLowerCase();
+  if (["successful", "success", "sent", "queued", "accepted", "submitted"].includes(status)) {
+    return true;
+  }
+
+  return Boolean(extractProviderMessageId(record));
+}
+
+function parseProviderBody(bodyText: string) {
+  if (!bodyText.trim()) return null;
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+}
+
+function logSmsFailure(
+  category: string,
+  details: {
+    phoneMasked: string;
+    status?: number;
+    providerBody?: unknown;
+  },
+) {
+  const isDevelopment =
+    String(process.env.NODE_ENV || "").toLowerCase() === "development" ||
+    String(process.env.CONVEX_ENVIRONMENT || "").toLowerCase() === "development";
+  if (!isDevelopment) return;
+
+  console.warn("[phoneOtp] VeevoTech send failed", {
+    phoneMasked: details.phoneMasked,
+    status: details.status,
+    category,
+    providerBody:
+      typeof details.providerBody === "string"
+        ? details.providerBody.slice(0, 500)
+        : details.providerBody,
+    timestamp: Date.now(),
+  });
 }
 
 export const sendPhoneOtp = action({
@@ -142,20 +236,18 @@ export const sendPhoneOtp = action({
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
+          apikey: apiHash,
           hash: apiHash,
           receivernum: phoneE164,
           sendernum: senderId,
-          textmessage: `Your MatchHai verification code is ${otp}. It expires in 5 minutes. Do not share this code.`,
+          textmessage: `Your Matchhai verification code is ${otp}. It expires in 5 minutes. Do not share this code.`,
         }),
       });
 
       let providerMessageId: string | undefined;
-      if (response.ok) {
-        try {
-          providerMessageId = extractProviderMessageId(await response.json());
-        } catch {
-          providerMessageId = undefined;
-        }
+      const providerBody = parseProviderBody(await response.text());
+      if (response.ok && isProviderSuccessResponse(providerBody)) {
+        providerMessageId = extractProviderMessageId(providerBody);
         await ctx.runMutation(internal.phoneOtp.markProviderSent, {
           verificationId,
           providerMessageId,
@@ -166,28 +258,28 @@ export const sendPhoneOtp = action({
           verificationId,
           updatedAt: Date.now(),
         });
-        console.warn("[phoneOtp] VeevoTech send failed", {
+        logSmsFailure(response.ok ? "provider_ambiguous_success" : "provider_non_ok", {
           phoneMasked,
           status: response.status,
-          category: "provider_non_ok",
-          timestamp: Date.now(),
+          providerBody,
         });
-        throw new Error("SMS send failed. Please try again.");
+        throw new Error("Could not send OTP. Please check your number and try again.");
       }
     } catch (error) {
       await ctx.runMutation(internal.phoneOtp.markFailed, {
         verificationId,
         updatedAt: Date.now(),
       });
-      if (error instanceof Error && error.message === "SMS send failed. Please try again.") {
+      if (
+        error instanceof Error &&
+        error.message === "Could not send OTP. Please check your number and try again."
+      ) {
         throw error;
       }
-      console.warn("[phoneOtp] VeevoTech send failed", {
+      logSmsFailure("network_or_runtime", {
         phoneMasked,
-        category: "network_or_runtime",
-        timestamp: Date.now(),
       });
-      throw new Error("SMS send failed. Please try again.");
+      throw new Error("Could not send OTP. Please check your number and try again.");
     }
 
     return {
@@ -283,7 +375,7 @@ export const getSendState = internalQuery({
 
     return {
       sendsInWindow: rows.length,
-      lastCreatedAt: rows[0]?.createdAt ?? null,
+      lastCreatedAt: rows.find((row) => row.status !== "failed")?.createdAt ?? null,
     };
   },
 });

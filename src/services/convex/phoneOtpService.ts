@@ -15,10 +15,12 @@ export async function sendPhoneOtp(phone: string): Promise<
       cooldownSeconds: result.cooldownSeconds,
     };
   } catch (error: any) {
-    Logger.warn("phoneOtpService", "Send phone OTP failed", {
-      category: "send_failed",
-      message: error?.message,
-    });
+    if (__DEV__) {
+      Logger.warn("phoneOtpService", "Send phone OTP failed", {
+        category: "send_failed",
+        message: error?.message,
+      });
+    }
     return {
       ok: false,
       message: error?.message || "Could not send verification code.",
@@ -49,10 +51,12 @@ export async function verifyPhoneOtp(
       verifiedAt: result.verifiedAt,
     };
   } catch (error: any) {
-    Logger.warn("phoneOtpService", "Verify phone OTP failed", {
-      category: "verify_failed",
-      message: error?.message,
-    });
+    if (__DEV__) {
+      Logger.warn("phoneOtpService", "Verify phone OTP failed", {
+        category: "verify_failed",
+        message: error?.message,
+      });
+    }
     return {
       ok: false,
       message: error?.message || "Could not verify code.",

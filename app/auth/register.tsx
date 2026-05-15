@@ -688,7 +688,7 @@ export default function Register() {
         </View>
         {renderAvailabilityHelper(emailStatus, "email")}
         <Text style={[styles.helperText, styles.helperOk, styles.diditHelperTextMargin]}>
-          Used for sign in, password reset, and MatchHai updates. Didit verifies identity separately.
+          Used for login and password reset.
         </Text>
         {email.trim().length > 0 && !isEmailValid && emailStatus === "idle" ? (
           <Text style={styles.errorText}>Enter a valid email address.</Text>
