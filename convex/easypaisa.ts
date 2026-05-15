@@ -326,6 +326,13 @@ function sanitizeForDebug(input: Record<string, unknown>) {
 }
 
 function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnapshot) {
+  const paymentMode = String(
+    snapshot.paymentMode
+    || snapshot.paymentMethod
+    || snapshot.rawPayload?.paymentMode
+    || snapshot.rawPayload?.paymentMethod
+    || "",
+  ).trim().toUpperCase();
   const transactionStatus = String(
     snapshot.transactionStatus
     || snapshot.rawPayload?.transactionStatus
@@ -342,9 +349,9 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
   ).trim();
   const combined = `${transactionStatus} ${responseCode} ${responseDesc}`.toUpperCase();
 
-  // IMPORTANT: For MA/OTC flows Easypaisa often returns responseCode=0000 and "SUCCESS"
-  // while the transaction is still pending or even cancelled by the user later. Never
-  // infer a paid settlement from response text alone (prevents false wallet credits).
+  // IMPORTANT: For OTC flows Easypaisa can return responseCode=0000 and "SUCCESS"
+  // when only a token was created. MA success is the completed mobile-account charge.
+  // Never infer paid for OTC from response text alone.
   const FAILED_STATUSES = new Set([
     "FAILED",
     "REVERSED",
@@ -376,6 +383,8 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
     resolvedStatus = "paid";
   } else if (PENDING_STATUSES.has(transactionStatus)) {
     resolvedStatus = "pending";
+  } else if (source === "initiate" && paymentMode === "MA" && responseCode === "0000") {
+    resolvedStatus = "paid";
   } else if (!transactionStatus && (source === "ipn" || source === "hosted_finalize")) {
     // Provider webhooks/finalize responses sometimes omit a normalized transactionStatus.
     if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE")) {
@@ -837,6 +846,7 @@ export const startCheckout = action({
       emailDomain: getEmailDomain(emailAddress),
     });
     let responseBody: any = {};
+    let initiateStatus: PaymentStatus = "pending";
     try {
       const initiateResult: any = await ctx.runAction((internal as any).easypaisaNode.initiateRestTransaction, {
         endpointPath,
@@ -856,12 +866,13 @@ export const startCheckout = action({
         paymentTokenPresent: Boolean(responseBody?.paymentToken),
       });
 
-      await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
+      const providerUpdate: FinalizeResult = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
         orderRefNum,
         source: "initiate",
         snapshot: {
           responseCode: responseBody?.responseCode || null,
           responseDesc: responseBody?.responseDesc || null,
+          transactionStatus: responseBody?.transactionStatus || responseBody?.status || null,
           transactionId: responseBody?.transactionId || null,
           paymentToken: responseBody?.paymentToken || null,
           paymentTokenExpiryDateTime: responseBody?.paymentTokenExpiryDateTime || null,
@@ -883,6 +894,7 @@ export const startCheckout = action({
           },
         },
       });
+      initiateStatus = providerUpdate.status;
 
       if (String(responseBody?.responseCode || "") !== "0000") {
         throw new Error(String(responseBody?.responseDesc || "Failed to initiate Easypaisa payment."));
@@ -936,7 +948,7 @@ export const startCheckout = action({
       orderRefNum,
       checkoutUrl: EASYPAISA_HOSTED_FALLBACK_ENABLED ? checkoutUrl : null,
       expiresAt,
-      status: "pending",
+      status: initiateStatus,
       transactionType,
       hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
       actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",

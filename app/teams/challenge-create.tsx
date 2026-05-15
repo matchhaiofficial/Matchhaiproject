@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useAction, useQuery } from "convex/react";
 
 import AppHeader from "../../src/components/AppHeader";
@@ -137,6 +137,10 @@ const formatSeriesLabel = (series: SeriesType) => {
     if (series === "BO20") return "Best of 20";
     return "Best of 40";
 };
+
+const getEasypaisaStatus = (value: any) => String(value?.status || "").trim().toLowerCase();
+const isEasypaisaPaid = (value: any) => getEasypaisaStatus(value) === "paid";
+const isEasypaisaStopped = (value: any) => ["failed", "cancelled", "expired"].includes(getEasypaisaStatus(value));
 
 const getSeriesHours = (gameKey: string, seriesType: SeriesType) => {
     const game = String(gameKey || "").toLowerCase();
@@ -301,6 +305,7 @@ export default function TeamChallengeCreateScreen() {
     const [easypaisaModalVisible, setEasypaisaModalVisible] = useState(false);
     const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
     const [startingEasypaisa, setStartingEasypaisa] = useState(false);
+    const [finishingEasypaisa, setFinishingEasypaisa] = useState(false);
     const [activeEasypaisaOrderRef, setActiveEasypaisaOrderRef] = useState<string | null>(null);
     const [pendingCreateAfterPayment, setPendingCreateAfterPayment] = useState<{
         captainPaymentAmount: number;
@@ -564,6 +569,89 @@ export default function TeamChallengeCreateScreen() {
         ]);
     };
 
+    const handleStoppedEasypaisaPayment = React.useCallback((statusLike: any) => {
+        const status = getEasypaisaStatus(statusLike);
+        setActiveEasypaisaOrderRef(null);
+        resumedOrderRef.current = null;
+        showToast({
+            type: status === "expired" ? "warning" : "error",
+            title: status === "expired" ? "Payment expired" : "Payment failed",
+            message: status === "expired"
+                ? "This Easypaisa payment expired before confirmation."
+                : "Easypaisa did not confirm this payment.",
+        });
+    }, [showToast]);
+
+    const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
+        if (!pendingCreateAfterPayment) return;
+        if (resumedOrderRef.current === orderRefNum) return;
+        resumedOrderRef.current = orderRefNum;
+        setFinishingEasypaisa(true);
+
+        try {
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: pendingCreateAfterPayment.captainPaymentAmount,
+                side: "teamA",
+                reference: pendingCreateAfterPayment.walletReference,
+            });
+            if (!walletPayment.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingCreateAfterPayment(null);
+                showToast({
+                    type: "warning",
+                    title: "Payment received",
+                    message: walletPayment.message || "Funds were added to your wallet, but MatchHai could not send the challenge automatically. Try again using Wallet.",
+                });
+                return;
+            }
+            const result = await sendTeamMatchChallenge(pendingCreateAfterPayment.challengeArgs);
+            if (!result.ok) {
+                setActiveEasypaisaOrderRef(null);
+                setEasypaisaModalVisible(false);
+                setPendingCreateAfterPayment(null);
+                showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
+                return;
+            }
+
+            setEasypaisaModalVisible(false);
+            setPendingCreateAfterPayment(null);
+            setActiveEasypaisaOrderRef(null);
+
+            Alert.alert("Challenge sent", `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`, [
+                { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${(result as any).challengeId}` as any) },
+                { text: "OK" },
+            ]);
+        } catch (error: any) {
+            setActiveEasypaisaOrderRef(null);
+            setEasypaisaModalVisible(false);
+            setPendingCreateAfterPayment(null);
+            showToast({
+                type: "warning",
+                title: "Payment received",
+                message: error?.message || "Funds were added to your wallet, but MatchHai could not finish the challenge automatically.",
+            });
+        } finally {
+            setFinishingEasypaisa(false);
+        }
+    }, [pendingCreateAfterPayment, router, showToast]);
+
+    const refreshEasypaisaPaymentStatus = React.useCallback(async (orderRefNum: string) => {
+        if (!user?._id || !orderRefNum) return;
+        try {
+            const result = await syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> } as any);
+            if (isEasypaisaPaid(result)) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (isEasypaisaStopped(result)) {
+                handleStoppedEasypaisaPayment(result);
+            }
+        } catch {
+            // Keep polling; transient gateway inquiry errors should not strand the modal.
+        }
+    }, [finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, syncCheckoutStatus, user?._id]);
+
     const handleStartEasypaisaTopup = async () => {
         if (!user?._id || !pendingCreateAfterPayment) return;
         const amount = Math.max(0, Math.ceil(Number(pendingCreateAfterPayment.captainPaymentAmount || 0)));
@@ -601,13 +689,25 @@ export default function TeamChallengeCreateScreen() {
 
             const orderRefNum = String(checkout.orderRefNum || "");
             setActiveEasypaisaOrderRef(orderRefNum || null);
+            const paidImmediately = isEasypaisaPaid(checkout);
             showToast({
-                type: "info",
-                title: "Payment started",
-                message: checkout.transactionType === "OTC"
+                type: paidImmediately ? "success" : "info",
+                title: paidImmediately ? "Payment confirmed" : "Payment started",
+                message: paidImmediately
+                    ? "Payment received. Sending the challenge now."
+                    : checkout.transactionType === "OTC"
                     ? `Use token ${checkout.paymentToken || "generated by Easypaisa"} before it expires.`
                     : "Approve the payment in Easypaisa. MatchHai will keep checking the status.",
             });
+            if (paidImmediately && orderRefNum) {
+                await finishAfterEasypaisaPayment(orderRefNum);
+                return;
+            }
+            if (orderRefNum) {
+                setTimeout(() => {
+                    void refreshEasypaisaPaymentStatus(orderRefNum);
+                }, 1200);
+            }
         } catch (error: any) {
             showToast({ type: "error", title: "Payment failed", message: error?.message || "Could not start the Easypaisa payment." });
         } finally {
@@ -617,45 +717,38 @@ export default function TeamChallengeCreateScreen() {
 
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !checkoutStatus || !pendingCreateAfterPayment) return;
-        const status = String((checkoutStatus as any)?.status || "");
-        if (status !== "paid") return;
-        if (resumedOrderRef.current === activeEasypaisaOrderRef) return;
-        resumedOrderRef.current = activeEasypaisaOrderRef;
-
-        void (async () => {
-            const walletPayment = await payTeamChallengeWithWallet({
-                amount: pendingCreateAfterPayment.captainPaymentAmount,
-                side: "teamA",
-                reference: pendingCreateAfterPayment.walletReference,
-            });
-            if (!walletPayment.ok) {
-                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-                return;
-            }
-            const result = await sendTeamMatchChallenge(pendingCreateAfterPayment.challengeArgs);
-            if (!result.ok) {
-                showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
-                return;
-            }
-
-            setEasypaisaModalVisible(false);
-            setPendingCreateAfterPayment(null);
-            setActiveEasypaisaOrderRef(null);
-
-            Alert.alert("Challenge sent", `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`, [
-                { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${(result as any).challengeId}` as any) },
-                { text: "OK" },
-            ]);
-        })();
-    }, [activeEasypaisaOrderRef, checkoutStatus, pendingCreateAfterPayment, router, showToast]);
+        if (isEasypaisaPaid(checkoutStatus)) {
+            void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
+            return;
+        }
+        if (isEasypaisaStopped(checkoutStatus)) {
+            handleStoppedEasypaisaPayment(checkoutStatus);
+        }
+    }, [activeEasypaisaOrderRef, checkoutStatus, finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, pendingCreateAfterPayment]);
 
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !user?._id) return;
         const timer = setInterval(() => {
-            syncCheckoutStatus({ orderRefNum: activeEasypaisaOrderRef, userId: user._id as Id<"users"> } as any).catch(() => { });
+            void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
         }, 2000);
         return () => clearInterval(timer);
-    }, [activeEasypaisaOrderRef, syncCheckoutStatus, user?._id]);
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus, user?._id]);
+
+    useEffect(() => {
+        if (!activeEasypaisaOrderRef) return;
+        const subscription = AppState.addEventListener("change", (state) => {
+            if (state === "active") {
+                void refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef);
+            }
+        });
+        return () => subscription.remove();
+    }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus]);
+
+    const easypaisaStatusMessage = activeEasypaisaOrderRef
+        ? finishingEasypaisa || isEasypaisaPaid(checkoutStatus)
+            ? "Payment confirmed. Sending challenge..."
+            : "Waiting for payment confirmation..."
+        : null;
 
     if (loading) {
         return (
@@ -692,14 +785,14 @@ export default function TeamChallengeCreateScreen() {
             <AppHeader title="Challenge Team" onBack={() => router.back()} inlineTitle />
             <AppDialog
                 visible={easypaisaModalVisible}
-                onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
-                dismissDisabled={startingEasypaisa}
+                onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                dismissDisabled={startingEasypaisa || finishingEasypaisa}
             >
                 <AppModalHeader
                     title="Confirm Easypaisa Number"
                     subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(pendingCreateAfterPayment?.captainPaymentAmount || 0)))} then MatchHai will send the challenge automatically.`}
-                    onClose={() => !startingEasypaisa && setEasypaisaModalVisible(false)}
-                    closeDisabled={startingEasypaisa}
+                    onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
+                    closeDisabled={startingEasypaisa || finishingEasypaisa}
                 />
                 <AppModalBody scroll>
                     <Text style={{ color: COLORS.textSecondary, marginBottom: 10 }}>
@@ -720,11 +813,11 @@ export default function TeamChallengeCreateScreen() {
                         onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
                         placeholder="03XX XXX XXXX"
                         placeholderTextColor={COLORS.textSecondary}
-                        editable={!startingEasypaisa}
+                        editable={!startingEasypaisa && !finishingEasypaisa && !activeEasypaisaOrderRef}
                     />
-                    {activeEasypaisaOrderRef ? (
+                    {easypaisaStatusMessage ? (
                         <Text style={{ color: COLORS.warning, marginTop: 12 }}>
-                            Waiting for payment confirmation...
+                            {easypaisaStatusMessage}
                         </Text>
                     ) : null}
                 </AppModalBody>
@@ -734,15 +827,15 @@ export default function TeamChallengeCreateScreen() {
                             variant="secondary"
                             style={{ flex: 1 }}
                             onPress={() => setEasypaisaModalVisible(false)}
-                            disabled={startingEasypaisa}
+                            disabled={startingEasypaisa || finishingEasypaisa}
                         >
                             Cancel
                         </AppButton>
                         <AppButton
                             style={{ flex: 1 }}
                             onPress={handleStartEasypaisaTopup}
-                            loading={startingEasypaisa}
-                            disabled={startingEasypaisa || Boolean(activeEasypaisaOrderRef)}
+                            loading={startingEasypaisa || finishingEasypaisa}
+                            disabled={startingEasypaisa || finishingEasypaisa || Boolean(activeEasypaisaOrderRef)}
                         >
                             Continue to Pay
                         </AppButton>
