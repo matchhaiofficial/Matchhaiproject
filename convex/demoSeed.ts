@@ -6,6 +6,9 @@ import type { Doc, Id } from "./_generated/dataModel";
 
 const DEMO_DOMAIN = "@matchhai.demo";
 const DEMO_PASSWORD = "MatchHaiDemo123!";
+const KARACHI_REALISTIC_SEED_SOURCE = "karachi_realistic_demo_2026";
+const KARACHI_REALISTIC_PASSWORD = "Demo@123456";
+const KARACHI_REALISTIC_EMAIL_DOMAIN = "@matchhai.demo";
 const DEFAULT_CURRENCY = "PKR";
 const MAX_USERNAME_LEN = 24;
 const DEFAULT_PLAYER_COUNT = 200;
@@ -69,6 +72,9 @@ type DemoExport = {
 };
 
 function requireSeedKey(seedKey: string) {
+  if (String(process.env.DEMO_SEED_ENABLED || "").trim() !== "true") {
+    throw new Error("Demo seed is disabled. Set DEMO_SEED_ENABLED=true in the Convex environment to enable seeding.");
+  }
   const expected = process.env.DEMO_SEED_KEY;
   if (!expected) {
     throw new Error("DEMO_SEED_KEY is not configured in the Convex environment.");
@@ -536,7 +542,18 @@ function buildZoneName(i: number, city: string, profile: DemoZoneProfile) {
   return `${prefix} ${kind}`;
 }
 
-async function ensureBetterAuthUser(ctx: any, input: { email: string; name: string; username: string; phone: string }) {
+async function ensureBetterAuthUser(
+  ctx: any,
+  input: {
+    email: string;
+    name: string;
+    username: string;
+    phone: string;
+    passwordPlaintext?: string;
+    forceCredentialPassword?: boolean;
+    phoneNumberVerified?: boolean;
+  },
+) {
   const existing = await ctx.runQuery(components.betterAuth.adapter.findOne, {
     model: "user",
     where: [{ field: "email", operator: "eq", value: input.email }],
@@ -550,6 +567,62 @@ async function ensureBetterAuthUser(ctx: any, input: { email: string; name: stri
         0,
         MAX_USERNAME_LEN
       ) || input.username;
+
+    if (input.phoneNumberVerified) {
+      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+        input: {
+          model: "user",
+          where: [{ field: "_id", operator: "eq", value: id }],
+          update: {
+            emailVerified: true,
+            phoneNumber: input.phone,
+            phoneNumberVerified: true,
+            updatedAt: Date.now(),
+          },
+        },
+      });
+    }
+
+    const passwordToUse = input.passwordPlaintext || DEMO_PASSWORD;
+    const shouldForcePassword = !!input.forceCredentialPassword;
+    const isDemoEmail = String(input.email || "").toLowerCase().endsWith(KARACHI_REALISTIC_EMAIL_DOMAIN);
+    if (shouldForcePassword && isDemoEmail) {
+      const passwordHash = await hashPassword(passwordToUse);
+      const account = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+        model: "account",
+        where: [
+          { field: "userId", operator: "eq", value: id },
+          { connector: "AND", field: "providerId", operator: "eq", value: "credential" },
+        ],
+      });
+
+      if (account) {
+        await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+          input: {
+            model: "account",
+            where: [{ field: "_id", operator: "eq", value: String((account as any).id || (account as any)._id || "") }],
+            update: {
+              password: passwordHash,
+              updatedAt: Date.now(),
+            },
+          },
+        });
+      } else {
+        await ctx.runMutation(components.betterAuth.adapter.create, {
+          input: {
+            model: "account",
+            data: {
+              accountId: id,
+              providerId: "credential",
+              password: passwordHash,
+              userId: id,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          },
+        });
+      }
+    }
     return { authUserId: id, username };
   }
 
@@ -578,7 +651,7 @@ async function ensureBetterAuthUser(ctx: any, input: { email: string; name: stri
             username: candidate,
             displayUsername: candidate,
             phoneNumber: input.phone,
-            phoneNumberVerified: false,
+            phoneNumberVerified: !!input.phoneNumberVerified,
             image: null,
             isAnonymous: false,
             twoFactorEnabled: false,
@@ -607,7 +680,8 @@ async function ensureBetterAuthUser(ctx: any, input: { email: string; name: stri
     throw new Error("Failed to create Better Auth user.");
   }
 
-  const passwordHash = await hashPassword(DEMO_PASSWORD);
+  const passwordToUse = input.passwordPlaintext || DEMO_PASSWORD;
+  const passwordHash = await hashPassword(passwordToUse);
   const existingAccount = await ctx.runQuery(components.betterAuth.adapter.findOne, {
     model: "account",
     where: [
@@ -616,7 +690,15 @@ async function ensureBetterAuthUser(ctx: any, input: { email: string; name: stri
     ],
   });
 
-  if (!existingAccount) {
+  if (!existingAccount || (input.forceCredentialPassword && String(input.email || "").toLowerCase().endsWith(KARACHI_REALISTIC_EMAIL_DOMAIN))) {
+    if (existingAccount && input.forceCredentialPassword) {
+      await ctx.runMutation(components.betterAuth.adapter.deleteOne, {
+        input: {
+          model: "account",
+          where: [{ field: "_id", operator: "eq", value: String((existingAccount as any).id || (existingAccount as any)._id || "") }],
+        },
+      });
+    }
     await ctx.runMutation(components.betterAuth.adapter.create, {
       input: {
         model: "account",
@@ -2616,3 +2698,864 @@ async function deleteMatchroomAndChat(ctx: any, matchroomId: any) {
 
   await ctx.db.delete(matchroomId);
 }
+
+// ============================================================================
+// Karachi realistic demo seed (2026)
+// ============================================================================
+
+type KarachiRealisticSeedCursor = {
+  phase: "players" | "zones" | "done";
+  index: number;
+};
+
+function normalizeKarachiRealisticCursor(input: any): KarachiRealisticSeedCursor {
+  const phase = String(input?.phase || "players");
+  const validPhases = new Set(["players", "zones", "done"]);
+  const index = Number(input?.index || 1);
+  return {
+    phase: (validPhases.has(phase) ? phase : "players") as KarachiRealisticSeedCursor["phase"],
+    index: Number.isFinite(index) && index >= 1 ? Math.floor(index) : 1,
+  };
+}
+
+function isDemoEmail(email: string) {
+  return String(email || "").trim().toLowerCase().endsWith(KARACHI_REALISTIC_EMAIL_DOMAIN);
+}
+
+function clampInt(value: unknown, min: number, max: number) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return min;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizePlayerFullName(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/[^\p{L}\s.'-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+}
+
+function normalizePlayerUsername(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const cleaned = raw.replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned.slice(0, 20);
+}
+
+function isValidUsername(value: string) {
+  return /^[a-zA-Z0-9_]{3,20}$/.test(value);
+}
+
+function toDemoEmailForSeed(inputEmail: unknown, rowIndex: number) {
+  const raw = String(inputEmail || "").trim().toLowerCase();
+  const local = normalizeUsername(raw.split("@")[0] || "");
+  const suffix = to3((rowIndex % 1000) || 1);
+  const stableLocal = local.length >= 3 ? local : `demo_${suffix}`;
+  return `${stableLocal}${stableLocal.endsWith(suffix) ? "" : `.${suffix}`}${KARACHI_REALISTIC_EMAIL_DOMAIN}`;
+}
+
+function buildPakistaniMobile03(seed: number) {
+  const rand = mulberry32(123456 + seed);
+  const line = 100000000 + Math.floor(rand() * 899999999);
+  return `03${line}`;
+}
+
+function pickAgeRange(seed: number) {
+  const ranges = ["13-17", "18-24", "25-34", "35+"] as const;
+  return ranges[seed % ranges.length];
+}
+
+function gameKeyFromExcel(value: unknown): "cs2" | "cs16" | "valorant" | "fc26" | "tekken8" | null {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "cs2" || raw.includes("counter-strike 2")) return "cs2";
+  if (raw.includes("cs 1.6") || raw.includes("cs1.6") || raw.includes("1.6")) return "cs16";
+  if (raw.includes("valorant")) return "valorant";
+  if (raw.includes("fc26") || raw.includes("fc 26")) return "fc26";
+  if (raw.includes("tekken 8") || raw.includes("tekken8")) return "tekken8";
+  return null;
+}
+
+function skillTierToRating(tier: unknown) {
+  const raw = String(tier || "").trim().toLowerCase();
+  if (!raw) return { tierLabel: "Casual", rating: 50 };
+  if (raw === "beginner") return { tierLabel: "Beginner", rating: 35 };
+  if (raw === "casual") return { tierLabel: "Casual", rating: 50 };
+  if (raw === "intermediate") return { tierLabel: "Intermediate", rating: 65 };
+  if (raw === "advanced") return { tierLabel: "Advanced", rating: 78 };
+  if (raw === "semi-pro" || raw === "semi pro") return { tierLabel: "Semi-Pro", rating: 86 };
+  if (raw === "pro") return { tierLabel: "Pro", rating: 92 };
+  return { tierLabel: String(tier).slice(0, 40) || "Casual", rating: 55 };
+}
+
+async function ensureKarachiRealisticUser(ctx: any, input: {
+  authId: string;
+  email: string;
+  fullName: string;
+  username: string;
+  phone: string;
+  accountType: "player" | "zone";
+  playerGameKey?: string | null;
+  roleStyle?: string | null;
+  skillTier?: string | null;
+}) {
+  const now = Date.now();
+  const normalizedEmail = String(input.email || "").trim().toLowerCase();
+
+  const existing = await ctx.db
+    .query("users")
+    .withIndex("by_email", (q: any) => q.eq("email", normalizedEmail))
+    .unique();
+
+  if (existing) {
+    const existingIsDemo = !!(existing as any).isDemo || String((existing as any).seedSource || "") === KARACHI_REALISTIC_SEED_SOURCE;
+    if (!existingIsDemo && !isDemoEmail(normalizedEmail)) {
+      return { ok: false as const, skipped: true as const, reason: "existing_non_demo_email_conflict" as const };
+    }
+
+    await ctx.db.patch(existing._id, {
+      authId: input.authId,
+      isDemo: true,
+      seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+      isVerified: true,
+      phoneValidated: true,
+      phoneOtpVerified: true,
+      phoneOtpVerifiedAt: now,
+      phoneValidationCheckedAt: now,
+      kycVerificationStatus: "verified",
+      kycVerifiedAt: now,
+      emailVerificationStatus: "verified",
+      emailVerifiedAt: now,
+      phone: input.phone,
+      fullName: input.fullName || existing.fullName,
+      updatedAt: now,
+    } as any);
+
+    return { ok: true as const, userId: existing._id, created: false as const };
+  }
+
+  const usernameCandidates = Array.from(
+    new Set([
+      String(input.username || "").slice(0, 20),
+      String(`${input.username}_${to3(Math.abs(hashString(normalizedEmail)) % 1000)}`).slice(0, 20),
+      normalizeUsername(String(normalizedEmail).split("@")[0] || "").slice(0, 20),
+    ])
+  ).filter((u) => isValidUsername(u));
+
+  let finalUsername = usernameCandidates[0] || `demo_${to3(Math.abs(hashString(normalizedEmail)) % 1000)}`;
+  let finalLower = normalizeUsername(finalUsername);
+  for (const candidate of usernameCandidates) {
+    const lower = normalizeUsername(candidate);
+    const collision = await ctx.db
+      .query("users")
+      .withIndex("by_usernameLower", (q: any) => q.eq("usernameLower", lower))
+      .collect();
+    if (collision.length === 0) {
+      finalUsername = candidate;
+      finalLower = lower;
+      break;
+    }
+  }
+
+  const areas = AREAS_BY_CITY.Karachi || ["Gulshan-e-Iqbal"];
+  const rand = mulberry32(Math.abs(hashString(normalizedEmail)) % 100000);
+  const preferredAreas = Array.from(new Set([pick(rand, areas), pick(rand, areas), pick(rand, areas)])).slice(0, 5);
+
+  const base: Record<string, any> = {
+    authId: input.authId,
+    email: normalizedEmail,
+    fullName: input.fullName,
+    username: finalUsername,
+    usernameLower: finalLower,
+    phone: input.phone,
+    phoneValidated: true,
+    phoneOtpVerified: true,
+    phoneOtpVerifiedAt: now,
+    phoneValidationCheckedAt: now,
+    accountType: input.accountType,
+    isOnline: false,
+    isVerified: true,
+    isDemo: true,
+    seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+    kycVerificationStatus: "verified",
+    kycVerifiedAt: now,
+    emailVerificationStatus: "verified",
+    emailVerifiedAt: now,
+    onboardingCompleted: true,
+    onboardingStep: 4,
+    city: "Karachi",
+    areasPreferred: preferredAreas,
+    ageRange: pickAgeRange(Math.abs(hashString(normalizedEmail))),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (input.accountType === "player") {
+    const game = input.playerGameKey || null;
+    base.playsCs2 = game === "cs2";
+    base.playsCs16 = game === "cs16";
+    base.playsValorant = game === "valorant";
+    base.playsFc = game === "fc26";
+    base.playsTekken = game === "tekken8";
+
+    if (game === "cs2" && input.roleStyle) base.cs2Role = String(input.roleStyle).slice(0, 40);
+    if (game === "cs16" && input.roleStyle) base.cs16Role = String(input.roleStyle).slice(0, 40);
+    if (game === "valorant" && input.roleStyle) base.valorantRole = String(input.roleStyle).slice(0, 40);
+
+    const { tierLabel, rating } = skillTierToRating(input.skillTier);
+    const key =
+      game === "cs2"
+        ? "cs2"
+        : game === "cs16"
+          ? "cs16"
+          : game === "valorant"
+            ? "valorant"
+            : game === "fc26"
+              ? "fc26"
+              : game === "tekken8"
+                ? "tekken8"
+                : null;
+    if (key) {
+      base.skillScores = {
+        [key]: {
+          rating,
+          tier: tierLabel,
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          lastMatchDate: null,
+          lastUpdated: now,
+        },
+      };
+    }
+  }
+
+  const userId = await ctx.db.insert("users", base as any);
+  return { ok: true as const, userId, created: true as const };
+}
+
+async function ensureKarachiRealisticBetterAuth(ctx: any, input: {
+  email: string;
+  fullName: string;
+  username: string;
+  phone: string;
+}) {
+  const auth = await ensureBetterAuthUser(ctx, {
+    email: input.email,
+    name: input.fullName,
+    username: input.username,
+    phone: input.phone,
+    passwordPlaintext: KARACHI_REALISTIC_PASSWORD,
+    forceCredentialPassword: true,
+    phoneNumberVerified: true,
+  });
+  return auth;
+}
+
+export const seedKarachiRealisticPlayerByIndex = internalMutation({
+  args: { seedKey: v.string(), i: v.number(), player: v.any() },
+  handler: async (ctx, args): Promise<any> => {
+    requireSeedKey(args.seedKey);
+
+    const i = Math.floor(args.i);
+    const row = args.player || {};
+
+    const city = String(row.city || row.City || "").trim();
+    const country = String(row.country || row.Country || "").trim();
+    if (city !== "Karachi" || country !== "Pakistan") {
+      return { ok: true, skipped: true, reason: "invalid_city_or_country" };
+    }
+
+    const email = toDemoEmailForSeed(row.email || row["Email (Demo)"] || row.Email, i);
+    const fullName = normalizePlayerFullName(row.fullName || row["Player Name"] || row.playerName || row.name) || `Demo Player ${to3(i)}`;
+    const usernameRaw = normalizePlayerUsername(row.username || row.Username) || normalizeUsername(email.split("@")[0] || "");
+    const username = isValidUsername(usernameRaw) ? usernameRaw : `demo_${to3(i)}`;
+    const phone = buildPakistaniMobile03(10000 + i);
+
+    const gameKey = gameKeyFromExcel(row.game || row.Game);
+    const roleStyle = String(row.roleStyle || row["Preferred Role / Style"] || row.role || row.style || "").trim() || null;
+    const skillTier = String(row.skillTier || row["Skill Tier"] || "").trim() || null;
+
+    const auth = await ensureKarachiRealisticBetterAuth(ctx, { email, fullName, username, phone });
+
+    const ensured = await ensureKarachiRealisticUser(ctx, {
+      authId: auth.authUserId,
+      email,
+      fullName,
+      username: auth.username,
+      phone,
+      accountType: "player",
+      playerGameKey: gameKey,
+      roleStyle,
+      skillTier,
+    });
+
+    if (!ensured.ok) return ensured;
+
+    return { ok: true, userId: String(ensured.userId), created: ensured.created };
+  },
+});
+
+const KARACHI_ZONE_BRANDS = [
+  "Gaming Nexus",
+  "ManCave",
+  "Cyber Xtreme Gaming Arena",
+  "ROG",
+  "DEVILIAN'Z",
+  "Penguin Esports",
+  "O2 Esports",
+  "Arcadium",
+  "Nuke Town",
+] as const;
+
+function buildKarachiZoneVenueName(i: number, areaLabel: string) {
+  const brand = KARACHI_ZONE_BRANDS[(i - 1) % KARACHI_ZONE_BRANDS.length];
+  return `${brand} - ${areaLabel}`.slice(0, 80);
+}
+
+function buildBranchIdFrom(zoneKey: string, branchName: string) {
+  const raw = `${zoneKey}::${branchName}`;
+  return `kr_${to3(Math.abs(hashString(raw)) % 1000)}_${to3(Math.abs(hashString(raw + "_b")) % 1000)}`;
+}
+
+function buildKarachiBranchPricing(i: number) {
+  const rand = mulberry32(99000 + i);
+  const pcRegularCount = String(5 + Math.floor(rand() * 16)); // 5-20
+  const pcPremiumCount = String(3 + Math.floor(rand() * 10)); // 3-12
+  const pcEliteCount = String(1 + Math.floor(rand() * 8)); // 1-8
+  const pcRegularPrice = String(250 + Math.floor(rand() * 151)); // 250-400
+  const pcPremiumPrice = String(400 + Math.floor(rand() * 301)); // 400-700
+  const pcElitePrice = String(700 + Math.floor(rand() * 501)); // 700-1200
+
+  const consoleRegularCount = String(1 + Math.floor(rand() * 4)); // 1-4
+  const consolePremiumCount = String(1 + Math.floor(rand() * 3)); // 1-3
+  const consoleEliteCount = String(1 + Math.floor(rand() * 2)); // 1-2
+
+  const reg1v1 = String(500 + Math.floor(rand() * 301)); // 500-800
+  const reg2v2 = String(700 + Math.floor(rand() * 501)); // 700-1200
+  const prem1v1 = String(800 + Math.floor(rand() * 401)); // 800-1200
+  const prem2v2 = String(1200 + Math.floor(rand() * 601)); // 1200-1800
+  const elite1v1 = String(1200 + Math.floor(rand() * 601)); // 1200-1800
+  const elite2v2 = String(1800 + Math.floor(rand() * 701)); // 1800-2500
+
+  return {
+    pc: {
+      regular: { count: pcRegularCount, price: pcRegularPrice },
+      premium: { count: pcPremiumCount, price: pcPremiumPrice },
+      elite: { count: pcEliteCount, price: pcElitePrice },
+    },
+    console: {
+      regular: { count: consoleRegularCount, price1v1: reg1v1, price2v2: reg2v2 },
+      premium: { count: consolePremiumCount, price1v1: prem1v1, price2v2: prem2v2 },
+      elite: { count: consoleEliteCount, price1v1: elite1v1, price2v2: elite2v2 },
+    },
+  };
+}
+
+function buildKarachiBranchSpecs() {
+  return {
+    pcSpecs: {
+      regular: { cpu: "Core i5 / Ryzen 5", gpu: "GTX 1660 / RTX 2060", monitorRefreshRate: "144Hz" },
+      premium: { cpu: "Core i7 / Ryzen 7", gpu: "RTX 3060 / RTX 4060", monitorRefreshRate: "165Hz / 180Hz" },
+      elite: { cpu: "Core i7/i9 or Ryzen 7/9", gpu: "RTX 4070 / RTX 4080", monitorRefreshRate: "240Hz" },
+    },
+    specs: "Gaming chairs, high-speed internet, and UPS backup.",
+  };
+}
+
+function buildKarachiAggregateCapacity(branches: any[]) {
+  const toPositive = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+
+  return (branches || []).reduce(
+    (acc, branch) => {
+      const pricing = branch?.pricing || {};
+      const pc = pricing.pc || {};
+      const consolePricing = pricing.console || {};
+
+      acc.pcSeats +=
+        toPositive(pc.regular?.count) + toPositive(pc.premium?.count) + toPositive(pc.elite?.count);
+      acc.consoleSeats +=
+        toPositive(consolePricing.regular?.count) +
+        toPositive(consolePricing.premium?.count) +
+        toPositive(consolePricing.elite?.count) +
+        toPositive(consolePricing.ps5?.count) +
+        toPositive(consolePricing.xbox?.count);
+
+      return acc;
+    },
+    { pcSeats: 0, consoleSeats: 0 },
+  );
+}
+
+export const seedKarachiRealisticZoneByIndex = internalMutation({
+  args: { seedKey: v.string(), i: v.number() },
+  handler: async (ctx, args): Promise<any> => {
+    requireSeedKey(args.seedKey);
+
+    const now = Date.now();
+    const i = Math.floor(args.i);
+    const areas = AREAS_BY_CITY.Karachi || ["Gulshan-e-Iqbal"];
+    const areaLabel = areas[(i - 1) % areas.length];
+    const venueBrandName = buildKarachiZoneVenueName(i, areaLabel);
+    const zoneKey = normalizeUsername(venueBrandName);
+
+    const adminEmail = `${zoneKey}.${to3(i)}${KARACHI_REALISTIC_EMAIL_DOMAIN}`;
+    const adminFullName = `Owner ${venueBrandName}`.slice(0, 60);
+    const baseUsername = normalizeUsername(zoneKey).slice(0, 16) || "zone";
+    const adminUsername = `${baseUsername}_${to3(i)}`.slice(0, 20);
+    const adminPhone = buildPakistaniMobile03(50000 + i);
+
+    const auth = await ensureKarachiRealisticBetterAuth(ctx, {
+      email: adminEmail,
+      fullName: adminFullName,
+      username: adminUsername,
+      phone: adminPhone,
+    });
+
+    const ensuredAdmin = await ensureKarachiRealisticUser(ctx, {
+      authId: auth.authUserId,
+      email: adminEmail,
+      fullName: adminFullName,
+      username: auth.username,
+      phone: adminPhone,
+      accountType: "zone",
+    });
+
+    if (!ensuredAdmin.ok) return ensuredAdmin;
+
+    const existingZone = await ctx.db
+      .query("zones")
+      .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", ensuredAdmin.userId))
+      .unique();
+
+    const branchCount = (i % 3 === 0) ? 2 : 1;
+    const branches = Array.from({ length: branchCount }, (_, idx) => {
+      const branchDisplayName = idx === 0 ? "Main Branch" : "Branch 2";
+      const addressLine1 = `${10 + (i % 80)} ${areaLabel}, Karachi`;
+      const googleMapsUrl = `https://maps.google.com/?q=${encodeURIComponent(addressLine1)}`;
+      const pricing = buildKarachiBranchPricing(i * 10 + idx);
+      const specs = buildKarachiBranchSpecs();
+      return {
+        id: buildBranchIdFrom(zoneKey, branchDisplayName),
+        branchDisplayName,
+        name: branchDisplayName,
+        city: "Karachi",
+        areaLabel,
+        addressLine1,
+        googleMapsUrl,
+        contactPhone: buildPakistaniMobile03(70000 + i * 5 + idx),
+        supportsCs2: true,
+        supportsFc25: true,
+        supportsTekken8: true,
+        supportsFutsal: false,
+        supportsIndoorCricket: false,
+        supportsPadel: false,
+        supportsPickleball: false,
+        pricing,
+        ...specs,
+        notes: "Walk-ins welcome. Booking recommended on weekends.",
+        source: "seed",
+        isActive: true,
+        isDemo: true,
+        seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+        resourceModelVersion: 0,
+      };
+    });
+
+    const zoneDoc: any = {
+      ownerUid: ensuredAdmin.userId,
+      ownerUsername: auth.username,
+      ownerFullName: adminFullName,
+      name: venueBrandName,
+      venueBrandName,
+      contactEmail: adminEmail,
+      contactPhone: adminPhone,
+      type: "gaming",
+      status: "active",
+      onboardingStep: 4,
+      description: `A Karachi gaming zone with PC and console setups.`,
+      address: branches[0]?.addressLine1,
+      city: "Karachi",
+      phone: adminPhone,
+      isDemo: true,
+      seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+      games: ["cs2", "fc26", "tekken8"],
+      branches,
+      primaryBranch: {
+        branchDisplayName: branches[0]?.branchDisplayName,
+        city: "Karachi",
+        areaLabel,
+        addressLine1: branches[0]?.addressLine1,
+        googleMapsUrl: branches[0]?.googleMapsUrl,
+      },
+      capacity: buildKarachiAggregateCapacity(branches),
+      pricing: branches[0]?.pricing,
+      defaultPricing: { hourlyRate: 350, currency: DEFAULT_CURRENCY },
+      approvedAt: now,
+      createdAt: existingZone ? existingZone.createdAt : now,
+      updatedAt: now,
+    };
+
+    let zoneId: any = null;
+    if (existingZone) {
+      // Merge branches by id for idempotency.
+      const existingBranches = Array.isArray((existingZone as any).branches) ? (existingZone as any).branches : [];
+      const mergedById = new Map<string, any>();
+      for (const b of existingBranches) mergedById.set(String(b?.id || ""), b);
+      for (const b of branches) mergedById.set(String(b?.id || ""), b);
+      zoneDoc.branches = Array.from(mergedById.values()).filter((b) => b && b.id);
+
+      await ctx.db.patch(existingZone._id, zoneDoc);
+      zoneId = existingZone._id;
+    } else {
+      zoneId = await ctx.db.insert("zones", zoneDoc);
+    }
+
+    // Seed a small number of resources per branch (idempotent by name per branch).
+    const createdResources: string[] = [];
+    for (const b of branches) {
+      const branchId = String(b.id);
+      const existing = await ctx.db
+        .query("zoneResources")
+        .withIndex("by_zoneId_and_branchId", (q: any) => q.eq("zoneId", zoneId).eq("branchId", branchId))
+        .collect();
+      const existingNames = new Set(existing.map((r: any) => String(r.name)));
+
+      const pc = b.pricing?.pc;
+      const consolePricing = b.pricing?.console;
+      const pcTiers: Array<{ tier: string; count: number; price: number }> = [
+        { tier: "regular", count: Number(pc?.regular?.count || 0), price: Number(pc?.regular?.price || 0) },
+        { tier: "premium", count: Number(pc?.premium?.count || 0), price: Number(pc?.premium?.price || 0) },
+        { tier: "elite", count: Number(pc?.elite?.count || 0), price: Number(pc?.elite?.price || 0) },
+      ].filter((t) => t.count > 0 && t.price > 0);
+
+      for (const t of pcTiers) {
+        for (let seat = 1; seat <= Math.min(t.count, 2); seat += 1) {
+          const name = `PC ${t.tier.toUpperCase()}-${seat}`;
+          if (existingNames.has(name)) continue;
+          await ctx.db.insert("zoneResources", {
+            zoneId,
+            branchId,
+            kind: "seat",
+            name,
+            assetType: "pc",
+            tier: t.tier,
+            surface: "pc",
+            roomLabel: "PC Hall",
+            capacity: 1,
+            hourlyRate: t.price,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
+          } as any);
+          existingNames.add(name);
+          createdResources.push(name);
+        }
+      }
+
+      const cTiers: Array<{ tier: string; count: number; price1v1: number }> = [
+        { tier: "regular", count: Number(consolePricing?.regular?.count || 0), price1v1: Number(consolePricing?.regular?.price1v1 || 0) },
+        { tier: "premium", count: Number(consolePricing?.premium?.count || 0), price1v1: Number(consolePricing?.premium?.price1v1 || 0) },
+        { tier: "elite", count: Number(consolePricing?.elite?.count || 0), price1v1: Number(consolePricing?.elite?.price1v1 || 0) },
+      ].filter((t) => t.count > 0 && t.price1v1 > 0);
+
+      for (const t of cTiers) {
+        for (let unit = 1; unit <= Math.min(t.count, 1); unit += 1) {
+          const name = `CONSOLE ${t.tier.toUpperCase()}-${unit}`;
+          if (existingNames.has(name)) continue;
+          await ctx.db.insert("zoneResources", {
+            zoneId,
+            branchId,
+            kind: "seat",
+            name,
+            assetType: "console",
+            tier: t.tier,
+            surface: "ps5",
+            roomLabel: "Console Room",
+            capacity: 2,
+            hourlyRate: t.price1v1,
+            lifecycleStatus: "available",
+            isActive: true,
+            isDemo: true,
+            seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+            createdAt: now,
+            updatedAt: now,
+          } as any);
+          existingNames.add(name);
+          createdResources.push(name);
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      adminUserId: String(ensuredAdmin.userId),
+      zoneId: String(zoneId),
+      createdZone: !existingZone,
+      resourcesCreated: createdResources.length,
+      branchCount: branches.length,
+    };
+  },
+});
+
+export const seedKarachiRealisticDemo = action({
+  args: {
+    seedKey: v.string(),
+    cursor: v.optional(v.any()),
+    players: v.array(v.any()),
+    zoneCount: v.optional(v.number()),
+    batchSize: v.optional(v.number()),
+    maxMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<any> => {
+    requireSeedKey(args.seedKey);
+
+    const zoneCount = clampInt(args.zoneCount ?? 50, 1, 200);
+    const batchSize = clampInt(args.batchSize ?? 2, 1, 10);
+    const maxMs = clampInt(args.maxMs ?? 15_000, 1_000, 120_000);
+
+    const startedAt = Date.now();
+    let cursor = normalizeKarachiRealisticCursor(args.cursor);
+
+    const internalAny = (await import("./_generated/api")).internal as any;
+
+    const counts = {
+      playersCreated: 0,
+      playersUpdated: 0,
+      playersSkipped: 0,
+      zonesCreated: 0,
+      zonesUpdated: 0,
+      zoneAdmins: 0,
+      branches: 0,
+      resourcesCreated: 0,
+    };
+
+    while (Date.now() - startedAt < maxMs && cursor.phase !== "done") {
+      if (cursor.phase === "players") {
+        for (let k = 0; k < batchSize && cursor.index <= args.players.length; k += 1) {
+          const player = args.players[cursor.index - 1];
+          const res = await ctx.runMutation(internalAny.demoSeed.seedKarachiRealisticPlayerByIndex, {
+            seedKey: args.seedKey,
+            i: cursor.index,
+            player,
+          });
+          if (res?.created) counts.playersCreated += 1;
+          else if (res?.ok && !res?.skipped) counts.playersUpdated += 1;
+          else counts.playersSkipped += 1;
+          cursor.index += 1;
+          if (Date.now() - startedAt >= maxMs) break;
+        }
+        if (cursor.index > args.players.length) cursor = { phase: "zones", index: 1 };
+        continue;
+      }
+
+      if (cursor.phase === "zones") {
+        for (let k = 0; k < batchSize && cursor.index <= zoneCount; k += 1) {
+          const res = await ctx.runMutation(internalAny.demoSeed.seedKarachiRealisticZoneByIndex, {
+            seedKey: args.seedKey,
+            i: cursor.index,
+          });
+          if (res?.createdZone) counts.zonesCreated += 1;
+          else if (res?.ok) counts.zonesUpdated += 1;
+          if (res?.ok) counts.zoneAdmins += 1;
+          counts.branches += Number(res?.branchCount || 0);
+          counts.resourcesCreated += Number(res?.resourcesCreated || 0);
+          cursor.index += 1;
+          if (Date.now() - startedAt >= maxMs) break;
+        }
+        if (cursor.index > zoneCount) cursor = { phase: "done", index: 0 };
+        continue;
+      }
+
+      cursor = { phase: "done", index: 0 };
+    }
+
+    return {
+      ok: true,
+      done: cursor.phase === "done",
+      cursor,
+      counts,
+      password: KARACHI_REALISTIC_PASSWORD,
+      seedSource: KARACHI_REALISTIC_SEED_SOURCE,
+    };
+  },
+});
+
+type KarachiRealisticRemoveCursor = {
+  phase: "auth" | "zoneResources" | "zones" | "zoneAdmins" | "players" | "done";
+};
+
+function normalizeKarachiRealisticRemoveCursor(input: any): KarachiRealisticRemoveCursor {
+  const phase = String(input?.phase || "auth");
+  const validPhases = new Set(["auth", "zoneResources", "zones", "zoneAdmins", "players", "done"]);
+  return {
+    phase: (validPhases.has(phase) ? phase : "auth") as KarachiRealisticRemoveCursor["phase"],
+  };
+}
+
+const KARACHI_REMOVE_PHASES: KarachiRealisticRemoveCursor["phase"][] = [
+  "auth",
+  "zoneResources",
+  "zones",
+  "zoneAdmins",
+  "players",
+  "done",
+];
+
+function nextKarachiRemovePhase(phase: KarachiRealisticRemoveCursor["phase"]) {
+  const idx = KARACHI_REMOVE_PHASES.indexOf(phase);
+  return idx >= 0 && idx + 1 < KARACHI_REMOVE_PHASES.length ? KARACHI_REMOVE_PHASES[idx + 1] : "done";
+}
+
+export const removeKarachiRealisticDemoStep = internalMutation({
+  args: { seedKey: v.string(), phase: v.string(), batchSize: v.number() },
+  handler: async (ctx, args): Promise<any> => {
+    requireSeedKey(args.seedKey);
+
+    const phase = String(args.phase || "auth");
+    const batchSize = clampInt(args.batchSize, 1, 500);
+    const deleted: Record<string, number> = {};
+    const bump = (key: string, n: number) => {
+      deleted[key] = (deleted[key] || 0) + n;
+    };
+
+    if (phase === "auth") {
+      const seedUsers = await ctx.db
+        .query("users")
+        .withIndex("by_seedSource", (q: any) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+        .collect();
+
+      const authUserIds = seedUsers
+        .map((u: any) => String(u.authId || ""))
+        .filter(Boolean);
+
+      const authEmails = seedUsers
+        .map((u: any) => String(u.email || ""))
+        .filter((e: string) => e && isDemoEmail(e));
+
+      if (authUserIds.length > 0) {
+        await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+          input: { model: "session", where: [{ field: "userId", operator: "in", value: authUserIds }] },
+          paginationOpts: { cursor: null, numItems: 100000 },
+        });
+
+        await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+          input: { model: "account", where: [{ field: "userId", operator: "in", value: authUserIds }] },
+          paginationOpts: { cursor: null, numItems: 100000 },
+        });
+
+        await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+          input: { model: "user", where: [{ field: "_id", operator: "in", value: authUserIds }] },
+          paginationOpts: { cursor: null, numItems: 100000 },
+        });
+      }
+
+      if (authEmails.length > 0) {
+        await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+          input: { model: "verification", where: [{ field: "identifier", operator: "in", value: authEmails }] },
+          paginationOpts: { cursor: null, numItems: 100000 },
+        });
+      }
+
+      bump("betterAuthUsers", authUserIds.length);
+      return { ok: true, phaseDone: true, deleted };
+    }
+
+    if (phase === "zoneResources") {
+      const resources = await ctx.db
+        .query("zoneResources")
+        .withIndex("by_seedSource", (q: any) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+        .order("desc")
+        .take(batchSize);
+      for (const r of resources) await ctx.db.delete(r._id);
+      bump("zoneResources", resources.length);
+      return { ok: true, phaseDone: resources.length < batchSize, deleted };
+    }
+
+    if (phase === "zones") {
+      const zones = await ctx.db
+        .query("zones")
+        .withIndex("by_seedSource", (q: any) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+        .order("desc")
+        .take(batchSize);
+      for (const z of zones) await ctx.db.delete(z._id);
+      bump("zones", zones.length);
+      return { ok: true, phaseDone: zones.length < batchSize, deleted };
+    }
+
+    if (phase === "zoneAdmins") {
+      const admins = await ctx.db
+        .query("users")
+        .withIndex("by_seedSource", (q: any) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+        .filter((q: any) => q.eq(q.field("accountType"), "zone"))
+        .order("desc")
+        .take(batchSize);
+      for (const u of admins) await ctx.db.delete(u._id);
+      bump("zoneAdmins", admins.length);
+      return { ok: true, phaseDone: admins.length < batchSize, deleted };
+    }
+
+    if (phase === "players") {
+      const players = await ctx.db
+        .query("users")
+        .withIndex("by_seedSource", (q: any) => q.eq("seedSource", KARACHI_REALISTIC_SEED_SOURCE))
+        .filter((q: any) => q.eq(q.field("accountType"), "player"))
+        .order("desc")
+        .take(batchSize);
+      for (const u of players) await ctx.db.delete(u._id);
+      bump("players", players.length);
+      return { ok: true, phaseDone: players.length < batchSize, deleted };
+    }
+
+    return { ok: true, phaseDone: true, deleted };
+  },
+});
+
+export const removeKarachiRealisticDemo = action({
+  args: {
+    seedKey: v.string(),
+    cursor: v.optional(v.any()),
+    batchSize: v.optional(v.number()),
+    maxMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<any> => {
+    requireSeedKey(args.seedKey);
+
+    const batchSize = clampInt(args.batchSize ?? 200, 1, 500);
+    const maxMs = clampInt(args.maxMs ?? 15_000, 1_000, 120_000);
+
+    const startedAt = Date.now();
+    let cursor = normalizeKarachiRealisticRemoveCursor(args.cursor);
+
+    const deleted: Record<string, number> = {};
+
+    const internalAny = (await import("./_generated/api")).internal as any;
+
+    while (Date.now() - startedAt < maxMs && cursor.phase !== "done") {
+      const res = await ctx.runMutation(internalAny.demoSeed.removeKarachiRealisticDemoStep, {
+        seedKey: args.seedKey,
+        phase: cursor.phase,
+        batchSize,
+      });
+
+      for (const [k, n] of Object.entries(res?.deleted || {})) {
+        deleted[k] = (deleted[k] || 0) + Number(n || 0);
+      }
+
+      if (res?.phaseDone) {
+        cursor = { phase: nextKarachiRemovePhase(cursor.phase) };
+      }
+    }
+
+    return { ok: true, done: cursor.phase === "done", cursor, deleted, seedSource: KARACHI_REALISTIC_SEED_SOURCE };
+  },
+});

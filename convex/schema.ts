@@ -173,6 +173,8 @@ export default defineSchema({
     // Status
     isOnline: v.boolean(),
     isVerified: v.optional(v.boolean()),
+    isDemo: v.optional(v.boolean()),
+    seedSource: v.optional(v.string()),
     kycVerificationStatus: v.optional(v.union(
       v.literal("not_started"),
       v.literal("pending"),
@@ -301,6 +303,7 @@ export default defineSchema({
     .index("by_email", ["email"])
     .index("by_usernameLower", ["usernameLower"])
     .index("by_phone", ["phone"])
+    .index("by_seedSource", ["seedSource"])
     .index("by_steamId", ["steamId"])
     .index("by_faceitId", ["faceitId"])
     .index("by_psnAccountId", ["psnAccountId"])
@@ -1110,6 +1113,10 @@ export default defineSchema({
     phone: v.optional(v.string()),
     notes: v.optional(v.string()),
 
+    // Demo markers
+    isDemo: v.optional(v.boolean()),
+    seedSource: v.optional(v.string()),
+
     // Primary Branch (for display)
     primaryBranch: v.optional(v.object({
       branchDisplayName: v.optional(v.string()),
@@ -1190,6 +1197,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_ownerUid", ["ownerUid"])
+    .index("by_seedSource", ["seedSource"])
     .index("by_status", ["status"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_status_updatedAt", ["status", "updatedAt"]),
@@ -1272,6 +1280,10 @@ export default defineSchema({
     bookedByUid: v.optional(v.string()),
     isActive: v.optional(v.boolean()),
 
+    // Demo markers
+    isDemo: v.optional(v.boolean()),
+    seedSource: v.optional(v.string()),
+
     // Capacity
     capacity: v.optional(v.number()),
 
@@ -1283,6 +1295,7 @@ export default defineSchema({
   })
     .index("by_zoneId", ["zoneId"])
     .index("by_zoneId_and_branchId", ["zoneId", "branchId"])
+    .index("by_seedSource", ["seedSource"])
     .index("by_lifecycleStatus", ["lifecycleStatus"])
     .index("by_bookingRequestId", ["bookingRequestId"]),
 

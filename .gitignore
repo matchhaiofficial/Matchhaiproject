@@ -56,3 +56,6 @@ demo-data/
 # OS files
 .DS_Store
 Thumbs.db
+
+# demo seed input files
+matchhai_karachi_realistic_demo_players.xlsx
