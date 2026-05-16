@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, Text, View } from "react-native";
 
@@ -49,6 +49,8 @@ const TeamRow = React.memo(function TeamRow({
 }) {
   const isMyTeam = mode === "my";
   const isRequested = Boolean((team as any).isRequested);
+  const pendingChallengeId = String((team as any).pendingChallengeId || "");
+  const isChallenged = Boolean(pendingChallengeId);
   const isLoading = actionLoadingTeamId === team.id;
   const rawMemberCount = team.memberUids?.length ?? team.memberCount ?? 0;
   const totalMaxMembers = team.maxMembers || 0;
@@ -76,6 +78,8 @@ const TeamRow = React.memo(function TeamRow({
         </Text>
         {isMyTeam ? (
           <DiscoverActionChip label="View" tone="accent" onPress={handlePress} />
+        ) : isChallenged ? (
+          <DiscoverActionChip label="Challenged" tone="warning" onPress={handlePress} />
         ) : isRequested ? (
           <DiscoverActionChip label="Requested" tone="warning" />
         ) : isFull ? (
@@ -178,6 +182,12 @@ export default function DiscoverTeamList({
     fetchTeams();
   }, [fetchTeams]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchTeams();
+    }, [fetchTeams]),
+  );
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchTeams();
@@ -223,7 +233,7 @@ export default function DiscoverTeamList({
         setActionLoading(null);
       }
     },
-    [actionLoading, authUser, showToast],
+    [actionLoading, authUser, showToast, user],
   );
 
   const contentContainerStyle = useMemo(

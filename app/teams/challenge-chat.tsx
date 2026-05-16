@@ -50,7 +50,9 @@ export default function TeamChallengeChatScreen() {
     );
     const challengeData = useQuery(
         api.teamChallenges.getById,
-        chatData?.challengeId ? { challengeId: chatData.challengeId } : "skip"
+        chatData?.challengeId && user?._id
+            ? { challengeId: chatData.challengeId, actorUid: user._id as Id<"users"> }
+            : "skip"
     );
     const rawMessages = useQuery(
         api.teamChallengeChat.listMessages,

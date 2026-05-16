@@ -216,6 +216,13 @@ export default function TeamDetails() {
             ? { entityKey }
             : "skip"
     ) ?? false;
+    const pendingChallenge = useQuery(
+        api.teamChallenges.getPendingForOpponentByCaptain,
+        id && user?._id && !isMember
+            ? { opponentTeamId: id as Id<"teams">, actorUid: user._id as Id<"users"> }
+            : "skip",
+    );
+    const pendingChallengeId = pendingChallenge?.challengeId ? String(pendingChallenge.challengeId) : "";
 
     const loading = teamWithMembers === undefined;
 
@@ -553,6 +560,10 @@ export default function TeamDetails() {
 
     const handleChallenge = async () => {
         if (!team?.id || !user?._id) return;
+        if (pendingChallengeId) {
+            router.push(`/teams/challenge?id=${pendingChallengeId}` as any);
+            return;
+        }
         const candidates = captainedTeams.filter(
             (item) => item.id !== team.id && String(item.game || "").toLowerCase() === String(team.game || "").toLowerCase(),
         );
@@ -576,6 +587,11 @@ export default function TeamDetails() {
             pathname: "/teams/challenge-create" as any,
             params: { opponentTeamId: team.id },
         } as any);
+    };
+
+    const handleOpenChallenge = () => {
+        if (!pendingChallengeId) return;
+        router.push(`/teams/challenge?id=${pendingChallengeId}` as any);
     };
 
     const handleSubmitTeamReport = async () => {
@@ -606,6 +622,7 @@ export default function TeamDetails() {
     // Button State Logic
     const getButtonState = () => {
         if (isMember) return 'member';
+        if (pendingChallengeId) return 'challenged';
         if (myPendingRequest) return 'requested';
         if (isFull) return 'full';
         if (isPrivate) return 'private';
@@ -621,6 +638,10 @@ export default function TeamDetails() {
         }
         if (buttonState === 'eligible') {
             handleJoinRequest();
+            return;
+        }
+        if (buttonState === 'challenged') {
+            handleOpenChallenge();
             return;
         }
         if (buttonState === 'requested') {
@@ -987,6 +1008,17 @@ export default function TeamDetails() {
                                         <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
                                         <Text style={styles.actionButtonTextDisabled}>Requested</Text>
                                     </AppCard>
+                                )}
+                                {buttonState === 'challenged' && (
+                                    <AppButton
+                                        variant="success"
+                                        size="lg"
+                                        onPress={handleOpenChallenge}
+                                        disabled={submitting}
+                                        style={styles.challengeButton}
+                                    >
+                                        <Text style={styles.challengeButtonText}>Open Challenge</Text>
+                                    </AppButton>
                                 )}
                                 {buttonState === 'full' && (
                                     hasChallengeCandidateTeam ? (

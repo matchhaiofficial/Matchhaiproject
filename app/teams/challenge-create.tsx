@@ -18,6 +18,7 @@ import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import { parseScheduledDateTime } from "../../src/utils/matchroomTime";
+import { APP_ROUTES } from "../../src/navigation/routes";
 import BasicFields from "../matchrooms/create/components/BasicFields";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
 import { api } from "../../convex/_generated/api";
@@ -322,6 +323,16 @@ export default function TeamChallengeCreateScreen() {
             ? { userId: user._id as Id<"users">, orderRefNum: activeEasypaisaOrderRef }
             : "skip",
     );
+    const pendingChallengeForSelection = useQuery(
+        api.teamChallenges.getPendingForOpponentByCaptain,
+        user?._id && opponentTeamId && challengerTeamId
+            ? {
+                actorUid: user._id as Id<"users">,
+                opponentTeamId: opponentTeamId as Id<"teams">,
+                challengerTeamId: challengerTeamId as Id<"teams">,
+            }
+            : "skip",
+    );
     const [formData, setFormData] = useState({
         title: "",
         description: "",
@@ -456,6 +467,7 @@ export default function TeamChallengeCreateScreen() {
         !!formData.date &&
         !!formData.time &&
         pricePerPlayer > 0 &&
+        pendingChallengeForSelection !== undefined &&
         !submitting;
 
     const handleFieldChange = (field: string, value: any) => {
@@ -493,6 +505,23 @@ export default function TeamChallengeCreateScreen() {
 
         if (!isUserFullyVerified(authUser, user)) {
             showKycVerificationRequiredAlert();
+            return;
+        }
+        if (pendingChallengeForSelection === undefined) {
+            showToast({
+                type: "info",
+                title: "Checking challenge",
+                message: "Please try again in a moment.",
+            });
+            return;
+        }
+        if (pendingChallengeForSelection?.challengeId) {
+            showToast({
+                type: "warning",
+                title: "Challenge already sent",
+                message: "You already have a pending challenge for this team.",
+            });
+            router.replace(`/teams/challenge?id=${String(pendingChallengeForSelection.challengeId)}` as any);
             return;
         }
 
@@ -563,10 +592,12 @@ export default function TeamChallengeCreateScreen() {
             return;
         }
 
-        Alert.alert("Challenge sent", `${challengerTeam.name} challenged ${opponentTeam.name}.`, [
-            { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${result.challengeId}` as any) },
-            { text: "OK" },
-        ]);
+        showToast({
+            type: "success",
+            title: "Challenge sent",
+            message: `${challengerTeam.name} challenged ${opponentTeam.name}.`,
+        });
+        router.replace(APP_ROUTES.playerHome as any);
     };
 
     const handleStoppedEasypaisaPayment = React.useCallback((statusLike: any) => {
@@ -618,10 +649,12 @@ export default function TeamChallengeCreateScreen() {
             setPendingCreateAfterPayment(null);
             setActiveEasypaisaOrderRef(null);
 
-            Alert.alert("Challenge sent", `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`, [
-                { text: "Open Challenge", onPress: () => router.replace(`/teams/challenge?id=${(result as any).challengeId}` as any) },
-                { text: "OK" },
-            ]);
+            showToast({
+                type: "success",
+                title: "Challenge sent",
+                message: `${pendingCreateAfterPayment.challengerTeamName} challenged ${pendingCreateAfterPayment.opponentTeamName}.`,
+            });
+            router.replace(APP_ROUTES.playerHome as any);
         } catch (error: any) {
             setActiveEasypaisaOrderRef(null);
             setEasypaisaModalVisible(false);
