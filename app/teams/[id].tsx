@@ -814,7 +814,15 @@ export default function TeamDetails() {
                                     <Text style={styles.occupancyText}>
                                         {mainMemberCountDisplay} / {mainRosterSize}
                                     </Text>
-                                    {isFull && <StatusPill tone="danger" label="Full" />}
+                                    {isFull && (
+                                        <StatusPill
+                                            tone="danger"
+                                            label="Full"
+                                            caps={false}
+                                            style={styles.occupancyFullPill}
+                                            textStyle={styles.occupancyFullPillText}
+                                        />
+                                    )}
                                 </View>
 
                                 {!isCaptain && !isDeleted && (

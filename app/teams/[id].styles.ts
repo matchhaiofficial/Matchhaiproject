@@ -250,6 +250,17 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.label,
         letterSpacing: 0,
     },
+    occupancyFullPill: {
+        marginLeft: SPACING.sm,
+        alignSelf: "center",
+        minHeight: 24,
+        paddingVertical: 4,
+        paddingHorizontal: SPACING.sm,
+    },
+    occupancyFullPillText: {
+        fontSize: 10,
+        letterSpacing: 0.2,
+    },
     fullBadge: {
         marginLeft: SPACING.sm,
         color: COLORS.error,
