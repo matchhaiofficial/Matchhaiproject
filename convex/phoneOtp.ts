@@ -10,12 +10,20 @@ const VERIFY_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_SENDS_PER_HOUR = 3;
 const MAX_VERIFY_ATTEMPTS_PER_DAY = 5;
 const DEFAULT_VEEVOTECH_SMS_URL = "https://api.veevotech.com/v3/sendsms";
+const SMS_SEND_FAILURE_MESSAGE = "Could not send OTP. Please check your number and try again.";
+const SMS_PROVIDER_FAILURE_MESSAGE = "SMS service is temporarily unavailable. Please try again later.";
 
 type NormalizedPhone = {
   phoneE164: string;
   phoneDigits: string;
   phoneMasked: string;
 };
+
+type PhoneOtpFailure = { ok: false; message: string };
+
+function phoneOtpFailure(message: string): PhoneOtpFailure {
+  return { ok: false, message };
+}
 
 function normalizePakistaniPhone(value: string): NormalizedPhone {
   const raw = String(value || "").trim();
@@ -125,6 +133,21 @@ function isProviderFailureResponse(value: unknown) {
   return ["failed", "failure", "error", "invalid", "rejected", "unsuccessful"].includes(status);
 }
 
+function getProviderFailureCategory(value: unknown) {
+  if (!value || typeof value !== "object") return "provider_ambiguous_success";
+  const record = value as Record<string, unknown>;
+  const errorFilter = getProviderString(record, ["ERROR_FILTER", "errorFilter", "error_filter"]);
+  if (errorFilter) return `provider_error_${errorFilter.toLowerCase()}`;
+
+  const errorCode = getProviderString(record, ["ERROR_CODE", "errorCode", "error_code"]);
+  if (errorCode) return "provider_error";
+
+  const status = getProviderString(record, ["STATUS", "status"]).toLowerCase();
+  if (status === "error") return "provider_error";
+
+  return "provider_ambiguous_success";
+}
+
 function isProviderSuccessResponse(value: unknown) {
   if (!value || typeof value !== "object" || isProviderFailureResponse(value)) return false;
   const record = value as Record<string, unknown>;
@@ -148,48 +171,109 @@ function parseProviderBody(bodyText: string) {
   }
 }
 
+function redactProviderBody(value: unknown): unknown {
+  if (typeof value === "string") return value.slice(0, 1000);
+  if (!value || typeof value !== "object") return value;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = normalizeProviderKey(key);
+    if (
+      normalizedKey.includes("hash") ||
+      normalizedKey.includes("key") ||
+      normalizedKey.includes("token") ||
+      normalizedKey.includes("secret") ||
+      normalizedKey.includes("password")
+    ) {
+      redacted[key] = "[redacted]";
+    } else {
+      redacted[key] = fieldValue;
+    }
+  }
+  return redacted;
+}
+
+function getSmsUrlDebugInfo(smsUrl: string) {
+  try {
+    const parsed = new URL(smsUrl);
+    return {
+      host: parsed.host,
+      path: parsed.pathname,
+    };
+  } catch {
+    return {
+      host: "invalid-url",
+      path: "",
+    };
+  }
+}
+
 function logSmsFailure(
   category: string,
   details: {
     phoneMasked: string;
+    smsUrl: string;
+    hasApiHash: boolean;
+    hasSenderId: boolean;
     status?: number;
+    statusText?: string;
     providerBody?: unknown;
+    errorMessage?: string;
   },
 ) {
-  const isDevelopment =
-    String(process.env.NODE_ENV || "").toLowerCase() === "development" ||
-    String(process.env.CONVEX_ENVIRONMENT || "").toLowerCase() === "development";
-  if (!isDevelopment) return;
+  const smsUrlDebug = getSmsUrlDebugInfo(details.smsUrl);
 
-  console.warn("[phoneOtp] VeevoTech send failed", {
+  console.warn("[phoneOtp] VeevoTech send debug", {
     phoneMasked: details.phoneMasked,
+    smsEndpointHost: smsUrlDebug.host,
+    smsEndpointPath: smsUrlDebug.path,
+    hasApiHash: details.hasApiHash,
+    hasSenderId: details.hasSenderId,
     status: details.status,
+    statusText: details.statusText,
     category,
-    providerBody:
-      typeof details.providerBody === "string"
-        ? details.providerBody.slice(0, 500)
-        : details.providerBody,
+    providerBody: redactProviderBody(details.providerBody),
+    errorMessage: details.errorMessage,
     timestamp: Date.now(),
   });
 }
 
 export const sendPhoneOtp = action({
   args: { phone: v.string() },
-  handler: async (ctx, args): Promise<{
-    ok: true;
-    phoneE164: string;
-    phoneMasked: string;
-    cooldownSeconds: number;
-  }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | PhoneOtpFailure
+    | {
+        ok: true;
+        phoneE164: string;
+        phoneMasked: string;
+        cooldownSeconds: number;
+      }
+  > => {
     const apiHash = process.env.VEEVOTECH_API_HASH;
     const senderId = process.env.VEEVOTECH_SENDER_ID;
     const smsUrl = process.env.VEEVOTECH_SMS_URL || DEFAULT_VEEVOTECH_SMS_URL;
 
     if (!apiHash || !senderId) {
-      throw new Error("SMS verification is not configured.");
+      logSmsFailure("missing_config", {
+        phoneMasked: "unavailable",
+        smsUrl,
+        hasApiHash: Boolean(apiHash),
+        hasSenderId: Boolean(senderId),
+      });
+      return phoneOtpFailure("SMS verification is not configured.");
     }
 
-    const { phoneE164, phoneMasked } = normalizePakistaniPhone(args.phone);
+    let normalizedPhone: NormalizedPhone;
+    try {
+      normalizedPhone = normalizePakistaniPhone(args.phone);
+    } catch {
+      return phoneOtpFailure("Please enter a valid Pakistani mobile number.");
+    }
+
+    const { phoneE164, phoneMasked } = normalizedPhone;
     const phoneHash = await sha256(phoneE164);
     const now = Date.now();
 
@@ -197,7 +281,7 @@ export const sendPhoneOtp = action({
       phone: phoneE164,
     });
     if (!available) {
-      throw new Error("This phone number is already registered.");
+      return phoneOtpFailure("This phone number is already registered.");
     }
 
     const sendState: {
@@ -210,11 +294,11 @@ export const sendPhoneOtp = action({
 
     if (sendState.lastCreatedAt && now - sendState.lastCreatedAt < RESEND_COOLDOWN_MS) {
       const remaining = Math.ceil((RESEND_COOLDOWN_MS - (now - sendState.lastCreatedAt)) / 1000);
-      throw new Error(`Please wait ${remaining}s before requesting another code.`);
+      return phoneOtpFailure(`Please wait ${remaining}s before requesting another code.`);
     }
 
     if (sendState.sendsInWindow >= MAX_SENDS_PER_HOUR) {
-      throw new Error("Too many OTP requests. Please try again later.");
+      return phoneOtpFailure("Too many OTP requests. Please try again later.");
     }
 
     const otp = generateOtp();
@@ -258,28 +342,33 @@ export const sendPhoneOtp = action({
           verificationId,
           updatedAt: Date.now(),
         });
-        logSmsFailure(response.ok ? "provider_ambiguous_success" : "provider_non_ok", {
+        const failureCategory = response.ok
+          ? getProviderFailureCategory(providerBody)
+          : "provider_non_ok";
+        logSmsFailure(failureCategory, {
           phoneMasked,
+          smsUrl,
+          hasApiHash: Boolean(apiHash),
+          hasSenderId: Boolean(senderId),
           status: response.status,
+          statusText: response.statusText,
           providerBody,
         });
-        throw new Error("Could not send OTP. Please check your number and try again.");
+        return phoneOtpFailure(response.ok ? SMS_PROVIDER_FAILURE_MESSAGE : SMS_SEND_FAILURE_MESSAGE);
       }
     } catch (error) {
       await ctx.runMutation(internal.phoneOtp.markFailed, {
         verificationId,
         updatedAt: Date.now(),
       });
-      if (
-        error instanceof Error &&
-        error.message === "Could not send OTP. Please check your number and try again."
-      ) {
-        throw error;
-      }
       logSmsFailure("network_or_runtime", {
         phoneMasked,
+        smsUrl,
+        hasApiHash: Boolean(apiHash),
+        hasSenderId: Boolean(senderId),
+        errorMessage: error instanceof Error ? error.message : String(error),
       });
-      throw new Error("Could not send OTP. Please check your number and try again.");
+      return phoneOtpFailure(SMS_SEND_FAILURE_MESSAGE);
     }
 
     return {
@@ -293,17 +382,30 @@ export const sendPhoneOtp = action({
 
 export const verifyPhoneOtp = action({
   args: { phone: v.string(), otp: v.string() },
-  handler: async (ctx, args): Promise<{
-    ok: true;
-    phoneE164: string;
-    phoneMasked: string;
-    phoneHash: string;
-    verifiedAt: number;
-  }> => {
-    const { phoneE164, phoneMasked } = normalizePakistaniPhone(args.phone);
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | PhoneOtpFailure
+    | {
+        ok: true;
+        phoneE164: string;
+        phoneMasked: string;
+        phoneHash: string;
+        verifiedAt: number;
+      }
+  > => {
+    let normalizedPhone: NormalizedPhone;
+    try {
+      normalizedPhone = normalizePakistaniPhone(args.phone);
+    } catch {
+      return phoneOtpFailure("Please enter a valid Pakistani mobile number.");
+    }
+
+    const { phoneE164, phoneMasked } = normalizedPhone;
     const otp = String(args.otp || "").replace(/\D/g, "");
     if (!/^\d{6}$/.test(otp)) {
-      throw new Error("Enter the 6-digit verification code.");
+      return phoneOtpFailure("Enter the 6-digit verification code.");
     }
 
     const phoneHash = await sha256(phoneE164);
@@ -316,7 +418,7 @@ export const verifyPhoneOtp = action({
       },
     );
     if (attemptState.attemptsInWindow >= MAX_VERIFY_ATTEMPTS_PER_DAY) {
-      throw new Error("Too many attempts. Please try again later.");
+      return phoneOtpFailure("Too many attempts. Please try again later.");
     }
 
     const session: {
@@ -327,7 +429,7 @@ export const verifyPhoneOtp = action({
     } | null = await ctx.runQuery(internal.phoneOtp.getLatestPending, { phoneHash });
 
     if (!session) {
-      throw new Error("Verification code expired. Please request a new code.");
+      return phoneOtpFailure("Verification code expired. Please request a new code.");
     }
 
     if (session.expiresAt <= now) {
@@ -335,7 +437,7 @@ export const verifyPhoneOtp = action({
         verificationId: session._id,
         updatedAt: now,
       });
-      throw new Error("Verification code expired. Please request a new code.");
+      return phoneOtpFailure("Verification code expired. Please request a new code.");
     }
 
     const enteredHash = await sha256(`${phoneHash}:${otp}`);
@@ -344,7 +446,7 @@ export const verifyPhoneOtp = action({
         verificationId: session._id,
         updatedAt: now,
       });
-      throw new Error("Incorrect verification code.");
+      return phoneOtpFailure("Incorrect verification code.");
     }
 
     await ctx.runMutation(internal.phoneOtp.markVerified, {

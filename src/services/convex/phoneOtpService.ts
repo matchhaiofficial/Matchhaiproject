@@ -8,6 +8,12 @@ export async function sendPhoneOtp(phone: string): Promise<
 > {
   try {
     const result = await convex.action(api.phoneOtp.sendPhoneOtp, { phone });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+      };
+    }
     return {
       ok: true,
       phoneE164: result.phoneE164,
@@ -43,6 +49,12 @@ export async function verifyPhoneOtp(
 > {
   try {
     const result = await convex.action(api.phoneOtp.verifyPhoneOtp, { phone, otp });
+    if (!result.ok) {
+      return {
+        ok: false,
+        message: result.message,
+      };
+    }
     return {
       ok: true,
       phoneE164: result.phoneE164,
