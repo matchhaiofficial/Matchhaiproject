@@ -109,7 +109,7 @@ while (true) {
     seedKey,
     cursor,
     players,
-    zoneCount: 50,
+    zoneCount: 60,
     batchSize: 10,
     maxMs: 15000,
   });

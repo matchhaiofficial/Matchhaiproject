@@ -3023,23 +3023,24 @@ function buildBranchIdFrom(zoneKey: string, branchName: string) {
 
 function buildKarachiBranchPricing(i: number) {
   const rand = mulberry32(99000 + i);
+  const lowPriceMode = i >= 510; // zones 51-60 (i ~= zoneIndex*10 + branchIndex) => low-cost demo venues
   const pcRegularCount = String(5 + Math.floor(rand() * 16)); // 5-20
   const pcPremiumCount = String(3 + Math.floor(rand() * 10)); // 3-12
   const pcEliteCount = String(1 + Math.floor(rand() * 8)); // 1-8
-  const pcRegularPrice = String(250 + Math.floor(rand() * 151)); // 250-400
-  const pcPremiumPrice = String(400 + Math.floor(rand() * 301)); // 400-700
-  const pcElitePrice = String(700 + Math.floor(rand() * 501)); // 700-1200
+  const pcRegularPrice = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(250 + Math.floor(rand() * 151)); // 20-40 or 250-400
+  const pcPremiumPrice = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(400 + Math.floor(rand() * 301)); // 20-40 or 400-700
+  const pcElitePrice = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(700 + Math.floor(rand() * 501)); // 20-40 or 700-1200
 
   const consoleRegularCount = String(1 + Math.floor(rand() * 4)); // 1-4
   const consolePremiumCount = String(1 + Math.floor(rand() * 3)); // 1-3
   const consoleEliteCount = String(1 + Math.floor(rand() * 2)); // 1-2
 
-  const reg1v1 = String(500 + Math.floor(rand() * 301)); // 500-800
-  const reg2v2 = String(700 + Math.floor(rand() * 501)); // 700-1200
-  const prem1v1 = String(800 + Math.floor(rand() * 401)); // 800-1200
-  const prem2v2 = String(1200 + Math.floor(rand() * 601)); // 1200-1800
-  const elite1v1 = String(1200 + Math.floor(rand() * 601)); // 1200-1800
-  const elite2v2 = String(1800 + Math.floor(rand() * 701)); // 1800-2500
+  const reg1v1 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(500 + Math.floor(rand() * 301)); // 20-40 or 500-800
+  const reg2v2 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(700 + Math.floor(rand() * 501)); // 20-40 or 700-1200
+  const prem1v1 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(800 + Math.floor(rand() * 401)); // 20-40 or 800-1200
+  const prem2v2 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(1200 + Math.floor(rand() * 601)); // 20-40 or 1200-1800
+  const elite1v1 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(1200 + Math.floor(rand() * 601)); // 20-40 or 1200-1800
+  const elite2v2 = lowPriceMode ? String(20 + Math.floor(rand() * 21)) : String(1800 + Math.floor(rand() * 701)); // 20-40 or 1800-2500
 
   return {
     pc: {
@@ -3134,9 +3135,9 @@ export const seedKarachiRealisticZoneByIndex = internalMutation({
       .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", ensuredAdmin.userId))
       .unique();
 
-    const branchCount = (i % 3 === 0) ? 2 : 1;
+    const branchCount = i > 50 ? 3 + (i % 2) : (i % 3 === 0) ? 2 : 1;
     const branches = Array.from({ length: branchCount }, (_, idx) => {
-      const branchDisplayName = idx === 0 ? "Main Branch" : "Branch 2";
+      const branchDisplayName = idx === 0 ? "Main Branch" : `Branch ${idx + 1}`;
       const addressLine1 = `${10 + (i % 80)} ${areaLabel}, Karachi`;
       const googleMapsUrl = `https://maps.google.com/?q=${encodeURIComponent(addressLine1)}`;
       const pricing = buildKarachiBranchPricing(i * 10 + idx);
