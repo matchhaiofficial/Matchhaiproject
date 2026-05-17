@@ -164,6 +164,8 @@ export interface Matchroom {
     finalWinner?: "team1" | "team2";
     resolvedAt?: any;
     resolutionSource?: string;
+    adminReviewReason?: string;
+    validationError?: string;
   };
 }
 

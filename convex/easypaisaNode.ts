@@ -142,8 +142,7 @@ export const initiateRestTransaction = internalAction({
   handler: async (_ctx, args) => {
     ensureRestConfig(false);
     const response = await postJson(args.endpointPath, args.payload || {}, {
-      retries: 1,
-      retryDelayMs: 1500,
+      retries: 0,
     });
     return {
       ...response,

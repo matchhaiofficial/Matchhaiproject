@@ -21,6 +21,7 @@ import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { AppImage } from "../../../src/components/AppImage";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import { BlockingLoader } from "../../../src/components/BlockingLoader";
+import { GameImageIcon } from "../../../src/components/GameImageIcon";
 import Screen from "../../../src/components/Screen";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -495,7 +496,12 @@ export default function Profile() {
                                     <Pressable key={game.key} style={styles.gameCard} onPress={() => handleEditGame(game.key)}>
                                         <AppCard style={styles.gameCardInner}>
                                         <View style={styles.gameIcon}>
-                                            <AppIcon name={game.icon} size={24} color={COLORS.accent} />
+                                            <GameImageIcon
+                                                game={game.key}
+                                                size={60}
+                                                fallbackIconName={game.icon}
+                                                fallbackIconColor={COLORS.accent}
+                                            />
                                         </View>
                                         <View style={styles.gameInfo}>
                                             <Text style={styles.gameName} numberOfLines={1}>{game.name}</Text>
@@ -537,7 +543,12 @@ export default function Profile() {
                                     <Pressable key={game.key} style={styles.gameCardInactive} onPress={() => handleAddGame(game.key)}>
                                         <AppCard style={styles.gameCardInactiveInner}>
                                         <View style={styles.gameIconInactive}>
-                                            <AppIcon name={game.icon} size={24} color={COLORS.muted} />
+                                            <GameImageIcon
+                                                game={game.key}
+                                                size={56}
+                                                fallbackIconName={game.icon}
+                                                fallbackIconColor={COLORS.muted}
+                                            />
                                         </View>
                                         <View>
                                             <Text style={styles.gameNameInactive}>{game.name}</Text>

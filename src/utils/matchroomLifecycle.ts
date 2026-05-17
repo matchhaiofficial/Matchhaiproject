@@ -17,8 +17,14 @@ function toDate(value: any): Date | null {
         const ms = value.toMillis();
         return Number.isFinite(ms) ? new Date(ms) : null;
     }
-    if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
-    if (typeof value === "number") return new Date(value);
+    if (typeof value?.seconds === "number") {
+        const parsed = new Date(value.seconds * 1000);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
     if (typeof value === "string") {
         const parsed = new Date(value);
         return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -40,13 +46,16 @@ export function parseScheduledStartAt(room: any): Date | null {
 }
 
 export function getRoomLockAt(room: any): Date | null {
-    // Testing mode: do not time-lock matchrooms before their scheduled start.
-    return null;
+    const explicit = toDate(room?.lockAt);
+    if (explicit) return explicit;
+    const start = parseScheduledStartAt(room);
+    return start ? new Date(start.getTime()) : null;
 }
 
 export function getRoomExpiresAt(room: any): Date | null {
-    // Testing mode: matchrooms should not expire while validating payment/admin flows.
-    return null;
+    const explicit = toDate(room?.expiresAt);
+    if (explicit) return explicit;
+    return parseScheduledStartAt(room);
 }
 
 /**
@@ -75,9 +84,8 @@ export function isRoomFull(room: any): boolean {
 
     // If slots exist, check confirmed count
     if (allSlots.length > 0) {
-        const totalSlots = allSlots.length;
-        const confirmedSlots = allSlots.filter((s: any) => s.status === 'confirmed').length;
-        return confirmedSlots >= totalSlots;
+        const confirmedSlots = allSlots.filter((s: any) => s.status === 'confirmed' && (s.uid || s.user?.uid)).length;
+        return confirmedSlots >= allSlots.length && confirmedSlots >= (room.maxPlayers || allSlots.length);
     }
 
     // Fallback: player count
@@ -101,8 +109,11 @@ export function isRoomFull(room: any): boolean {
  * @returns true if room is expired
  */
 export function isRoomExpired(room: any, now = new Date()): boolean {
-    // Testing mode: disable computed/explicit matchroom expiry.
-    return false;
+    if (!room) return false;
+    if (room.status === "expired" || room.status === "cancelled") return true;
+    const expiresAt = getRoomExpiresAt(room);
+    if (!expiresAt || isRoomFull(room)) return false;
+    return expiresAt.getTime() <= now.getTime();
 }
 
 /**
@@ -122,8 +133,6 @@ export function isRoomLocked(room: any, now = new Date()): boolean {
 
     // Expired rooms aren't treated as locked for join logic
     if (isRoomExpired(room, now)) return false;
-
-    // Testing mode: time locking is disabled.
 
     // Full = locked
     return isRoomFull(room);

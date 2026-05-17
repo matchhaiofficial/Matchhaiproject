@@ -24,6 +24,41 @@ interface MatchroomCardProps {
     containerStyle?: StyleProp<ViewStyle>;
 }
 
+const toValidDate = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value?.seconds === "number") {
+        const parsed = new Date(value.seconds * 1000);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === "string") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    return null;
+};
+
+const parseScheduledDateTime = (dateStr?: string | null, timeStr?: string | null): Date | null => {
+    const date = String(dateStr || "").trim();
+    const time = String(timeStr || "").trim();
+    if (!date) return null;
+    let base: Date | null = null;
+    if (date.includes("/")) {
+        const [day, month, year] = date.split("/").map(Number);
+        base = new Date(year, month - 1, day);
+    } else {
+        base = toValidDate(date);
+    }
+    if (!base || Number.isNaN(base.getTime())) return null;
+    const [hours, minutes] = time.split(":").map(Number);
+    if (!Number.isNaN(hours)) base.setHours(hours, Number.isNaN(minutes) ? 0 : minutes, 0, 0);
+    return base;
+};
+
 const localStyles = StyleSheet.create({
     cardPressed: {
         opacity: 0.92,
@@ -135,16 +170,14 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
 
     const timeDisplay = useMemo(() => {
         const getStartDate = () => {
+            const startTime = toValidDate(room.startTime);
+            if (startTime) return startTime;
             if (typeof room.scheduledStartAt === "number") {
-                return new Date(room.scheduledStartAt);
+                const scheduledStart = toValidDate(room.scheduledStartAt);
+                if (scheduledStart) return scheduledStart;
             }
-            if (room.startTime?.seconds) {
-                return new Date(room.startTime.seconds * 1000);
-            }
-            if (room.scheduledDate && room.scheduledTime) {
-                const parsed = new Date(`${room.scheduledDate}T${room.scheduledTime}`);
-                if (!Number.isNaN(parsed.getTime())) return parsed;
-            }
+            const scheduled = parseScheduledDateTime(room.scheduledDate, room.scheduledTime);
+            if (scheduled) return scheduled;
             if (room.scheduledTime) {
                 const [hours, minutes] = room.scheduledTime.split(":").map(Number);
                 if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
@@ -157,7 +190,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         };
 
         const startDate = getStartDate();
-        if (!startDate) return "Flexible time";
+        if (!startDate) return "Time not set";
 
         const durationMinutes = Number(
             room.durationMinutes ||

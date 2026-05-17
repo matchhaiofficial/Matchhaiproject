@@ -20,6 +20,107 @@ function getMatchroomPlayerUids(room: any): string[] {
   return Array.from(new Set([...fromPlayerUids, ...fromPlayers]));
 }
 
+function getSlotUserUid(slot: any): string {
+  return String(slot?.uid || slot?.user?.uid || "").trim();
+}
+
+function getAllMatchroomSlots(room: any): any[] {
+  return [...(room?.slotsA || []), ...(room?.slotsB || [])];
+}
+
+function getRequiredPlayerCount(room: any): number {
+  const maxPlayers = Number(room?.maxPlayers || 0);
+  if (Number.isFinite(maxPlayers) && maxPlayers > 0) return maxPlayers;
+  const slotCount = getAllMatchroomSlots(room).length;
+  return Math.max(1, slotCount || Number(room?.currentPlayers || 0) || 1);
+}
+
+function getConfirmedPlayerCount(room: any): number {
+  const slots = getAllMatchroomSlots(room);
+  const confirmedSlotUids = slots
+    .filter((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot))
+    .map(getSlotUserUid);
+  if (slots.length > 0) {
+    return new Set(confirmedSlotUids).size;
+  }
+  return getMatchroomPlayerUids(room).length;
+}
+
+function isRosterFull(room: any): boolean {
+  const required = getRequiredPlayerCount(room);
+  const slotsA = room?.slotsA || [];
+  const slotsB = room?.slotsB || [];
+  if (slotsA.length > 0 || slotsB.length > 0) {
+    const teamAFilled = slotsA.length === 0 || slotsA.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    const teamBFilled = slotsB.length === 0 || slotsB.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    return teamAFilled && teamBFilled && getConfirmedPlayerCount(room) >= required;
+  }
+  return getConfirmedPlayerCount(room) >= required;
+}
+
+function getRoomStartMs(room: any): number | null {
+  const candidates = [room?.startTime, room?.scheduledStartAt]
+    .map((value) => Number(value || 0))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return candidates[0] || null;
+}
+
+function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
+  if (!room || !["open", "locked"].includes(String(room.status || ""))) return false;
+  const scheduledStartAt = Number(room.scheduledStartAt || 0);
+  if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
+  return scheduledStartAt <= now && !isRosterFull(room);
+}
+
+function canStartMatchroom(room: any, now = Date.now()) {
+  if (!room || !["open", "locked"].includes(String(room.status || ""))) {
+    return { ok: false, reason: "invalid_status" };
+  }
+  const scheduledStartAt = Number(room.scheduledStartAt || 0);
+  if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) {
+    return { ok: false, reason: "missing_start_time" };
+  }
+  if (scheduledStartAt > now) {
+    return { ok: false, reason: "start_time_not_due" };
+  }
+  if (!isRosterFull(room)) {
+    return { ok: false, reason: "roster_not_full" };
+  }
+  return { ok: true, reason: "valid" };
+}
+
+function canCompleteMatchroom(room: any, now = Date.now()) {
+  if (!room || String(room.status || "") !== "in-progress") {
+    return { ok: false, reason: "invalid_status" };
+  }
+  if (room.startedWithFullRoster !== true && !isRosterFull(room)) {
+    return { ok: false, reason: "not_started_with_full_roster" };
+  }
+  const startMs = getRoomStartMs(room);
+  if (!startMs) {
+    return { ok: false, reason: "missing_start_time" };
+  }
+  const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
+  if (startMs + durationMinutes * 60 * 1000 > now) {
+    return { ok: false, reason: "duration_not_elapsed" };
+  }
+  return { ok: true, reason: "valid" };
+}
+
+function canEnterResultVerification(room: any) {
+  if (!room || String(room.status || "") !== "completed") {
+    return { ok: false, reason: "invalid_status" };
+  }
+  if (room.startedWithFullRoster !== true && !isRosterFull(room)) {
+    return { ok: false, reason: "invalid_or_incomplete_roster" };
+  }
+  const captains = resolveResultCaptains(room, room.resultVerification || {});
+  if (!captains.team1Captain || !captains.team2Captain) {
+    return { ok: false, reason: "missing_result_captains" };
+  }
+  return { ok: true, reason: "valid" };
+}
+
 function resolveResultCaptains(room: any, rv: any = {}) {
   const team1Captain = String(rv.team1Captain || room.captainUidA || room.hostUid || "");
   const team2Captain = String(
@@ -180,13 +281,18 @@ async function requireVerifiedActor(ctx: any, expectedUid?: string) {
 
 // Helper: Check if room is expired
 export function isRoomExpired(room: any): boolean {
-  return false;
+  if (!room) return false;
+  if (room.status === "expired" || room.status === "cancelled") return true;
+  const now = Date.now();
+  if (shouldExpireForNotFull(room, now)) return true;
+  const expiresAt = Number(room.expiresAt || 0);
+  return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now && !isRosterFull(room);
 }
 
 // Helper: Check if room is locked
 export function isRoomLocked(room: any): boolean {
   if (room.status === "locked" || room.isLocked) return true;
-  if (room.currentPlayers >= room.maxPlayers) return true;
+  if (isRosterFull(room)) return true;
   return false;
 }
 
@@ -579,6 +685,106 @@ async function refundCapturedBookingIntentsForMatchroom(ctx: any, matchroomId: I
   }
 
   return { refundedCount };
+}
+
+async function expireBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, reason: string) {
+  const intents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+
+  const terminalStatuses = new Set(["expired", "cancelled", "rejected"]);
+  const now = Date.now();
+  let expiredCount = 0;
+  for (const intent of intents) {
+    if (terminalStatuses.has(String(intent.status || ""))) continue;
+    await ctx.db.patch(intent._id, {
+      status: "expired",
+      updatedAt: now,
+    });
+    expiredCount += 1;
+  }
+
+  return { expiredCount, reason };
+}
+
+async function expirePendingMatchroomNotifications(ctx: any, matchroomId: Id<"matchrooms">, reason: string) {
+  const notifications = await ctx.db
+    .query("notifications")
+    .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
+    .collect();
+  const expirableTypes = new Set(["match.join_request", "match_join_request", "match.payment_required", "match.seat_invite"]);
+  const now = Date.now();
+  let expiredCount = 0;
+  for (const notification of notifications) {
+    if (notification.status !== "pending") continue;
+    if (!expirableTypes.has(String(notification.type || ""))) continue;
+    await ctx.db.patch(notification._id, {
+      status: "expired",
+      updatedAt: now,
+      data: {
+        ...(notification.data || {}),
+        expiredReason: reason,
+      },
+    });
+    expiredCount += 1;
+  }
+  return { expiredCount };
+}
+
+async function expireMatchroomForInvalidLifecycle(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  roomInput: any,
+  reason: string,
+) {
+  const room = roomInput || await ctx.db.get(matchroomId);
+  if (!room) return { changed: false, reason: "missing_room" };
+  if (room.status === "expired" || room.status === "cancelled") {
+    return { changed: false, reason: "already_terminal" };
+  }
+
+  const now = Date.now();
+  await ctx.db.patch(matchroomId, {
+    status: "expired",
+    isLocked: true,
+    cancelReason: reason,
+    resultVerification:
+      room.resultVerification && room.resultVerification.status !== "resolved"
+        ? {
+            ...room.resultVerification,
+            status: "admin_review",
+            adminReviewReason: reason,
+            validationError: "Matchroom expired before a valid full roster could start.",
+          }
+        : room.resultVerification,
+    updatedAt: now,
+  });
+  await expireBookingIntentsForMatchroom(ctx, matchroomId, reason);
+  await expirePendingMatchroomNotifications(ctx, matchroomId, reason);
+  await releaseHeldBookingIntentsForMatchroom(ctx, matchroomId, reason);
+  await refundCapturedBookingIntentsForMatchroom(ctx, matchroomId, reason);
+  return { changed: true, reason };
+}
+
+async function markInvalidResultVerificationForAdminReview(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  room: any,
+  reason: string,
+) {
+  const now = Date.now();
+  const rv = room?.resultVerification || {};
+  await ctx.db.patch(matchroomId, {
+    resultVerification: {
+      ...rv,
+      status: "admin_review",
+      adminReviewReason: reason,
+      validationError: "This matchroom did not pass lifecycle validation for result verification.",
+    },
+    updatedAt: now,
+  });
+  return { ok: false, status: "admin_review", reason };
 }
 
 async function captureHeldBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">) {
@@ -1657,10 +1863,32 @@ export const updateStatus = mutation({
       status: args.status,
       updatedAt: Date.now(),
     };
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
 
+    if (args.status === "in-progress") {
+      const validation = canStartMatchroom(room, Date.now());
+      if (!validation.ok) {
+        if (shouldExpireForNotFull(room, Date.now())) {
+          await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "scheduled_start_roster_incomplete");
+        }
+        throw new Error(`Matchroom cannot start: ${validation.reason}`);
+      }
+      updateData.startTime = room.startTime || room.scheduledStartAt || Date.now();
+      updateData.startedAt = Date.now();
+      updateData.startedWithFullRoster = true;
+      updateData.startedPlayerCount = getConfirmedPlayerCount(room);
+      updateData.captainUidA = room.captainUidA || room.hostUid;
+    }
     if (args.status === "completed") {
-      const room = await ctx.db.get(args.matchroomId);
+      const validation = canCompleteMatchroom(room, Date.now());
+      if (!validation.ok) {
+        throw new Error(`Matchroom cannot complete: ${validation.reason}`);
+      }
       const captains = room ? resolveResultCaptains(room, room.resultVerification) : { team1Captain: "", team2Captain: "" };
+      if (!captains.team1Captain || !captains.team2Captain) {
+        throw new Error("Matchroom cannot complete: missing_result_captains");
+      }
       updateData.completedAt = Date.now();
       updateData.resultVerification = room?.resultVerification || {
         status: "pending",
@@ -1681,6 +1909,8 @@ export const updateStatus = mutation({
       await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
     }
     if (args.status === "cancelled" || args.status === "expired") {
+      await expireBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
+      await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
       await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
     }
@@ -1697,9 +1927,22 @@ export const startMatch = mutation({
     initialRatings: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
+    const validation = canStartMatchroom(room, Date.now());
+    if (!validation.ok) {
+      if (shouldExpireForNotFull(room, Date.now())) {
+        await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "scheduled_start_roster_incomplete");
+      }
+      throw new Error(`Matchroom cannot start: ${validation.reason}`);
+    }
+    const startTime = room.startTime || room.scheduledStartAt || Date.now();
     await ctx.db.patch(args.matchroomId, {
       status: "in-progress",
-      startTime: Date.now(),
+      startTime,
+      startedAt: Date.now(),
+      startedWithFullRoster: true,
+      startedPlayerCount: getConfirmedPlayerCount(room),
       captainUidA: args.hostUid,
       captainUidB: args.team2Captain,
       updatedAt: Date.now(),
@@ -1721,6 +1964,15 @@ export const submitCaptainReport = mutation({
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
     if (room.status !== "completed") throw new Error("Results can only be submitted after match completion");
+    const verificationValidation = canEnterResultVerification(room);
+    if (!verificationValidation.ok) {
+      return await markInvalidResultVerificationForAdminReview(
+        ctx,
+        args.matchroomId,
+        room,
+        verificationValidation.reason,
+      );
+    }
 
     const rv = room.resultVerification || { status: "pending" as const };
     if (rv.status === "resolved") return { ok: true, status: "resolved", winner: rv.finalWinner };
@@ -1803,6 +2055,15 @@ export const submitParticipantVote = mutation({
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
+    const verificationValidation = canEnterResultVerification(room);
+    if (!verificationValidation.ok) {
+      return await markInvalidResultVerificationForAdminReview(
+        ctx,
+        args.matchroomId,
+        room,
+        verificationValidation.reason,
+      );
+    }
 
     const rv = room.resultVerification || { status: "pending" as const };
     if (rv.status === "resolved") return { ok: true, status: "resolved", winner: rv.finalWinner };
@@ -1892,6 +2153,7 @@ export const getPendingResultForUser = query({
       const participantUids = getMatchroomPlayerUids(room);
       const isParticipant = participantUids.some((uid) => uidCandidates.includes(String(uid)));
       if (!isParticipant) continue;
+      if (!canEnterResultVerification(room).ok) continue;
 
       const rv = room.resultVerification || { status: "pending" as const };
       if (rv.status === "resolved") continue;
@@ -1942,6 +2204,8 @@ export const adminCancel = mutation({
       cancelNote: args.note || "",
       updatedAt: Date.now(),
     });
+    await expireBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
+    await expirePendingMatchroomNotifications(ctx, args.matchroomId, "admin_cancel");
     await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
     await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
 
@@ -2101,14 +2365,20 @@ export const syncLifecycleIfDue = mutation({
     const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
     let changed = false;
 
-    if (
-      scheduledStartAt &&
-      ["open", "locked"].includes(room.status) &&
-      scheduledStartAt <= now
-    ) {
+    if (shouldExpireForNotFull(room, now)) {
+      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "scheduled_start_roster_incomplete");
+      changed = true;
+      return { changed, status: "expired" };
+    }
+
+    const startValidation = canStartMatchroom(room, now);
+    if (startValidation.ok) {
       await ctx.db.patch(args.matchroomId, {
         status: "in-progress",
         startTime: room.startTime || scheduledStartAt,
+        startedAt: now,
+        startedWithFullRoster: true,
+        startedPlayerCount: getConfirmedPlayerCount(room),
         captainUidA: room.captainUidA || room.hostUid,
         updatedAt: now,
       });
@@ -2119,10 +2389,22 @@ export const syncLifecycleIfDue = mutation({
     if (!refreshedRoom) return { changed };
 
     const effectiveStart = refreshedRoom.startTime || refreshedRoom.scheduledStartAt;
-    const shouldComplete =
+    const completeDue =
       refreshedRoom.status === "in-progress" &&
       effectiveStart &&
       effectiveStart + durationMinutes * 60 * 1000 <= now;
+    const completeValidation = canCompleteMatchroom(refreshedRoom, now);
+    const shouldComplete = completeValidation.ok;
+
+    if (completeDue && !completeValidation.ok) {
+      await expireMatchroomForInvalidLifecycle(
+        ctx,
+        args.matchroomId,
+        refreshedRoom,
+        `invalid_in_progress_${completeValidation.reason}`,
+      );
+      return { changed: true, status: "expired" };
+    }
 
     if (
       refreshedRoom.locationMode === "broadcast" &&
@@ -2140,6 +2422,16 @@ export const syncLifecycleIfDue = mutation({
         refreshedRoom.captainUidB ||
         refreshedRoom.players?.find((player: any) => player.uid !== refreshedRoom.hostUid)?.uid ||
         undefined;
+
+      if ((!refreshedRoom.captainUidA && !refreshedRoom.hostUid) || !teamTwoCaptain) {
+        await markInvalidResultVerificationForAdminReview(
+          ctx,
+          args.matchroomId,
+          refreshedRoom,
+          "missing_result_captains",
+        );
+        return { changed: true, status: "admin_review" };
+      }
 
       await ctx.db.patch(args.matchroomId, {
         status: "completed",
@@ -3137,14 +3429,95 @@ export const checkExpiration = internalMutation({
   args: { matchroomId: v.id("matchrooms") },
   handler: async (ctx, args) => {
     const matchroom = await ctx.db.get(args.matchroomId);
-    if (matchroom && matchroom.status === "open") {
-      await ctx.db.patch(args.matchroomId, {
-        status: "expired",
-        updatedAt: Date.now(),
-      });
-      await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "matchroom_expired");
-      await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "matchroom_expired");
+    if (matchroom && shouldExpireForNotFull(matchroom, Date.now())) {
+      return await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, matchroom, "matchroom_expired");
     }
+    return { changed: false, reason: "not_expirable" };
+  },
+});
+
+export const runLifecycleSweep = internalMutation({
+  args: {
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize = Math.max(1, Math.min(50, Number(args.batchSize || 25)));
+    const now = Date.now();
+    let changedRooms = 0;
+    let expiredNotifications = 0;
+    let inspectedRooms = 0;
+
+    for (const status of ["open", "locked", "in-progress", "completed"]) {
+      const rooms = await ctx.db
+        .query("matchrooms")
+        .withIndex("by_status", (q: any) => q.eq("status", status))
+        .take(batchSize);
+
+      for (const room of rooms) {
+        inspectedRooms += 1;
+        if (shouldExpireForNotFull(room, now)) {
+          const result = await expireMatchroomForInvalidLifecycle(
+            ctx,
+            room._id,
+            room,
+            "scheduled_start_roster_incomplete",
+          );
+          if (result.changed) changedRooms += 1;
+          continue;
+        }
+
+        if (room.status === "in-progress") {
+          const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
+          const startMs = getRoomStartMs(room);
+          const completeDue = Boolean(startMs && startMs + durationMinutes * 60 * 1000 <= now);
+          const validation = canCompleteMatchroom(room, now);
+          if (completeDue && !validation.ok) {
+            const result = await expireMatchroomForInvalidLifecycle(
+              ctx,
+              room._id,
+              room,
+              `invalid_in_progress_${validation.reason}`,
+            );
+            if (result.changed) changedRooms += 1;
+          }
+          continue;
+        }
+
+        if (room.status === "completed") {
+          const rv: any = room.resultVerification || {};
+          const validation = canEnterResultVerification(room);
+          if (rv.status !== "resolved" && rv.status !== "admin_review" && !validation.ok) {
+            await markInvalidResultVerificationForAdminReview(
+              ctx,
+              room._id,
+              room,
+              validation.reason,
+            );
+            changedRooms += 1;
+          }
+        }
+      }
+    }
+
+    const pendingNotifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_status", (q: any) => q.eq("status", "pending"))
+      .take(batchSize);
+    for (const notification of pendingNotifications) {
+      if (!isMatchJoinRequestNotification(notification)) continue;
+      if (!notification.expiresAt || notification.expiresAt > now) continue;
+      await ctx.db.patch(notification._id, {
+        status: "expired",
+        updatedAt: now,
+        data: {
+          ...(notification.data || {}),
+          expiredReason: "join_request_ttl_elapsed",
+        },
+      });
+      expiredNotifications += 1;
+    }
+
+    return { inspectedRooms, changedRooms, expiredNotifications };
   },
 });
 

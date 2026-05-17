@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AppHeader from '../../src/components/AppHeader';
 import { AppIcon } from '../../src/components/AppIcon';
+import { GameImageIcon } from '../../src/components/GameImageIcon';
 import Screen from '../../src/components/Screen';
 import { useAuth } from '../../src/context/AuthContext';
 import { getMatchroomById, submitCaptainReport } from '../../src/services/convex/matchService';
@@ -184,7 +185,12 @@ export default function MatchResultSubmission() {
                         <Text style={styles.matchInfoValue}>{matchData.title}</Text>
                     </View>
                     <View style={styles.matchInfoRow}>
-                        <AppIcon name="videogame-asset" size={16} color={COLORS.accent} />
+                        <GameImageIcon
+                            game={matchData.gameKey}
+                            size={34}
+                            fallbackIconName="videogame-asset"
+                            fallbackIconColor={COLORS.accent}
+                        />
                         <Text style={styles.matchInfoLabel}>Game:</Text>
                         <Text style={styles.matchInfoValue}>{matchData.gameKey.toUpperCase()}</Text>
                     </View>

@@ -1,5 +1,5 @@
 // app/_layout.tsx
-export const unstable_settings = { initialRouteName: "auth/login" };
+export const unstable_settings = { initialRouteName: "index" };
 
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";

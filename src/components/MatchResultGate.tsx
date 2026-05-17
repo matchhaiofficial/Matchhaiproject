@@ -43,17 +43,33 @@ export default function MatchResultGate() {
     setSubmitting(true);
     try {
       if (phase === "captain") {
-        await submitCaptainReport({
+        const result: any = await submitCaptainReport({
           matchroomId: room._id as Id<"matchrooms">,
           captainUid: userId,
           winner: selectedWinner,
         });
+        if (result?.status === "admin_review") {
+          showToast({
+            type: "error",
+            title: "Result needs review",
+            message: "This matchroom cannot be verified automatically.",
+          });
+          return;
+        }
       } else {
-        await submitParticipantVote({
+        const result: any = await submitParticipantVote({
           matchroomId: room._id as Id<"matchrooms">,
           participantUid: userId,
           vote: selectedWinner,
         });
+        if (result?.status === "admin_review") {
+          showToast({
+            type: "error",
+            title: "Result needs review",
+            message: "This matchroom cannot be verified automatically.",
+          });
+          return;
+        }
       }
       setSelectedWinner(null);
       showToast({

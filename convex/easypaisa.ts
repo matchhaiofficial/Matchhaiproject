@@ -343,8 +343,10 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
   const responseDesc = String(
     snapshot.responseDesc
     || snapshot.rawPayload?.responseDesc
+    || snapshot.rawPayload?.errorReason
     || snapshot.rawPayload?.responseMessage
     || snapshot.rawPayload?.description
+    || snapshot.rawPayload?.errorMessage
     || "",
   ).trim();
   const combined = `${transactionStatus} ${responseCode} ${responseDesc}`.toUpperCase();
@@ -424,6 +426,42 @@ function getProviderReference(snapshot: ProviderSnapshot, orderRefNum: string) {
     || snapshot.rawPayload?.txnId
     || snapshot.rawPayload?.paymentToken
     || orderRefNum,
+  );
+}
+
+function getRestInquiryResponse(snapshot: ProviderSnapshot) {
+  return snapshot.rawPayload?.rest?.inquiry?.response || {};
+}
+
+function isMaNoResponseFailure(source: ProviderSource, snapshot: ProviderSnapshot, normalized: ReturnType<typeof normalizeProviderUpdate>) {
+  if (source !== "inquiry" || normalized.resolvedStatus !== "failed") {
+    return false;
+  }
+
+  const inquiryResponse = getRestInquiryResponse(snapshot);
+  const paymentMode = String(
+    snapshot.paymentMode
+    || snapshot.paymentMethod
+    || inquiryResponse.paymentMode
+    || inquiryResponse.paymentMethod
+    || "",
+  ).toUpperCase();
+  const errorCode = String(inquiryResponse.errorCode || snapshot.rawPayload?.errorCode || "").toUpperCase();
+  const errorText = String(
+    inquiryResponse.errorReason
+    || inquiryResponse.responseDesc
+    || normalized.responseDesc
+    || "",
+  ).toLowerCase();
+
+  return (
+    paymentMode === "MA"
+    && (
+      errorCode === "NO_RESPONSE_FROM_EWP"
+      || errorText.includes("approve this transaction")
+      || errorText.includes("mobile account pin")
+      || errorText.includes("no response")
+    )
   );
 }
 
@@ -978,12 +1016,16 @@ export const syncTransactionStatus = action({
       storeId: EASYPAISA_STORE_ID,
     });
     const inquiryBody = inquiryResult?.body || {};
+    const inquiryDescription =
+      String(inquiryBody?.transactionStatus || "").toUpperCase() === "FAILED"
+        ? inquiryBody?.errorReason || inquiryBody?.responseDesc
+        : inquiryBody?.responseDesc || inquiryBody?.errorReason;
     const applyResult: any = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
       orderRefNum: row.orderRefNum,
       source: "inquiry",
       snapshot: {
-        responseCode: inquiryBody?.responseCode || null,
-        responseDesc: inquiryBody?.responseDesc || null,
+        responseCode: inquiryBody?.responseCode || inquiryBody?.errorCode || null,
+        responseDesc: inquiryDescription || null,
         transactionStatus: inquiryBody?.transactionStatus || null,
         transactionId: inquiryBody?.transactionId || null,
         paymentToken: inquiryBody?.paymentToken || null,
@@ -1183,6 +1225,7 @@ export const applyProviderUpdate = internalMutation({
     const now = Date.now();
     const snapshot = args.snapshot as ProviderSnapshot;
     const normalized = normalizeProviderUpdate(args.source, snapshot);
+    const keepMaNoResponsePending = isMaNoResponseFailure(args.source, snapshot, normalized);
     const providerReference = getProviderReference(snapshot, row.orderRefNum);
     logGatewayDebug("provider.update", {
       transactionId: String(row._id),
@@ -1192,6 +1235,7 @@ export const applyProviderUpdate = internalMutation({
       amount: row.amount,
       previousStatus: row.status,
       resolvedStatus: normalized.resolvedStatus,
+      keepPending: keepMaNoResponsePending,
       providerStatus: normalized.transactionStatus || normalized.responseCode || null,
       providerDescription: normalized.responseDesc || null,
       providerReference,
@@ -1255,11 +1299,58 @@ export const applyProviderUpdate = internalMutation({
       };
     }
 
-    if (normalized.resolvedStatus === "pending") {
+    if (
+      Number(row.expiresAt || 0) > 0
+      && now > Number(row.expiresAt || 0)
+      && (normalized.resolvedStatus === "pending" || keepMaNoResponsePending)
+    ) {
+      if (row.bookingIntentId) {
+        await ctx.db.patch(row.bookingIntentId, {
+          status: "expired",
+          updatedAt: now,
+        });
+      }
+
+      await ctx.db.patch(row._id, {
+        ...callbackPatch,
+        status: "expired",
+        lastError: undefined,
+      });
+
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
+        toUid: row.userId,
+        status: "expired",
+        dedupeKey: `${row.kind}:payment_result:${String(row._id)}:expired`,
+        dedupePolicy: "replace_active",
+        route: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
+        title: row.kind === "wallet_topup" ? "Top-up Expired" : "Payment Expired",
+        body: row.kind === "wallet_topup"
+          ? "Your wallet top-up session expired before payment completed."
+          : "Your booking payment session expired before the slot was confirmed.",
+        data: {
+          paymentTransactionId: String(row._id),
+          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
+          orderRefNum: row.orderRefNum,
+          decision: "expired",
+          href: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
+        },
+      });
+
+      return {
+        appReturnUrl: row.appReturnUrl,
+        orderRefNum: row.orderRefNum,
+        ok: true,
+        shouldRetry: false,
+        status: "expired",
+      };
+    }
+
+    if (normalized.resolvedStatus === "pending" || keepMaNoResponsePending) {
       await ctx.db.patch(row._id, {
         ...callbackPatch,
         status: row.status === "redirected" || row.status === "token_received" ? row.status : "pending",
-        lastError: undefined,
+        lastError: keepMaNoResponsePending ? normalized.responseDesc || undefined : undefined,
       });
       return {
         appReturnUrl: row.appReturnUrl,

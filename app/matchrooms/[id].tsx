@@ -438,7 +438,9 @@ export default function MatchroomDetails() {
         ? `Final Result: ${room.resultVerification.finalWinner === "team2" ? "Team 2" : "Team 1"} Won`
         : room?.resultVerification?.status === "participant_vote"
           ? "Result Dispute"
-          : "Verifying Results";
+          : room?.resultVerification?.status === "admin_review"
+            ? "Admin Review"
+            : "Verifying Results";
 
   if (loading) {
     return (

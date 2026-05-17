@@ -1,6 +1,6 @@
 import { useAction, useQuery } from "convex/react";
 import { Link, router, useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { api } from "../../convex/_generated/api";
@@ -25,8 +25,15 @@ function formatKycReason(reason?: string | null) {
   return value.replace(/_/g, " ").toLowerCase();
 }
 
+const ACCOUNT_EMAIL_REQUIRED_MESSAGE =
+  "Your account email is missing or invalid. Please update your account email before starting verification.";
+
+function isValidAccountEmail(value?: string | null) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim().toLowerCase());
+}
+
 export default function VerificationRequiredScreen() {
-  const { authUser, user, refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { showToast } = useToast();
   const [starting, setStarting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,10 +43,21 @@ export default function VerificationRequiredScreen() {
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus || "not_started";
   const isRejected = kycStatus === "rejected";
   const isVerified = kycStatus === "verified";
+  const accountEmail = String(user?.email || "").trim().toLowerCase();
+  const accountEmailValid = isValidAccountEmail(accountEmail);
+  const dashboardRoute = user?.accountType === "zone" ? "/zone/(tabs)" : "/(player)/(tabs)";
   const safeReason = useMemo(
     () => formatKycReason(currentKyc?.rejectionReason),
     [currentKyc?.rejectionReason],
   );
+
+  const openProfileEmailSettings = useCallback(() => {
+    if (user?.accountType === "zone") {
+      router.push("/zone/profile/edit" as any);
+      return;
+    }
+    router.push("/(player)/profile/edit" as any);
+  }, [user?.accountType]);
 
   const refreshVerificationState = useCallback(async () => {
     setRefreshing(true);
@@ -65,14 +83,16 @@ export default function VerificationRequiredScreen() {
     }, [refreshVerificationState]),
   );
 
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      router.replace("/(player)/(tabs)" as any);
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, []);
-
   const handleStart = async () => {
+    if (!accountEmailValid) {
+      showToast({
+        type: "error",
+        title: "Account email required",
+        message: ACCOUNT_EMAIL_REQUIRED_MESSAGE,
+      });
+      openProfileEmailSettings();
+      return;
+    }
     setStarting(true);
     const role = user?.accountType === "zone" ? "zone_owner" : "player";
     const result = await startDiditKyc(role);
@@ -116,12 +136,19 @@ export default function VerificationRequiredScreen() {
         </Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Signed in as</Text>
+          <Text style={styles.label}>Account email used for verification</Text>
           <AppCard style={styles.inputBox}>
             <Text style={[styles.input, { color: COLORS.text }]}>
-              {authUser?.email || "Your MatchHai account"}
+              {accountEmail || "No account email on file"}
             </Text>
           </AppCard>
+          <View style={styles.helperTextRow}>
+            <Text style={[styles.helperText, accountEmailValid ? { color: COLORS.muted } : styles.helperWarning]}>
+              {accountEmailValid
+                ? "This email comes from your MatchHai account and cannot be changed during KYC."
+                : ACCOUNT_EMAIL_REQUIRED_MESSAGE}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.helperTextRow}>
@@ -134,10 +161,18 @@ export default function VerificationRequiredScreen() {
         </View>
 
         <View style={styles.buttonShadowWrapper}>
-          <AppButton onPress={handleStart} disabled={starting} loading={starting}>
+          <AppButton onPress={handleStart} disabled={starting || !accountEmailValid} loading={starting}>
             {isRejected ? "Retry Verification" : "Start Verification"}
           </AppButton>
         </View>
+
+        {!accountEmailValid ? (
+          <View style={styles.buttonShadowWrapper}>
+            <AppButton variant="secondary" onPress={openProfileEmailSettings}>
+              Update account email
+            </AppButton>
+          </View>
+        ) : null}
 
         <View style={styles.buttonShadowWrapper}>
           <AppButton variant="secondary" onPress={handleRefresh} disabled={refreshing} loading={refreshing}>
@@ -152,7 +187,7 @@ export default function VerificationRequiredScreen() {
           </Link>
         </View>
 
-        <Pressable onPress={() => router.replace("/(player)/(tabs)" as any)} style={{ marginTop: 18 }}>
+        <Pressable onPress={() => router.replace(dashboardRoute as any)} style={{ marginTop: 18 }}>
           <Text style={[styles.bottomText, { color: COLORS.accent, textAlign: "center" }]}>
             {isVerified ? "Continue to MatchHai" : "Back to locked dashboard"}
           </Text>

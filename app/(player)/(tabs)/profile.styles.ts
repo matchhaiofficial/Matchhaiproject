@@ -133,8 +133,8 @@ export default StyleSheet.create({
         borderStyle: 'dashed',
     },
     gameIconInactive: {
-        width: 40,
-        height: 40,
+        width: 60,
+        height: 60,
         borderRadius: RADII.sm,
         backgroundColor: COLORS.overlayLight,
         alignItems: 'center',
@@ -194,8 +194,8 @@ export default StyleSheet.create({
         height: '100%',
     },
     gameIcon: {
-        width: 44,
-        height: 44,
+        width: 64,
+        height: 64,
         borderRadius: RADII.md,
         backgroundColor: COLORS.overlayMedium,
         alignItems: 'center',

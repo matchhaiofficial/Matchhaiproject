@@ -7,6 +7,7 @@ import AppHeader from "../../src/components/AppHeader";
 import BottomActionBar from "../../src/components/BottomActionBar";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppButton } from "../../src/components/AppPrimitives";
+import { GameImageIcon } from "../../src/components/GameImageIcon";
 import { AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
@@ -890,10 +891,11 @@ export default function TeamChallengeCreateScreen() {
                     <View style={localStyles.matchupCard}>
                         <View style={localStyles.matchupTopRow}>
                             <View style={localStyles.gamePill}>
-                                <AppIcon
-                                    name={(GAME_ICONS[gameKey] as any) || "sports-esports"}
-                                    size={16}
-                                    color={styles.accentText.color as string}
+                                <GameImageIcon
+                                    game={gameKey}
+                                    size={34}
+                                    fallbackIconName={(GAME_ICONS[gameKey] as any) || "sports-esports"}
+                                    fallbackIconColor={styles.accentText.color as string}
                                 />
                                 <Text style={localStyles.gamePillText}>{gameLabel}</Text>
                             </View>

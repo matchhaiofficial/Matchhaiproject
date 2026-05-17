@@ -15,7 +15,12 @@ export function getRoomStartDate(room: any): Date | null {
     // Primary: startTime
     if (room.startTime) {
         if (typeof room.startTime === 'object' && 'seconds' in room.startTime) {
-            return new Date(room.startTime.seconds * 1000);
+            const parsed = new Date(room.startTime.seconds * 1000);
+            if (!isNaN(parsed.getTime())) return parsed;
+        }
+        if (typeof room.startTime === 'number') {
+            const parsed = new Date(room.startTime);
+            if (!isNaN(parsed.getTime())) return parsed;
         }
         if (room.startTime instanceof Date) {
             return room.startTime;

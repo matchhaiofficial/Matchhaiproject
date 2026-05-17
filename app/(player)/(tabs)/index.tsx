@@ -23,6 +23,7 @@ import { Team } from "../../../src/services/convex/teamService";
 import { formatSupportedGameLabels, Zone } from "../../../src/services/convex/zoneService";
 import { signOutUser } from "../../../src/services/convex/authService";
 import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
+import { useToast } from "../../../src/hooks/useToast";
 import { COLORS, SPACING } from "../../../src/theme";
 import {
   KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE,
@@ -321,6 +322,7 @@ export default function PlayerDashboard() {
     initialScale: 0.995,
   });
   const startDiditKyc = useStartDiditKyc();
+  const { showToast } = useToast();
   const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
   const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
@@ -452,8 +454,13 @@ export default function PlayerDashboard() {
     const result = await startDiditKyc("player");
     if (!result.ok) {
       Logger.error("Dashboard", "Could not start KYC", result.message);
+      showToast({
+        type: "error",
+        title: "Could not start verification",
+        message: result.message,
+      });
     }
-  }, [startDiditKyc]);
+  }, [showToast, startDiditKyc]);
 
   const handleRefreshVerification = useCallback(async () => {
     if (!currentKyc?._id) {

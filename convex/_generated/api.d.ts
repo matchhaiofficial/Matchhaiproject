@@ -14,6 +14,7 @@ import type * as bookings from "../bookings.js";
 import type * as chat from "../chat.js";
 import type * as chatAuth from "../chatAuth.js";
 import type * as chatIdentity from "../chatIdentity.js";
+import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
 import type * as demoSeed from "../demoSeed.js";
 import type * as devCleanup from "../devCleanup.js";
@@ -67,6 +68,7 @@ declare const fullApi: ApiFromModules<{
   chat: typeof chat;
   chatAuth: typeof chatAuth;
   chatIdentity: typeof chatIdentity;
+  crons: typeof crons;
   dashboard: typeof dashboard;
   demoSeed: typeof demoSeed;
   devCleanup: typeof devCleanup;

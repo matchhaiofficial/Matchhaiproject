@@ -40,11 +40,25 @@ function getStatusBadgeStyle(status: string) {
     }
 }
 
+function getStartLabel(item: Matchroom) {
+    const value = item.startTime || item.scheduledStartAt;
+    if (typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? "Date not set" : parsed.toLocaleDateString();
+    }
+    if (typeof value?.seconds === "number") {
+        const parsed = new Date(value.seconds * 1000);
+        return Number.isNaN(parsed.getTime()) ? "Date not set" : parsed.toLocaleDateString();
+    }
+    if (item.scheduledDate) return item.scheduledDate;
+    return "Date not set";
+}
+
 const MatchroomCard = memo(function MatchroomCard({ item, userId, onPress }: MatchroomCardProps) {
     const isHost = item.hostUid === userId;
     const myPlayer = item.players.find(p => p.uid === userId);
     const status = getRoomDisplayStatus(item);
-    const startLabel = item.startTime ? new Date(item.startTime.seconds * 1000).toLocaleDateString() : 'Flexible';
+    const startLabel = getStartLabel(item);
 
     return (
         <Pressable

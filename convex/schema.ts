@@ -551,6 +551,9 @@ export default defineSchema({
 
     // Timing & Pricing
     startTime: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    startedWithFullRoster: v.optional(v.boolean()),
+    startedPlayerCount: v.optional(v.number()),
     scheduledDate: v.optional(v.string()),
     scheduledTime: v.optional(v.string()),
     scheduledStartAt: v.optional(v.number()),
@@ -662,6 +665,8 @@ export default defineSchema({
       finalWinner: v.optional(v.union(v.literal("team1"), v.literal("team2"))),
       resolvedAt: v.optional(v.number()),
       resolutionSource: v.optional(v.string()),
+      adminReviewReason: v.optional(v.string()),
+      validationError: v.optional(v.string()),
     })),
 
     // Cancellation
@@ -1395,6 +1400,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_toUid", ["toUid"])
+    .index("by_status", ["status"])
     .index("by_toUid_and_status", ["toUid", "status"])
     .index("by_toUid_and_type", ["toUid", "type"])
     .index("by_toUid_isRead_createdAt", ["toUid", "isRead", "createdAt"])

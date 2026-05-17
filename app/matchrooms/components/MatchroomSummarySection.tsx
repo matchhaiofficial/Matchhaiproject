@@ -9,21 +9,45 @@ import {
   isBroadcastVenuePending,
 } from "../utils/matchroomLocationDisplay";
 
+const toValidDate = (value: any): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value?.seconds === "number") {
+    const parsed = new Date(value.seconds * 1000);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof value === "number") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+};
+
+const parseScheduledDate = (dateStr?: string | null): Date | null => {
+  const value = String(dateStr || "").trim();
+  if (!value) return null;
+  if (value.includes("/")) {
+    const [day, month, year] = value.split("/").map(Number);
+    const parsed = new Date(year, month - 1, day);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return toValidDate(value);
+};
+
 const formatScheduledWindow = (room: any) => {
   const dateStr = room.scheduledDate || "";
-  const timeStr = room.scheduledTime || "00:00";
+  const timeStr = room.scheduledTime || "";
 
-  let start = new Date();
-  if (dateStr.includes("/")) {
-    const [day, month, year] = dateStr.split("/").map(Number);
-    start = new Date(year, month - 1, day);
-  } else if (dateStr) {
-    const parsed = new Date(dateStr);
-    if (!Number.isNaN(parsed.getTime())) start = parsed;
-  }
+  const explicitStart = toValidDate(room.startTime) || toValidDate(room.scheduledStartAt);
+  const start = explicitStart || parseScheduledDate(dateStr);
+  if (!start) return timeStr ? timeStr : "Time not set";
 
   const [hours, mins] = timeStr.split(":").map(Number);
-  if (!Number.isNaN(hours)) {
+  if (!explicitStart && !Number.isNaN(hours)) {
     start.setHours(hours, mins || 0);
   }
 
@@ -34,11 +58,11 @@ const formatScheduledWindow = (room: any) => {
       hour12: true,
     });
 
-  const startDisplay = room.startTime
-    ? format12h(new Date(room.startTime.seconds * 1000))
+  const startDisplay = explicitStart
+    ? format12h(explicitStart)
     : room.scheduledTime
       ? format12h(start)
-      : "Flexible";
+      : "Time not set";
 
   let duration = room.durationMinutes;
   if (!duration) {
@@ -119,9 +143,8 @@ export function MatchroomSummarySection({
             <Text style={styles.gameText}>{room.game}</Text>
           </View>
           <Text style={styles.dateText}>
-            {room.startTime
-              ? new Date(room.startTime.seconds * 1000).toLocaleDateString()
-              : room.scheduledDate || "Flexible Date"}
+            {(toValidDate(room.startTime) || toValidDate(room.scheduledStartAt) || parseScheduledDate(room.scheduledDate))
+              ?.toLocaleDateString() || "Date not set"}
           </Text>
         </View>
         <Text style={styles.title}>{room.title}</Text>

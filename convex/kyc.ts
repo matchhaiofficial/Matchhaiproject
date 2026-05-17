@@ -27,6 +27,9 @@ const kycRoleValidator = v.union(
 type KycStatus = "not_started" | "pending" | "in_progress" | "in_review" | "verified" | "rejected" | "expired";
 type KycRole = "player" | "zone_owner" | "venue_admin" | "high_risk_dispute" | "tournament_organizer";
 
+const ACCOUNT_EMAIL_REQUIRED_MESSAGE =
+  "Your account email is missing or invalid. Please update your account email before starting verification.";
+
 async function getAuthIdFromContextOrSessionToken(ctx: any, sessionToken?: string | null) {
   try {
     const authUser = await authComponent.getAuthUser(ctx);
@@ -48,6 +51,62 @@ async function getAuthIdFromContextOrSessionToken(ctx: any, sessionToken?: strin
   }
 
   return String(session.userId);
+}
+
+function normalizeAccountEmail(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidAccountEmail(value?: string | null) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeAccountEmail(value));
+}
+
+function requireAccountEmail(profile?: any) {
+  const email = normalizeAccountEmail(profile?.email);
+  if (!isValidAccountEmail(email)) {
+    throw new Error(ACCOUNT_EMAIL_REQUIRED_MESSAGE);
+  }
+  return email;
+}
+
+async function getBetterAuthEmail(ctx: any, authId?: string | null, fallbackEmail?: string | null) {
+  const fallback = normalizeAccountEmail(fallbackEmail);
+  if (fallback) return fallback;
+  const id = String(authId || "").trim();
+  if (!id) return "";
+  const authUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+    model: "user",
+    where: [{ field: "_id", operator: "eq", value: id }],
+  });
+  return normalizeAccountEmail(authUser?.email);
+}
+
+async function logAuthEmailMismatch(ctx: any, input: {
+  userId: Id<"users">;
+  verificationId?: Id<"identityVerifications">;
+  role: KycRole;
+  authEmail?: string | null;
+  accountEmail: string;
+  timestamp: number;
+}) {
+  const authEmail = normalizeAccountEmail(input.authEmail);
+  const accountEmail = normalizeAccountEmail(input.accountEmail);
+  if (!authEmail || authEmail === accountEmail) return;
+
+  await ctx.runMutation(internal.kyc.recordKycAuditEvent, {
+    userId: input.userId,
+    verificationId: input.verificationId,
+    provider: "didit",
+    role: input.role,
+    action: "auth_email_mismatch",
+    timestamp: input.timestamp,
+    details: {
+      authEmail,
+      accountEmail,
+      emailUsedForKyc: accountEmail,
+      sourceOfTruth: "users.email",
+    },
+  });
 }
 
 function getDiditConfig() {
@@ -84,7 +143,7 @@ function buildDiditSessionBody(config: ReturnType<typeof getDiditConfig>, verifi
   const { firstName, lastName } = splitFullName(profile?.fullName || profile?.ownerFullName);
   const contactDetails: Record<string, string> = {};
   const expectedDetails: Record<string, string> = {};
-  if (profile?.email) contactDetails.email = String(profile.email).trim().toLowerCase();
+  contactDetails.email = requireAccountEmail(profile);
   if (profile?.phone) contactDetails.phone_number = String(profile.phone).trim();
   if (firstName) expectedDetails.first_name = firstName;
   if (lastName) expectedDetails.last_name = lastName;
@@ -418,6 +477,7 @@ export const startDiditKycSession = action({
     if ((args.role === "zone_owner" || args.role === "venue_admin") && profile.accountType !== "zone") {
       throw new Error("Zone verification is only available for zone admin accounts.");
     }
+    const accountEmail = requireAccountEmail(profile);
 
     const config = getDiditConfig();
     const verificationId: Id<"identityVerifications"> = await ctx.runMutation(internal.kyc.createOrReuseKycVerification, {
@@ -425,6 +485,14 @@ export const startDiditKycSession = action({
       role: args.role,
       workflowId: config.workflowId,
       now: Date.now(),
+    });
+    await logAuthEmailMismatch(ctx, {
+      userId: profile._id,
+      verificationId,
+      role: args.role,
+      authEmail: authUser.email,
+      accountEmail,
+      timestamp: Date.now(),
     });
 
     const response = await fetch(`${config.baseUrl}/v3/session/`, {
@@ -492,6 +560,8 @@ export const createDiditKycStartIntent = mutation({
     if ((args.role === "zone_owner" || args.role === "venue_admin") && profile.accountType !== "zone") {
       throw new Error("Zone verification is only available for zone admin accounts.");
     }
+    const accountEmail = requireAccountEmail(profile);
+    const authEmail = await getBetterAuthEmail(ctx, authId);
 
     const config = getDiditConfig();
     const now = Date.now();
@@ -522,6 +592,14 @@ export const createDiditKycStartIntent = mutation({
       startTokenExpiresAt: now + 10 * 60 * 1000,
       updatedAt: now,
     });
+    await logAuthEmailMismatch(ctx, {
+      userId: profile._id,
+      verificationId,
+      role: args.role,
+      authEmail,
+      accountEmail,
+      timestamp: now,
+    });
 
     await ctx.db.patch(profile._id, {
       kycVerificationStatus: "pending",
@@ -546,6 +624,7 @@ export const startDiditKycSessionFromIntent = action({
     const profile: any = verification?.userId
       ? await ctx.runQuery(api.users.getById, { userId: verification.userId })
       : null;
+    requireAccountEmail(profile);
     if (!verification?.startTokenHash || !verification.startTokenExpiresAt) {
       throw new Error("Verification session expired. Please try again.");
     }
@@ -932,6 +1011,7 @@ export const recordKycAuditEvent = internalMutation({
     action: v.string(),
     status: v.optional(kycStatusValidator),
     timestamp: v.number(),
+    details: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const auditEvent: Record<string, unknown> = {
@@ -946,6 +1026,7 @@ export const recordKycAuditEvent = internalMutation({
         provider: args.provider,
         role: args.role || null,
         status: args.status || null,
+        ...(args.details || {}),
       },
       createdAt: args.timestamp,
     };

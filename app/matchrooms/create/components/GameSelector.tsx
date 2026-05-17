@@ -5,6 +5,7 @@ import Animated from "react-native-reanimated";
 
 import { GAME_OPTIONS, SPORT_OPTIONS } from "../../../../constants/profileOptions";
 import { AppIcon } from "../../../../src/components/AppIcon";
+import { GameImageIcon } from "../../../../src/components/GameImageIcon";
 import { useEntrance } from "../../../../src/motion/useEntrance";
 import { isProfileGameEnabled } from "../../../../src/services/userService";
 import { COLORS } from "../../../../src/theme";
@@ -19,17 +20,6 @@ interface GameSelectorProps {
     allowedGameKeys?: string[];
 }
 
-const GAME_ICONS: Record<string, string> = {
-    cs2: "🎯",
-    cs16: "💣",
-    valorant: "⚡",
-    fc26: "⚽",
-    tekken8: "🥊",
-    futsal: "🏟️",
-    indoor_cricket: "🏏",
-    padel: "🎾",
-    pickleball: "🏓",
-};
 // Check if user has added this game to their profile
 const isGameActive = (gameKey: string, profile: any): boolean => {
     return isProfileGameEnabled(profile, gameKey);
@@ -101,12 +91,12 @@ export default function GameSelector({
                         ]}
                         onPress={() => onSelectGame(game.key)}
                     >
-                        <Text style={[
-                            styles.gameIcon,
-                            { fontSize: 32, textAlign: "center" }
-                        ]}>
-                            {GAME_ICONS[game.key] || "🎮"}
-                        </Text>
+                        <GameImageIcon
+                            game={game.key}
+                            size={84}
+                            containerStyle={[styles.gameIcon, { alignSelf: "center" }]}
+                            fallbackIconColor={COLORS.muted}
+                        />
                         <Text
                             style={[
                                 styles.gameName,
