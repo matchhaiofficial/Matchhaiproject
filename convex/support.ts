@@ -581,6 +581,12 @@ export const appendUserMessage = mutation({
       lastMessageAt: now,
       updatedAt: now,
     });
+    if (conversation.activeTicketId) {
+      await ctx.db.patch(conversation.activeTicketId, {
+        lastUserResponseAt: now,
+        updatedAt: now,
+      });
+    }
     return messageId;
   },
 });
@@ -689,6 +695,232 @@ async function getSafeContextForUser(ctx: any, userId: Id<"users">) {
     recentPayments: recentPayments.map(safePayment),
     recentMatchrooms: matchrooms,
     recentReports: recentReports.map(safeReport),
+  };
+}
+
+function asId(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return text as any;
+}
+
+function isUserInMatchroom(room: any, userId: Id<"users">) {
+  const userIdString = String(userId);
+  return (
+    String(room?.hostUid || "") === userIdString ||
+    String(room?.captainUidA || "") === userIdString ||
+    String(room?.captainUidB || "") === userIdString ||
+    (Array.isArray(room?.playerUids) && room.playerUids.map(String).includes(userIdString)) ||
+    (Array.isArray(room?.players) && room.players.some((player: any) => String(player?.uid || "") === userIdString)) ||
+    (Array.isArray(room?.slotsA) && room.slotsA.some((slot: any) => String(slot?.uid || slot?.user?.uid || "") === userIdString)) ||
+    (Array.isArray(room?.slotsB) && room.slotsB.some((slot: any) => String(slot?.uid || slot?.user?.uid || "") === userIdString))
+  );
+}
+
+function getUserRoleInRoom(room: any, userId: Id<"users">) {
+  const userIdString = String(userId);
+  if (String(room?.hostUid || "") === userIdString) return "host";
+  if (String(room?.captainUidA || "") === userIdString || String(room?.captainUidB || "") === userIdString) return "captain";
+  if (isUserInMatchroom(room, userId)) return "player";
+  return "none";
+}
+
+function buildMatchroomNextSafeAction(room: any, intent?: any | null) {
+  if (!room) return "Open Discover and refresh your matchrooms.";
+  if (room.status === "cancelled" || room.status === "expired") return "Check Wallet history for any refund transaction, or create a support ticket if money is missing.";
+  if (room.status === "completed") return "Check completed matchroom details and result status.";
+  if (intent?.status === "approved_pending_payment" || intent?.paymentStatus === "unpaid") return "Complete payment from the matchroom request screen.";
+  if (room.locationMode === "broadcast" && room.broadcastRequestStatus === "waiting_for_zones") return "Wait for an eligible zone to accept, or check again later.";
+  if (room.status === "open") return "Wait for the room to fill or invite players.";
+  return "Open the matchroom details screen for the latest status.";
+}
+
+async function getOwnedMatchroom(ctx: any, userId: Id<"users">, matchroomId?: unknown) {
+  if (matchroomId) {
+    const room = await ctx.db.get(asId(matchroomId));
+    return room && isUserInMatchroom(room, userId) ? room : null;
+  }
+  const recent = await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(80);
+  return recent.find((room: any) => isUserInMatchroom(room, userId)) || null;
+}
+
+async function getMyMatchroomStatus(ctx: any, identity: ReturnType<typeof assertAgentIdentity>, payload: any) {
+  const room = await getOwnedMatchroom(ctx, identity.userId, payload?.matchroomId);
+  if (!room) return { found: false, reasonSummary: "No matching matchroom was found for this account.", nextSafeAction: "Ask for support ticket creation if this looks wrong." };
+  const intent = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_createdByUid_matchroomId", (q: any) => q.eq("createdByUid", identity.userId).eq("matchroomId", room._id))
+    .order("desc")
+    .first();
+  const joinedPlayers = Math.max(
+    Number(room.currentPlayers || 0),
+    Array.isArray(room.playerUids) ? room.playerUids.length : 0,
+  );
+  return {
+    found: true,
+    matchroomId: String(room._id),
+    game: room.game,
+    status: room.status,
+    requiredPlayers: room.maxPlayers,
+    joinedPlayers,
+    userRoleInRoom: getUserRoleInRoom(room, identity.userId),
+    captainApprovalStatus: intent?.captainApproval ? (intent.captainApproval.approved ? "approved" : "pending") : null,
+    zoneApprovalStatus: room.zoneAdminApproved === true || intent?.zoneApproval?.approved ? "approved" : room.locationMode === "zone" || room.locationMode === "broadcast" ? "pending" : null,
+    bookingIntentStatus: intent?.status || null,
+    paymentStatus: intent?.paymentStatus || room.paymentStatus || "unpaid",
+    expiresAt: intent?.expiresAt || room.expiresAt || room.broadcastRequestExpiresAt || null,
+    nextSafeAction: buildMatchroomNextSafeAction(room, intent),
+    reasonSummary: room.cancelReason || room.cancelNote || room.broadcastRequestStatus || room.status,
+  };
+}
+
+async function getMyPaymentBookingStatus(ctx: any, identity: ReturnType<typeof assertAgentIdentity>, payload: any) {
+  const recentPayments = await ctx.db
+    .query("paymentTransactions")
+    .withIndex("by_userId", (q: any) => q.eq("userId", identity.userId))
+    .order("desc")
+    .take(20);
+  const reference = String(payload?.providerReference || payload?.reference || "").trim();
+  const payment = payload?.paymentId
+    ? recentPayments.find((row: any) => String(row._id) === String(payload.paymentId))
+    : reference
+      ? recentPayments.find((row: any) => row.orderRefNum === reference || row.providerReference === reference)
+      : recentPayments[0];
+  let bookingIntent = payment?.bookingIntentId ? await ctx.db.get(payment.bookingIntentId) : null;
+  if (!bookingIntent && payload?.bookingId) {
+    const candidate = await ctx.db.get(asId(payload.bookingId));
+    if (candidate && String(candidate.createdByUid) === String(identity.userId)) bookingIntent = candidate;
+  }
+  const matchroom = bookingIntent?.matchroomId ? await ctx.db.get(bookingIntent.matchroomId) : null;
+  const refund = payment
+    ? await ctx.db
+        .query("walletTransactions")
+        .withIndex("by_userId", (q: any) => q.eq("userId", identity.userId))
+        .order("desc")
+        .take(20)
+    : [];
+  const linkedRefund = Array.isArray(refund)
+    ? refund.find((row: any) => row.type === "refund" && String(row.reference || "").includes(String(payment?._id || payment?.orderRefNum || "")))
+    : null;
+  return {
+    found: Boolean(payment || bookingIntent),
+    paymentStatus: payment?.status || bookingIntent?.paymentStatus || null,
+    amount: payment?.amount || bookingIntent?.pricing?.totalCost || null,
+    currency: payment?.currency || bookingIntent?.pricing?.currency || "PKR",
+    createdAt: payment?.createdAt || bookingIntent?.createdAt || null,
+    bookingStatus: bookingIntent?.status || null,
+    matchroomStatus: matchroom?.status || null,
+    refundStatus: linkedRefund?.status || matchroom?.refundStatus || null,
+    providerReferenceMasked: maskReference(payment?.providerReference || payment?.orderRefNum),
+    nextSafeAction: payment?.status === "paid" || bookingIntent?.paymentStatus === "paid"
+      ? "Open the related matchroom or booking details. If it still looks unpaid, create a support ticket."
+      : "Retry payment only if the provider did not deduct money. If money was deducted, create a support ticket.",
+  };
+}
+
+async function getMyRefundStatus(ctx: any, identity: ReturnType<typeof assertAgentIdentity>, payload: any) {
+  const walletRows = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_userId", (q: any) => q.eq("userId", identity.userId))
+    .order("desc")
+    .take(30);
+  const refund = walletRows.find((row: any) => row.type === "refund" && (!payload?.reference || String(row.reference || "").includes(String(payload.reference))));
+  const paymentStatus = await getMyPaymentBookingStatus(ctx, identity, payload);
+  return {
+    refundStatus: refund?.status || paymentStatus.refundStatus || "not_found",
+    paymentStatus: paymentStatus.paymentStatus,
+    bookingStatus: paymentStatus.bookingStatus,
+    expectedNextStep: refund
+      ? "Refund is recorded in Wallet history."
+      : "No matching wallet refund was found. Create a support ticket if a cancellation/refund was expected.",
+    supportTicketRecommended: !refund,
+  };
+}
+
+async function getMyTeamChallengeStatus(ctx: any, identity: ReturnType<typeof assertAgentIdentity>, payload: any) {
+  const userTeams = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_userId", (q: any) => q.eq("odxerId", identity.userId))
+    .take(30);
+  const captainedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_captainUid", (q: any) => q.eq("captainUid", identity.userId))
+    .take(30);
+  const teamIds = new Set([...userTeams.map((row: any) => String(row.teamId)), ...captainedTeams.map((row: any) => String(row._id))]);
+  let challenge: any = null;
+  if (payload?.challengeId) {
+    const candidate = await ctx.db.get(asId(payload.challengeId));
+    if (candidate && (teamIds.has(String(candidate.challengerTeamId)) || teamIds.has(String(candidate.opponentTeamId)))) challenge = candidate;
+  }
+  if (!challenge) {
+    for (const teamId of teamIds) {
+      const outgoing = await ctx.db.query("teamChallenges").withIndex("by_challengerTeamId", (q: any) => q.eq("challengerTeamId", teamId as Id<"teams">)).order("desc").first();
+      const incoming = await ctx.db.query("teamChallenges").withIndex("by_opponentTeamId", (q: any) => q.eq("opponentTeamId", teamId as Id<"teams">)).order("desc").first();
+      challenge = outgoing || incoming;
+      if (challenge) break;
+    }
+  }
+  const userTeamRole = challenge
+    ? String(challenge.captainAUid) === String(identity.userId) ? "challenger_captain"
+      : String(challenge.captainBUid) === String(identity.userId) ? "opponent_captain"
+        : "team_member"
+    : captainedTeams.length ? "captain" : userTeams.length ? "member" : "none";
+  const targetTeam = challenge?.opponentTeamId ? await ctx.db.get(challenge.opponentTeamId) : null;
+  return {
+    found: Boolean(challenge),
+    userTeamRole,
+    isCaptain: userTeamRole.includes("captain") || captainedTeams.length > 0,
+    challengeStatus: challenge?.status || null,
+    targetTeamStatus: targetTeam?.status || null,
+    game: challenge?.game || captainedTeams[0]?.game || null,
+    reasonUserCannotChallenge: !captainedTeams.length ? "Only a team captain can challenge another team." : targetTeam?.status === "deleted" ? "The target team was deleted." : null,
+    nextSafeAction: challenge ? "Open the challenge details screen for accept/reject/payment status." : "Create or captain an eligible team before sending a challenge.",
+  };
+}
+
+async function getMyZoneRequestStatus(ctx: any, identity: ReturnType<typeof assertAgentIdentity>, payload: any) {
+  const zones = await ctx.db
+    .query("zones")
+    .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", identity.userId))
+    .order("desc")
+    .take(10);
+  const zone = payload?.zoneId
+    ? zones.find((row: any) => String(row._id) === String(payload.zoneId))
+    : zones[0];
+  if (!zone) return { found: false, nextSafeAction: "Complete zone registration first." };
+  const missingFields = [
+    !zone.venueBrandName && !zone.name ? "venue name" : null,
+    !zone.contactPhone ? "contact phone" : null,
+    !zone.city ? "city" : null,
+    !zone.primaryBranch && (!Array.isArray(zone.branches) || zone.branches.length === 0) ? "branch details" : null,
+  ].filter(Boolean);
+  return {
+    found: true,
+    zoneId: String(zone._id),
+    branchId: payload?.branchId || zone.primaryBranch?.id || null,
+    approvalStatus: zone.status,
+    missingFields,
+    rejectionReasonPublic: zone.status === "rejected" ? zone.rejectionReasonPublic || zone.rejectionReason || "Your zone request needs changes before approval." : null,
+    nextSafeAction: zone.status === "active" ? "Your zone is active. Check zone bookings for requests." : missingFields.length ? "Complete the missing zone setup fields." : "Wait for MatchHai super-admin review.",
+  };
+}
+
+async function getMyRecentSupportEntities(ctx: any, identity: ReturnType<typeof assertAgentIdentity>) {
+  const [safeContext, teams, teamMemberships, tickets, bookings] = await Promise.all([
+    getSafeContextForUser(ctx, identity.userId),
+    ctx.db.query("teams").withIndex("by_captainUid", (q: any) => q.eq("captainUid", identity.userId)).order("desc").take(5),
+    ctx.db.query("teamMembers").withIndex("by_userId", (q: any) => q.eq("odxerId", identity.userId)).order("desc").take(5),
+    ctx.db.query("supportTickets").withIndex("by_userId", (q: any) => q.eq("userId", identity.userId)).order("desc").take(5),
+    ctx.db.query("bookingIntents").withIndex("by_createdByUid", (q: any) => q.eq("createdByUid", identity.userId)).order("desc").take(5),
+  ]);
+  return {
+    matchrooms: safeContext.recentMatchrooms,
+    bookings: bookings.map((booking: any) => safeBookingIntent(booking, null)),
+    payments: safeContext.recentPayments,
+    teams: teams.map((team: any) => ({ teamId: String(team._id), name: team.name, game: team.game, status: team.status || "active", role: "captain" })),
+    teamMemberships: teamMemberships.map((member: any) => ({ teamId: String(member.teamId), role: member.role, joinedAt: member.joinedAt })),
+    zoneRequests: safeContext.zones,
+    tickets: tickets.map((ticket: any) => ({ ticketId: String(ticket._id), reference: ticket.reference, status: ticket.status, category: ticket.category, priority: ticket.priority, createdAt: ticket.createdAt })),
   };
 }
 
@@ -938,6 +1170,72 @@ export const executeAgentToolGateway = internalMutation({
             reasonCategory: "safe_read",
           });
           results.push({ type: tool.type, ok: true, data: safeContext });
+        } else if (tool.type === "get_my_matchroom_status") {
+          const data = await getMyMatchroomStatus(ctx, identity, tool.payload || {});
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_matchroom_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
+        } else if (tool.type === "get_my_payment_booking_status") {
+          const data = await getMyPaymentBookingStatus(ctx, identity, tool.payload || {});
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_payment_booking_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
+        } else if (tool.type === "get_my_refund_status") {
+          const data = await getMyRefundStatus(ctx, identity, tool.payload || {});
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_refund_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
+        } else if (tool.type === "get_my_team_challenge_status") {
+          const data = await getMyTeamChallengeStatus(ctx, identity, tool.payload || {});
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_team_challenge_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
+        } else if (tool.type === "get_my_zone_request_status") {
+          const data = await getMyZoneRequestStatus(ctx, identity, tool.payload || {});
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_zone_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
+        } else if (tool.type === "get_my_recent_support_entities") {
+          const data = await getMyRecentSupportEntities(ctx, identity);
+          await insertAuditLog(ctx, {
+            requestId: args.requestId,
+            userId: identity.userId,
+            conversationId: identity.conversationId,
+            actionType: tool.type,
+            actionStatus: "executed",
+            reasonCategory: "safe_recent_entities_read",
+          });
+          results.push({ type: tool.type, ok: true, data });
         } else if (tool.type === "create_support_ticket" || tool.type === "create_admin_escalation") {
           const result = await createAgentTicket(ctx, identity, args.requestId, tool.payload || {});
           results.push({ type: tool.type, ...result });
@@ -1035,16 +1333,46 @@ export const supportAgentTools = httpAction(async (ctx, request) => {
   if (!body?.identityToken || !Array.isArray(body?.tools)) {
     return new Response(JSON.stringify({ ok: false, error: "invalid_request" }), { status: 400 });
   }
-  const result = await ctx.runMutation((internal as any).support.executeAgentToolGateway, {
-    requestId: String(body.requestId || "unknown").slice(0, 80),
-    identityToken: String(body.identityToken),
-    ipKey: body.ipKey ? String(body.ipKey).slice(0, 80) : undefined,
-    tools: body.tools.slice(0, 5).map((tool: any) => ({
-      type: String(tool?.type || "unknown").slice(0, 80),
-      reason: tool?.reason ? safeContextText(tool.reason).slice(0, 200) : undefined,
-      payload: tool?.payload || {},
-    })),
-  });
+  const requestId = String(body.requestId || "unknown").slice(0, 80);
+  const tools = body.tools.slice(0, 5).map((tool: any) => ({
+    type: String(tool?.type || "unknown").slice(0, 80),
+    reason: tool?.reason ? safeContextText(tool.reason).slice(0, 200) : undefined,
+    payload: tool?.payload || {},
+  }));
+  const knowledgeTools = tools.filter((tool: any) => tool.type === "search_support_knowledge");
+  const regularTools = tools.filter((tool: any) => tool.type !== "search_support_knowledge");
+  const results: any[] = [];
+  if (regularTools.length) {
+    const regularResult = await ctx.runMutation((internal as any).support.executeAgentToolGateway, {
+      requestId,
+      identityToken: String(body.identityToken),
+      ipKey: body.ipKey ? String(body.ipKey).slice(0, 80) : undefined,
+      tools: regularTools,
+    });
+    results.push(...(regularResult.results || []));
+    if (regularResult.rateLimited) {
+      return new Response(JSON.stringify({ ok: false, rateLimited: true, results }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+  for (const tool of knowledgeTools) {
+    try {
+      const searchResult = await ctx.runAction((internal as any).supportKnowledge.searchKnowledgeForAgent, {
+        requestId,
+        identityToken: String(body.identityToken),
+        query: String(tool.payload?.query || tool.reason || "").slice(0, 1200),
+        locale: tool.payload?.locale,
+        category: tool.payload?.category ? String(tool.payload.category).slice(0, 80) : undefined,
+        limit: typeof tool.payload?.limit === "number" ? tool.payload.limit : undefined,
+      });
+      results.push({ type: tool.type, ok: true, data: searchResult });
+    } catch {
+      results.push({ type: tool.type, ok: false, reason: "tool_error" });
+    }
+  }
+  const result = { ok: true, rateLimited: false, results };
   return new Response(JSON.stringify(result), {
     status: 200,
     headers: { "Content-Type": "application/json" },

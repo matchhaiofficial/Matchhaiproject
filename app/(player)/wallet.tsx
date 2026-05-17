@@ -1,4 +1,4 @@
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
     useCallback,
@@ -137,6 +137,7 @@ export default function WalletScreen() {
 
   const userId = user?._id as Id<"users"> | undefined;
   const startCheckout = useAction((api as any).easypaisa.startCheckout);
+  const repairRejectedRefunds = useMutation(api.teamChallenges.repairRejectedRefundsForCaptain);
 
   const walletBalance =
     useQuery(api.wallet.getBalance, userId ? { userId } : "skip") ?? 0;
@@ -220,6 +221,22 @@ export default function WalletScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchServiceData();
+      if (userId) {
+        repairRejectedRefunds({ actorUid: userId })
+          .then((result: any) => {
+            const creditedAmount = Number(result?.creditedAmount || 0);
+            if (creditedAmount > 0) {
+              showToast({
+                type: "success",
+                title: "Refund restored",
+                message: `PKR ${creditedAmount} was returned to your wallet.`,
+              });
+            }
+          })
+          .catch((error) => {
+            Logger.warn("Wallet", "Failed to repair rejected challenge refunds", error);
+          });
+      }
       const orderRefNum = String(activeOrderRef || params.orderRefNum || "");
       const gateway = String(params.gateway || "");
       const paymentStatus = String(params.paymentStatus || "");
@@ -250,6 +267,9 @@ export default function WalletScreen() {
       params.gateway,
       params.orderRefNum,
       params.paymentStatus,
+      repairRejectedRefunds,
+      showToast,
+      userId,
     ]),
   );
 

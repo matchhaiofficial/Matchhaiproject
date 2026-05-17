@@ -7,6 +7,7 @@ import { api } from "../../../convex/_generated/api";
 import ChatThread from "../chat/ChatThread";
 import type { ChatParticipant, ChatThreadMessage } from "../chat/types";
 import { useAuth } from "../../context/AuthContext";
+import { SUPPORT_RESPONSE_SLA } from "../../config/support";
 import { COLORS, FONTS } from "../../theme";
 import {
   EMPTY_SUPPORT_CONTEXT,
@@ -32,18 +33,15 @@ type SupportChatScreenProps = {
 const SUPPORT_BOT_ID = "matchhai-support-ai";
 const SUPPORT_TYPING_DELAY_MS = 3000;
 const SUPPORT_DEBUG = process.env.EXPO_PUBLIC_SUPPORT_DEBUG === "1";
-const LOCAL_MESSAGE_RETENTION_MS = 2500;
 const CONNECTION_RETRY_DELAY_MS = 900;
 const CONNECTION_MAX_AUTO_RETRIES = 8;
 const SUPPORT_INACTIVITY_REFRESH_MS = 5 * 60 * 1000;
 const QUICK_ACTIONS = [
-  "Payment deducted",
   "Matchroom pending",
+  "Payment deducted",
   "Refund status",
-  "Venue not showing",
-  "Notifications issue",
-  "Report player",
-  "Report venue",
+  "Team challenge issue",
+  "Zone booking issue",
   "Create support ticket",
 ];
 
@@ -68,12 +66,26 @@ function normalizeMessageSignature(text: string) {
   return String(text || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function getMessageSignature(message: Pick<ChatThreadMessage, "senderUid" | "text">) {
+  return `${message.senderUid}:${normalizeMessageSignature(message.text)}`;
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function wantsSupportEmail(input: string) {
   return /\b(email|send to support|contact support|contact admin|report)\b/i.test(input);
+}
+
+function getSupportWorkLabel(input: string) {
+  const text = input.trim().toLowerCase();
+  if (/\b(refund|refunded|money back)\b/.test(text)) return "Checking your refund status...";
+  if (/\b(payment|paid|deducted|charged|wallet|top[ -]?up|easypaisa|booking)\b/.test(text)) return "Checking your payment status...";
+  if (/\b(team challenge|challenge|challenged|opponent team)\b/.test(text)) return "Checking your team challenge...";
+  if (/\b(zone|venue|branch|zone booking|booking request)\b/.test(text)) return "Checking your zone booking...";
+  if (/\b(matchroom|match room|lobby|slot|room pending)\b/.test(text)) return "Checking your matchroom...";
+  return "Checking MatchHai support info...";
 }
 
 function buildSupportCards(input: string, answer: string, supportContext: any): ChatThreadMessage["supportCards"] | undefined {
@@ -120,7 +132,9 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
   );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [supportWorkLabel, setSupportWorkLabel] = useState<string | null>(null);
   const [transientMessages, setTransientMessages] = useState<ChatThreadMessage[]>([]);
+  const pendingUserMessageSignaturesRef = useRef(new Set<string>());
   const [conversationRetry, setConversationRetry] = useState(0);
   const [autoRetryCount, setAutoRetryCount] = useState(0);
   const [connectionState, setConnectionState] = useState<ConversationConnectionState>("connecting");
@@ -289,35 +303,51 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
     };
   }, [refreshAfterInactivity]);
 
+  useEffect(() => {
+    const rows = Array.isArray(persistedMessages) ? persistedMessages : [];
+    if (!rows.length || pendingUserMessageSignaturesRef.current.size === 0) return;
+    const persistedSignatures = new Set(
+      rows
+        .filter((message: any) => message.role === "user")
+        .map((message: any) => `${currentUserId}:${normalizeMessageSignature(String(message.textRedacted || ""))}`),
+    );
+    const hasPersistedPendingMessage = Array.from(pendingUserMessageSignaturesRef.current)
+      .some((signature) => persistedSignatures.has(signature));
+    if (!hasPersistedPendingMessage) return;
+    setTransientMessages((current) =>
+      current.filter((message) => {
+        if (message.senderUid !== currentUserId) return true;
+        const signature = getMessageSignature(message);
+        if (!pendingUserMessageSignaturesRef.current.has(signature) || !persistedSignatures.has(signature)) {
+          return true;
+        }
+        pendingUserMessageSignaturesRef.current.delete(signature);
+        return false;
+      }),
+    );
+  }, [currentUserId, persistedMessages]);
+
   const messages = useMemo<ChatThreadMessage[]>(() => {
     const rows = Array.isArray(persistedMessages) ? persistedMessages : [];
     const mapped = rows.map((message: any) => ({
       id: String(message._id),
       text: String(message.textRedacted || ""),
-      senderUid: message.role === "assistant" ? SUPPORT_BOT_ID : currentUserId,
-      senderName: message.role === "assistant" ? SUPPORT_BOT_COPY.botName : user?.fullName || user?.username || "You",
+      senderUid: message.role === "user" ? currentUserId : SUPPORT_BOT_ID,
+      senderName: message.role === "user" ? user?.fullName || user?.username || "You" : SUPPORT_BOT_COPY.botName,
       createdAt: Number(message.createdAt || Date.now()),
       type: "text" as const,
       supportCards: message.metadata?.supportCards,
     }));
 
-    const recentOutgoingSignatures = new Set(
+    const persistedOutgoingSignatures = new Set(
       mapped
         .filter((message) => message.senderUid === currentUserId)
-        .map((message) => `${message.senderUid}:${normalizeMessageSignature(message.text)}`),
+        .map(getMessageSignature),
     );
 
     const visibleTransientMessages = transientMessages.filter((message) => {
       if (message.senderUid !== currentUserId) return true;
-      const signature = `${message.senderUid}:${normalizeMessageSignature(message.text)}`;
-      if (!recentOutgoingSignatures.has(signature)) return true;
-      const matchingMessage = mapped.find(
-        (persistedMessage) =>
-          persistedMessage.senderUid === currentUserId &&
-          normalizeMessageSignature(persistedMessage.text) === normalizeMessageSignature(message.text) &&
-          Math.abs(persistedMessage.createdAt - message.createdAt) < 10_000,
-      );
-      return !matchingMessage;
+      return !persistedOutgoingSignatures.has(getMessageSignature(message));
     });
 
     if (mapped.length) return [...mapped, ...visibleTransientMessages];
@@ -444,6 +474,8 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       currentUserId,
       user?.fullName || user?.username || "You",
     );
+    const localUserMessageSignature = getMessageSignature(localUserMessage);
+    pendingUserMessageSignaturesRef.current.add(localUserMessageSignature);
     setTransientMessages((current) => [...current, localUserMessage]);
 
     const startedAt = Date.now();
@@ -456,9 +488,6 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       }
 
       await appendUserMessage({ conversationId: activeConversationId as any, text: trimmed });
-      setTimeout(() => {
-        setTransientMessages((current) => current.filter((message) => message.id !== localUserMessage.id));
-      }, LOCAL_MESSAGE_RETENTION_MS);
 
       const nextContext = updateSupportContext(conversationContext, trimmed, undefined, undefined, { moduleLabel });
       let assistantText = "";
@@ -518,6 +547,7 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
         contextPatch = { pendingAction: "none" };
       } else {
         if (shouldCallSupportAi(trimmed, nextContext)) {
+          setSupportWorkLabel(getSupportWorkLabel(trimmed));
           if (SUPPORT_DEBUG) {
             console.log("[SupportChat] Worker call started");
           }
@@ -571,6 +601,8 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       }
       rememberExchange(trimmed, assistantText, responseContext, contextPatch, agentMeta, activeConversationId);
     } catch (error) {
+      pendingUserMessageSignaturesRef.current.delete(localUserMessageSignature);
+      setTransientMessages((current) => current.filter((message) => message.id !== localUserMessage.id));
       if (SUPPORT_DEBUG) {
         const status = typeof (error as any)?.status === "number" ? (error as any).status : "unknown";
         console.log("[SupportChat] Worker call failure", { status });
@@ -593,6 +625,7 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
         conversationId,
       );
     } finally {
+      setSupportWorkLabel(null);
       setSending(false);
     }
   };
@@ -610,7 +643,9 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       </Text>
       {conversationContext.supportTicketReference ? (
         <View style={styles.ticketBanner}>
-          <Text style={styles.ticketBannerText}>Ticket: {conversationContext.supportTicketReference}</Text>
+          <Text style={styles.ticketBannerTitle}>Support ticket created</Text>
+          <Text style={styles.ticketBannerText}>Reference: {conversationContext.supportTicketReference}</Text>
+          <Text style={styles.ticketBannerMeta}>Status: Open | {SUPPORT_RESPONSE_SLA}</Text>
         </View>
       ) : null}
       <View style={styles.quickActions}>
@@ -652,6 +687,10 @@ export default function SupportChatScreen({ moduleLabel }: SupportChatScreenProp
       {SUPPORT_DEBUG && connectionErrorCategory ? (
         <Text style={styles.connectionDebugText}>Debug: {connectionErrorCategory}</Text>
       ) : null}
+    </View>
+  ) : supportWorkLabel ? (
+    <View style={styles.connectionBanner}>
+      <Text style={styles.connectionText}>{supportWorkLabel}</Text>
     </View>
   ) : null;
 
@@ -715,6 +754,16 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.interSemiBold,
     fontSize: 12,
+  },
+  ticketBannerTitle: {
+    color: COLORS.accent,
+    fontFamily: FONTS.heading,
+    fontSize: 13,
+  },
+  ticketBannerMeta: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
   },
   quickActions: {
     flexDirection: "row",

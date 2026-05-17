@@ -136,6 +136,18 @@ function sanitizeAuditMetadata(value: any): any {
   return undefined;
 }
 
+function redactSupportText(input: string) {
+  return String(input || "")
+    .replace(/\b(?:otp|pin|password|token|secret)\s*[:=]?\s*[A-Z0-9@#$%^&*._-]{3,}\b/gi, "[redacted-secret]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/g, "[redacted-phone]")
+    .replace(/\b(?:\d[ -]?){13,19}\b/g, "[redacted-card]")
+    .replace(/\b(?:easypaisa|jazzcash|wallet)\s*[:=]?\s*(?:\+?92|0)?3[0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}\b/gi, "[redacted-wallet]")
+    .replace(/\b\d{5}[-\s]?\d{7}[-\s]?\d\b/g, "[redacted-cnic]")
+    .replace(/\b(?:EP|TXN|TRX|PAY|ORD|REF)[-_]?(?=[A-Z0-9-]*\d)[A-Z0-9-]{6,}\b/gi, "[redacted-reference]")
+    .replace(/\b[A-F0-9]{12,}\b/gi, "[redacted-id]");
+}
+
 async function insertSuperAdminAuditLog(
   ctx: any,
   admin: { authUser?: any; profile?: any } | null,
@@ -297,6 +309,7 @@ function summarizeSupportTicketMetadata(metadata: any) {
 
 async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = false) {
   const user = await ctx.db.get(ticket.userId);
+  const assignedAdmin = ticket.assignedAdminId ? await ctx.db.get(ticket.assignedAdminId) : null;
   const base = {
     id: ticket._id,
     _id: ticket._id,
@@ -311,8 +324,15 @@ async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = fal
     relatedMatchroomId: ticket.relatedMatchroomId ? String(ticket.relatedMatchroomId) : undefined,
     relatedPaymentId: ticket.relatedPaymentId ? String(ticket.relatedPaymentId) : undefined,
     relatedBookingId: ticket.relatedBookingId ? String(ticket.relatedBookingId) : undefined,
+    relatedTeamId: ticket.relatedTeamId ? String(ticket.relatedTeamId) : undefined,
     relatedZoneId: ticket.relatedZoneId ? String(ticket.relatedZoneId) : undefined,
     conversationId: ticket.conversationId ? String(ticket.conversationId) : undefined,
+    assignedAdminId: ticket.assignedAdminId ? String(ticket.assignedAdminId) : undefined,
+    assignedAdminName: assignedAdmin?.fullName || assignedAdmin?.username || undefined,
+    lastAdminResponseAt: ticket.lastAdminResponseAt,
+    lastUserResponseAt: ticket.lastUserResponseAt,
+    resolutionSummary: ticket.resolutionSummary,
+    internalTags: ticket.internalTags || [],
     status: ticket.status,
     source: ticket.source,
     createdAt: ticket.createdAt,
@@ -324,9 +344,38 @@ async function serializeSupportTicket(ctx: any, ticket: any, includeDetail = fal
 
   if (!includeDetail) return base;
 
+  const [notes, supportMessages] = await Promise.all([
+    ctx.db
+      .query("supportTicketNotes")
+      .withIndex("by_ticketId_createdAt", (q: any) => q.eq("ticketId", ticket._id))
+      .order("asc")
+      .take(50),
+    ticket.conversationId
+      ? ctx.db
+          .query("supportMessages")
+          .withIndex("by_conversationId_createdAt", (q: any) => q.eq("conversationId", ticket.conversationId))
+          .order("asc")
+          .take(80)
+      : Promise.resolve([]),
+  ]);
+
   return {
     ...base,
     conversationExcerpt: ticket.conversationExcerpt || [],
+    internalNotes: notes.map((note: any) => ({
+      id: String(note._id),
+      author: note.author,
+      adminId: note.adminId ? String(note.adminId) : undefined,
+      text: note.textRedacted,
+      createdAt: note.createdAt,
+    })),
+    conversationMessages: supportMessages.map((message: any) => ({
+      id: String(message._id),
+      role: message.role,
+      text: message.textRedacted,
+      createdAt: message.createdAt,
+      metadata: message.metadata,
+    })),
     metadataSummary: summarizeSupportTicketMetadata(ticket.metadata),
   };
 }
@@ -1381,6 +1430,218 @@ export const updateSupportTicketStatus = mutation({
       targetId: String(args.ticketId),
       status: "success",
       metadataSafe: { previousStatus: ticket.status, status: args.status, reference: ticket.reference },
+    });
+    return { ok: true };
+  },
+});
+
+export const addSupportTicketInternalNote = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+
+    const text = String(args.note || "").trim();
+    if (!text) throw new Error("Internal note is required.");
+
+    await ctx.db.insert("supportTicketNotes", {
+      ticketId: args.ticketId,
+      adminId: admin.profile._id,
+      author: "admin",
+      textRedacted: redactSupportText(text).slice(0, 1200),
+      createdAt: Date.now(),
+    });
+    await ctx.db.patch(args.ticketId, { updatedAt: Date.now() });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "add_support_ticket_internal_note",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { reference: ticket.reference },
+    });
+    return { ok: true };
+  },
+});
+
+export const replyToSupportTicketUser = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    message: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+    if (!ticket.conversationId) throw new Error("This ticket is not linked to a support conversation.");
+
+    const conversation = await ctx.db.get(ticket.conversationId);
+    if (!conversation || String(conversation.userId) !== String(ticket.userId)) {
+      throw new Error("Support conversation not found.");
+    }
+
+    const text = String(args.message || "").trim();
+    if (!text) throw new Error("Reply message is required.");
+
+    const now = Date.now();
+    const safeText = redactSupportText(text).slice(0, 2000);
+    const messageId = await ctx.db.insert("supportMessages", {
+      conversationId: ticket.conversationId,
+      role: "admin",
+      textRedacted: safeText,
+      metadata: {
+        source: "super_admin_reply",
+        ticketId: String(args.ticketId),
+        ticketReference: ticket.reference,
+      },
+      createdAt: now,
+    });
+
+    await ctx.db.patch(ticket.conversationId, {
+      activeTicketId: args.ticketId,
+      lastMessageAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(args.ticketId, {
+      status: ticket.status === "open" ? "in_review" : ticket.status,
+      assignedAdminId: ticket.assignedAdminId || admin.profile._id,
+      lastAdminResponseAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "support.admin_reply",
+      toUid: ticket.userId,
+      fromUid: admin.profile._id,
+      fromUsername: admin.profile.fullName || admin.profile.username || "MatchHai Support",
+      status: "pending",
+      dedupeKey: `support.admin_reply:${String(args.ticketId)}:${String(messageId)}`,
+      dedupePolicy: "replace_active",
+      route: ticket.userRole === "zone_admin" ? "/zone/modules/ai-support" : "/(player)/support",
+      title: "Support replied",
+      body: `MatchHai Support replied to ${ticket.reference}.`,
+      data: {
+        ticketId: String(args.ticketId),
+        ticketReference: ticket.reference,
+        conversationId: String(ticket.conversationId),
+        href: ticket.userRole === "zone_admin" ? "/zone/modules/ai-support" : "/(player)/support",
+      },
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "reply_to_support_ticket_user",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { reference: ticket.reference },
+    });
+    return { ok: true, messageId };
+  },
+});
+
+export const assignSupportTicket = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    assignedAdminId: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+
+    await ctx.db.patch(args.ticketId, {
+      assignedAdminId: args.assignedAdminId || admin.profile._id,
+      status: ticket.status === "open" ? "in_review" : ticket.status,
+      updatedAt: Date.now(),
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "assign_support_ticket",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { reference: ticket.reference },
+    });
+    return { ok: true };
+  },
+});
+
+export const linkSupportTicketEntities = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    relatedMatchroomId: v.optional(v.id("matchrooms")),
+    relatedBookingId: v.optional(v.id("bookingIntents")),
+    relatedPaymentId: v.optional(v.id("paymentTransactions")),
+    relatedTeamId: v.optional(v.id("teams")),
+    relatedZoneId: v.optional(v.id("zones")),
+    internalTags: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+
+    await ctx.db.patch(args.ticketId, {
+      relatedMatchroomId: args.relatedMatchroomId || ticket.relatedMatchroomId,
+      relatedBookingId: args.relatedBookingId || ticket.relatedBookingId,
+      relatedPaymentId: args.relatedPaymentId || ticket.relatedPaymentId,
+      relatedTeamId: args.relatedTeamId || ticket.relatedTeamId,
+      relatedZoneId: args.relatedZoneId || ticket.relatedZoneId,
+      internalTags: args.internalTags?.map((tag) => String(tag).trim().slice(0, 40)).filter(Boolean).slice(0, 10) || ticket.internalTags,
+      updatedAt: Date.now(),
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "link_support_ticket_entities",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { reference: ticket.reference },
+    });
+    return { ok: true };
+  },
+});
+
+export const resolveSupportTicket = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+    resolutionSummary: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+
+    const summary = String(args.resolutionSummary || "").trim();
+    if (!summary) throw new Error("Resolution summary is required.");
+
+    await ctx.db.patch(args.ticketId, {
+      status: "resolved",
+      assignedAdminId: ticket.assignedAdminId || admin.profile._id,
+      resolutionSummary: redactSupportText(summary).slice(0, 1000),
+      updatedAt: Date.now(),
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "resolve_support_ticket",
+      module: "support",
+      targetType: "supportTicket",
+      targetId: String(args.ticketId),
+      status: "success",
+      metadataSafe: { reference: ticket.reference },
     });
     return { ok: true };
   },

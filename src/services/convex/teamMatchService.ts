@@ -368,8 +368,12 @@ export const sendTeamMatchChallenge = async (input: {
 
         return { ok: true, challengeId };
     } catch (error: any) {
+        const rawMessage = String(error?.message || error || "");
+        if (rawMessage.includes("already have a pending challenge")) {
+            return { ok: false, message: "You already have a pending challenge for this team." };
+        }
         Logger.error("teamMatchService", "sendTeamMatchChallenge failed", error);
-        return { ok: false, message: error?.message || "Failed to send challenge." };
+        return { ok: false, message: rawMessage || "Failed to send challenge." };
     }
 };
 
@@ -385,6 +389,7 @@ export const acceptTeamMatchChallenge = async (input: {
 
         const challenge = await convex.query(api.teamChallenges.getById, {
             challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
 
@@ -449,8 +454,12 @@ export const payTeamChallengeWithWallet = async (input: {
         });
         return { ok: true, amount };
     } catch (error: any) {
+        const rawMessage = String(error?.message || error || "");
+        if (rawMessage.includes("Insufficient wallet balance")) {
+            return { ok: false, message: "Insufficient wallet balance. Please add funds from Wallet." };
+        }
         Logger.error("teamMatchService", "payTeamChallengeWithWallet failed", error);
-        return { ok: false, message: error?.message || "Failed to pay from wallet." };
+        return { ok: false, message: rawMessage || "Failed to pay from wallet." };
     }
 };
 
@@ -464,10 +473,11 @@ export const rejectTeamMatchChallenge = async (input: {
 
         const challenge = await convex.query(api.teamChallenges.getById, {
             challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
 
-        if (challenge.status !== "pending") {
+        if (challenge.status !== "pending" && challenge.status !== "rejected") {
             const statusText = String(challenge.status || "resolved").replace(/_/g, " ");
             return { ok: false, message: `Challenge is already ${statusText}.` };
         }
@@ -498,6 +508,7 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
 
         const challenge = await convex.query(api.teamChallenges.getById, {
             challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
         if (challenge.status !== "pending") return { ok: false, message: "Challenge is not pending." };
@@ -576,6 +587,7 @@ export const proposeTeamChallengeVenue = async (input: {
 
         const challenge = await convex.query(api.teamChallenges.getById, {
             challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
         if (!["accepted", "venue_proposed", "venue_confirmed"].includes(challenge.status)) {
@@ -594,6 +606,7 @@ export const proposeTeamChallengeVenue = async (input: {
         if (result?.confirmedVenue) {
             const latest = await convex.query(api.teamChallenges.getById, {
                 challengeId: input.challengeId as Id<"teamChallenges">,
+                actorUid: me.convexId,
             });
             if (!latest) {
                 return { ok: false, message: "Challenge not found after venue confirmation." };
@@ -682,8 +695,12 @@ export const proposeTeamChallengeVenue = async (input: {
 // Get challenge by ID
 export const getTeamMatchChallengeById = async (challengeId: string): Promise<ServerResponse> => {
     try {
+        const me = await getCurrentUserInfo();
+        if (!me) return { ok: false, message: "Not authenticated." };
+
         const challenge = await convex.query(api.teamChallenges.getById, {
             challengeId: challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
         if (!challenge) return { ok: false, message: "Challenge not found." };
         return { ok: true, data: { ...challenge, id: challenge._id } };
@@ -705,8 +722,14 @@ export const subscribeTeamMatchChallenge = (
     // This provides a one-time fetch for compatibility
     (async () => {
         try {
+            const me = await getCurrentUserInfo();
+            if (!me) {
+                onData(null);
+                return;
+            }
             const challenge = await convex.query(api.teamChallenges.getById, {
                 challengeId: challengeId as Id<"teamChallenges">,
+                actorUid: me.convexId,
             });
             if (!challenge) {
                 onData(null);

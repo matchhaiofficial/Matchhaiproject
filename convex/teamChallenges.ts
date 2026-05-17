@@ -146,6 +146,86 @@ async function createChallengeNotification(
   });
 }
 
+async function refundChallengerPaymentForRejectedChallenge(ctx: any, challengeId: Id<"teamChallenges">, challenge: any) {
+  if (challenge.teamAPaymentStatus !== "paid") {
+    return { refunded: false, amount: 0, created: false };
+  }
+
+  const captainAUid = challenge.captainAUid as Id<"users"> | undefined;
+  if (!captainAUid) {
+    return { refunded: false, amount: 0, created: false };
+  }
+
+  const walletTransactions = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_userId", (q: any) => q.eq("userId", captainAUid))
+    .collect();
+
+  const challengeCreatedAt = Number(challenge.createdAt || 0);
+  const sourcePayment = walletTransactions
+    .filter((transaction: any) => {
+      if (transaction.type !== "withdrawal") return false;
+      if (transaction.status !== "completed") return false;
+      const metadata = transaction.metadata || {};
+      if (metadata.flow !== "team_challenge" || metadata.side !== "teamA") return false;
+      if (String(metadata.challengeId || "") === String(challengeId)) return true;
+      const reference = String(transaction.reference || "");
+      if (!reference.startsWith(`team_challenge:create:${String(challenge.challengerTeamId)}:`)) return false;
+      const transactionCreatedAt = Number(transaction.createdAt || 0);
+      return !challengeCreatedAt || (
+        transactionCreatedAt >= challengeCreatedAt - 10 * 60 * 1000 &&
+        transactionCreatedAt <= challengeCreatedAt + 60 * 1000
+      );
+    })
+    .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
+
+  const amount = Math.ceil(Number(challenge.teamAPaymentAmount || sourcePayment?.amount || 0));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { refunded: false, amount: 0, created: false };
+  }
+
+  const refundReference = `team_challenge_refund:${String(challengeId)}:teamA`;
+  const existingRefund = await ctx.db
+    .query("walletTransactions")
+      .withIndex("by_reference", (q: any) => q.eq("reference", refundReference))
+      .unique();
+  if (existingRefund) {
+    return { refunded: true, amount: Number(existingRefund.amount || amount), created: false };
+  }
+
+  const captainA = await ctx.db.get(captainAUid);
+  if (!captainA) {
+    return { refunded: false, amount: 0, created: false };
+  }
+
+  const now = Date.now();
+  await ctx.db.patch(captainAUid, {
+    walletBalance: Number(captainA.walletBalance || 0) + amount,
+    updatedAt: now,
+  });
+
+  await ctx.db.insert("walletTransactions", {
+    userId: captainAUid,
+    type: "refund",
+    amount,
+    status: "completed",
+    reference: refundReference,
+    metadata: {
+      flow: "team_challenge",
+      reason: "challenge_rejected",
+      challengeId: String(challengeId),
+      challengerTeamId: String(challenge.challengerTeamId || ""),
+      opponentTeamId: String(challenge.opponentTeamId || ""),
+      originalTransactionId: sourcePayment?._id ? String(sourcePayment._id) : null,
+      originalReference: sourcePayment?.reference || null,
+      originalPaymentStatus: challenge.teamAPaymentStatus || null,
+    },
+    createdAt: now,
+  });
+
+  return { refunded: true, amount, created: true };
+}
+
 // Get challenge by ID
 export const getById = query({
   args: { challengeId: v.id("teamChallenges"), actorUid: v.optional(v.id("users")) },
@@ -243,6 +323,47 @@ export const listPendingForTeam = query({
   },
 });
 
+export const getPendingForOpponentByCaptain = query({
+  args: {
+    opponentTeamId: v.id("teams"),
+    actorUid: v.optional(v.id("users")),
+    challengerTeamId: v.optional(v.id("teams")),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthenticatedUserId(ctx, args.actorUid);
+    const challengerTeams = args.challengerTeamId
+      ? [await ctx.db.get(args.challengerTeamId)]
+      : await ctx.db
+          .query("teams")
+          .withIndex("by_captainUid", (q) => q.eq("captainUid", userId))
+          .collect();
+    const challengerTeamIds = new Set(
+      challengerTeams
+        .filter((team: any) => team && team.captainUid === userId)
+        .map((team: any) => String(team._id)),
+    );
+    if (challengerTeamIds.size === 0) return null;
+
+    const challenges = await ctx.db
+      .query("teamChallenges")
+      .withIndex("by_opponentTeamId", (q) => q.eq("opponentTeamId", args.opponentTeamId))
+      .collect();
+    const pending = challenges
+      .filter((challenge: any) => challenge.status === "pending")
+      .filter((challenge: any) => String(challenge.captainAUid || "") === String(userId))
+      .filter((challenge: any) => challengerTeamIds.has(String(challenge.challengerTeamId)))
+      .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
+    if (!pending) return null;
+
+    return {
+      challengeId: pending._id,
+      challengerTeamId: pending.challengerTeamId,
+      opponentTeamId: pending.opponentTeamId,
+      status: pending.status,
+    };
+  },
+});
+
 export const create = mutation({
   args: {
     challengerTeamId: v.id("teams"),
@@ -295,6 +416,16 @@ export const respond = mutation({
   handler: async (ctx, args) => {
     const { challenge, userId } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     if (challenge.status !== "pending") {
+      if (!args.accept && challenge.status === "rejected") {
+        const refundResult = await refundChallengerPaymentForRejectedChallenge(ctx, args.challengeId, challenge);
+        if (refundResult.refunded && challenge.teamAPaymentStatus === "paid") {
+          await ctx.db.patch(args.challengeId, {
+            teamAPaymentStatus: "unpaid",
+            updatedAt: Date.now(),
+          });
+        }
+        return { ok: true, status: "rejected", chatId: challenge.chatId, refund: refundResult };
+      }
       throw new Error("Challenge is not pending");
     }
 
@@ -304,11 +435,15 @@ export const respond = mutation({
 
     const nextStatus = args.accept ? "accepted" : "rejected";
     const chatId = args.accept ? challenge.chatId || String(args.challengeId) : challenge.chatId;
+    const refundResult = args.accept
+      ? { refunded: false, amount: 0 }
+      : await refundChallengerPaymentForRejectedChallenge(ctx, args.challengeId, challenge);
 
     await ctx.db.patch(args.challengeId, {
       status: nextStatus,
       chatId,
       lineupB: args.accept ? args.lineupB || challenge.lineupB : challenge.lineupB,
+      teamAPaymentStatus: !args.accept && refundResult.refunded ? "unpaid" : challenge.teamAPaymentStatus,
       teamBPaymentStatus: args.accept ? args.teamBPaymentStatus || challenge.teamBPaymentStatus || "paid" : challenge.teamBPaymentStatus,
       teamBPaymentAmount: args.accept ? args.teamBPaymentAmount ?? challenge.teamBPaymentAmount : challenge.teamBPaymentAmount,
       updatedAt: Date.now(),
@@ -330,12 +465,54 @@ export const respond = mutation({
         title: args.accept ? "Challenge accepted" : "Challenge declined",
         body: args.accept
           ? `${challenge.opponentTeamName || "Opponent"} accepted the team challenge.`
-          : `${challenge.opponentTeamName || "Opponent"} declined the team challenge.`,
+          : refundResult.refunded && recipientUid === challenge.captainAUid
+            ? `${challenge.opponentTeamName || "Opponent"} declined the team challenge. PKR ${refundResult.amount} was refunded to your wallet.`
+            : `${challenge.opponentTeamName || "Opponent"} declined the team challenge.`,
         updateKind: nextStatus,
+        extraData: !args.accept && refundResult.refunded
+          ? {
+              refundAmount: refundResult.amount,
+              refundReference: `team_challenge_refund:${String(args.challengeId)}:teamA`,
+            }
+          : undefined,
       });
     }
 
     return { ok: true, status: nextStatus, chatId };
+  },
+});
+
+export const repairRejectedRefundsForCaptain = mutation({
+  args: { actorUid: v.optional(v.id("users")) },
+  handler: async (ctx, args) => {
+    const userId = await getAuthenticatedUserId(ctx, args.actorUid);
+    const rejectedChallenges = await ctx.db
+      .query("teamChallenges")
+      .withIndex("by_status", (q) => q.eq("status", "rejected"))
+      .collect();
+
+    let repairedCount = 0;
+    let creditedAmount = 0;
+
+    for (const challenge of rejectedChallenges) {
+      if (String(challenge.captainAUid || "") !== String(userId)) continue;
+      if (challenge.teamAPaymentStatus !== "paid") continue;
+
+      const refundResult = await refundChallengerPaymentForRejectedChallenge(ctx, challenge._id, challenge);
+      if (!refundResult.refunded) continue;
+
+      await ctx.db.patch(challenge._id, {
+        teamAPaymentStatus: "unpaid",
+        updatedAt: Date.now(),
+      });
+
+      repairedCount += 1;
+      if (refundResult.created) {
+        creditedAmount += refundResult.amount;
+      }
+    }
+
+    return { ok: true, repairedCount, creditedAmount };
   },
 });
 

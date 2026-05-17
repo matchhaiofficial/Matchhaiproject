@@ -40,6 +40,7 @@ import type * as social from "../social.js";
 import type * as storage from "../storage.js";
 import type * as support from "../support.js";
 import type * as supportEmail from "../supportEmail.js";
+import type * as supportKnowledge from "../supportKnowledge.js";
 import type * as teamChallengeChat from "../teamChallengeChat.js";
 import type * as teamChallenges from "../teamChallenges.js";
 import type * as teams from "../teams.js";
@@ -92,6 +93,7 @@ declare const fullApi: ApiFromModules<{
   storage: typeof storage;
   support: typeof support;
   supportEmail: typeof supportEmail;
+  supportKnowledge: typeof supportKnowledge;
   teamChallengeChat: typeof teamChallengeChat;
   teamChallenges: typeof teamChallenges;
   teams: typeof teams;

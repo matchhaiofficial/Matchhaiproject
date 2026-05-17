@@ -1,13 +1,17 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminInfoLine } from "../../../src/components/AdminSurface";
 import Screen from "../../../src/components/Screen";
 import { useToast } from "../../../src/hooks/useToast";
 import {
+  addSupportTicketInternalNote,
+  assignSupportTicket,
   getSupportTicketById,
+  replyToSupportTicketUser,
+  resolveSupportTicket,
   type SuperAdminSupportTicket,
   type SuperAdminSupportTicketStatus,
   updateSupportTicketStatus,
@@ -57,6 +61,10 @@ export default function SuperAdminSupportTicketDetail() {
   const [ticket, setTicket] = useState<SuperAdminSupportTicket | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyStatus, setBusyStatus] = useState<SuperAdminSupportTicketStatus | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [resolutionText, setResolutionText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const loadTicket = async () => {
@@ -91,6 +99,61 @@ export default function SuperAdminSupportTicketDetail() {
       await loadTicket();
     } else {
       showToast({ type: "error", title: "Update failed", message: result.message });
+    }
+  };
+
+  const submitInternalNote = async () => {
+    if (!ticket || !noteText.trim()) return;
+    setBusyAction("note");
+    const result = await addSupportTicketInternalNote(ticket.id, noteText.trim());
+    setBusyAction(null);
+    if (result.ok) {
+      setNoteText("");
+      showToast({ type: "success", title: "Note added", message: "Internal note saved." });
+      await loadTicket();
+    } else {
+      showToast({ type: "error", title: "Note failed", message: result.message });
+    }
+  };
+
+  const submitReply = async () => {
+    if (!ticket || !replyText.trim()) return;
+    setBusyAction("reply");
+    const result = await replyToSupportTicketUser(ticket.id, replyText.trim());
+    setBusyAction(null);
+    if (result.ok) {
+      setReplyText("");
+      showToast({ type: "success", title: "Reply sent", message: "The user will see this in Help & Support." });
+      await loadTicket();
+    } else {
+      showToast({ type: "error", title: "Reply failed", message: result.message });
+    }
+  };
+
+  const assignToMe = async () => {
+    if (!ticket) return;
+    setBusyAction("assign");
+    const result = await assignSupportTicket(ticket.id);
+    setBusyAction(null);
+    if (result.ok) {
+      showToast({ type: "success", title: "Assigned", message: "Ticket assigned to you." });
+      await loadTicket();
+    } else {
+      showToast({ type: "error", title: "Assign failed", message: result.message });
+    }
+  };
+
+  const submitResolution = async () => {
+    if (!ticket || !resolutionText.trim()) return;
+    setBusyAction("resolve");
+    const result = await resolveSupportTicket(ticket.id, resolutionText.trim());
+    setBusyAction(null);
+    if (result.ok) {
+      setResolutionText("");
+      showToast({ type: "success", title: "Ticket resolved", message: "Resolution summary saved." });
+      await loadTicket();
+    } else {
+      showToast({ type: "error", title: "Resolve failed", message: result.message });
     }
   };
 
@@ -130,6 +193,10 @@ export default function SuperAdminSupportTicketDetail() {
             {ticket.priority ? <AdminInfoLine label="Priority" value={formatValue(ticket.priority)} /> : null}
             <AdminInfoLine label="Source" value={formatValue(ticket.source)} />
             <AdminInfoLine label="Email status" value={formatValue(ticket.metadataSummary?.emailStatus || "not_configured")} />
+            {ticket.assignedAdminName ? <AdminInfoLine label="Assigned admin" value={ticket.assignedAdminName} /> : null}
+            {ticket.lastAdminResponseAt ? <AdminInfoLine label="Last admin reply" value={formatDate(ticket.lastAdminResponseAt)} /> : null}
+            {ticket.lastUserResponseAt ? <AdminInfoLine label="Last user response" value={formatDate(ticket.lastUserResponseAt)} /> : null}
+            {ticket.resolutionSummary ? <AdminInfoLine label="Resolution" value={ticket.resolutionSummary} /> : null}
             <AdminInfoLine label="Created" value={formatDate(ticket.createdAt)} />
             <AdminInfoLine label="Updated" value={formatDate(ticket.updatedAt)} />
           </View>
@@ -142,17 +209,19 @@ export default function SuperAdminSupportTicketDetail() {
               {ticket.relatedMatchroomId ? <AdminInfoLine label="Matchroom ID" value={ticket.relatedMatchroomId} /> : null}
               {ticket.relatedPaymentId ? <AdminInfoLine label="Payment ID" value={ticket.relatedPaymentId} /> : null}
               {ticket.relatedBookingId ? <AdminInfoLine label="Booking ID" value={ticket.relatedBookingId} /> : null}
+              {ticket.relatedTeamId ? <AdminInfoLine label="Team ID" value={ticket.relatedTeamId} /> : null}
               {ticket.relatedZoneId ? <AdminInfoLine label="Zone ID" value={ticket.relatedZoneId} /> : null}
+              {ticket.internalTags?.length ? <AdminInfoLine label="Internal tags" value={ticket.internalTags.join(", ")} /> : null}
             </View>
           ) : null}
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Conversation Excerpt</Text>
             <Text style={styles.helperText}>Rendered as stored after support-chat redaction.</Text>
-            {ticket.conversationExcerpt?.length ? (
-              ticket.conversationExcerpt.map((message, index) => (
+            {(ticket.conversationMessages?.length ? ticket.conversationMessages : ticket.conversationExcerpt)?.length ? (
+              (ticket.conversationMessages?.length ? ticket.conversationMessages : ticket.conversationExcerpt || []).map((message: any, index) => (
                 <View key={`${message.role}-${index}`} style={styles.messageRow}>
-                  <Text style={styles.messageRole}>{message.role === "assistant" ? "Support" : "User"}</Text>
+                  <Text style={styles.messageRole}>{message.role === "user" ? "User" : message.role === "admin" ? "Admin Reply" : "Support"}</Text>
                   <Text style={styles.messageText}>{message.text}</Text>
                 </View>
               ))
@@ -190,7 +259,70 @@ export default function SuperAdminSupportTicketDetail() {
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Ticket Actions</Text>
-            <Text style={styles.helperText}>No reply or email sending is wired yet. These actions only update ticket status.</Text>
+            <Text style={styles.helperText}>Replies are sent into the user's Help & Support conversation. Internal notes stay admin-only.</Text>
+            {!ticket.assignedAdminId ? (
+              <Pressable style={styles.secondaryButton} onPress={assignToMe} disabled={busyAction !== null || busyStatus !== null}>
+                {busyAction === "assign" ? <ActivityIndicator color={COLORS.text} /> : <Text style={styles.secondaryButtonText}>Assign To Me</Text>}
+              </Pressable>
+            ) : null}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.contextLabel}>Reply to user</Text>
+              <TextInput
+                value={replyText}
+                onChangeText={setReplyText}
+                placeholder="Write a user-facing support reply"
+                placeholderTextColor={COLORS.textSecondary}
+                multiline
+                style={styles.textArea}
+              />
+              <Pressable style={[styles.primaryButton, !replyText.trim() && styles.disabledButton]} onPress={submitReply} disabled={!replyText.trim() || busyAction !== null || busyStatus !== null}>
+                {busyAction === "reply" ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send Reply</Text>}
+              </Pressable>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.contextLabel}>Internal note</Text>
+              <TextInput
+                value={noteText}
+                onChangeText={setNoteText}
+                placeholder="Add an admin-only note"
+                placeholderTextColor={COLORS.textSecondary}
+                multiline
+                style={styles.textArea}
+              />
+              <Pressable style={[styles.secondaryButton, !noteText.trim() && styles.disabledButton]} onPress={submitInternalNote} disabled={!noteText.trim() || busyAction !== null || busyStatus !== null}>
+                {busyAction === "note" ? <ActivityIndicator color={COLORS.text} /> : <Text style={styles.secondaryButtonText}>Add Note</Text>}
+              </Pressable>
+            </View>
+
+            {ticket.internalNotes?.length ? (
+              <View style={styles.metadataBlock}>
+                <Text style={styles.contextLabel}>Internal Notes</Text>
+                {ticket.internalNotes.map((note) => (
+                  <View key={note.id} style={styles.metadataItem}>
+                    <Text style={styles.metadataText}>{formatDate(note.createdAt)}</Text>
+                    <Text style={styles.messageText}>{note.text}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.contextLabel}>Resolution summary</Text>
+              <TextInput
+                value={resolutionText}
+                onChangeText={setResolutionText}
+                placeholder="Summarize how this ticket was resolved"
+                placeholderTextColor={COLORS.textSecondary}
+                multiline
+                style={styles.textArea}
+              />
+              <Pressable style={[styles.primaryButton, !resolutionText.trim() && styles.disabledButton]} onPress={submitResolution} disabled={!resolutionText.trim() || busyAction !== null || busyStatus !== null}>
+                {busyAction === "resolve" ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Resolve With Summary</Text>}
+              </Pressable>
+            </View>
+
             <View style={styles.actionRow}>
               {ticket.status !== "in_review" ? (
                 <Pressable style={styles.secondaryButton} onPress={() => updateStatus("in_review")} disabled={busyStatus !== null}>
@@ -239,8 +371,22 @@ const styles = StyleSheet.create({
   contextLabel: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 13 },
   metadataText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, lineHeight: 20 },
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: SPACING.sm },
+  inputGroup: { gap: SPACING.sm, marginTop: SPACING.md },
+  textArea: {
+    minHeight: 96,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.overlayLight,
+    color: COLORS.text,
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    padding: SPACING.md,
+    textAlignVertical: "top",
+  },
   primaryButton: { minHeight: 44, minWidth: 124, paddingHorizontal: SPACING.lg, borderRadius: RADII.lg, backgroundColor: COLORS.accent, alignItems: "center", justifyContent: "center" },
   primaryButtonText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 14 },
   secondaryButton: { minHeight: 44, minWidth: 124, paddingHorizontal: SPACING.lg, borderRadius: RADII.lg, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.overlayLight, alignItems: "center", justifyContent: "center" },
   secondaryButtonText: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 14 },
+  disabledButton: { opacity: 0.45 },
 });
