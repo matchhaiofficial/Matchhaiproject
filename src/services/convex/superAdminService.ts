@@ -98,8 +98,15 @@ export type SuperAdminSupportTicket = {
   relatedMatchroomId?: string;
   relatedPaymentId?: string;
   relatedBookingId?: string;
+  relatedTeamId?: string;
   relatedZoneId?: string;
   conversationId?: string;
+  assignedAdminId?: string;
+  assignedAdminName?: string;
+  lastAdminResponseAt?: number;
+  lastUserResponseAt?: number;
+  resolutionSummary?: string;
+  internalTags?: string[];
   status: SuperAdminSupportTicketStatus;
   source: "help_support_chat" | "help_support_ai_agent";
   createdAt: number;
@@ -121,6 +128,20 @@ export type SuperAdminSupportTicket = {
     recentMatchrooms?: Array<Record<string, unknown>>;
     recentReports?: Array<Record<string, unknown>>;
   };
+  internalNotes?: Array<{
+    id: string;
+    author: "agent" | "admin" | "system";
+    adminId?: string;
+    text: string;
+    createdAt: number;
+  }>;
+  conversationMessages?: Array<{
+    id: string;
+    role: "user" | "assistant" | "system" | "admin";
+    text: string;
+    createdAt: number;
+    metadata?: Record<string, unknown>;
+  }>;
 };
 
 export type EasypaisaAdminTransaction = {
@@ -541,6 +562,69 @@ export async function updateSupportTicketStatus(
   } catch (error: any) {
     console.error("[superAdminService] updateSupportTicketStatus error", error);
     return { ok: false, message: "Failed to update support ticket status." };
+  }
+}
+
+export async function addSupportTicketInternalNote(ticketId: string, note: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.addSupportTicketInternalNote, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] addSupportTicketInternalNote error", error);
+    return { ok: false, message: error?.message || "Failed to add internal note." };
+  }
+}
+
+export async function replyToSupportTicketUser(ticketId: string, message: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.replyToSupportTicketUser, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+      message,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] replyToSupportTicketUser error", error);
+    return { ok: false, message: error?.message || "Failed to send support reply." };
+  }
+}
+
+export async function assignSupportTicket(ticketId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.assignSupportTicket, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] assignSupportTicket error", error);
+    return { ok: false, message: error?.message || "Failed to assign support ticket." };
+  }
+}
+
+export async function resolveSupportTicket(ticketId: string, resolutionSummary: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.resolveSupportTicket, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+      resolutionSummary,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] resolveSupportTicket error", error);
+    return { ok: false, message: error?.message || "Failed to resolve support ticket." };
   }
 }
 

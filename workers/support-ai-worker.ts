@@ -14,6 +14,15 @@ type AgentAction = {
   reason?: string;
   payload?: Record<string, unknown>;
 };
+type SupportQuestionCategory =
+  | "general_policy"
+  | "matchroom_issue"
+  | "payment_booking_issue"
+  | "refund_issue"
+  | "team_challenge_issue"
+  | "zone_admin_issue"
+  | "report_dispute_issue"
+  | "ticket_escalation_request";
 
 const MAX_USER_MESSAGE_CHARS = 2000;
 const MAX_RECENT_MESSAGES_SENT = 12;
@@ -42,6 +51,9 @@ const SYSTEM_PROMPT = [
   "You are MatchHai AI Support Agent.",
   "You help players, zone admins, and super admins with MatchHai app support issues only.",
   "You can inspect only safe tool context provided to you. Never claim you checked data that is not in safe context.",
+  "Use retrieved MatchHai knowledge chunks for policy/how-to answers. Use real-time tool results for account-specific answers.",
+  "If real-time data is unavailable or does not verify the user's claim, say that clearly and offer ticket creation.",
+  "Do not expose knowledge chunk internals, source labels, scores, raw metadata, or tool payloads to users.",
   "Never ask for OTPs, PINs, passwords, tokens, auth headers, CNIC, card numbers, wallet numbers, or payment gateway payloads.",
   "Never perform or recommend direct execution of refunds, wallet balance changes, bans, suspensions, venue payouts, result overrides, account deletion, or confirmed matchroom cancellation. Escalate those.",
   "For low or medium priority ticket creation, ask for user confirmation before creating a ticket.",
@@ -243,13 +255,98 @@ function inferReportType(message: string) {
   return "user_report";
 }
 
+function classifySupportQuestion(message: string, context: any): SupportQuestionCategory {
+  const text = normalize(message);
+  // Prefer "how-to" / guidance questions over incident triage.
+  // Otherwise queries like "how to create matchroom" get misclassified as a matchroom incident.
+  if (/\b(how\s+to|how\s+do\s+i|steps?|guide|tutorial|instructions?)\b/.test(text)) {
+    return "general_policy";
+  }
+  if (/\b(create|make|start|set\s*up)\b/.test(text) && /\b(matchroom|match\s*room|team\s*challenge|challenge|wallet|top\s*up|booking|zone|venue)\b/.test(text)) {
+    return "general_policy";
+  }
+  if (wantsTicket(message, context) || /\b(escalate|human support|support ticket|support request|contact admin)\b/.test(text)) {
+    return "ticket_escalation_request";
+  }
+  if (/\b(refund|refunded|money back|returned to wallet|cancelled payment)\b/.test(text)) return "refund_issue";
+  if (/\b(payment|paid|deducted|charged|wallet|top[ -]?up|booking|easypaisa|transaction|checkout)\b/.test(text)) {
+    return "payment_booking_issue";
+  }
+  if (/\b(team challenge|challenge|challenged|opponent team|reject challenge|accept challenge|captain)\b/.test(text)) {
+    return "team_challenge_issue";
+  }
+  if (/\b(matchroom|match room|room pending|lobby|slot|join room|player not show|no[- ]?show|venue not confirmed)\b/.test(text)) {
+    return "matchroom_issue";
+  }
+  if (/\b(zone|venue|branch|zone admin|owner|approval|booking request|resource|pricing)\b/.test(text)) {
+    return "zone_admin_issue";
+  }
+  if (/\b(report|dispute|complaint|abuse|harassment|cheat|cheating|unsafe|scam|fraud)\b/.test(text)) {
+    return "report_dispute_issue";
+  }
+  if (context?.currentIssueCategory === "payments_wallet_refunds") return "payment_booking_issue";
+  if (context?.currentIssueCategory === "matchroom_lobby") return "matchroom_issue";
+  if (context?.currentIssueCategory === "zone_admin") return "zone_admin_issue";
+  return "general_policy";
+}
+
+function buildContextTools(category: SupportQuestionCategory, userMessage: string): AgentAction[] {
+  const tools: AgentAction[] = [
+    {
+      type: "search_support_knowledge",
+      reason: "Retrieve MatchHai support policy and how-to context for this user message.",
+      payload: {
+        query: userMessage,
+        limit: category === "general_policy" ? 6 : 4,
+      },
+    },
+  ];
+  if (category === "matchroom_issue") {
+    tools.push({ type: "get_my_matchroom_status", reason: "Check safe matchroom status for this authenticated user.", payload: { recentOnly: true } });
+  } else if (category === "payment_booking_issue") {
+    tools.push({ type: "get_my_payment_booking_status", reason: "Check safe payment and booking status for this authenticated user.", payload: {} });
+  } else if (category === "refund_issue") {
+    tools.push({ type: "get_my_refund_status", reason: "Check safe refund status for this authenticated user.", payload: {} });
+  } else if (category === "team_challenge_issue") {
+    tools.push({ type: "get_my_team_challenge_status", reason: "Check safe team challenge status for this authenticated user.", payload: {} });
+  } else if (category === "zone_admin_issue") {
+    tools.push({ type: "get_my_zone_request_status", reason: "Check safe zone request status for this authenticated user.", payload: {} });
+  } else if (category === "ticket_escalation_request") {
+    tools.push({ type: "get_my_recent_support_entities", reason: "Gather safe recent entities for support ticket context.", payload: {} });
+  }
+  return tools.slice(0, MAX_TOOL_CALLS_PER_TURN);
+}
+
+function getKnowledgeChunks(toolResults: any[]) {
+  const searchResult = toolResults.find((result) => result?.type === "search_support_knowledge" && result?.ok);
+  const chunks = searchResult?.data?.chunks || searchResult?.data?.data?.chunks || [];
+  return Array.isArray(chunks) ? chunks.slice(0, 6) : [];
+}
+
+function getRealtimeToolResults(toolResults: any[]) {
+  return toolResults
+    .filter((result) => result?.ok && result?.type !== "search_support_knowledge")
+    .map((result) => ({
+      type: result.type,
+      data: result.data,
+    }));
+}
+
 function trimContext(payload: unknown) {
   const text = JSON.stringify(payload);
   if (text.length <= MAX_CONTEXT_CHARS) return payload;
   return {
     truncated: true,
+    questionClassification: (payload as any)?.questionClassification,
     currentSupportContext: (payload as any)?.currentSupportContext,
     inferredPatch: (payload as any)?.inferredPatch,
+    retrievedKnowledge: ((payload as any)?.retrievedKnowledge || []).slice(0, 4).map((chunk: any) => ({
+      title: chunk.title,
+      category: chunk.category,
+      sourceLabel: chunk.sourceLabel,
+      text: String(chunk.text || "").slice(0, 900),
+    })),
+    realtimeToolResults: ((payload as any)?.realtimeToolResults || []).slice(0, 3),
     safeAppContext: (payload as any)?.safeAppContext
       ? {
           user: (payload as any).safeAppContext.user,
@@ -395,6 +492,20 @@ export default {
       }, 200, origin);
     }
 
+    const questionClassification = classifySupportQuestion(userMessage, context);
+    const contextTools = await callToolGateway(env, {
+      requestId: id,
+      identityToken,
+      ipKey,
+      tools: buildContextTools(questionClassification, userMessage),
+    });
+    if (contextTools.rateLimited) {
+      await recordAgentEvent(env, identityToken, id, "context_tools", "rate_limited", questionClassification);
+    }
+    const contextToolResults = contextTools.ok ? contextTools.results || [] : [];
+    const retrievedKnowledge = getKnowledgeChunks(contextToolResults);
+    const realtimeToolResults = getRealtimeToolResults(contextToolResults);
+
     const recentHistory = (body?.history || [])
       .slice(-MAX_RECENT_MESSAGES_SENT)
       .map((item) => ({
@@ -408,16 +519,22 @@ export default {
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "system",
-          content: JSON.stringify(trimContext({
+          content: [
+            "Grounding context for this turn. Answer from retrievedKnowledge for MatchHai policy/how-to details, and from realtimeToolResults for user-specific status. If either is empty or inconclusive, say the system could not verify it and offer ticket creation.",
+            JSON.stringify(trimContext({
             currentSupportContext: context,
             inferredPatch,
+            questionClassification,
+            retrievedKnowledge,
+            realtimeToolResults,
             safeAppContext: safeContext,
             supportEmailConfigured: Boolean(String(body?.supportEmail || env.SUPPORT_EMAIL || "").trim()),
             requestLimits: {
               maxRecentMessages: MAX_RECENT_MESSAGES_SENT,
               maxToolCalls: MAX_TOOL_CALLS_PER_TURN,
             },
-          })),
+            })),
+          ].join("\n"),
         },
         ...recentHistory,
         { role: "user", content: userMessage },
@@ -428,7 +545,15 @@ export default {
       return json({
         answer: fallback.answer,
         contextPatch: fallback.contextPatch,
-        agentMeta: { requestId: id, intent: fallback.intent, priority: fallback.priority, fallback: true },
+        agentMeta: {
+          requestId: id,
+          intent: fallback.intent,
+          priority: fallback.priority,
+          fallback: true,
+          questionClassification,
+          realtimeTools: realtimeToolResults.map((result) => result.type),
+          knowledgeSources: retrievedKnowledge.map((chunk: any) => chunk.sourceLabel).filter(Boolean),
+        },
       }, 200, origin);
     }
 
@@ -463,7 +588,16 @@ export default {
             category: inferredPatch.currentIssueCategory || intent,
             issueSummary: inferredPatch.currentIssueSummary || userMessage,
             suggestedAdminAction: action.payload?.suggestedAdminAction || action.reason || "Review safe support context and follow up with the user.",
-            safeContextSnapshot: safeContext,
+            safeContextSnapshot: {
+              safeAppContext: safeContext,
+              questionClassification,
+              realtimeToolResults,
+              knowledgeSources: retrievedKnowledge.map((chunk: any) => ({
+                title: chunk.title,
+                category: chunk.category,
+                sourceLabel: chunk.sourceLabel,
+              })),
+            },
           },
         };
       }
@@ -517,6 +651,9 @@ export default {
         intent,
         priority,
         confidence: Number(planner.confidence || 0),
+        questionClassification,
+        realtimeTools: realtimeToolResults.map((result) => result.type),
+        knowledgeSources: retrievedKnowledge.map((chunk: any) => chunk.sourceLabel).filter(Boolean),
         actions: executedResults.map((result) => ({
           type: result.type,
           ok: Boolean(result.ok),

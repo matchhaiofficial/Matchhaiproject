@@ -1570,8 +1570,14 @@ export default defineSchema({
     relatedMatchroomId: v.optional(v.id("matchrooms")),
     relatedPaymentId: v.optional(v.id("paymentTransactions")),
     relatedBookingId: v.optional(v.id("bookingIntents")),
+    relatedTeamId: v.optional(v.id("teams")),
     relatedZoneId: v.optional(v.id("zones")),
     conversationId: v.optional(v.id("supportConversations")),
+    assignedAdminId: v.optional(v.id("users")),
+    lastAdminResponseAt: v.optional(v.number()),
+    lastUserResponseAt: v.optional(v.number()),
+    resolutionSummary: v.optional(v.string()),
+    internalTags: v.optional(v.array(v.string())),
     metadata: v.optional(v.any()),
     status: v.union(
       v.literal("open"),
@@ -1587,6 +1593,7 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_conversationId", ["conversationId"])
     .index("by_conversationId_createdAt", ["conversationId", "createdAt"])
+    .index("by_assignedAdminId", ["assignedAdminId"])
     .index("by_status_createdAt", ["status", "createdAt"]),
 
   supportConversations: defineTable({
@@ -1618,7 +1625,7 @@ export default defineSchema({
 
   supportMessages: defineTable({
     conversationId: v.id("supportConversations"),
-    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("admin")),
     textRedacted: v.string(),
     metadata: v.optional(v.any()),
     createdAt: v.number(),
@@ -1627,6 +1634,7 @@ export default defineSchema({
 
   supportTicketNotes: defineTable({
     ticketId: v.id("supportTickets"),
+    adminId: v.optional(v.id("users")),
     author: v.union(v.literal("agent"), v.literal("admin"), v.literal("system")),
     textRedacted: v.string(),
     createdAt: v.number(),
@@ -1660,6 +1668,71 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_key", ["key"]),
+
+  supportKnowledgeDocuments: defineTable({
+    title: v.string(),
+    slug: v.string(),
+    category: v.string(),
+    roleScope: v.union(
+      v.literal("player"),
+      v.literal("zone_admin"),
+      v.literal("super_admin"),
+      v.literal("all")
+    ),
+    locale: v.union(v.literal("en"), v.literal("ur"), v.literal("mixed")),
+    sourceType: v.union(
+      v.literal("markdown"),
+      v.literal("manual"),
+      v.literal("policy"),
+      v.literal("faq"),
+      v.literal("internal")
+    ),
+    contentHash: v.string(),
+    sourceLabel: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_isActive", ["isActive"])
+    .index("by_roleScope_and_isActive", ["roleScope", "isActive"])
+    .index("by_category_and_isActive", ["category", "isActive"]),
+
+  supportKnowledgeChunks: defineTable({
+    documentId: v.id("supportKnowledgeDocuments"),
+    chunkIndex: v.number(),
+    title: v.string(),
+    category: v.string(),
+    roleScope: v.union(
+      v.literal("player"),
+      v.literal("zone_admin"),
+      v.literal("super_admin"),
+      v.literal("all")
+    ),
+    locale: v.union(v.literal("en"), v.literal("ur"), v.literal("mixed")),
+    sourceType: v.union(
+      v.literal("markdown"),
+      v.literal("manual"),
+      v.literal("policy"),
+      v.literal("faq"),
+      v.literal("internal")
+    ),
+    chunkText: v.string(),
+    embedding: v.array(v.float64()),
+    sourceLabel: v.string(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_documentId", ["documentId"])
+    .index("by_documentId_and_chunkIndex", ["documentId", "chunkIndex"])
+    .index("by_roleScope_and_isActive", ["roleScope", "isActive"])
+    .index("by_category_and_isActive", ["category", "isActive"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 384,
+      filterFields: ["isActive", "roleScope", "locale", "category"],
+    }),
 
   superAdminAuditLogs: defineTable({
     superAdminUserId: v.optional(v.id("users")),

@@ -598,6 +598,28 @@ export const listDiscoverTeams = query({
         .map((notification: any) => String(notification.teamId || notification.data?.teamId || ""))
     );
 
+    const viewerCaptainTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_captainUid", (q) => q.eq("captainUid", args.viewerUserId))
+      .collect();
+    const viewerCaptainTeamIds = new Set(viewerCaptainTeams.map((team: any) => String(team._id)));
+    const pendingChallenges = viewerCaptainTeamIds.size > 0
+      ? await ctx.db
+          .query("teamChallenges")
+          .withIndex("by_status", (q) => q.eq("status", "pending"))
+          .collect()
+      : [];
+    const pendingChallengeByOpponentTeamId = new Map<string, string>();
+    pendingChallenges
+      .filter((challenge: any) => String(challenge.captainAUid || "") === String(args.viewerUserId))
+      .filter((challenge: any) => viewerCaptainTeamIds.has(String(challenge.challengerTeamId)))
+      .forEach((challenge: any) => {
+        const opponentTeamId = String(challenge.opponentTeamId || "");
+        if (opponentTeamId && !pendingChallengeByOpponentTeamId.has(opponentTeamId)) {
+          pendingChallengeByOpponentTeamId.set(opponentTeamId, String(challenge._id));
+        }
+      });
+
     const baseTeams =
       args.selectedGame !== "all"
         ? await ctx.db.query("teams").withIndex("by_game", (q) => q.eq("game", args.selectedGame)).take(teamFetchLimit)
@@ -642,6 +664,7 @@ export const listDiscoverTeams = query({
         ...team,
         id: team._id,
         isRequested: requestedTeamIds.has(String(team._id)),
+        pendingChallengeId: pendingChallengeByOpponentTeamId.get(String(team._id)) || null,
       }));
   },
 });
