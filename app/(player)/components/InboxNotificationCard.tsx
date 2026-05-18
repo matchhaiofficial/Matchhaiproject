@@ -191,6 +191,7 @@ export function InboxNotificationCard({
   const isBookingNotification =
     isBookingRequestAccepted || isBookingRequestRejected || isBookingCounterOffer;
   const isPending = item.status === "pending";
+  const isUnread = item.isRead === false;
   const isProcessing = processing === item.id;
   const counterOfferOptions = getCounterOfferOptions(item);
   const challengeGameLabel = formatGameLabel(item.meta?.gameKey || item.meta?.game);
@@ -376,7 +377,13 @@ export function InboxNotificationCard({
   }, [item.meta?.challengeId, openChallenge]);
 
   return (
-    <View style={[styles.notificationCard, styles.notificationCardNoMargin]}>
+    <View
+      style={[
+        styles.notificationCard,
+        styles.notificationCardNoMargin,
+        isUnread && styles.notificationCardUnread,
+      ]}
+    >
       <View style={styles.cardHeader}>
         <View style={[styles.iconContainer, iconContainerStyle]}>
           <AppIcon
@@ -385,11 +392,13 @@ export function InboxNotificationCard({
             color={iconColor}
           />
         </View>
-        {item.isRead === false && (
+        {isUnread && (
           <View style={styles.unreadDot} />
         )}
         <View style={styles.headerInfo}>
-          <Text style={styles.typeText}>{typeLabel}</Text>
+          <Text style={[styles.typeText, isUnread && styles.typeTextUnread]}>
+            {typeLabel}
+          </Text>
           <Text style={styles.timeText}>{getTimeAgo(item.createdAt)}</Text>
         </View>
         {!isPending && (
@@ -416,7 +425,7 @@ export function InboxNotificationCard({
         )}
       </View>
 
-      <View style={styles.cardBody}>
+      <View style={[styles.cardBody, isUnread && styles.cardBodyUnread]}>
         <View style={styles.messageWrap}>
           <Text style={styles.messageText}>
             {!isPaymentRequired && (

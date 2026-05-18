@@ -242,7 +242,7 @@ export function useNotificationCount() {
   const userId = user?._id as Id<"users"> | undefined;
 
   const count = useQuery(
-    api.notifications.countPendingFast,
+    api.notifications.countUnreadFast,
     userId ? { userId } : "skip"
   );
 

@@ -189,6 +189,10 @@ export default function Inbox() {
     openMatchroom,
   });
 
+  const onDeleteNotification = useCallback((notifId: string) => {
+    handleDeleteNotification(notifId);
+  }, [handleDeleteNotification]);
+
   useEffect(() => {
     if (unreadIds.length === 0) return;
 
@@ -206,10 +210,6 @@ export default function Inbox() {
 
     void markUnreadBatch();
   }, [activeTab, markManyAsRead, unreadIds]);
-
-  const onDeleteNotification = useCallback((notifId: string) => {
-    handleDeleteNotification(notifId);
-  }, [handleDeleteNotification]);
 
   const renderItem = useCallback(({ item }: { item: Notification }) => {
     return (
