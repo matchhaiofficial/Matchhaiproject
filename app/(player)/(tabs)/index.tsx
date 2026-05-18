@@ -347,7 +347,7 @@ export default function PlayerDashboard() {
 
   const notificationCount =
     useQuery(
-      api.notifications.countPendingFast,
+      api.notifications.countUnreadFast,
       user?._id ? { userId: user._id as Id<"users"> } : "skip",
     ) ?? 0;
 

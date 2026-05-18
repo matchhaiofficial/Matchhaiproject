@@ -736,10 +736,11 @@ export const countUnreadFast = query({
         q.eq("toUid", args.userId).eq("isRead", false)
       )
       .collect();
-    return unread
-      .filter(isNotificationActive)
-      .filter((notification: any) => !isHiddenFromInbox(notification))
-      .length;
+    return collapsePendingMatchJoinDuplicates(
+      unread
+        .filter(isNotificationActive)
+        .filter((notification: any) => !isHiddenFromInbox(notification)),
+    ).length;
   },
 });
 
@@ -1003,9 +1004,12 @@ export const updateStatus = mutation({
     status: notificationStatus,
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     await ctx.db.patch(args.notificationId, {
       status: args.status,
-      updatedAt: Date.now(),
+      isRead: true,
+      readAt: now,
+      updatedAt: now,
     });
     return true;
   },

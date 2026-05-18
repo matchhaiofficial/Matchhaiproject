@@ -67,6 +67,10 @@ export default StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.08)',
         ...SHADOWS.cardSoft,
     },
+    notificationCardUnread: {
+        backgroundColor: 'rgba(66, 165, 245, 0.08)',
+        borderColor: 'rgba(66, 165, 245, 0.38)',
+    },
     notificationCardNoMargin: {
         marginBottom: 0,
     },
@@ -108,6 +112,9 @@ export default StyleSheet.create({
         fontFamily: FONTS.bold,
         fontWeight: '600',
     },
+    typeTextUnread: {
+        color: COLORS.accent,
+    },
     timeText: {
         color: COLORS.muted,
         fontSize: 11,
@@ -131,6 +138,9 @@ export default StyleSheet.create({
         padding: SPACING.md,
         borderRadius: RADII.md + 2,
         marginBottom: SPACING.sm,
+    },
+    cardBodyUnread: {
+        backgroundColor: 'rgba(66, 165, 245, 0.075)',
     },
     messageWrap: {
         width: '100%',
