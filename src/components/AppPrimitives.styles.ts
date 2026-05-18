@@ -107,6 +107,7 @@ export default StyleSheet.create({
   },
   pillBase: {
     alignSelf: "flex-start",
+    flexShrink: 0,
     minHeight: CONTROL_SIZES.chipMd,
     borderRadius: RADII.pill,
     borderWidth: 1,

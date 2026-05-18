@@ -346,7 +346,16 @@ export async function recordSuperAdminAccessDenied(route = "/super-admin", reaso
   });
 }
 
-async function getCachedOrLoad<T>(key: string, loader: () => Promise<T>) {
+async function getCachedOrLoad<T>(
+  key: string,
+  loader: () => Promise<T>,
+  options?: { forceRefresh?: boolean },
+) {
+  if (options?.forceRefresh) {
+    const data = await loader();
+    writeCache(key, data);
+    return data;
+  }
   const cached = readCache<T>(key);
   if (cached) {
     return cached;
@@ -550,7 +559,8 @@ export async function getReports(
 }
 
 export async function getSupportTickets(
-  status?: SuperAdminSupportTicketStatus
+  status?: SuperAdminSupportTicketStatus,
+  options?: { forceRefresh?: boolean }
 ): Promise<Result<SuperAdminSupportTicket[]>> {
   try {
     const sessionToken = await getRequiredSessionToken();
@@ -561,7 +571,8 @@ export async function getSupportTickets(
           sessionToken,
           status,
           limit: 100,
-        })
+        }),
+      options
     );
     await recordSuperAdminAuditSafe({ action: "view_support_tickets", module: "support", metadataSafe: { status: status || "all", count: tickets.length } });
     return { ok: true, data: tickets as SuperAdminSupportTicket[] };

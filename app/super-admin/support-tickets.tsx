@@ -1,9 +1,9 @@
+
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
-import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
@@ -102,7 +102,7 @@ export default function SuperAdminSupportTicketsScreen() {
     if (mode === "initial") setLoading(true);
     else setRefreshing(true);
 
-    const result = await getSupportTickets(tab);
+    const result = await getSupportTickets(tab, { forceRefresh: true });
     if (result.ok) setTickets(result.data);
     else showToast({ type: "error", title: "Support tickets failed", message: result.message });
 
@@ -167,11 +167,10 @@ export default function SuperAdminSupportTicketsScreen() {
         >
           {visible.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} />)}
           {visible.length === 0 ? (
-            <AdminEmptyStateCard
-              title={emptyLabel(tab)}
-              description="Support requests from the Help & Support chat will appear here."
-              icon="support"
-            />
+            <AppCard variant="empty">
+              <Text style={styles.emptyTitle}>{emptyLabel(tab)}</Text>
+              <Text style={styles.emptyText}>Support requests from the Help & Support chat will appear here.</Text>
+            </AppCard>
           ) : null}
         </ScrollView>
       )}
@@ -200,14 +199,16 @@ const styles = StyleSheet.create({
   content: { gap: SPACING.md, paddingBottom: SPACING.xxl },
   ticketPressable: { borderRadius: RADII.lg },
   pressed: { opacity: 0.9 },
-  ticketCard: { gap: SPACING.md },
+  ticketCard: { gap: SPACING.sm },
   cardTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: SPACING.md },
   titleWrap: { flex: 1, minWidth: 0 },
   reference: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
   summary: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16, marginTop: 2, lineHeight: 22 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  metaText: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 13 },
+  metaText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13 },
   metaDot: { color: COLORS.muted, fontFamily: FONTS.body, fontSize: 13 },
-  excerpt: { color: COLORS.text, fontFamily: FONTS.interRegular, fontSize: 14, lineHeight: 21, marginTop: SPACING.xs },
+  excerpt: { color: COLORS.text, fontFamily: FONTS.martelRegular, fontSize: 14, lineHeight: 21, marginTop: SPACING.xs },
   linkHint: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
+  emptyTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18, textAlign: "center" },
+  emptyText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, textAlign: "center", marginTop: SPACING.xs },
 });

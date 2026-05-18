@@ -235,10 +235,25 @@ function wantsTicket(message: string, context: any) {
   const text = normalize(message);
   return (
     text.includes("create ticket") ||
+    text.includes("create a ticket") ||
+    text.includes("open ticket") ||
+    text.includes("open a ticket") ||
+    text.includes("make ticket") ||
+    text.includes("make a ticket") ||
+    text.includes("support ticket") ||
+    text.includes("ticlet") ||
     text.includes("create support request") ||
     text.includes("contact support") ||
     text.includes("send to support") ||
     (isAffirmative(message) && context?.pendingAction === "create_ticket")
+  );
+}
+
+function claimsTicketCreated(answer: string) {
+  const text = normalize(answer);
+  return (
+    /\b(i'?ve|i have|we'?ve|we have)\s+created\b/.test(text) &&
+    /\b(ticket|support request)\b/.test(text)
   );
 }
 
@@ -560,6 +575,7 @@ export default {
     const priority = ["low", "medium", "high", "urgent"].includes(planner.priority) ? planner.priority : "medium";
     const intent = String(planner.intent || inferredPatch.currentIssueCategory || "general_help").slice(0, 80);
     let actions = validateActions(planner.actions);
+    const userRequestedTicket = wantsTicket(userMessage, context);
     if (wantsModerationReport(userMessage) && !actions.some((action) => action.type === "create_moderation_report")) {
       actions.push({
         type: "create_moderation_report",
@@ -575,6 +591,13 @@ export default {
     if (hadDangerousAction) {
       await recordAgentEvent(env, identityToken, id, "dangerous_action", "denied", "dangerous_action_blocked");
       actions = actions.filter((action) => !DANGEROUS_ACTIONS.has(action.type));
+    }
+    if (userRequestedTicket && !actions.some((action) => action.type === "create_support_ticket" || action.type === "create_admin_escalation")) {
+      actions.push({
+        type: "create_support_ticket",
+        reason: "User explicitly asked MatchHai support to create a support ticket.",
+        payload: {},
+      });
     }
 
     actions = actions.map((action) => {
@@ -605,7 +628,7 @@ export default {
     });
 
     const createTicketAction = actions.find((action) => action.type === "create_support_ticket" || action.type === "create_admin_escalation");
-    const shouldAutoCreateTicket = Boolean(createTicketAction && (isUrgentPaymentIssue(userMessage, planner) || wantsTicket(userMessage, context)));
+    const shouldAutoCreateTicket = Boolean(createTicketAction && (isUrgentPaymentIssue(userMessage, planner) || userRequestedTicket));
     if (createTicketAction && !shouldAutoCreateTicket && (priority === "low" || priority === "medium")) {
       actions = actions.filter((action) => action !== createTicketAction);
       planner.contextPatch = { ...(planner.contextPatch || {}), pendingAction: "create_ticket", escalationOffered: true };
@@ -624,7 +647,12 @@ export default {
 
     const createdTicket = executedResults.find((result) => result?.reference);
     const createdReport = executedResults.find((result) => result?.type === "create_moderation_report" && result?.ok);
-    const answerParts = [String(planner.answer || "").trim()];
+    const baseAnswer = String(planner.answer || "").trim();
+    const answerParts = [
+      !createdTicket?.reference && claimsTicketCreated(baseAnswer)
+        ? "I can create a support ticket for this issue, but I could not confirm that one was created yet. Please try again or ask me to create a support ticket."
+        : baseAnswer,
+    ];
     if (createdTicket?.reference) {
       answerParts.push("", `Support ticket created: ${createdTicket.reference}`);
       answerParts.push("Email sending is not configured, so this is an in-app support ticket for the MatchHai team.");

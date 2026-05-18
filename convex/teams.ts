@@ -753,6 +753,17 @@ export const inviteToTeam = mutation({
       throw new Error("User is already a member");
     }
 
+    // Prevent inviting someone already in another active team for the same game.
+    // (Captains are included in memberUids on team creation, but we enforce here anyway.)
+    const gameTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_game", (q) => q.eq("game", team.game))
+      .collect();
+    const existingTeam = gameTeams.find((t) => isActiveTeam(t) && t.memberUids.includes(args.toUid) && t._id !== args.teamId);
+    if (existingTeam) {
+      throw new Error(`User is already in a ${team.game} team (${existingTeam.name}).`);
+    }
+
     // Check if friends
     const friendship = await ctx.db
       .query("friendships")
@@ -888,6 +899,11 @@ export const respondToTeamInvite = mutation({
       .collect();
     const existingTeam = gameTeams.find((t) => isActiveTeam(t) && t.memberUids.includes(args.userId) && t._id !== teamId);
     if (existingTeam) {
+      await ctx.db.patch(args.notificationId, {
+        status: "rejected",
+        updatedAt: now,
+        body: `You are already in another ${team.game} team (${existingTeam.name}). Leave it before accepting a new invite.`,
+      });
       throw new Error(`You are already in a ${team.game} team (${existingTeam.name}). You must leave it to join a new one.`);
     }
 
