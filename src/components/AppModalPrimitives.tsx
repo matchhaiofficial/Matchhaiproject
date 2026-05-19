@@ -140,7 +140,7 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  const bottomInset = insets.bottom;
+  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
 
   return (
     <View
@@ -167,7 +167,7 @@ export function AppDialog({
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomClearance = insets.bottom;
+  const bottomClearance = Platform.OS === "ios" ? insets.bottom : 0;
   const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
@@ -221,7 +221,7 @@ export function AppBottomSheet({
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomInset = insets.bottom;
+  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
   const maxSheetHeight = Math.floor(
     Math.min(
       windowHeight * 0.82,
@@ -233,6 +233,8 @@ export function AppBottomSheet({
     axis: "y",
     distance: 22,
   });
+  const sheetOuterBottomPad =
+    Platform.OS === "ios" ? Math.max(SPACING.sm, bottomInset) : 0;
 
   return (
     <Modal
@@ -248,7 +250,12 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-              <View style={[styles.sheetWrap, { paddingBottom: Math.max(bottomInset, SPACING.sm) }]}>
+        <View
+          style={[
+            styles.sheetWrap,
+            { paddingBottom: sheetOuterBottomPad },
+          ]}
+        >
           <Animated.View style={entrance.animatedStyle}>
             <View
               style={[

@@ -373,7 +373,14 @@ export function getSupportActionIntent(input: string, context?: SupportConversat
     text.includes("contact admin") ||
     text.includes("contact support") ||
     text.includes("create ticket") ||
+    text.includes("create a ticket") ||
+    text.includes("open ticket") ||
+    text.includes("open a ticket") ||
+    text.includes("make ticket") ||
+    text.includes("make a ticket") ||
     text.includes("create support request") ||
+    text.includes("create a support request") ||
+    text.includes("support ticket") ||
     text.includes("support request");
   if (asksDirectAction) return "create_ticket";
 

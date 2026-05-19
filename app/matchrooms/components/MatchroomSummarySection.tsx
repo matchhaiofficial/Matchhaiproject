@@ -43,12 +43,14 @@ const formatScheduledWindow = (room: any) => {
   const timeStr = room.scheduledTime || "";
 
   const explicitStart = toValidDate(room.startTime) || toValidDate(room.scheduledStartAt);
-  const start = explicitStart || parseScheduledDate(dateStr);
+  const scheduledStart = parseScheduledDate(dateStr);
+  const start = explicitStart || scheduledStart;
   if (!start) return timeStr ? timeStr : "Time not set";
 
   const [hours, mins] = timeStr.split(":").map(Number);
-  if (!explicitStart && !Number.isNaN(hours)) {
-    start.setHours(hours, mins || 0);
+  const displayStart = new Date(start.getTime());
+  if (!explicitStart && scheduledStart && !Number.isNaN(hours)) {
+    displayStart.setHours(hours, mins || 0);
   }
 
   const format12h = (value: Date) =>
@@ -61,7 +63,7 @@ const formatScheduledWindow = (room: any) => {
   const startDisplay = explicitStart
     ? format12h(explicitStart)
     : room.scheduledTime
-      ? format12h(start)
+      ? format12h(displayStart)
       : "Time not set";
 
   let duration = room.durationMinutes;
@@ -110,6 +112,18 @@ export function MatchroomSummarySection({
   const isBroadcastPending = isBroadcastVenuePending(room);
   const broadcastAreas = getBroadcastAreas(room);
   const primaryLocation = getPrimaryLocationLabel(room);
+  const dateLabelDate =
+    toValidDate(room.startTime) ||
+    toValidDate(room.scheduledStartAt) ||
+    parseScheduledDate(room.scheduledDate);
+  const dateLabel = dateLabelDate
+    ? dateLabelDate.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "Date not set";
 
   return (
     <>
@@ -142,10 +156,7 @@ export function MatchroomSummarySection({
           <View style={styles.gameBadge}>
             <Text style={styles.gameText}>{room.game}</Text>
           </View>
-          <Text style={styles.dateText}>
-            {(toValidDate(room.startTime) || toValidDate(room.scheduledStartAt) || parseScheduledDate(room.scheduledDate))
-              ?.toLocaleDateString() || "Date not set"}
-          </Text>
+          <Text style={styles.dateText}>{dateLabel}</Text>
         </View>
         <Text style={styles.title}>{room.title}</Text>
         <Text style={styles.description}>

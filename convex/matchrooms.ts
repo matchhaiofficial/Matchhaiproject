@@ -76,8 +76,17 @@ function getRoomStartMs(room: any): number | null {
 }
 
 function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
-  if (!room || !["open", "locked"].includes(String(room.status || ""))) return false;
-  const scheduledStartAt = Number(room.scheduledStartAt || 0);
+  if (!room) return false;
+  if (!["open", "locked"].includes(String(room.status || ""))) return false;
+  const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
+  if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
+  return scheduledStartAt <= now && !isRosterFull(room);
+}
+
+function shouldExpireInProgressRoom(room: any, now = Date.now()): boolean {
+  if (!room || String(room.status || "") !== "in-progress") return false;
+  if (room.startedWithFullRoster === true) return false;
+  const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
   return scheduledStartAt <= now && !isRosterFull(room);
 }
@@ -2426,6 +2435,12 @@ export const syncLifecycleIfDue = mutation({
       return { changed, status: "expired" };
     }
 
+    if (shouldExpireInProgressRoom(room, now)) {
+      await expireMatchroomForInvalidLifecycle(ctx, args.matchroomId, room, "in_progress_roster_incomplete");
+      changed = true;
+      return { changed, status: "expired" };
+    }
+
     const startValidation = canStartMatchroom(room, now);
     if (startValidation.ok) {
       await ctx.db.patch(args.matchroomId, {
@@ -3549,6 +3564,16 @@ export const runLifecycleSweep = internalMutation({
         }
 
         if (room.status === "in-progress") {
+          if (shouldExpireInProgressRoom(room, now)) {
+            const result = await expireMatchroomForInvalidLifecycle(
+              ctx,
+              room._id,
+              room,
+              "in_progress_roster_incomplete",
+            );
+            if (result.changed) changedRooms += 1;
+            continue;
+          }
           const durationMinutes = Math.max(1, Number(room.durationMinutes || 60));
           const startMs = getRoomStartMs(room);
           const completeDue = Boolean(startMs && startMs + durationMinutes * 60 * 1000 <= now);
