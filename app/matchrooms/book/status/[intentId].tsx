@@ -10,7 +10,6 @@ import {
     Text,
     View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -34,12 +33,10 @@ export default function BookingStatusScreen() {
         orderRefNum?: string;
     };
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
-    const ctaBottomGuard = insets.bottom + 24;
 
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
@@ -196,7 +193,7 @@ export default function BookingStatusScreen() {
             variant="stack"
             scroll={false}
             edges={["top", "bottom"]}
-            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
+            contentStyle={styles.screenContent}
         >
             <AppHeader
                 title="Booking Status"
@@ -384,7 +381,7 @@ export default function BookingStatusScreen() {
                         />
                     </DetailSectionCard>
                 ) : null}
-                <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
+                <View style={styles.footerBlock}>
                     <View style={styles.footer}>
                     {isGatewayPending ? (
                         <AppButton

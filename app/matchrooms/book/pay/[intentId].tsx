@@ -8,7 +8,6 @@ import {
     Pressable,
     View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -33,7 +32,6 @@ import styles from "./pay.styles";
 export default function MockPaymentScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const { showToast } = useToast();
     const startCheckout = useAction((api as any).easypaisa.startCheckout);
@@ -44,7 +42,6 @@ export default function MockPaymentScreen() {
     const [walletBalance, setWalletBalance] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
     const [nowMs, setNowMs] = useState(Date.now());
-    const ctaBottomGuard = insets.bottom + 24;
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -178,7 +175,7 @@ export default function MockPaymentScreen() {
             variant="stack"
             scroll={false}
             edges={["top", "bottom"]}
-            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
+            contentStyle={styles.screenContent}
         >
             <AppHeader
                 title="Review & Pay"
@@ -274,7 +271,7 @@ export default function MockPaymentScreen() {
                         </Text>
                     ) : null}
                 </DetailSectionCard>
-                <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
+                <View style={styles.footerBlock}>
                     <View style={styles.footer}>
                 <AppButton
                     size="lg"

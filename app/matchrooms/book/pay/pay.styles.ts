@@ -6,6 +6,9 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingBottom: 0,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -26,8 +29,8 @@ export default StyleSheet.create({
         flex: 1,
     },
     content: {
-        padding: SPACING.screenPadding,
-        paddingBottom: SPACING.xl,
+        alignItems: 'stretch',
+        paddingBottom: SPACING.xxl,
     },
 
     // Payment Card
@@ -69,7 +72,6 @@ export default StyleSheet.create({
         backgroundColor: COLORS.accent + '10',
         padding: SPACING.md,
         borderRadius: RADII.md,
-        marginTop: SPACING.xl,
         marginBottom: SPACING.lg,
         gap: SPACING.sm,
         borderWidth: 1,
@@ -252,6 +254,10 @@ export default StyleSheet.create({
     },
     footer: {
         gap: SPACING.sm,
+    },
+    footerBlock: {
+        width: '100%',
+        marginTop: SPACING.xs,
     },
     cancelHint: {
         color: COLORS.muted,

@@ -6,6 +6,9 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingBottom: 0,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -37,15 +40,13 @@ export default StyleSheet.create({
         flex: 1,
     },
     content: {
-        padding: SPACING.screenPadding,
         alignItems: 'stretch',
-        paddingBottom: SPACING.xl,
+        paddingBottom: SPACING.xxl,
     },
     statusDisplay: {
         width: '100%',
         alignItems: 'center',
         marginBottom: SPACING.xl,
-        marginTop: SPACING.md,
     },
     statusPill: {
         marginTop: SPACING.sm,
@@ -214,6 +215,10 @@ export default StyleSheet.create({
     footer: {
         gap: SPACING.md,
         width: '100%',
+    },
+    footerBlock: {
+        width: '100%',
+        marginTop: SPACING.xs,
     },
     footerRow: {
         flexDirection: 'row',
