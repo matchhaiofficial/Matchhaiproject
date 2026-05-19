@@ -3,11 +3,13 @@ import { v } from "convex/values";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import {
-  BROADCAST_COUNTER_RESPONSE_WINDOW_MS,
+  closeBroadcastOfferRequest,
   confirmBroadcastVenue,
-  finalizeBroadcastFailure,
+  getBroadcastOfferExpiresAt,
+  notifyBroadcastOfferReceived,
 } from "./matchroomBroadcast";
 import { requireKycVerified } from "./kycGate";
+import { getMatchroomLockAt, validateMatchroomScheduleWindow } from "./timing";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -16,6 +18,14 @@ function normalizeGameKey(value?: string | null) {
 
 function normalizeResourceToken(value?: string | null) {
   return String(value || "").trim().toLowerCase();
+}
+
+function parseLocalDateTimeMillis(dateValue?: string | null, timeValue?: string | null) {
+  const date = String(dateValue || "").trim();
+  const time = String(timeValue || "").trim();
+  if (!date || !time) return null;
+  const parsed = new Date(`${date}T${time}`).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function inferResourceTier(resource: any) {
@@ -98,6 +108,45 @@ function validateSelectedResourceFit(request: any, selectedResources: any[]) {
   });
 }
 
+async function holdResourcesForBroadcastOffer(ctx: any, input: {
+  request: any;
+  matchroomId: any;
+  resourceIds: any[];
+  zoneId: string;
+  branchId: string;
+  adminUid: string;
+  now: number;
+}) {
+  const resources = await Promise.all(input.resourceIds.map((resourceId) => ctx.db.get(resourceId)));
+  resources.forEach((resource, index) => {
+    if (!resource) {
+      throw new Error("One or more selected resources no longer exist.");
+    }
+    if (String(resource.zoneId) !== input.zoneId) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to this venue.`);
+    }
+    if (String(resource.branchId || "") !== String(input.branchId)) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
+    }
+    const status = String(resource.lifecycleStatus || "");
+    const heldForSameRequest = status === "held" && String(resource.bookingRequestId || "") === String(input.request._id);
+    if (status !== "available" && !heldForSameRequest) {
+      throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
+    }
+  });
+
+  validateSelectedResourceFit(input.request, resources);
+
+  for (const resourceId of input.resourceIds) {
+    await ctx.db.patch(resourceId, {
+      lifecycleStatus: "held",
+      bookingRequestId: input.request._id,
+      matchroomId: input.matchroomId,
+      updatedAt: input.now,
+    });
+  }
+}
+
 function getConfirmedSlotCount(room: any) {
   return [...(room?.slotsA || []), ...(room?.slotsB || [])].filter((slot: any) =>
     slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
@@ -158,6 +207,35 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .query("users")
     .withIndex("by_authId", (q: any) => q.eq("authId", value))
     .unique();
+}
+
+async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Please sign in to view booking history.");
+
+  const candidates = [identity.tokenIdentifier, identity.subject]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  let actor: any = null;
+  for (const candidate of candidates) {
+    actor = await resolveUserByAnyId(ctx, candidate);
+    if (actor) break;
+  }
+  if (!actor) throw new Error("Signed-in user profile not found.");
+
+  let zone: any = null;
+  try {
+    zone = await ctx.db.get(zoneId as any);
+  } catch {
+    zone = null;
+  }
+  if (!zone) throw new Error("Zone not found.");
+  if (String(zone.ownerUid || "") !== String(actor._id)) {
+    throw new Error("You are not authorized to view this zone's booking history.");
+  }
+
+  return { actor, zone };
 }
 
 function buildZoneBookingNotificationData(input: {
@@ -637,6 +715,186 @@ export const listBookingQueueForZone = query({
   },
 });
 
+export const listBookingHistoryForZone = query({
+  args: {
+    zoneId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { zone } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const limit = Math.max(1, Math.min(100, Math.floor(Number(args.limit || 20))));
+    const fetchLimit = Math.max(50, Math.min(300, limit * 6));
+
+    const requestRows = await ctx.db
+      .query("bookingRequests")
+      .withIndex("by_zoneId_and_requestKind_and_updatedAt", (q: any) =>
+        q.eq("zoneId", zone._id).eq("requestKind", "broadcast_fanout"),
+      )
+      .order("desc")
+      .take(fetchLimit);
+
+    const zoneOffers = await ctx.db
+      .query("zoneOffers")
+      .withIndex("by_zoneId", (q: any) => q.eq("zoneId", zone._id))
+      .order("desc")
+      .take(fetchLimit);
+
+    const requestsById = new Map<string, any>();
+    for (const request of requestRows) {
+      requestsById.set(String(request._id), request);
+    }
+
+    const missingOfferRequestIds = Array.from(
+      new Set(
+        zoneOffers
+          .map((offer: any) => String(offer.requestId || ""))
+          .filter((requestId: string) => requestId && !requestsById.has(requestId)),
+      ),
+    );
+    const offerRequests = await Promise.all(
+      missingOfferRequestIds.map((requestId) => ctx.db.get(requestId as any).catch(() => null)),
+    );
+    offerRequests.forEach((request: any) => {
+      if (request?.requestKind === "broadcast_fanout") {
+        requestsById.set(String(request._id), request);
+      }
+    });
+
+    const offersByRequestId = new Map<string, any[]>();
+    zoneOffers.forEach((offer: any) => {
+      const requestId = String(offer.requestId || "");
+      if (!requestId) return;
+      const current = offersByRequestId.get(requestId) || [];
+      current.push(offer);
+      offersByRequestId.set(requestId, current);
+    });
+
+    const matchroomIds = Array.from(
+      new Set(
+        Array.from(requestsById.values())
+          .map((request: any) => String(request.matchroomId || ""))
+          .filter(Boolean),
+      ),
+    );
+    const matchroomRows = await Promise.all(
+      matchroomIds.map((matchroomId) => ctx.db.get(matchroomId as any).catch(() => null)),
+    );
+    const matchroomsById = new Map<string, any>();
+    matchroomRows.forEach((room: any) => {
+      if (room?._id) matchroomsById.set(String(room._id), room);
+    });
+
+    const chooseOffer = (offers: any[]) =>
+      [...offers].sort((left, right) => {
+        const statusPriority: Record<string, number> = { accepted: 4, rejected: 3, expired: 2, pending: 1 };
+        const leftPriority = statusPriority[String(left.status || "")] || 0;
+        const rightPriority = statusPriority[String(right.status || "")] || 0;
+        if (leftPriority !== rightPriority) return rightPriority - leftPriority;
+        return Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0);
+      })[0] || null;
+
+    const isHistoryRow = (request: any, offer: any, matchroom: any) => {
+      const requestStatus = String(request.status || "");
+      const lifecycleStatus = String(request.lifecycleStatus || "");
+      const closedReason = String(request.closedReason || "");
+      const offerStatus = String(offer?.status || "");
+      const broadcastStatus = String(matchroom?.broadcastRequestStatus || "");
+      const confirmedThisZone =
+        broadcastStatus === "zone_confirmed" &&
+        String(matchroom?.confirmedZoneId || matchroom?.zoneId || "") === String(zone._id);
+
+      return (
+        requestStatus === "expired" ||
+        requestStatus === "cancelled" ||
+        Boolean(closedReason) ||
+        lifecycleStatus === "zone_confirmed" ||
+        lifecycleStatus.includes("expired") ||
+        lifecycleStatus.includes("rejected") ||
+        lifecycleStatus.includes("closed") ||
+        confirmedThisZone ||
+        ["accepted", "rejected", "expired"].includes(offerStatus) ||
+        ["expired", "failed", "cancelled", "zone_confirmed"].includes(broadcastStatus)
+      );
+    };
+
+    return Array.from(requestsById.values())
+      .filter((request: any) => request.requestKind === "broadcast_fanout")
+      .map((request: any) => {
+        const offers = offersByRequestId.get(String(request._id)) || [];
+        const offer = chooseOffer(offers);
+        const matchroom = request.matchroomId ? matchroomsById.get(String(request.matchroomId)) || null : null;
+        return { request, offer, matchroom };
+      })
+      .filter(({ request, offer, matchroom }: any) => isHistoryRow(request, offer, matchroom))
+      .sort((left: any, right: any) =>
+        Number(right.request.updatedAt || right.request.createdAt || 0) -
+        Number(left.request.updatedAt || left.request.createdAt || 0),
+      )
+      .slice(0, limit)
+      .map(({ request, offer, matchroom }: any) => ({
+        id: String(request._id),
+        requestId: String(request._id),
+        matchroomId: request.matchroomId ? String(request.matchroomId) : null,
+        zoneId: String(zone._id),
+        userId: request.userId ? String(request.userId) : null,
+        userName: request.userName || "Player",
+        title: request.title || `Broadcast request for ${normalizeGameKey(request.gameKey).toUpperCase()}`,
+        gameKey: normalizeGameKey(request.gameKey),
+        status: request.status || null,
+        lifecycleStatus: request.lifecycleStatus || null,
+        closedReason: request.closedReason || null,
+        requestKind: request.requestKind || null,
+        preferredDate: request.preferredDate || null,
+        preferredTime: request.preferredTime || null,
+        targetAreaLabel: request.targetAreaLabel || null,
+        preferredAreas: Array.isArray(request.preferredAreas) ? request.preferredAreas : [],
+        budgetPerPlayer: Number(request.budgetPerPlayer || 0) || null,
+        currency: request.currency || "PKR",
+        allocatedBranchId: request.allocatedBranchId || null,
+        allocatedResourceIds: Array.isArray(request.allocatedResourceIds)
+          ? request.allocatedResourceIds.map((resourceId: any) => String(resourceId))
+          : [],
+        allocatedAt: request.allocatedAt || null,
+        createdAt: request.createdAt || null,
+        updatedAt: request.updatedAt || request.createdAt || null,
+        offer: offer
+          ? {
+              id: String(offer._id),
+              offerId: String(offer._id),
+              status: offer.status || null,
+              offerType: offer.offerType || null,
+              requestKind: offer.requestKind || null,
+              proposedPrice: Number(offer.proposedPrice || 0) || null,
+              proposedDate: offer.proposedDate || null,
+              proposedTime: offer.proposedTime || null,
+              scheduleOptions: Array.isArray(offer.scheduleOptions) ? offer.scheduleOptions : [],
+              expiresAt: offer.expiresAt || offer.responseExpiresAt || null,
+              responseExpiresAt: offer.responseExpiresAt || offer.expiresAt || null,
+              zoneName: offer.zoneName || null,
+              branchId: offer.branchId || null,
+              branchName: offer.branchName || null,
+              selectedOptionIndex: offer.selectedOptionIndex ?? null,
+              resolvedMatchroomId: offer.resolvedMatchroomId ? String(offer.resolvedMatchroomId) : null,
+              createdAt: offer.createdAt || null,
+              updatedAt: offer.updatedAt || offer.createdAt || null,
+            }
+          : null,
+        matchroom: matchroom
+          ? {
+              id: String(matchroom._id),
+              status: matchroom.status || null,
+              locationMode: matchroom.locationMode || null,
+              broadcastRequestStatus: matchroom.broadcastRequestStatus || null,
+              confirmedZoneId: matchroom.confirmedZoneId || matchroom.zoneId || null,
+              confirmedBranchId: matchroom.confirmedBranchId || matchroom.branchId || null,
+              venueConfirmedAt: matchroom.venueConfirmedAt || null,
+              location: matchroom.location || null,
+            }
+          : null,
+      }));
+  },
+});
+
 // List matchrooms for zone admin (by zoneId, ownerUid, location)
 export const listMatchroomsForZone = query({
   args: {
@@ -795,30 +1053,88 @@ export const acceptBookingRequest = mutation({
     let matchroomId: any;
 
     if (bookingRequest.requestKind === "broadcast_fanout" && bookingRequest.matchroomId) {
-      const confirmation = await confirmBroadcastVenue(ctx, {
-        matchroomId: bookingRequest.matchroomId,
-        winningRequestId: args.requestId,
-        zoneId: args.zoneId as any,
-        zoneOwnerUid: args.adminUid,
-        zoneName: args.zoneName || null,
-        locationLabel: args.location || args.branchName || args.zoneName || null,
-        branchId: args.branchId || null,
-        branchName: args.branchName || null,
-        resourceIds: args.resourceIds,
-      });
-      matchroomId = confirmation.matchroomId;
-
-      for (const resourceId of args.resourceIds) {
-        await ctx.db.patch(resourceId, {
-          lifecycleStatus: "booked",
-          bookingRequestId: args.requestId,
-          bookedAt: now,
-          bookedByUid: args.adminUid,
-          matchroomId,
-          updatedAt: now,
-        });
+      matchroomId = bookingRequest.matchroomId;
+      const room = await ctx.db.get(bookingRequest.matchroomId);
+      if (!room || room.locationMode !== "broadcast") {
+        throw new Error("Broadcast matchroom not found.");
       }
-      await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
+      if (room.broadcastRequestStatus === "zone_confirmed") {
+        throw new Error("A venue has already been confirmed for this matchroom.");
+      }
+      if (room.broadcastRequestStatus !== "waiting_for_zones") {
+        throw new Error("This broadcast request is no longer accepting venue offers.");
+      }
+      if (Number(room.broadcastRequestExpiresAt || 0) > 0 && Number(room.broadcastRequestExpiresAt) <= now) {
+        throw new Error("This broadcast request has expired.");
+      }
+
+      const existingOffers = await ctx.db
+        .query("zoneOffers")
+        .withIndex("by_requestId", (q: any) => q.eq("requestId", args.requestId))
+        .collect();
+      if (existingOffers.length > 0) {
+        throw new Error("A venue offer already exists for this broadcast request.");
+      }
+
+      const offerExpiresAt = getBroadcastOfferExpiresAt(room, now);
+      if (!offerExpiresAt) {
+        throw new Error("The broadcast offer response window has expired.");
+      }
+
+      await holdResourcesForBroadcastOffer(ctx, {
+        request: bookingRequest,
+        matchroomId,
+        resourceIds: args.resourceIds,
+        zoneId: args.zoneId,
+        branchId: args.branchId,
+        adminUid: args.adminUid,
+        now,
+      });
+
+      await ctx.db.patch(args.requestId, {
+        status: "accepted",
+        allocatedBranchId: args.branchId,
+        allocatedResourceIds: args.resourceIds,
+        allocatedAt: now,
+        allocatedByUid: args.adminUid,
+        lifecycleStatus: "broadcast_offer_pending_selection",
+        updatedAt: now,
+      });
+
+      const offerId = await ctx.db.insert("zoneOffers", {
+        requestId: args.requestId,
+        zoneId: args.zoneId as any,
+        status: "pending",
+        offerType: "standard_accept",
+        requestKind: "broadcast_fanout",
+        proposedPrice: Number(bookingRequest.budgetPerPlayer || args.matchroomData.pricing?.perPlayer || 0),
+        proposedDate: bookingRequest.preferredDate,
+        proposedTime: bookingRequest.preferredTime,
+        expiresAt: offerExpiresAt,
+        responseExpiresAt: offerExpiresAt,
+        zoneName: args.zoneName || "Zone Venue",
+        zoneOwnerUid: args.adminUid,
+        branchId: args.branchId,
+        branchName: args.branchName,
+        requestOwnerUid: args.requestOwnerUid,
+        message: args.note,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await notifyBroadcastOfferReceived(ctx, {
+        room: { ...room, _id: bookingRequest.matchroomId },
+        offerId,
+        requestId: args.requestId,
+        zoneName: args.zoneName || "Zone Venue",
+        expiresAt: offerExpiresAt,
+      });
+
+      await ctx.scheduler.runAfter(
+        offerExpiresAt - now,
+        internal.matchroomBroadcast.expireBroadcastCounterOffer,
+        { offerId },
+      );
     } else if (bookingRequest.matchroomId) {
       matchroomId = bookingRequest.matchroomId;
 
@@ -1001,7 +1317,23 @@ export const rejectBookingRequest = mutation({
           };
 
     await ctx.db.patch(args.requestId, statusPatch);
-    if (request?.matchroomId) {
+    if (request?.requestKind === "broadcast_fanout") {
+      const offers = await ctx.db
+        .query("zoneOffers")
+        .withIndex("by_requestId", (q: any) => q.eq("requestId", args.requestId))
+        .collect();
+      for (const offer of offers) {
+        if (offer.status !== "pending") continue;
+        await ctx.db.patch(offer._id, { status: "rejected", updatedAt: now });
+      }
+      await closeBroadcastOfferRequest(ctx, {
+        request,
+        offerStatus: "rejected",
+        lifecycleStatus: "broadcast_rejected",
+        closedReason: "rejected_by_zone",
+        now,
+      });
+    } else if (request?.matchroomId) {
       await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
         matchroomId: request.matchroomId,
         reason: "booking_request_rejected",
@@ -1060,10 +1392,6 @@ export const rejectBookingRequest = mutation({
       },
       createdAt: now,
     });
-
-    if (request?.requestKind === "broadcast_fanout" && request.matchroomId) {
-      await finalizeBroadcastFailure(ctx, request.matchroomId, "no_zone_response");
-    }
 
     return true;
   },
@@ -1132,8 +1460,11 @@ export const sendCounterOffer = mutation({
     }
 
     const expiresAt = isBroadcastRequest
-      ? now + BROADCAST_COUNTER_RESPONSE_WINDOW_MS
+      ? getBroadcastOfferExpiresAt(broadcastApprovalState?.matchroom, now)
       : now + Math.max(60, args.expiresInMinutes || 240) * 60 * 1000;
+    if (!expiresAt) {
+      throw new Error("The broadcast counter-offer response window has expired.");
+    }
     const primaryOption = scheduleOptions[0];
 
     // Create zone offer
@@ -1141,6 +1472,7 @@ export const sendCounterOffer = mutation({
       requestId: args.requestId,
       zoneId: args.zoneId,
       status: "pending",
+      offerType: "counter_offer",
       proposedPrice: args.pricePerPlayer,
       proposedDate: new Date(`${primaryOption.date}T00:00:00`).getTime(),
       proposedTime: primaryOption.time,
@@ -1203,7 +1535,7 @@ export const sendCounterOffer = mutation({
 
     if (isBroadcastRequest) {
       await ctx.scheduler.runAfter(
-        BROADCAST_COUNTER_RESPONSE_WINDOW_MS,
+        expiresAt - now,
         internal.matchroomBroadcast.expireBroadcastCounterOffer,
         { offerId },
       );
@@ -1324,19 +1656,13 @@ export const respondToCounterOffer = mutation({
       if (rejectedByRequired.length > 0) {
         patch.status = "rejected";
         finalStatus = "rejected";
-        await ctx.db.patch(request._id, {
-          status: "cancelled",
+        await closeBroadcastOfferRequest(ctx, {
+          request,
+          offerId: args.offerId,
+          offerStatus: "rejected",
           lifecycleStatus: "broadcast_counter_offer_rejected",
           closedReason: "counter_offer_rejected",
-          updatedAt: now,
-        });
-        await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
-          matchroomId: request.matchroomId,
-          reason: "counter_offer_rejected",
-        });
-        await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
-          matchroomId: request.matchroomId,
-          reason: "counter_offer_rejected",
+          now,
         });
         await patchOfferNotifications(ctx, {
           offerId: String(args.offerId),
@@ -1358,7 +1684,6 @@ export const respondToCounterOffer = mutation({
           body: "A captain rejected the broadcast counter-offer, so the request was closed.",
           reason: "captain_rejected",
         });
-        await finalizeBroadcastFailure(ctx, request.matchroomId, "counter_offer_rejected");
         return {
           status: finalStatus,
           matchroomId: matchroomId ? String(matchroomId) : undefined,
@@ -1380,6 +1705,7 @@ export const respondToCounterOffer = mutation({
           branchId: offer.branchId || null,
           branchName: offer.branchName || null,
           locationLabel: offer.branchName || offer.zoneName || undefined,
+          resourceIds: Array.isArray(request.allocatedResourceIds) ? request.allocatedResourceIds : undefined,
         });
         matchroomId = confirmation.matchroomId;
         patch.status = "accepted";
@@ -1389,7 +1715,7 @@ export const respondToCounterOffer = mutation({
         await ctx.db.patch(request._id, {
           status: "accepted",
           matchroomId,
-          lifecycleStatus: "zone_accepted_locked",
+          lifecycleStatus: "zone_confirmed",
           preferredDate: chosenOption ? new Date(`${chosenOption.date}T00:00:00`).getTime() : request.preferredDate,
           preferredTime: chosenOption?.time || request.preferredTime,
           updatedAt: now,
@@ -1556,6 +1882,11 @@ export const createWalkInMatchroom = mutation({
     await requireKycVerified(ctx);
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
+    const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
+    const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, now);
+    if (!scheduleValidation.ok) {
+      throw new Error(scheduleValidation.message);
+    }
 
     const matchroomId = await ctx.db.insert("matchrooms", {
       hostUid: args.adminUid,
@@ -1574,6 +1905,8 @@ export const createWalkInMatchroom = mutation({
       zoneOwnerUid: args.zoneOwnerUid,
       scheduledDate: args.scheduledDate,
       scheduledTime: args.scheduledTime,
+      scheduledStartAt: scheduledStartAt || undefined,
+      lockAt: getMatchroomLockAt(scheduledStartAt) || undefined,
       durationMinutes: Math.max(30, Math.floor(args.durationMinutes)),
       seriesType: args.seriesType,
       slotsA: args.slotsA,

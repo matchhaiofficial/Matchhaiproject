@@ -711,9 +711,9 @@ export default function TeamMatchChallengeDetails() {
 
                 {isAcceptedFlow && (
                     <>
-                        <DetailSectionCard title="Common Preferred Areas">
+                        <DetailSectionCard title="Suggested Areas">
                             {showNoCommonHint ? (
-                                <Text style={styles.meta}>No common preferred areas found. Captains can still pick any suitable venue.</Text>
+                                <Text style={styles.meta}>No suggested areas available.</Text>
                             ) : (
                                 <View style={styles.chipsWrap}>
                                     {(challenge.commonAreas || []).map((area) => (
@@ -723,6 +723,7 @@ export default function TeamMatchChallengeDetails() {
                                     ))}
                                 </View>
                             )}
+                            <Text style={styles.meta}>These are suggestions based on both teams' preferences. Captains still need to select a specific venue.</Text>
                         </DetailSectionCard>
 
                         {canProposeVenue && (

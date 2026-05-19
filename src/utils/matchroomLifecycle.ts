@@ -1,10 +1,14 @@
 // src/utils/matchroomLifecycle.ts
 // Helpers for matchroom expiry/lock using scheduled match time.
 
+import {
+    DAY_MS,
+    MATCHROOM_LOCK_BEFORE_START_MS,
+} from "../constants/timing";
+
 // Legacy fallback TTL (older docs without scheduled timestamps)
 const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
-const ONE_HOUR_MS = 60 * 60 * 1000;
-const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+const ONE_DAY_MS = DAY_MS;
 
 function toDate(value: any): Date | null {
     if (!value) return null;
@@ -49,7 +53,7 @@ export function getRoomLockAt(room: any): Date | null {
     const explicit = toDate(room?.lockAt);
     if (explicit) return explicit;
     const start = parseScheduledStartAt(room);
-    return start ? new Date(start.getTime()) : null;
+    return start ? new Date(start.getTime() - MATCHROOM_LOCK_BEFORE_START_MS) : null;
 }
 
 export function getRoomExpiresAt(room: any): Date | null {
@@ -117,25 +121,35 @@ export function isRoomExpired(room: any, now = new Date()): boolean {
 }
 
 /**
- * Check if a matchroom is locked.
+ * Check if a matchroom is join-locked.
  *
- * Locked rules:
+ * Join-lock rules:
  * - Full rooms are considered locked (no more joins).
- * - If now >= lockAt, room is locked (but if not full by then, it is expired instead).
+ * - If now >= lockAt, new join flows are blocked.
  * 
  * @param room The matchroom object
- * @returns true if room is locked
+ * @returns true if room is join-locked
  */
-export function isRoomLocked(room: any, now = new Date()): boolean {
-    // Explicit lock
-    if (room.status === 'locked') return true;
-    if (room.isLocked === true) return true;
-
+export function isJoinLocked(room: any, now = new Date()): boolean {
     // Expired rooms aren't treated as locked for join logic
     if (isRoomExpired(room, now)) return false;
 
-    // Full = locked
-    return isRoomFull(room);
+    if (isRoomFull(room)) return true;
+
+    const lockAt = getRoomLockAt(room);
+    return Boolean(lockAt && lockAt.getTime() <= now.getTime());
+}
+
+export function isLeaveLocked(room: any, now = new Date()): boolean {
+    if (!room) return false;
+    if (room.status === "expired" || room.status === "cancelled") return true;
+    if (room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true) return true;
+    const lockAt = getRoomLockAt(room);
+    return Boolean(lockAt && lockAt.getTime() <= now.getTime());
+}
+
+export function isRoomLocked(room: any, now = new Date()): boolean {
+    return isJoinLocked(room, now);
 }
 
 /**

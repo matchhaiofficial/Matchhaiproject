@@ -14,6 +14,7 @@ import {
     replayPollingRows,
     SharedPollingState,
 } from "./sharedPollingRegistry";
+import { getMatchroomLockAtMs } from "../../constants/timing";
 
 export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
 export type ZoneBookingQueueStatus =
@@ -538,7 +539,7 @@ export async function acceptZoneBookingRequest(input: {
             scheduledDate,
             scheduledTime,
             scheduledStartAt,
-            lockAt: scheduledStartAt,
+            lockAt: getMatchroomLockAtMs(scheduledStartAt) ?? undefined,
             expiresAt,
             durationMinutes,
             pricing: {

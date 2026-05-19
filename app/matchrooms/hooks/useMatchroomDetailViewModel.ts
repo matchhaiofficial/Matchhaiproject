@@ -2,7 +2,8 @@ import { useCallback, useMemo } from "react";
 import { GameSkillScore, SkillTier } from "../../../src/services/skillRatingService";
 import {
   isRoomExpired,
-  isRoomLocked,
+  isJoinLocked,
+  isLeaveLocked,
 } from "../../../src/utils/matchroomLifecycle";
 import {
   deriveMatchroomLobbyState,
@@ -42,7 +43,8 @@ export function useMatchroomDetailViewModel({
     [currentIdentityValues, identityMatches, room?.hostUid],
   );
   const isExpired = useMemo(() => (room ? isRoomExpired(room) : false), [room]);
-  const isLocked = useMemo(() => (room ? isRoomLocked(room) : false), [room]);
+  const joinLocked = useMemo(() => (room ? isJoinLocked(room) : false), [room]);
+  const leaveLocked = useMemo(() => (room ? isLeaveLocked(room) : false), [room]);
   const lobbyState = useMemo(
     () => deriveMatchroomLobbyState(room, currentIdentityValues),
     [currentIdentityValues, room],
@@ -50,10 +52,10 @@ export function useMatchroomDetailViewModel({
   const canJoin = useMemo(
     () =>
       !isExpired &&
-      !isLocked &&
+      !joinLocked &&
       !lobbyState.isJoined &&
       !lobbyState.isFull,
-    [isExpired, isLocked, lobbyState.isFull, lobbyState.isJoined],
+    [isExpired, joinLocked, lobbyState.isFull, lobbyState.isJoined],
   );
 
   const captainUidAResolved = room?.captainUidA || room?.hostUid;
@@ -101,7 +103,9 @@ export function useMatchroomDetailViewModel({
   return {
     isHost,
     isExpired,
-    isLocked,
+    isLocked: joinLocked,
+    isJoinLocked: joinLocked,
+    isLeaveLocked: leaveLocked,
     canJoin,
     captainUidAResolved,
     captainUidBResolved,

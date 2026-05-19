@@ -192,6 +192,7 @@ export default StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         height: '100%',
+        overflow: 'hidden',
     },
     gameIcon: {
         width: 64,
@@ -201,16 +202,29 @@ export default StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: SPACING.md,
+        flexShrink: 0,
     },
     gameInfo: {
         flex: 1,
+        minWidth: 0,
+    },
+    gameTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        marginBottom: SPACING.xs,
     },
     gameName: {
+        flexShrink: 1,
+        minWidth: 0,
         color: COLORS.text,
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
         fontWeight: '600',
-        marginBottom: SPACING.xs,
+    },
+    gameBadge: {
+        flexShrink: 0,
+        marginLeft: SPACING.xs,
     },
     gameRole: {
         color: COLORS.muted,
@@ -485,9 +499,6 @@ export default StyleSheet.create({
     },
     flex1: {
         flex: 1,
-    },
-    marginLeftAuto: {
-        marginLeft: 'auto',
     },
     yellowIcon: {
         marginRight: 4,

@@ -292,6 +292,107 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         marginTop: 4,
     },
+    historyCard: {
+        backgroundColor: COLORS.cardDark,
+        borderColor: COLORS.cardBorder,
+        borderWidth: 1,
+        borderRadius: RADII.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.sm,
+    },
+    historyCardHeader: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: SPACING.sm,
+    },
+    historyTitleWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    historyTitle: {
+        color: COLORS.text,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.label,
+    },
+    historyTimestamp: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        marginTop: 2,
+    },
+    historyStatusChip: {
+        borderWidth: 1,
+        borderRadius: RADII.pill,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 4,
+    },
+    historyStatusSuccess: {
+        borderColor: COLORS.success,
+        backgroundColor: "rgba(102, 187, 106, 0.12)",
+    },
+    historyStatusWarning: {
+        borderColor: COLORS.warning,
+        backgroundColor: "rgba(255, 202, 40, 0.12)",
+    },
+    historyStatusError: {
+        borderColor: COLORS.error,
+        backgroundColor: "rgba(239, 83, 80, 0.12)",
+    },
+    historyStatusMuted: {
+        borderColor: COLORS.cardBorder,
+        backgroundColor: "rgba(255,255,255,0.04)",
+    },
+    historyStatusAccent: {
+        borderColor: COLORS.accent,
+        backgroundColor: "rgba(66, 165, 245, 0.12)",
+    },
+    historyStatusText: {
+        color: COLORS.text,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.xs + 1,
+    },
+    historyMetaRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: SPACING.sm,
+        marginTop: SPACING.sm,
+    },
+    historyMetaText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interMedium,
+        fontSize: TEXT_SIZES.caption,
+    },
+    historyDetailText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        marginTop: 4,
+    },
+    historyRawText: {
+        color: COLORS.muted,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.xs + 1,
+        marginTop: SPACING.xs,
+        lineHeight: 17,
+    },
+    historyLinkButton: {
+        alignSelf: "flex-start",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginTop: SPACING.sm,
+        paddingVertical: 4,
+        paddingRight: SPACING.sm,
+    },
+    historyLinkButtonPressed: {
+        opacity: 0.75,
+    },
+    historyLinkText: {
+        color: COLORS.accent,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: TEXT_SIZES.caption,
+    },
     detailsTitle: {
         color: COLORS.text,
         fontFamily: FONTS.heading,

@@ -38,6 +38,7 @@ import {
     type ZoneBookingAllocationResourceOption,
 } from "./components/ZoneBookingsAllocationSheet";
 import { ZoneBookingsCounterOfferSheets } from "./components/ZoneBookingsCounterOfferSheets";
+import { ZoneBookingsHistorySection } from "./components/ZoneBookingsHistorySection";
 import { ZoneBookingsMatchroomsSection } from "./components/ZoneBookingsMatchroomsSection";
 import { ZoneBookingsRequestsSection } from "./components/ZoneBookingsRequestsSection";
 import { ZoneBookingsWalkinsSection } from "./components/ZoneBookingsWalkinsSection";
@@ -49,7 +50,7 @@ import {
 } from "./hooks/useZoneBookingsViewModel";
 import styles from "./bookings.styles";
 
-type Segment = "requests" | "pending" | "matchrooms" | "walkins";
+type Segment = "requests" | "pending" | "matchrooms" | "walkins" | "history";
 type RequestFilter = "all" | "open";
 type MatchroomFilter = "all" | "open" | "locked" | "cancelled";
 type GameFilter = "all" | "cs2" | "cs16" | "valorant" | "fc26" | "tekken8" | "futsal" | "indoor_cricket" | "padel" | "pickleball";
@@ -491,6 +492,10 @@ export default function ZoneBookingsModule() {
         api.bookings.listOffersByZone,
         zone?.id ? { zoneId: zone.id as Id<"zones"> } : "skip",
     );
+    const historyRows = useQuery(
+        api.zoneAdminBooking.listBookingHistoryForZone,
+        zone?.id && segment === "history" ? { zoneId: zone.id, limit: 20 } : "skip",
+    );
 
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
@@ -688,7 +693,7 @@ export default function ZoneBookingsModule() {
     }, [branchAreas, user?._id, zone?.id]);
 
     useEffect(() => {
-        if (deepSegment === "matchrooms" || deepSegment === "requests") {
+        if (deepSegment === "matchrooms" || deepSegment === "requests" || deepSegment === "history") {
             setSegment(deepSegment);
         }
         if (deepRequestId) {
@@ -977,6 +982,11 @@ export default function ZoneBookingsModule() {
                     { key: "pending", label: "Pending", badge: pendingOffers.length },
                     { key: "matchrooms", label: "Matchrooms", badge: filteredMatchrooms.length },
                     { key: "walkins", label: "Walk-ins", badge: walkInCount },
+                    {
+                        key: "history",
+                        label: "History",
+                        badge: historyRows ? (historyRows.length > 99 ? "99+" : historyRows.length) : undefined,
+                    },
                 ]}
                 value={segment}
                 onChange={(value) => setSegment(value)}
@@ -1087,6 +1097,13 @@ export default function ZoneBookingsModule() {
                             zone?.primaryBranch?.areaLabel || zone?.venueBrandName || "Zone Venue",
                         )
                     }
+                />
+            ) : null}
+
+            {segment === "history" ? (
+                <ZoneBookingsHistorySection
+                    loading={historyRows === undefined}
+                    rows={(historyRows || []) as any[]}
                 />
             ) : null}
 

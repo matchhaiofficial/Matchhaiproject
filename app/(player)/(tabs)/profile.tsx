@@ -141,6 +141,7 @@ export default function Profile() {
     });
     const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
+    const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -504,35 +505,36 @@ export default function Profile() {
                                             />
                                         </View>
                                         <View style={styles.gameInfo}>
-                                            <Text style={styles.gameName} numberOfLines={1}>{game.name}</Text>
+                                            <View style={styles.gameTitleRow}>
+                                                <Text style={styles.gameName} numberOfLines={1} ellipsizeMode="tail">{game.name}</Text>
+                                                {/* Primary Badge: SkillScore > Faceit Level > PSN */}
+                                                <View style={styles.gameBadge}>
+                                                    {skillScore ? (
+                                                        <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
+                                                    ) : (
+                                                        /* Legacy/External Badge Fallback */
+                                                        game.key === 'cs2' && profile?.faceitSkillLevel ? (
+                                                            <AppImage
+                                                                source={faceitLevelIcons[profile.faceitSkillLevel]}
+                                                                containerStyle={styles.faceitIcon}
+                                                                contentFit="contain"
+                                                            />
+                                                        ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
+                                                            <View style={styles.gameSkill}>
+                                                                <AppIcon name="emoji-events" size={16} color="#FFD700" style={styles.yellowIcon} />
+                                                            </View>
+                                                        ) : (
+                                                            <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
+                                                        )
+                                                    )}
+                                                </View>
+                                            </View>
                                             <Text style={styles.gameRole} numberOfLines={1}>{roleText}</Text>
                                             {/* New Secondary Stat Line */}
                                             {externalStat && (
                                                 <Text style={styles.secondaryStat} numberOfLines={1}>
                                                     Verified: {externalStat}
                                                 </Text>
-                                            )}
-                                        </View>
-
-                                        {/* Primary Badge: SkillScore > Faceit Level > PSN */}
-                                        <View style={styles.marginLeftAuto}>
-                                            {skillScore ? (
-                                                <SkillBadge tier={skillScore.tier} rating={skillScore.rating} size="compact" />
-                                            ) : (
-                                                /* Legacy/External Badge Fallback */
-                                                game.key === 'cs2' && profile?.faceitSkillLevel ? (
-                                                    <AppImage
-                                                        source={faceitLevelIcons[profile.faceitSkillLevel]}
-                                                        containerStyle={styles.faceitIcon}
-                                                        contentFit="contain"
-                                                    />
-                                                ) : (game.key === 'fc26' || game.key === 'tekken8') && profile?.psnStats?.[game.key === 'fc26' ? 'fc' : 'tekken8']?.present ? (
-                                                    <View style={styles.gameSkill}>
-                                                        <AppIcon name="emoji-events" size={16} color="#FFD700" style={styles.yellowIcon} />
-                                                    </View>
-                                                ) : (
-                                                    <AppIcon name="chevron-right" size={20} color={COLORS.muted} />
-                                                )
                                             )}
                                         </View>
                                         </AppCard>
@@ -719,7 +721,7 @@ export default function Profile() {
                 </View>
 
                 {/* Logout */}
-                {__DEV__ ? (
+                {touchDebugEnabled ? (
                     <AppButton
                         variant="secondary"
                         style={[styles.logoutButton, { marginBottom: 12 }]}

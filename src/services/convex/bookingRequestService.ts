@@ -61,6 +61,8 @@ export interface ZoneOffer {
   zoneId: string;
   zoneName?: string;
   zoneOwnerUid?: string;
+  offerType?: "standard_accept" | "counter_offer";
+  requestKind?: "direct_zone" | "broadcast_fanout";
   zoneAdminId?: string;
   branchId?: string;
   branchName?: string;
@@ -80,6 +82,7 @@ export interface ZoneOffer {
   selectedOptionIndex?: number;
   resolvedMatchroomId?: string;
   expiresAt?: number;
+  responseExpiresAt?: number;
   proposedPrice: number;
   pricePerPlayer?: number;
   currency?: string;

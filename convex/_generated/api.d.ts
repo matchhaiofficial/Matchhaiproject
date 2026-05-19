@@ -45,6 +45,7 @@ import type * as supportKnowledge from "../supportKnowledge.js";
 import type * as teamChallengeChat from "../teamChallengeChat.js";
 import type * as teamChallenges from "../teamChallenges.js";
 import type * as teams from "../teams.js";
+import type * as timing from "../timing.js";
 import type * as userVisibility from "../userVisibility.js";
 import type * as users from "../users.js";
 import type * as wallet from "../wallet.js";
@@ -99,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   teamChallengeChat: typeof teamChallengeChat;
   teamChallenges: typeof teamChallenges;
   teams: typeof teams;
+  timing: typeof timing;
   userVisibility: typeof userVisibility;
   users: typeof users;
   wallet: typeof wallet;

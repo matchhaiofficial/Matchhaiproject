@@ -9,8 +9,10 @@ import { normalizeGameKey } from "../../features/discover/utils/gameKeys";
 import { initializeSkillIfMissing, type GameKey, type GameSkillScore } from "../skillRatingService";
 import { isProfileGameEnabled } from "../userService";
 import { getCanonicalGameLabel } from "../../utils/gameLabels";
-
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+import {
+  getMatchroomLockAtMs,
+  validateMatchroomScheduleWindow,
+} from "../../constants/timing";
 
 export interface Slot {
   slotId: string;
@@ -64,6 +66,7 @@ export interface Matchroom {
     | "waiting_for_fill"
     | "waiting_for_zones"
     | "zone_confirmed"
+    | "failed"
     | "expired"
     | "cancelled";
   broadcastRequestStartedAt?: number;
@@ -380,15 +383,11 @@ export async function createMatchroom(
         return { ok: false, message: "Scheduled date/time is required." };
       }
 
-      const now = Date.now();
-      const isAdminFlow = roomData.zoneAdminApproved === true;
-      const minLeadMs = isAdminFlow ? ONE_DAY_MS : 60 * 60 * 1000;
-
-      if (scheduledStartAt - now < minLeadMs) {
-        const hours = Math.round(minLeadMs / (60 * 60 * 1000));
+      const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, Date.now());
+      if (!scheduleValidation.ok) {
         return {
           ok: false,
-          message: `Match must be scheduled at least ${hours} hours in advance.`,
+          message: scheduleValidation.message,
         };
       }
     }
@@ -427,7 +426,7 @@ export async function createMatchroom(
       roomData.scheduledDate,
       roomData.scheduledTime
     ) ?? undefined;
-    const lockAt = undefined;
+    const lockAt = getMatchroomLockAtMs(scheduledStartAt) ?? undefined;
     const expiresAt = undefined;
 
     const matchroomId = await convex.mutation(api.matchrooms.create, {

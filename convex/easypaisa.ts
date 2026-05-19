@@ -5,6 +5,7 @@ import { Id } from "./_generated/dataModel";
 import { action, httpAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
 import { EasypaisaTransactionType } from "./easypaisaRest";
+import { EASYPAY_CHECKOUT_TTL_MS } from "./timing";
 
 const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
 const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest").trim().toLowerCase();
@@ -28,7 +29,7 @@ const EASYPAISA_HASH_KEY = String(process.env.EASYPAISA_HASH_KEY || "").trim();
 const EASYPAISA_PAYMENT_METHOD = String(process.env.EASYPAISA_PAYMENT_METHOD || "").trim();
 const EASYPAISA_IPN_ALLOWED_HOSTS = String(process.env.EASYPAISA_IPN_ALLOWED_HOSTS || "").trim();
 const APP_SCHEME = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai").trim().replace(/:\/?\/?$/, "");
-const CHECKOUT_TTL_MS = 15 * 60 * 1000;
+const CHECKOUT_TTL_MS = EASYPAY_CHECKOUT_TTL_MS;
 const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
 
 const CHECKOUT_PATH = "/payments/easypaisa/checkout";

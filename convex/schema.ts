@@ -531,6 +531,7 @@ export default defineSchema({
         v.literal("waiting_for_fill"),
         v.literal("waiting_for_zones"),
         v.literal("zone_confirmed"),
+        v.literal("failed"),
         v.literal("expired"),
         v.literal("cancelled")
       )
@@ -843,7 +844,8 @@ export default defineSchema({
     .index("by_zoneId", ["zoneId"])
     .index("by_matchroomId", ["matchroomId"])
     .index("by_status", ["status"])
-    .index("by_gameKey", ["gameKey"]),
+    .index("by_gameKey", ["gameKey"])
+    .index("by_zoneId_and_requestKind_and_updatedAt", ["zoneId", "requestKind", "updatedAt"]),
 
   // ============================================
   // ZONE OFFERS
@@ -856,6 +858,9 @@ export default defineSchema({
       v.literal("accepted"),
       v.literal("rejected"),
       v.literal("expired")
+    ),
+    offerType: v.optional(
+      v.union(v.literal("standard_accept"), v.literal("counter_offer"))
     ),
     requestKind: v.optional(
       v.union(v.literal("direct_zone"), v.literal("broadcast_fanout"))

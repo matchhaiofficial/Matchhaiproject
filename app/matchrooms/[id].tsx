@@ -18,6 +18,7 @@ import { AppButton } from "../../src/components/AppPrimitives";
 import { DetailSectionCard, DetailSectionHeader } from "../../src/components/DetailSurface";
 import {
   MatchroomAdminCancelSheet,
+  BroadcastStatusPanel,
   MatchroomFallbackRoster,
   MatchroomInviteSheet,
   MatchroomJoinTeamSheet,
@@ -581,6 +582,13 @@ export default function MatchroomDetails() {
               qrValue={qrValue}
               matchCode={matchCode}
               styles={styles}
+            />
+
+            <BroadcastStatusPanel
+              room={room}
+              matchroomId={matchroomId}
+              currentIdentityValues={currentIdentityValues}
+              currentUserId={user?._id ? String(user._id) : null}
             />
 
             {(displaySlotsA?.length || displaySlotsB?.length) ? (

@@ -106,6 +106,30 @@ const toPositiveNumber = (value: unknown) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
+const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 3;
+const TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS = 2;
+const TEAM_CHALLENGE_MIN_SCHEDULE_MS = TEAM_CHALLENGE_MIN_SCHEDULE_DAYS * 24 * 60 * 60 * 1000;
+
+const addMonths = (date: Date, months: number) => {
+    const next = new Date(date);
+    next.setMonth(next.getMonth() + months);
+    return next;
+};
+
+const validateTeamChallengeScheduledAt = (scheduledAtMs: number, nowMs = Date.now()): string | null => {
+    const now = new Date(nowMs);
+    const minAt = nowMs + TEAM_CHALLENGE_MIN_SCHEDULE_MS;
+    const maxAt = addMonths(now, TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS).getTime();
+
+    if (scheduledAtMs < minAt) {
+        return "Team challenges must be scheduled at least 3 days in advance.";
+    }
+    if (scheduledAtMs > maxAt) {
+        return "Team challenges cannot be scheduled more than 2 months in advance.";
+    }
+    return null;
+};
+
 const getZonePricingSourcesForChallenge = (zoneData: any) => {
     const branchPricing = Array.isArray(zoneData?.branches)
         ? zoneData.branches.map((branch: any) => branch?.pricing)
@@ -294,8 +318,9 @@ export const sendTeamMatchChallenge = async (input: {
         if (!scheduledAt) {
             return { ok: false, message: "Invalid challenge date/time." };
         }
-        if (scheduledAt.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
-            return { ok: false, message: "Challenge match must be at least 24 hours from now." };
+        const scheduleError = validateTeamChallengeScheduledAt(scheduledAt.getTime());
+        if (scheduleError) {
+            return { ok: false, message: scheduleError };
         }
 
         const [{ team: teamA, members: teamAMembers }, { team: teamB, members: teamBMembers }] = await Promise.all([
@@ -599,7 +624,6 @@ export const proposeTeamChallengeVenue = async (input: {
             zoneId: input.zoneId as Id<"zones">,
             zoneName: input.venueName,
             areaLabel: input.areaLabel || null,
-            scheduledAt: Date.now(),
             actorUid: me.convexId,
         });
 

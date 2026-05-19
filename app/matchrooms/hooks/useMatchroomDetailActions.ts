@@ -23,6 +23,7 @@ import {
 } from "../../../src/services/convex/zoneAdminBookingService";
 import { useToast } from "../../../src/hooks/useToast";
 import Logger from "../../../src/utils/logger";
+import { isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
 import { getUserProfile } from "../../../src/services/userService";
 import { useCallback, useEffect, useRef } from "react";
 
@@ -574,15 +575,10 @@ export function useMatchroomDetailActions({
   const handleLeave = () => {
     if (!room || !user || !id) return;
 
-    const slotsA = room.slotsA || [];
-    const slotsB = room.slotsB || [];
-    const confirmedCount = [...slotsA, ...slotsB].filter(
-      (slot) => slot?.status === "confirmed",
-    ).length;
-    if (confirmedCount >= 10) {
+    if (isLeaveLocked(room)) {
       Alert.alert(
         "Locked",
-        "The matchroom is full and locked. You cannot leave at this stage.",
+        "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.",
       );
       return;
     }

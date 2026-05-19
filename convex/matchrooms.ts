@@ -8,11 +8,21 @@ import {
   dispatchBroadcastZoneRequestsForMatchroom,
   finalizeBroadcastFailure,
 } from "./matchroomBroadcast";
+import {
+  INVITE_TTL_MS,
+  JOIN_REQUEST_TTL_MS,
+  PAYMENT_INTENT_TTL_MS,
+  capExpiryAtLockTime,
+  getMatchroomLockAt,
+  validateMatchroomScheduleWindow,
+} from "./timing";
 
 // Constants
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
 const SKILL_JOIN_DELTA = 10;
 const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_request"]);
+export const MATCHROOM_LOCKED_MESSAGE =
+  "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.";
 
 function getMatchroomPlayerUids(room: any): string[] {
   const fromPlayerUids = Array.isArray(room.playerUids) ? room.playerUids.map(String) : [];
@@ -290,10 +300,44 @@ export function isRoomExpired(room: any): boolean {
 }
 
 // Helper: Check if room is locked
-export function isRoomLocked(room: any): boolean {
-  if (room.status === "locked" || room.isLocked) return true;
+function getRoomLockAtMs(room: any) {
+  const explicitLockAt = Number(room?.lockAt || 0);
+  if (Number.isFinite(explicitLockAt) && explicitLockAt > 0) return explicitLockAt;
+  return getMatchroomLockAt(room?.scheduledStartAt || room?.startTime);
+}
+
+export function isJoinLocked(room: any, now = Date.now()): boolean {
+  if (!room || room.status === "cancelled" || room.status === "expired") return true;
   if (isRosterFull(room)) return true;
-  return false;
+  const lockAt = getRoomLockAtMs(room);
+  return typeof lockAt === "number" && lockAt <= now;
+}
+
+export function isLeaveLocked(room: any, now = Date.now()): boolean {
+  if (!room) return false;
+  if (room.status === "cancelled" || room.status === "expired") return true;
+  if (room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true) return true;
+  const lockAt = getRoomLockAtMs(room);
+  return typeof lockAt === "number" && lockAt <= now;
+}
+
+// Legacy alias for call sites not yet split by intent.
+export function isRoomLocked(room: any): boolean {
+  return isJoinLocked(room);
+}
+
+function getCappedMatchroomExpiryOrThrow(
+  room: any,
+  ttlMs: number,
+  label: string,
+  now = Date.now(),
+) {
+  const desiredExpiry = now + ttlMs;
+  const expiry = capExpiryAtLockTime(now, desiredExpiry, room?.scheduledStartAt || room?.startTime);
+  if (!expiry) {
+    throw new Error(`${label} cannot be created because this matchroom is locked.`);
+  }
+  return expiry;
 }
 
 // Slot validator (matching new schema)
@@ -1218,6 +1262,12 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     .collect();
 
   const now = Date.now();
+  const expiresAt = getCappedMatchroomExpiryOrThrow(
+    args.room,
+    PAYMENT_INTENT_TTL_MS,
+    "Payment intent",
+    now,
+  );
   const duplicate = existingIntents.find((intent: any) =>
     String(intent.matchroomId) === String(args.room._id)
     && intent.paymentStatus !== "paid"
@@ -1230,7 +1280,7 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     await ctx.db.patch(duplicate._id, {
       updatedAt: now,
       sourceNotificationId: args.sourceNotificationId || duplicate.sourceNotificationId,
-      expiresAt: now + 15 * 60 * 1000,
+      expiresAt,
     });
     return duplicate._id;
   }
@@ -1253,7 +1303,7 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     },
     game: args.room.game,
     paymentStatus: "unpaid",
-    expiresAt: now + 15 * 60 * 1000,
+    expiresAt,
     createdAt: now,
     updatedAt: now,
   });
@@ -1525,6 +1575,7 @@ export const create = mutation({
       v.literal("waiting_for_fill"),
       v.literal("waiting_for_zones"),
       v.literal("zone_confirmed"),
+      v.literal("failed"),
       v.literal("expired"),
       v.literal("cancelled"),
     )),
@@ -1588,6 +1639,10 @@ export const create = mutation({
     }
 
     const now = Date.now();
+    const scheduleValidation = validateMatchroomScheduleWindow(args.scheduledStartAt, now);
+    if (!scheduleValidation.ok) {
+      throw new Error(scheduleValidation.message);
+    }
 
     if (
       args.locationMode === "zone"
@@ -1651,7 +1706,7 @@ export const create = mutation({
       scheduledDate: args.scheduledDate,
       scheduledTime: args.scheduledTime,
       scheduledStartAt: args.scheduledStartAt,
-      lockAt: args.lockAt,
+      lockAt: args.lockAt || getMatchroomLockAt(args.scheduledStartAt) || undefined,
       expiresAt: args.expiresAt,
       durationMinutes: args.durationMinutes,
       pricing: args.pricing,
@@ -1691,7 +1746,7 @@ export const create = mutation({
 
     if (
       args.locationMode === "broadcast" &&
-      normalizedPlayers.length >= args.maxPlayers
+      (args.broadcastAreas || []).length > 0
     ) {
       await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
     }
@@ -1752,7 +1807,7 @@ export const join = mutation({
       throw new Error("This matchroom has expired.");
     }
 
-    if (isRoomLocked(room)) {
+    if (isJoinLocked(room)) {
       throw new Error("This matchroom is locked (no new players allowed).");
     }
 
@@ -1804,10 +1859,8 @@ export const leave = mutation({
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
 
-    const confirmedCount = [...(room.slotsA || []), ...(room.slotsB || [])]
-      .filter((s: any) => s?.status === "confirmed").length;
-    if (confirmedCount >= room.maxPlayers) {
-      throw new Error("Matchroom is locked (all players confirmed). You cannot leave.");
+    if (isLeaveLocked(room)) {
+      throw new Error(MATCHROOM_LOCKED_MESSAGE);
     }
 
     const updatedPlayers = room.players.filter((p) => p.uid !== args.uid);
@@ -2301,6 +2354,8 @@ export const inviteToMatchroom = mutation({
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
+    if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
+    if (isJoinLocked(room)) throw new Error("This matchroom is locked.");
 
     // Verify captain
     const captainUid = args.team === "A"
@@ -2319,7 +2374,7 @@ export const inviteToMatchroom = mutation({
 
     const entityKey = `match.seat_invite:${args.matchroomId}:${args.toUid}:${args.slotId}`;
     const now = Date.now();
-    const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+    const expiresAt = getCappedMatchroomExpiryOrThrow(room, INVITE_TTL_MS, "Seat invite", now);
 
     // Get fromUser Convex ID
     const fromUserId = actor?._id;
@@ -2345,7 +2400,7 @@ export const inviteToMatchroom = mutation({
         game: room.game,
         href: `/matchrooms/${String(args.matchroomId)}`,
       },
-      expiresAt: now + twoDaysMs,
+      expiresAt,
     });
 
     return notificationResult.notificationId;
@@ -2475,7 +2530,7 @@ export const requestToJoinMatchroom = mutation({
     if (!room) throw new Error("Matchroom not found");
 
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
-    if (isRoomLocked(room)) throw new Error("This matchroom is locked.");
+    if (isJoinLocked(room)) throw new Error("This matchroom is locked.");
     if (room.playerUids.includes(actorUid)) throw new Error("You are already in this matchroom.");
     const now = Date.now();
     const role = args.role || "Player";
@@ -2546,7 +2601,7 @@ export const requestToJoinMatchroom = mutation({
       throw new Error("No available captains found for this matchroom.");
     }
 
-    const oneDayMs = 24 * 60 * 60 * 1000;
+    const expiresAt = getCappedMatchroomExpiryOrThrow(room, JOIN_REQUEST_TTL_MS, "Join request", now);
     const createdNotificationIds: Id<"notifications">[] = [];
     for (const captainUid of captainUids) {
       const captain = await resolveUserByAnyId(ctx, captainUid);
@@ -2584,7 +2639,7 @@ export const requestToJoinMatchroom = mutation({
           ratingDifference: ratingDiff,
           href: `/matchrooms/${String(args.matchroomId)}`,
         },
-        expiresAt: now + oneDayMs,
+        expiresAt,
       });
       createdNotificationIds.push(notificationResult.notificationId);
     }
@@ -2653,7 +2708,7 @@ export const respondToMatchroomInvite = mutation({
     const room = await ctx.db.get(matchroomId as Id<"matchrooms">);
     if (!room) throw new Error("Matchroom not found.");
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
-    if (isRoomLocked(room) || (room.currentPlayers || 0) >= room.maxPlayers) {
+    if (isJoinLocked(room) || (room.currentPlayers || 0) >= room.maxPlayers) {
       throw new Error("This matchroom is locked.");
     }
 
@@ -2674,6 +2729,7 @@ export const respondToMatchroomInvite = mutation({
       requestedSlotId: slotId,
       source: "captain_invite",
     });
+    const paymentExpiresAt = getCappedMatchroomExpiryOrThrow(room, PAYMENT_INTENT_TTL_MS, "Payment intent", now);
     await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
 
     const paymentNotificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
@@ -2700,7 +2756,7 @@ export const respondToMatchroomInvite = mutation({
         paymentRequired: true,
         href: `/matchrooms/${String(matchroomId)}`,
       },
-      expiresAt: now + 15 * 60 * 1000,
+      expiresAt: paymentExpiresAt,
     });
     await ctx.db.patch(intentId, {
       sourceNotificationId: paymentNotificationResult.notificationId,
@@ -2862,6 +2918,7 @@ export const respondToMatchroomJoinRequest = mutation({
         requestedSlotId: data?.slotId || null,
         source: "captain_approved_join",
       });
+      const paymentExpiresAt = getCappedMatchroomExpiryOrThrow(room, PAYMENT_INTENT_TTL_MS, "Payment intent", now);
 
       await ctx.db.patch(args.notificationId, { status: "accepted", updatedAt: now });
       const paymentNotificationResult: any = await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
@@ -2888,7 +2945,7 @@ export const respondToMatchroomJoinRequest = mutation({
           paymentRequired: true,
           href: `/matchrooms/${String(matchroomId)}`,
         },
-        expiresAt: now + 15 * 60 * 1000,
+        expiresAt: paymentExpiresAt,
       });
       await ctx.db.patch(intentId, {
         sourceNotificationId: paymentNotificationResult.notificationId,
@@ -2936,6 +2993,7 @@ export const respondToMatchroomJoinRequest = mutation({
       requestedSlotId: data?.slotId || null,
       source: "captain_approved_join",
     });
+    const paymentExpiresAt = getCappedMatchroomExpiryOrThrow(room, PAYMENT_INTENT_TTL_MS, "Payment intent", now);
 
     for (const notification of relatedNotifications) {
       if (notification.status === "pending") {
@@ -2967,7 +3025,7 @@ export const respondToMatchroomJoinRequest = mutation({
         paymentRequired: true,
         href: `/matchrooms/${String(matchroomId)}`,
       },
-      expiresAt: now + 15 * 60 * 1000,
+      expiresAt: paymentExpiresAt,
     });
     await ctx.db.patch(intentId, {
       sourceNotificationId: paymentNotificationResult.notificationId,
@@ -3031,7 +3089,7 @@ export const payMatchroomSeatIntent = mutation({
     const room = await ctx.db.get(intent.matchroomId);
     if (!room) throw new Error("Matchroom not found.");
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
-    if (isRoomLocked(room) && !(room.playerUids || []).includes(payerUid)) {
+    if (isJoinLocked(room) && !(room.playerUids || []).includes(payerUid)) {
       throw new Error("This matchroom is locked.");
     }
     if ((room.playerUids || []).includes(payerUid)) {
@@ -3464,6 +3522,30 @@ export const runLifecycleSweep = internalMutation({
           );
           if (result.changed) changedRooms += 1;
           continue;
+        }
+
+        if (
+          room.locationMode === "broadcast" &&
+          !room.venueConfirmedAt &&
+          !room.confirmedZoneId &&
+          !["zone_confirmed", "failed", "expired", "cancelled"].includes(String(room.broadcastRequestStatus || ""))
+        ) {
+          const lockAt = getRoomLockAtMs(room);
+          const isPastLockAt = typeof lockAt === "number" && lockAt <= now;
+
+          if (room.broadcastRequestStatus === "waiting_for_fill" || room.broadcastRequestStatus === "idle") {
+            const result = isPastLockAt
+              ? await finalizeBroadcastFailure(ctx, room._id, "no_zone_response")
+              : await dispatchBroadcastZoneRequestsForMatchroom(ctx, room._id);
+            if ((result as any).changed || (result as any).dispatched) changedRooms += 1;
+          } else if (
+            room.broadcastRequestStatus === "waiting_for_zones" &&
+            Number(room.broadcastRequestExpiresAt || 0) > 0 &&
+            Number(room.broadcastRequestExpiresAt) <= now
+          ) {
+            const result = await finalizeBroadcastFailure(ctx, room._id, "no_zone_response");
+            if ((result as any).changed) changedRooms += 1;
+          }
         }
 
         if (room.status === "in-progress") {

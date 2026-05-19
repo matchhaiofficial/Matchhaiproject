@@ -23,6 +23,33 @@ const challengeStatuses = new Set([
   "expired",
 ]);
 
+const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 3;
+const TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS = 2;
+const TEAM_CHALLENGE_MIN_SCHEDULE_MS = TEAM_CHALLENGE_MIN_SCHEDULE_DAYS * 24 * 60 * 60 * 1000;
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function validateTeamChallengeScheduledAt(scheduledAt: unknown, nowMs = Date.now()) {
+  if (typeof scheduledAt !== "number" || !Number.isFinite(scheduledAt)) {
+    throw new Error("Invalid challenge date/time.");
+  }
+
+  const now = new Date(nowMs);
+  const minAt = nowMs + TEAM_CHALLENGE_MIN_SCHEDULE_MS;
+  const maxAt = addMonths(now, TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS).getTime();
+
+  if (scheduledAt < minAt) {
+    throw new Error("Team challenges must be scheduled at least 3 days in advance.");
+  }
+  if (scheduledAt > maxAt) {
+    throw new Error("Team challenges cannot be scheduled more than 2 months in advance.");
+  }
+}
+
 async function resolveUserByAnyId(ctx: any, value?: string | null) {
   if (!value) return null;
 
@@ -522,7 +549,6 @@ export const proposeVenue = mutation({
     zoneId: v.id("zones"),
     zoneName: v.optional(v.string()),
     areaLabel: v.optional(v.union(v.string(), v.null())),
-    scheduledAt: v.optional(v.number()),
     actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
@@ -553,7 +579,6 @@ export const proposeVenue = mutation({
       status: bothConfirmed ? "venue_confirmed" : "venue_proposed",
       zoneId: bothConfirmed ? args.zoneId : undefined,
       zoneName: bothConfirmed ? venue.venueName : undefined,
-      scheduledAt: args.scheduledAt ?? challenge.scheduledAt,
       proposedVenueByCaptainA: isCaptainAActor ? venue : challenge.proposedVenueByCaptainA,
       alternativeVenueByCaptainB: !isCaptainAActor ? venue : challenge.alternativeVenueByCaptainB,
       captainVenueChoices,
@@ -718,6 +743,7 @@ export const createFull = mutation({
 
     const now = Date.now();
     const scheduledAt = typeof args.scheduledAt === "number" ? args.scheduledAt : undefined;
+    validateTeamChallengeScheduledAt(scheduledAt, now);
 
     // Prevent spamming the same opponent team with duplicate pending challenges until the proposed time passes.
     if (args.status === "pending" && scheduledAt && scheduledAt > now) {
@@ -837,7 +863,10 @@ export const update = mutation({
     if (updates.status !== undefined) patch.status = updates.status;
     if (updates.zoneId !== undefined) patch.zoneId = updates.zoneId;
     if (updates.zoneName !== undefined) patch.zoneName = updates.zoneName;
-    if (updates.scheduledAt !== undefined) patch.scheduledAt = updates.scheduledAt;
+    if (updates.scheduledAt !== undefined) {
+      validateTeamChallengeScheduledAt(updates.scheduledAt);
+      patch.scheduledAt = updates.scheduledAt;
+    }
     if (updates.message !== undefined) patch.message = updates.message;
     if (updates.adminReviewStatus !== undefined) patch.adminReviewStatus = updates.adminReviewStatus;
     if (updates.proposedVenueByCaptainA !== undefined) patch.proposedVenueByCaptainA = updates.proposedVenueByCaptainA;

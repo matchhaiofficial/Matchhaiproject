@@ -3,8 +3,9 @@ import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
+import { PAYMENT_INTENT_TTL_MS } from "./timing";
 
-const BOOKING_INTENT_TTL_MS = 15 * 60 * 1000;
+const BOOKING_INTENT_TTL_MS = PAYMENT_INTENT_TTL_MS;
 
 function normalizeBookingGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();

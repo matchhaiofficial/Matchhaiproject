@@ -160,7 +160,7 @@ export default function TeamChallengesScreen() {
                                 </View>
                                 <Text style={styles.meta}>Game: {String(item.gameKey || "").toUpperCase()}</Text>
                                 <Text style={styles.meta}>
-                                    Common areas: {(item.commonAreas || []).length > 0 ? item.commonAreas.join(", ") : "None"}
+                                    Suggested areas: {(item.commonAreas || []).length > 0 ? item.commonAreas.join(", ") : "None"}
                                 </Text>
                                 {item.pricePerPlayer ? (
                                     <Text style={styles.meta}>
