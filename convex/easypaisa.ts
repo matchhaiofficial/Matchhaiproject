@@ -31,6 +31,8 @@ const EASYPAISA_IPN_ALLOWED_HOSTS = String(process.env.EASYPAISA_IPN_ALLOWED_HOS
 const APP_SCHEME = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai").trim().replace(/:\/?\/?$/, "");
 const CHECKOUT_TTL_MS = EASYPAY_CHECKOUT_TTL_MS;
 const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
+const BOOKING_CHECKOUT_RETRY_WINDOW_MS = CHECKOUT_TTL_MS;
+const MAX_BOOKING_CHECKOUT_ATTEMPTS_PER_WINDOW = 5;
 
 const CHECKOUT_PATH = "/payments/easypaisa/checkout";
 const TOKEN_PATH = "/payments/easypaisa/token";
@@ -496,6 +498,7 @@ export const getStartCheckoutContext = internalQuery({
     amount: v.optional(v.number()),
     userId: v.optional(v.id("users")),
     phone: v.optional(v.string()),
+    forceNew: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
@@ -532,10 +535,25 @@ export const getStartCheckoutContext = internalQuery({
         .query("paymentTransactions")
         .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", bookingIntentId!))
         .collect();
-      const activeTransaction = existing.find((transaction: any) =>
-        activeStatuses.includes(transaction.status)
-        && Number(transaction.expiresAt || 0) > now,
-      );
+
+      if (args.forceNew) {
+        const retryWindowStart = now - BOOKING_CHECKOUT_RETRY_WINDOW_MS;
+        const recentAttempts = existing.filter((transaction: any) =>
+          transaction.kind === "booking_intent" &&
+          Number(transaction.createdAt || 0) >= retryWindowStart,
+        );
+        if (recentAttempts.length >= MAX_BOOKING_CHECKOUT_ATTEMPTS_PER_WINDOW) {
+          throw new Error(
+            `You have reached the Easypaisa retry limit for this booking. Please wait a few minutes and try again.`,
+          );
+        }
+      }
+
+      const activeTransaction = args.forceNew
+        ? null
+        : existing.find((transaction: any) =>
+            activeStatuses.includes(transaction.status) && Number(transaction.expiresAt || 0) > now,
+          );
 
       return {
         userId: user._id,
@@ -554,19 +572,29 @@ export const getStartCheckoutContext = internalQuery({
     }
 
     let activeTransaction: any = null;
-    for (const status of activeStatuses) {
-      const rows = await ctx.db
-        .query("paymentTransactions")
-        .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
-        .collect();
-      activeTransaction = rows.find((transaction: any) =>
-        transaction.kind === "wallet_topup"
-        && Number(transaction.amount || 0) === amount
-        && Number(transaction.expiresAt || 0) > now,
-      );
-      if (activeTransaction) {
-        break;
+    if (!args.forceNew) {
+      for (const status of activeStatuses) {
+        const rows = await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
+          .collect();
+        activeTransaction = rows.find((transaction: any) =>
+          transaction.kind === "wallet_topup" &&
+          Number(transaction.amount || 0) === amount &&
+          Number(transaction.expiresAt || 0) > now,
+        );
+        if (activeTransaction) {
+          break;
+        }
       }
+    }
+
+    // Avoid reusing very old pending checkouts for wallet top-ups; users often need a fresh request.
+    if (
+      activeTransaction &&
+      Number(activeTransaction.updatedAt || activeTransaction.createdAt || 0) + 2 * 60 * 1000 < now
+    ) {
+      activeTransaction = null;
     }
 
     return {
@@ -728,6 +756,7 @@ export const startCheckout = action({
     flow: v.optional(v.union(v.literal("rest"), v.literal("hosted"))),
     transactionType: v.optional(v.union(v.literal("MA"), v.literal("OTC"))),
     phone: v.optional(v.string()),
+    forceNew: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<any> => {
     ensurePaymentConfig();
@@ -739,6 +768,7 @@ export const startCheckout = action({
       amount: args.amount,
       userId: args.userId,
       phone: args.phone,
+      forceNew: args.forceNew,
     });
     const userId = context.userId as Id<"users">;
     const userPhone = String(context.userPhone || "");

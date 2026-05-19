@@ -140,7 +140,9 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  // Use safe-area bottom inset on all platforms so buttons never sit under
+  // gesture nav / software buttons (Android) or the home indicator (iOS).
+  const bottomInset = Math.max(0, insets.bottom || 0);
 
   return (
     <View
@@ -167,7 +169,7 @@ export function AppDialog({
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomClearance = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomClearance = Math.max(0, insets.bottom || 0);
   const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
@@ -221,7 +223,7 @@ export function AppBottomSheet({
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomInset = Math.max(0, insets.bottom || 0);
   const maxSheetHeight = Math.floor(
     Math.min(
       windowHeight * 0.82,
@@ -233,8 +235,7 @@ export function AppBottomSheet({
     axis: "y",
     distance: 22,
   });
-  const sheetOuterBottomPad =
-    Platform.OS === "ios" ? Math.max(SPACING.sm, bottomInset) : 0;
+  const sheetOuterBottomPad = Math.max(SPACING.sm, bottomInset);
 
   return (
     <Modal

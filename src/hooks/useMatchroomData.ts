@@ -7,7 +7,24 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
 
-const MATCH_JOIN_REQUEST_TYPE = "match.join_request";
+const ACTIVE_BOOKING_INTENT_STATUSES = new Set([
+  "approved_pending_payment",
+  "pending_approvals",
+  "approved",
+]);
+
+function isActiveBookingIntent(intent: any, now: number) {
+  if (!intent || intent.paymentStatus === "paid") {
+    return false;
+  }
+
+  if (!ACTIVE_BOOKING_INTENT_STATUSES.has(String(intent.status || ""))) {
+    return false;
+  }
+
+  const expiresAt = Number(intent.expiresAt || 0);
+  return !expiresAt || expiresAt > now;
+}
 
 /**
  * Hook for getting user's outgoing join requests for a matchroom
@@ -17,8 +34,14 @@ export function useMyJoinRequests(matchroomId: string | undefined) {
   const userId = user?._id as Id<"users"> | undefined;
 
   const notifications = useQuery(
-    api.notifications.listByFromUidAndType,
-    userId ? { fromUid: userId, type: MATCH_JOIN_REQUEST_TYPE, limit: 50 } : "skip"
+    api.notifications.listOutgoingMatchroomJoinRequests,
+    userId && matchroomId
+      ? {
+        fromUid: userId,
+        matchroomId: matchroomId as Id<"matchrooms">,
+        limit: 50,
+      }
+      : "skip"
   );
 
   const bookingIntents = useQuery(
@@ -33,14 +56,11 @@ export function useMyJoinRequests(matchroomId: string | undefined) {
     const requestedSlots = new Map<string, string>();
     let genericRequestStatus: string | null = null;
     const activeIntentIds: string[] = [];
+    const now = Date.now();
 
     if (notifications && matchroomId) {
       notifications.forEach((n: any) => {
-        const isActiveRequest = n.status === "pending";
-        if (
-          isActiveRequest &&
-          (n.data?.matchroomId === matchroomId || n.matchroomId === matchroomId)
-        ) {
+        if (n.status === "pending") {
           if (n.data?.slotId) {
             requestedSlots.set(n.data.slotId, n.status);
           } else {
@@ -52,6 +72,10 @@ export function useMyJoinRequests(matchroomId: string | undefined) {
 
     if (bookingIntents && matchroomId) {
       bookingIntents.forEach((intent: any) => {
+        if (!isActiveBookingIntent(intent, now)) {
+          return;
+        }
+
         activeIntentIds.push(String(intent._id));
         const slotIds = Array.isArray(intent.selectedSlotIds)
           ? intent.selectedSlotIds
@@ -86,11 +110,10 @@ export function useMyActiveMatchroomRoomStates() {
   const userId = user?._id as Id<"users"> | undefined;
 
   const notifications = useQuery(
-    api.notifications.listByFromUidAndType,
+    api.notifications.listOutgoingMatchroomJoinRequests,
     userId
       ? {
         fromUid: userId,
-        type: MATCH_JOIN_REQUEST_TYPE,
         limit: 100,
       }
       : "skip"
@@ -103,6 +126,7 @@ export function useMyActiveMatchroomRoomStates() {
 
   const roomStatuses = new Map<string, string>();
   const activeIntentIdsByRoom = new Map<string, string[]>();
+  const now = Date.now();
 
   if (notifications) {
     notifications.forEach((notification: any) => {
@@ -116,6 +140,10 @@ export function useMyActiveMatchroomRoomStates() {
 
   if (bookingIntents) {
     bookingIntents.forEach((intent: any) => {
+      if (!isActiveBookingIntent(intent, now)) {
+        return;
+      }
+
       if (!intent.matchroomId) {
         return;
       }

@@ -88,13 +88,24 @@ async function cancelScheduledNotification(notificationId?: string) {
   }
 }
 
-async function cancelUnknownScheduledReminderDuplicates(desiredKeys: Set<string>) {
+async function cancelUnknownScheduledReminderDuplicates(params: {
+  desiredKeys: Set<string>;
+  desiredRoomIds?: Set<string>;
+}) {
   try {
     const scheduled = await getAllScheduledNotificationsAsync();
     const obsolete = scheduled.filter((item: any) => {
       const contentData = item?.content?.data || item?.request?.content?.data || {};
       const reminderKey = String(contentData?.reminderKey || "");
-      return reminderKey && !desiredKeys.has(reminderKey);
+      if (reminderKey) return !params.desiredKeys.has(reminderKey);
+
+      // Legacy/unknown scheduled notifications: best-effort cleanup so reminders
+      // don't linger forever if older builds scheduled without a reminderKey.
+      const roomId = String(contentData?.roomId || "");
+      if (roomId && params.desiredRoomIds) {
+        return !params.desiredRoomIds.has(roomId);
+      }
+      return false;
     });
 
     await Promise.all(
@@ -182,7 +193,7 @@ export async function clearAllMatchroomReminders() {
   const map = await readReminderMap();
   await Promise.all(Object.values(map).map((entry) => cancelScheduledNotification(entry.notificationId)));
   await writeReminderMap({});
-  await cancelUnknownScheduledReminderDuplicates(new Set());
+  await cancelUnknownScheduledReminderDuplicates({ desiredKeys: new Set() });
 }
 
 export async function cancelMatchroomReminder(roomId: string) {
@@ -208,6 +219,7 @@ export async function reconcileMatchroomReminders(plans: ReminderPlan[]) {
       (plan) => plan && plan.reminderKey && plan.roomId && Number.isFinite(plan.triggerAtMs)
     );
     const desiredKeySet = new Set(desiredPlans.map((plan) => plan.reminderKey));
+    const desiredRoomIdSet = new Set(desiredPlans.map((plan) => plan.roomId));
     const stored = await readReminderMap();
     const nextMap: StoredReminderMap = {};
 
@@ -243,7 +255,10 @@ export async function reconcileMatchroomReminders(plans: ReminderPlan[]) {
     }
 
     await writeReminderMap(nextMap);
-    await cancelUnknownScheduledReminderDuplicates(new Set(Object.keys(nextMap)));
+    await cancelUnknownScheduledReminderDuplicates({
+      desiredKeys: new Set(Object.keys(nextMap)),
+      desiredRoomIds: desiredRoomIdSet,
+    });
     return nextMap;
   });
 }

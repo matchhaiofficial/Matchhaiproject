@@ -1106,6 +1106,7 @@ export default function CreateMatchroom() {
     closeEasypaisaPhonePrompt,
     completeAssessment,
     confirmEasypaisaPayment,
+    resendEasypaisaPayment,
     confirmActivation,
     easypaisaCheckoutPhone,
     easypaisaCheckoutStatus,
@@ -1193,8 +1194,10 @@ export default function CreateMatchroom() {
     easypaisaPaymentPhase === "confirmed" ||
     easypaisaPaymentPhase === "completing";
   const easypaisaDialogTitle = isEasypaisaPaymentActive
-    ? easypaisaPaymentPhase === "failed"
-      ? "Payment Not Completed"
+    ? easypaisaPaymentPhase === "completion_failed"
+      ? "Completion Pending"
+      : easypaisaPaymentPhase === "failed"
+        ? "Payment Not Completed"
       : easypaisaPaymentPhase === "expired"
         ? "Payment Expired"
         : easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
@@ -1204,6 +1207,8 @@ export default function CreateMatchroom() {
   const easypaisaDialogSubtitle = isEasypaisaPaymentActive
     ? easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
       ? "MatchHai received the payment and is finishing your matchroom."
+      : easypaisaPaymentPhase === "completion_failed"
+        ? "MatchHai confirmed the payment but still needs a moment to finish the matchroom."
       : "Approve the payment in Easypaisa. MatchHai will keep checking this screen."
     : "Use the number you want to pay with for this top-up.";
   const easypaisaStartTimedOut = String(easypaisaCheckoutStatus?.lastError || "")
@@ -1214,6 +1219,8 @@ export default function CreateMatchroom() {
       ? "Payment confirmed. Completing your matchroom now..."
       : easypaisaPaymentPhase === "completing"
         ? "Payment confirmed. Creating your matchroom..."
+        : easypaisaPaymentPhase === "completion_failed"
+          ? "Payment confirmed, but finishing the matchroom is still pending. Wait a few seconds then retry."
         : easypaisaPaymentPhase === "failed"
           ? "Easypaisa did not complete this payment. You can try again with the same or another number."
           : easypaisaPaymentPhase === "expired"
@@ -1224,13 +1231,17 @@ export default function CreateMatchroom() {
   const easypaisaStatusIcon =
     easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
       ? "check-circle"
-      : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
+      : easypaisaPaymentPhase === "completion_failed"
+        ? "hourglass-top"
+        : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
         ? "error"
         : "hourglass-top";
   const easypaisaStatusColor =
     easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
       ? COLORS.success
-      : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
+      : easypaisaPaymentPhase === "completion_failed"
+        ? COLORS.warning
+        : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
         ? COLORS.error
         : COLORS.warning;
   if (loading) {
@@ -2270,7 +2281,26 @@ export default function CreateMatchroom() {
         <AppModalFooter style={styles.phoneFooter}>
           {isEasypaisaPaymentActive ? (
             <View style={styles.phoneActionsRow}>
-              {easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired" ? (
+              {easypaisaPaymentPhase === "completion_failed" ? (
+                <>
+                  <AppButton
+                    variant="secondary"
+                    style={styles.phoneActionBtn}
+                    onPress={closeEasypaisaPhonePrompt}
+                  >
+                    Close
+                  </AppButton>
+                  <AppButton
+                    style={styles.phoneActionBtn}
+                    onPress={() => {
+                      // Retry completion using the wallet that was just topped up.
+                      handleSubmit({ skipPaymentPrompt: true });
+                    }}
+                  >
+                    Try Again
+                  </AppButton>
+                </>
+              ) : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired" ? (
                 <>
                   <AppButton
                     variant="secondary"
@@ -2287,16 +2317,28 @@ export default function CreateMatchroom() {
                   </AppButton>
                 </>
               ) : (
-                <AppButton
-                  style={styles.phoneActionBtn}
-                  onPress={() => refreshEasypaisaPaymentStatus("manual")}
-                  loading={refreshingEasypaisaStatus || easypaisaPaymentPhase === "completing"}
-                  disabled={refreshingEasypaisaStatus || easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"}
-                >
-                  {easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
-                    ? "Completing..."
-                    : "Refresh Status"}
-                </AppButton>
+                <>
+                  {easypaisaPaymentPhase === "payment_sent" ? (
+                    <AppButton
+                      variant="secondary"
+                      style={styles.phoneActionBtn}
+                      onPress={() => void resendEasypaisaPayment()}
+                      disabled={refreshingEasypaisaStatus || startingEasypaisaPayment}
+                    >
+                      Resend Request
+                    </AppButton>
+                  ) : null}
+                  <AppButton
+                    style={styles.phoneActionBtn}
+                    onPress={() => refreshEasypaisaPaymentStatus("manual")}
+                    loading={refreshingEasypaisaStatus}
+                    disabled={refreshingEasypaisaStatus}
+                  >
+                    {easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
+                      ? "Refresh Status"
+                      : "Refresh Status"}
+                  </AppButton>
+                </>
               )}
             </View>
           ) : (
@@ -2311,7 +2353,7 @@ export default function CreateMatchroom() {
               </AppButton>
               <AppButton
                 style={styles.phoneActionBtn}
-                onPress={confirmEasypaisaPayment}
+                onPress={() => void confirmEasypaisaPayment()}
                 loading={startingEasypaisaPayment}
                 disabled={startingEasypaisaPayment}
                 perf={{

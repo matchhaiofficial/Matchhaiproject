@@ -836,10 +836,9 @@ export async function cancelMatchJoinRequest(
 ): Promise<Result> {
   try {
     const me = await getCurrentIdentity();
-    const requests = await convex.query(api.notifications.listByFromUidAndType, {
+    const requests = await convex.query(api.notifications.listOutgoingMatchroomJoinRequests, {
       fromUid: me.convexId,
-      type: "match.join_request",
-      status: "pending",
+      matchroomId: roomId as Id<"matchrooms">,
       limit: 100,
     });
 

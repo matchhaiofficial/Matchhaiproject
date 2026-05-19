@@ -1309,11 +1309,22 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
   );
 
   if (duplicate) {
-    await ctx.db.patch(duplicate._id, {
+    const patch: Record<string, any> = {
       updatedAt: now,
       sourceNotificationId: args.sourceNotificationId || duplicate.sourceNotificationId,
       expiresAt,
-    });
+    };
+
+    if (duplicate.status === "pending_approvals" || duplicate.status === "approved") {
+      patch.status = "approved_pending_payment";
+      patch.pricing = {
+        totalCost: Number(args.room.pricing?.perPlayer || 0),
+        perPlayerCost: Number(args.room.pricing?.perPlayer || 0),
+        currency: String(args.room.pricing?.currency || "PKR"),
+      };
+    }
+
+    await ctx.db.patch(duplicate._id, patch);
     return duplicate._id;
   }
 
@@ -1336,6 +1347,71 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     game: args.room.game,
     paymentStatus: "unpaid",
     expiresAt,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+async function createPendingApprovalBookingIntent(ctx: any, args: {
+  room: any;
+  createdByUid: Id<"users">;
+  createdByUsername: string;
+  role: string;
+  targetTeam?: string | null;
+  requestedSlotId?: string | null;
+  sourceNotificationId?: Id<"notifications">;
+  expiresAt: number;
+}) {
+  const selection = getOpenSlotSelection(args.room, args.targetTeam, args.requestedSlotId);
+  if (!selection) {
+    throw new Error("Selected slot is no longer available.");
+  }
+
+  const existingIntents = await ctx.db
+    .query("bookingIntents")
+    .withIndex("by_createdByUid_matchroomId", (q: any) =>
+      q.eq("createdByUid", args.createdByUid).eq("matchroomId", args.room._id)
+    )
+    .collect();
+
+  const now = Date.now();
+  const duplicate = existingIntents.find((intent: any) =>
+    String(intent.matchroomId) === String(args.room._id)
+    && intent.paymentStatus !== "paid"
+    && intent.status !== "cancelled"
+    && intent.status !== "expired"
+    && (intent.selectedSlotIds || []).includes(selection.slotId)
+  );
+
+  if (duplicate) {
+    await ctx.db.patch(duplicate._id, {
+      status: duplicate.status === "approved_pending_payment" ? duplicate.status : "pending_approvals",
+      updatedAt: now,
+      sourceNotificationId: args.sourceNotificationId || duplicate.sourceNotificationId,
+      expiresAt: args.expiresAt,
+    });
+    return duplicate._id;
+  }
+
+  return await ctx.db.insert("bookingIntents", {
+    matchroomId: args.room._id,
+    createdByUid: args.createdByUid,
+    createdByUsername: args.createdByUsername,
+    side: selection.side,
+    selectedSlots: selection.selectedSlots,
+    selectedSlotIds: [selection.slotId],
+    role: args.role,
+    source: "direct_join",
+    sourceNotificationId: args.sourceNotificationId,
+    status: "pending_approvals",
+    pricing: {
+      totalCost: Number(args.room.pricing?.perPlayer || 0),
+      perPlayerCost: Number(args.room.pricing?.perPlayer || 0),
+      currency: String(args.room.pricing?.currency || "PKR"),
+    },
+    game: args.room.game,
+    paymentStatus: "unpaid",
+    expiresAt: args.expiresAt,
     createdAt: now,
     updatedAt: now,
   });
@@ -2588,11 +2664,27 @@ export const requestToJoinMatchroom = mutation({
     });
 
     if (existingPendingRequest) {
+      const existingData = existingPendingRequest.data as any;
+      const existingExpiresAt =
+        existingPendingRequest.expiresAt ||
+        getCappedMatchroomExpiryOrThrow(room, JOIN_REQUEST_TTL_MS, "Join request", now);
+      const pendingIntentId = await createPendingApprovalBookingIntent(ctx, {
+        room,
+        createdByUid: actor.convexUser._id,
+        createdByUsername: args.fromUsername,
+        role,
+        targetTeam,
+        requestedSlotId: args.slotId || existingData?.slotId || null,
+        sourceNotificationId: existingPendingRequest._id,
+        expiresAt: existingExpiresAt,
+      });
+
       return {
         ok: true,
         alreadyPending: true,
         joined: false,
         notificationIds: [existingPendingRequest._id],
+        intentId: pendingIntentId,
         message: "Your join request is already pending captain approval.",
       };
     }
@@ -2614,25 +2706,7 @@ export const requestToJoinMatchroom = mutation({
     const requesterLevelLabel = requesterSkill.tier
       ? `${requesterSkill.tier} (${Math.round(Number(requesterSkill.rating))})`
       : `Rating ${Math.round(Number(requesterSkill.rating))}`;
-    if (ratingDiff <= SKILL_JOIN_DELTA) {
-      const intentId = await createSingleSeatBookingIntent(ctx, {
-        room,
-        createdByUid: actor.convexUser._id,
-        createdByUsername: args.fromUsername,
-        role,
-        targetTeam,
-        requestedSlotId: args.slotId || null,
-        source: "direct_join",
-      });
-      return {
-        ok: true,
-        autoJoined: false,
-        joined: false,
-        paymentRequired: true,
-        intentId,
-        message: `Your rating is within ${SKILL_JOIN_DELTA} points of the room average. Please pay now to confirm your slot.`,
-      };
-    }
+    const requiresAllCaptainApproval = ratingDiff > SKILL_JOIN_DELTA;
 
     const captainUids = getAvailableCaptainUids(room);
     if (captainUids.length === 0) {
@@ -2641,7 +2715,8 @@ export const requestToJoinMatchroom = mutation({
 
     const expiresAt = getCappedMatchroomExpiryOrThrow(room, JOIN_REQUEST_TTL_MS, "Join request", now);
     const createdNotificationIds: Id<"notifications">[] = [];
-    for (const captainUid of captainUids) {
+    const approvalCaptainUids = requiresAllCaptainApproval ? captainUids : [captainUids[0]];
+    for (const captainUid of approvalCaptainUids) {
       const captain = await resolveUserByAnyId(ctx, captainUid);
       if (!captain) {
         continue;
@@ -2668,8 +2743,8 @@ export const requestToJoinMatchroom = mutation({
           targetTeam,
           slotId: args.slotId || null,
           approvalGroupKey,
-          approvalRequired: true,
-          requiredCaptainUids: captainUids,
+          approvalRequired: requiresAllCaptainApproval,
+          requiredCaptainUids: approvalCaptainUids,
           requesterUid: actorUid,
           requesterRating: requesterSkill.rating,
           requesterSkillTier: requesterSkill.tier || null,
@@ -2686,12 +2761,26 @@ export const requestToJoinMatchroom = mutation({
       throw new Error("No available captains found for this matchroom.");
     }
 
+    const pendingIntentId = await createPendingApprovalBookingIntent(ctx, {
+      room,
+      createdByUid: actor.convexUser._id,
+      createdByUsername: args.fromUsername,
+      role,
+      targetTeam,
+      requestedSlotId: args.slotId || null,
+      sourceNotificationId: createdNotificationIds[0],
+      expiresAt,
+    });
+
     return {
       ok: true,
       approvalRequested: true,
       joined: false,
-      message: "Your rating is outside the allowed range. All available captains must approve this join request.",
+      message: requiresAllCaptainApproval
+        ? "Your rating is outside the allowed range. All available captains must approve this join request."
+        : "Your join request has been sent to the captain for approval.",
       notificationIds: createdNotificationIds,
+      intentId: pendingIntentId,
     };
   },
 });

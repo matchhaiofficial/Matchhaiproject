@@ -239,7 +239,7 @@ export default function BookingStatusScreen() {
                 </AppCard>
 
                 {/* Progress Stepper */}
-                <DetailSectionCard title="Progress">
+                <DetailSectionCard title="Progress" style={styles.sectionCardSpacing}>
                     <View style={styles.stepper}>
                         <View style={styles.stepContainer}>
                             <View style={styles.stepLineWrapper}>
@@ -314,7 +314,7 @@ export default function BookingStatusScreen() {
                     </View>
                 </DetailSectionCard>
 
-                <DetailSectionCard title="Summary">
+                <DetailSectionCard title="Summary" style={styles.sectionCardSpacing}>
                     <DetailKeyValueRow label="Seats Reserved" value={intent.selectedSlots.length} />
                     <DetailKeyValueRow
                         label="Total Amount"
@@ -358,7 +358,7 @@ export default function BookingStatusScreen() {
                     ) : null}
                 </DetailSectionCard>
                 {settlementSummary ? (
-                    <DetailSectionCard title="Payment">
+                    <DetailSectionCard title="Payment" style={styles.sectionCardSpacing}>
                         <DetailKeyValueRow
                             label="Funds"
                             value={settlementSummary.merchantSettlementStatus === "captured" ? "Captured" : "Reserved"}
@@ -366,6 +366,9 @@ export default function BookingStatusScreen() {
                         <DetailKeyValueRow
                             label="Refunds"
                             value="Approved refunds return to your MatchHai Wallet"
+                            style={styles.settlementRow}
+                            labelStyle={styles.settlementLabel}
+                            valueStyle={styles.settlementValue}
                         />
                         <DetailKeyValueRow
                             label="Venue"
@@ -375,6 +378,9 @@ export default function BookingStatusScreen() {
                                     : "Payout after match completion"
                             }
                             last
+                            style={styles.settlementRow}
+                            labelStyle={styles.settlementLabel}
+                            valueStyle={styles.settlementValue}
                         />
                     </DetailSectionCard>
                 ) : null}

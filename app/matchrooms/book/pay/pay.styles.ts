@@ -70,6 +70,7 @@ export default StyleSheet.create({
         padding: SPACING.md,
         borderRadius: RADII.md,
         marginTop: SPACING.xl,
+        marginBottom: SPACING.lg,
         gap: SPACING.sm,
         borderWidth: 1,
         borderColor: COLORS.accent + '20',
@@ -172,6 +173,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.lg,
         ...SHADOWS.cardSoft,
     },
+    sectionCardSpacing: {
+        marginBottom: SPACING.lg,
+    },
     cardTitle: {
         color: COLORS.textSecondary,
         fontSize: 10,
@@ -238,6 +242,13 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.caption,
         fontFamily: FONTS.body,
         lineHeight: 18,
+    },
+    expiredText: {
+        color: COLORS.warning,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        lineHeight: 18,
+        marginTop: SPACING.sm,
     },
     footer: {
         gap: SPACING.sm,

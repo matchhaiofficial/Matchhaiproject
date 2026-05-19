@@ -44,6 +44,7 @@ type EasypaisaPaymentPhase =
   | "payment_sent"
   | "confirmed"
   | "completing"
+  | "completion_failed"
   | "failed"
   | "expired";
 type SubmitOptions = {
@@ -136,7 +137,11 @@ type Params = {
 
 const WALKIN_SERIES_OPTIONS = ["BO1", "BO3", "BO5"] as const;
 const EASYPAY_PENDING_STATUSES = ["created", "redirected", "token_received", "pending"];
-const PAYMENT_RESUME_TIMEOUT_MS = 15000;
+// Completing a matchroom after payment can involve waiting for wallet balance propagation
+// and a few retries, so allow a bit more time before marking it as pending.
+const PAYMENT_RESUME_TIMEOUT_MS = 45000;
+const WALLET_BALANCE_WAIT_MS = 12000;
+const WALLET_BALANCE_POLL_MS = 800;
 
 async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = PAYMENT_RESUME_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -150,6 +155,34 @@ async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = PA
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+async function waitForWalletBalance(params: {
+  userId: Id<"users">;
+  amountDue: number;
+  getBalance: () => Promise<number>;
+  timeoutMs?: number;
+}): Promise<{ ok: true } | { ok: false; lastBalance: number }> {
+  const timeoutMs = Math.max(1000, params.timeoutMs ?? WALLET_BALANCE_WAIT_MS);
+  const amountDue = Math.max(0, Math.ceil(Number(params.amountDue || 0)));
+  const startedAt = Date.now();
+  let lastBalance = 0;
+
+  if (amountDue <= 0) return { ok: true };
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      lastBalance = Math.max(0, Number(await params.getBalance()) || 0);
+      if (lastBalance >= amountDue) {
+        return { ok: true };
+      }
+    } catch {
+      // Ignore and retry until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, WALLET_BALANCE_POLL_MS));
+  }
+
+  return { ok: false, lastBalance };
 }
 
 function generateMatchCode(zoneName?: string | null) {
@@ -332,7 +365,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     return () => subscription.remove();
   }, [activeEasypaisaOrderRef, refreshEasypaisaPaymentStatus]);
 
-  const confirmEasypaisaPayment = useCallback(async () => {
+  const confirmEasypaisaPayment = useCallback(async (options?: { forceNew?: boolean }) => {
     if (!user?._id || startingEasypaisaPayment) return;
     const amount = Math.max(0, Math.ceil(Number(easypaisaPaymentAmount || 0)));
     if (amount <= 0) {
@@ -354,6 +387,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
     setStartingEasypaisaPayment(true);
     try {
+      const forceNew = options?.forceNew === true;
       const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
       Logger.info("CreateMatchroomPayment", "Starting Easypaisa wallet top-up", {
         amount,
@@ -367,6 +401,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         userId: user._id as Id<"users">,
         phone: normalizedPhone.phoneE164 || easypaisaCheckoutPhone,
         transactionType: "MA",
+        forceNew,
       });
 
       const orderRefNum = String(checkout.orderRefNum || "");
@@ -415,6 +450,14 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     startingEasypaisaPayment,
     user?._id,
   ]);
+
+  const resendEasypaisaPayment = useCallback(async () => {
+    if (startingEasypaisaPayment || easypaisaPaymentPhase === "completing") return;
+    setActiveEasypaisaOrderRef(null);
+    setEasypaisaPaymentPhase("idle");
+    resumedEasypaisaOrderRef.current = null;
+    await confirmEasypaisaPayment({ forceNew: true });
+  }, [confirmEasypaisaPayment, easypaisaPaymentPhase, startingEasypaisaPayment]);
 
   const payWithWallet = useCallback(
     async (amountDue: number) => {
@@ -728,32 +771,75 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       if (result.ok) {
         try {
           if (amountDue > 0) {
+            const getBalance = async () => {
+              const balance = await convex.query(api.wallet.getBalance, {
+                userId: user._id as Id<"users">,
+              });
+              return Number(balance || 0);
+            };
+            const balanceReady = await waitForWalletBalance({
+              userId: user._id as Id<"users">,
+              amountDue,
+              getBalance,
+            });
+            if (!balanceReady.ok) {
+              Logger.warn("CreateMatchroomPayment", "Wallet balance not updated yet after payment confirmation", {
+                amountDue,
+                lastBalance: balanceReady.lastBalance,
+                matchroomId: result.id,
+              });
+            }
+
             Logger.info("CreateMatchroomPayment", "Deducting wallet for created matchroom", {
               amountDue,
               matchroomId: result.id,
             });
-            await withTimeout(
-              convex.mutation(api.wallet.deductFunds, {
-                amount: amountDue,
-                metadata: {
-                  flow: isBroadcastFlow ? "broadcast_matchroom_create" : "zone_matchroom_create",
+
+            let lastDeductionError: any = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                await withTimeout(
+                  convex.mutation(api.wallet.deductFunds, {
+                    amount: amountDue,
+                    metadata: {
+                      flow: isBroadcastFlow ? "broadcast_matchroom_create" : "zone_matchroom_create",
+                      matchroomId: result.id,
+                    },
+                    reference: `matchroom_create:${result.id}`,
+                    source: "matchroom_create",
+                    userId: user._id as Id<"users">,
+                  }),
+                  `Wallet deduction (attempt ${attempt})`,
+                  10000,
+                );
+                lastDeductionError = null;
+                break;
+              } catch (error) {
+                lastDeductionError = error;
+                const message = String((error as any)?.message || error || "");
+                const shouldRetry = attempt < 3 && /insufficient/i.test(message);
+                Logger.warn("CreateMatchroomPayment", "Wallet deduction failed", {
+                  attempt,
+                  shouldRetry,
+                  message,
                   matchroomId: result.id,
-                },
-                reference: `matchroom_create:${result.id}`,
-                source: "matchroom_create",
-                userId: user._id as Id<"users">,
-              }),
-              "Wallet deduction",
-              10000,
-            );
+                });
+                if (!shouldRetry) break;
+                await new Promise((resolve) => setTimeout(resolve, 1200));
+              }
+            }
+
+            if (lastDeductionError) {
+              throw lastDeductionError;
+            }
           }
         } catch (error) {
           await convex.mutation(api.matchrooms.remove, {
             matchroomId: result.id as Id<"matchrooms">,
           });
           notify({
-            message: "Wallet payment failed. The matchroom was not created.",
-            title: "Payment failed",
+            message: "Wallet payment could not be confirmed yet. Your funds are safe in your wallet. Please try creating the matchroom again in a few seconds.",
+            title: "Payment confirmation pending",
             type: "error",
           });
           setSubmitting(false);
@@ -894,10 +980,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       )
         .then((completed) => {
           if (!completed && resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
-            setEasypaisaPaymentPhase("failed");
+            setEasypaisaPaymentPhase("completion_failed");
             notify({
-              message: "Payment was added to your wallet, but MatchHai could not finish the matchroom automatically. Close this and create again using Wallet.",
-              title: "Completion failed",
+              message: "Payment was confirmed, but MatchHai could not finish creating the matchroom yet. Wait a few seconds and tap Try Again.",
+              title: "Completion pending",
               type: "warning",
             });
           }
@@ -905,9 +991,9 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         .catch((error) => {
           Logger.error("CreateMatchroom", "Failed to resume after Easypaisa payment", error);
           if (resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
-            setEasypaisaPaymentPhase("failed");
+            setEasypaisaPaymentPhase("completion_failed");
             notify({
-              message: "Payment was added to your wallet, but MatchHai could not finish the matchroom automatically. Close this and create again using Wallet.",
+              message: "Payment was confirmed, but completing the matchroom timed out. Wait a few seconds and tap Try Again.",
               title: "Completion timed out",
               type: "warning",
             });
@@ -1019,6 +1105,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     completeAssessment,
     closeEasypaisaPhonePrompt,
     confirmEasypaisaPayment,
+    resendEasypaisaPayment,
     confirmActivation,
     activeEasypaisaOrderRef,
     easypaisaCheckoutStatus: checkoutStatus,

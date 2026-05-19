@@ -92,6 +92,9 @@ export default StyleSheet.create({
         marginBottom: SPACING.lg,
         ...SHADOWS.cardSoft,
     },
+    sectionCardSpacing: {
+        marginBottom: SPACING.lg,
+    },
     cardTitle: {
         color: COLORS.textSecondary,
         fontSize: TEXT_SIZES.caption,
@@ -192,6 +195,19 @@ export default StyleSheet.create({
         textAlign: 'center',
         marginTop: SPACING.md,
         fontStyle: 'italic',
+    },
+    settlementRow: {
+        alignItems: 'flex-start',
+        gap: SPACING.lg,
+    },
+    settlementLabel: {
+        flex: 0,
+        minWidth: 56,
+    },
+    settlementValue: {
+        flex: 1,
+        textAlign: 'right',
+        lineHeight: 18,
     },
 
     // Footer Actions
