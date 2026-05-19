@@ -170,6 +170,10 @@ function canonicalizeType(rawType: string) {
       return "wallet.topup_result";
     case "account.role_changed":
       return "account.role_changed";
+    case "kyc.status_updated":
+      return "kyc.status_updated";
+    case "kyc.review_needed":
+      return "kyc.review_needed";
     case "operations.general":
       return "operations.general";
     case "general":
@@ -263,6 +267,8 @@ function defaultDedupePolicy(type: string): DedupePolicy {
     case "zone.status_updated":
     case "wallet.topup_result":
     case "account.role_changed":
+    case "kyc.status_updated":
+    case "kyc.review_needed":
       return "replace_active";
     default:
       return "versioned_new";
@@ -333,10 +339,12 @@ function inferEntity(type: string, input: CanonicalInput) {
   if (rawData.requestId) return { kind: "booking_request", id: String(rawData.requestId) };
   if (rawData.challengeId) return { kind: "challenge", id: String(rawData.challengeId) };
   if (rawData.reportId) return { kind: "report", id: String(rawData.reportId) };
+  if (rawData.verificationId) return { kind: "identityVerification", id: String(rawData.verificationId) };
 
   if (type.startsWith("booking.")) return { kind: "booking_request", id: input.entityId || null };
   if (type.startsWith("team.")) return { kind: "team", id: input.entityId || asStringId(input.teamId) || null };
   if (type.startsWith("match.")) return { kind: "matchroom", id: input.entityId || asStringId(input.matchroomId) || null };
+  if (type.startsWith("kyc.")) return { kind: "identityVerification", id: input.entityId || null };
   return { kind: "system", id: input.entityId || null };
 }
 

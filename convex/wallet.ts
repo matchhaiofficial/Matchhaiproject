@@ -2,6 +2,7 @@ import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
+import { notifySuperAdminsWithdrawalReviewNeeded } from "./withdrawalNotifications";
 
 async function getWalletUserRecord(
   ctx: any,
@@ -198,7 +199,7 @@ export const createZoneWithdrawalTransaction = mutation({
 
     const now = Date.now();
     const reference = `zone_withdrawal_${String(user._id)}_${now}`;
-    await ctx.db.insert("walletTransactions", {
+    const withdrawalId = await ctx.db.insert("walletTransactions", {
       userId: user._id,
       type: "withdrawal",
       amount: args.amount,
@@ -218,6 +219,8 @@ export const createZoneWithdrawalTransaction = mutation({
       },
       createdAt: now,
     });
+
+    await notifySuperAdminsWithdrawalReviewNeeded(ctx, { withdrawalId });
 
     return { reference, createdAt: now, walletBalance };
   },

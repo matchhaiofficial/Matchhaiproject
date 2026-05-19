@@ -149,6 +149,23 @@ export type SuperAdminSupportTicket = {
   }>;
 };
 
+export type SuperAdminNotificationTab = "unread" | "read";
+
+export type SuperAdminNotification = {
+  id: string;
+  _id: string;
+  type: string;
+  status: string;
+  title: string;
+  body: string;
+  route?: string | null;
+  data?: Record<string, unknown> | null;
+  isRead: boolean;
+  isArchived: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type EasypaisaAdminTransaction = {
   id: string;
   _id: string;
@@ -174,6 +191,36 @@ export type EasypaisaAdminTransaction = {
     lastSyncAt?: number | null;
     flow?: string | null;
   };
+};
+
+export type SuperAdminWithdrawalStatus = "pending" | "completed" | "failed";
+
+export type SuperAdminWithdrawalRequest = {
+  id: string;
+  _id: string;
+  userId: string;
+  amount: number;
+  status: SuperAdminWithdrawalStatus;
+  reference?: string | null;
+  createdAt: number;
+  branchId?: string | null;
+  branchName?: string | null;
+  venueName?: string | null;
+  bankName?: string | null;
+  accountNumberMasked?: string | null;
+  accountNumberLast4?: string | null;
+  ownerName?: string | null;
+  adminDecision?: "approved" | "rejected" | null;
+  decidedAt?: number | null;
+};
+
+export type SuperAdminWithdrawalDecisionResult = {
+  ok: true;
+  changed: boolean;
+  status?: SuperAdminWithdrawalStatus;
+} | {
+  ok: false;
+  message: string;
 };
 
 export type SuperAdminMatchroomLifecycle =
@@ -582,6 +629,73 @@ export async function getSupportTickets(
   }
 }
 
+export async function getSuperAdminNotifications(
+  tab: SuperAdminNotificationTab = "unread",
+  options?: { forceRefresh?: boolean }
+): Promise<Result<SuperAdminNotification[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const notifications = await getCachedOrLoad(
+      `notifications:${sessionToken}:${tab}`,
+      () =>
+        convex.query(api.admin.listMyNotifications, {
+          sessionToken,
+          tab,
+          limit: 80,
+        }),
+      options
+    );
+    return { ok: true, data: notifications as SuperAdminNotification[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminNotifications error", error);
+    return { ok: false, message: "Failed to load notifications." };
+  }
+}
+
+export async function getSuperAdminUnreadNotificationCount(): Promise<Result<number>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const count = await convex.query(api.admin.countMyUnreadNotifications, {
+      sessionToken,
+      limit: 300,
+    });
+    return { ok: true, data: Number(count || 0) };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminUnreadNotificationCount error", error);
+    return { ok: false, message: "Failed to load notification count." };
+  }
+}
+
+export async function markSuperAdminNotificationRead(notificationId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.markMyNotificationRead, {
+      sessionToken,
+      notificationId: notificationId as Id<"notifications">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] markSuperAdminNotificationRead error", error);
+    return { ok: false, message: "Failed to mark notification as read." };
+  }
+}
+
+export async function archiveSuperAdminNotification(notificationId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.archiveMyNotification, {
+      sessionToken,
+      notificationId: notificationId as Id<"notifications">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] archiveSuperAdminNotification error", error);
+    return { ok: false, message: "Failed to archive notification." };
+  }
+}
+
 export async function getSupportTicketById(ticketId: string): Promise<Result<SuperAdminSupportTicket | null>> {
   try {
     const sessionToken = await getRequiredSessionToken();
@@ -704,6 +818,62 @@ export async function getEasypaisaTransactions(
   } catch (error: any) {
     console.error("[superAdminService] getEasypaisaTransactions error", error);
     return { ok: false, message: "Failed to load Easypaisa transactions." };
+  }
+}
+
+export async function getZoneWithdrawalRequests(
+  input?: { status?: SuperAdminWithdrawalStatus | "any"; limit?: number }
+): Promise<Result<SuperAdminWithdrawalRequest[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const withdrawals = await convex.query(api.admin.listZoneWithdrawalRequests, {
+      sessionToken,
+      status: input?.status || "pending",
+      limit: input?.limit || 50,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_withdrawals",
+      module: "withdrawals",
+      metadataSafe: { status: input?.status || "pending", count: withdrawals.length },
+    });
+    return { ok: true, data: withdrawals as SuperAdminWithdrawalRequest[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getZoneWithdrawalRequests error", error);
+    return { ok: false, message: "Failed to load withdrawal requests." };
+  }
+}
+
+export async function approveZoneWithdrawal(withdrawalId: string): Promise<SuperAdminWithdrawalDecisionResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.mutation(api.admin.approveZoneWithdrawal, {
+      sessionToken,
+      withdrawalId: withdrawalId as Id<"walletTransactions">,
+    });
+    clearSuperAdminCache();
+    return result as SuperAdminWithdrawalDecisionResult;
+  } catch (error: any) {
+    console.error("[superAdminService] approveZoneWithdrawal error", error);
+    return { ok: false, message: error?.message || "Failed to approve withdrawal." };
+  }
+}
+
+export async function rejectZoneWithdrawal(
+  withdrawalId: string,
+  reason: string,
+): Promise<SuperAdminWithdrawalDecisionResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.mutation(api.admin.rejectZoneWithdrawal, {
+      sessionToken,
+      withdrawalId: withdrawalId as Id<"walletTransactions">,
+      reason,
+    });
+    clearSuperAdminCache();
+    return result as SuperAdminWithdrawalDecisionResult;
+  } catch (error: any) {
+    console.error("[superAdminService] rejectZoneWithdrawal error", error);
+    return { ok: false, message: error?.message || "Failed to reject withdrawal." };
   }
 }
 

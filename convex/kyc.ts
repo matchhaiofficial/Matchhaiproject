@@ -3,6 +3,7 @@ import { httpAction, action, internalMutation, internalQuery, mutation, query } 
 import { api, components, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
+import { notifyKycStatusUpdated, notifySuperAdminsKycReviewNeeded } from "./kycNotifications";
 
 const DEFAULT_DIDIT_BASE_URL = "https://verification.didit.me";
 
@@ -92,6 +93,10 @@ async function logAuthEmailMismatch(ctx: any, input: {
   const authEmail = normalizeAccountEmail(input.authEmail);
   const accountEmail = normalizeAccountEmail(input.accountEmail);
   if (!authEmail || authEmail === accountEmail) return;
+  const [authEmailHash, accountEmailHash] = await Promise.all([
+    sha256Hex(authEmail),
+    sha256Hex(accountEmail),
+  ]);
 
   await ctx.runMutation(internal.kyc.recordKycAuditEvent, {
     userId: input.userId,
@@ -101,9 +106,10 @@ async function logAuthEmailMismatch(ctx: any, input: {
     action: "auth_email_mismatch",
     timestamp: input.timestamp,
     details: {
-      authEmail,
-      accountEmail,
-      emailUsedForKyc: accountEmail,
+      authEmailHash,
+      accountEmailHash,
+      emailUsedForKycHash: accountEmailHash,
+      emailsMatch: false,
       sourceOfTruth: "users.email",
     },
   });
@@ -913,7 +919,9 @@ export const applyDiditStatusUpdate = internalMutation({
   handler: async (ctx, args) => {
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
+    const previousStatus = verification.status as KycStatus;
     const effectiveStatus: KycStatus = args.status === "not_started" ? "in_progress" : args.status;
+    const statusChanged = previousStatus !== effectiveStatus;
 
     const verificationPatch: Record<string, unknown> = {
       status: effectiveStatus,
@@ -999,6 +1007,25 @@ export const applyDiditStatusUpdate = internalMutation({
       },
       createdAt: args.now,
     });
+
+    if (statusChanged) {
+      await notifyKycStatusUpdated(ctx, {
+        verificationId: args.verificationId,
+        userId: verification.userId,
+        role: verification.role,
+        status: effectiveStatus,
+        now: args.now,
+      });
+
+      if (previousStatus !== "in_review" && effectiveStatus === "in_review") {
+        await notifySuperAdminsKycReviewNeeded(ctx, {
+          verificationId: args.verificationId,
+          userId: verification.userId,
+          role: verification.role,
+          now: args.now,
+        });
+      }
+    }
   },
 });
 

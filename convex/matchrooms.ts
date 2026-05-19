@@ -573,8 +573,24 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
   if (!owner) return null;
 
   const now = Date.now();
+  let zone: any = null;
+  if (room.zoneId) {
+    try {
+      zone = await ctx.db.get(room.zoneId as Id<"zones">);
+    } catch {
+      zone = null;
+    }
+  }
   const grossAmount = getMatchroomGrossAmount(room);
-  const payoutAmount = Math.round(grossAmount * 0.9 * 100) / 100;
+  const normalPayoutRate = Number.isFinite(Number(zone?.normalPayoutRate)) ? Number(zone.normalPayoutRate) : 0.9;
+  const pilotPayoutRate = Number.isFinite(Number(zone?.pilotPayoutRate)) ? Number(zone.pilotPayoutRate) : 1.0;
+  // Pilot eligibility is decided at payout calculation time using backend time, not client-sent data.
+  const pilotApplied = zone?.pilotStatus === "active" && typeof zone?.pilotEndsAt === "number" && now <= zone.pilotEndsAt;
+  const payoutRateRaw = pilotApplied ? pilotPayoutRate : normalPayoutRate;
+  const payoutRate = Math.min(1, Math.max(0, payoutRateRaw));
+  const platformRate = Math.round((1 - payoutRate) * 10000) / 10000;
+  const payoutAmount = Math.round(grossAmount * payoutRate * 100) / 100;
+  const platformShareAmount = Math.round((grossAmount - payoutAmount) * 100) / 100;
   if (payoutAmount <= 0) return null;
 
   const reference = `venue_payout:${String(matchroomId)}`;
@@ -586,8 +602,12 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
       source: "matchroom_completion_payout",
       matchroomId: String(matchroomId),
       grossAmount,
-      platformShareAmount: Math.round((grossAmount - payoutAmount) * 100) / 100,
-      payoutRate: 0.9,
+      platformShareAmount,
+      payoutRate,
+      platformRate,
+      pilotApplied,
+      pilotStartedAt: zone?.pilotStartedAt || null,
+      pilotEndsAt: zone?.pilotEndsAt || null,
     },
   });
   await ctx.db.patch(matchroomId, {
@@ -602,6 +622,9 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
     zoneOwnerUid: String(owner._id),
     grossAmount,
     payoutAmount,
+    payoutRate,
+    platformRate,
+    pilotApplied,
     reference,
   });
   return { status: "paid", reference, amount: payoutAmount, paidAt: now };

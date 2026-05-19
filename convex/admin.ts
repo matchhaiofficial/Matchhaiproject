@@ -6,6 +6,8 @@ import { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
 import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
+import { notifyKycStatusUpdated } from "./kycNotifications";
+import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
 
 const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").trim().toLowerCase();
 const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -46,6 +48,17 @@ function normalizePhone(phone?: string | null) {
   if (digits.startsWith("92")) return `+${digits}`;
   if (digits.startsWith("0")) return `+92${digits.slice(1)}`;
   return `+${digits}`;
+}
+
+function addMonthsClamped(timestamp: number, months: number) {
+  const start = new Date(timestamp);
+  const target = new Date(timestamp);
+  const day = start.getDate();
+  target.setDate(1);
+  target.setMonth(target.getMonth() + months);
+  const lastDayOfTargetMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDayOfTargetMonth));
+  return target.getTime();
 }
 
 function parseSuperAdminAllowlistJson(): SuperAdminAllowlistEntry[] {
@@ -146,6 +159,70 @@ function redactSupportText(input: string) {
     .replace(/\b\d{5}[-\s]?\d{7}[-\s]?\d\b/g, "[redacted-cnic]")
     .replace(/\b(?:EP|TXN|TRX|PAY|ORD|REF)[-_]?(?=[A-Z0-9-]*\d)[A-Z0-9-]{6,}\b/gi, "[redacted-reference]")
     .replace(/\b[A-F0-9]{12,}\b/gi, "[redacted-id]");
+}
+
+function supportRecipientRole(value?: string | null): "player" | "zone_admin" {
+  return value === "zone_admin" || value === "zone" ? "zone_admin" : "player";
+}
+
+function supportRouteForRecipientRole(role: "player" | "zone_admin") {
+  return role === "zone_admin" ? "/zone/modules/ai-support" : "/(player)/support";
+}
+
+async function notifySupportTicketStatusChanged(ctx: any, ticket: any, status: "open" | "in_review" | "resolved") {
+  const recipientRole = supportRecipientRole(ticket.userRole);
+  const route = supportRouteForRecipientRole(recipientRole);
+  await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+    type: "support.ticket_status_changed",
+    toUid: ticket.userId,
+    recipientRole,
+    status: "pending",
+    dedupeKey: `support.ticket_status_changed:${String(ticket._id)}:${status}`,
+    dedupePolicy: "replace_active",
+    pushPolicy: "eligible",
+    route,
+    entity: { kind: "supportTicket", id: String(ticket._id) },
+    entityId: String(ticket._id),
+    title: "Support ticket updated",
+    body: `Your support ticket ${ticket.reference} has been updated.`,
+    data: {
+      ticketId: String(ticket._id),
+      ticketReference: ticket.reference,
+      status,
+      userRole: ticket.userRole || null,
+      route,
+      href: route,
+    },
+  });
+}
+
+function serializeAdminNotification(notification: any) {
+  if (!notification) return null;
+  return {
+    id: String(notification._id),
+    _id: String(notification._id),
+    type: notification.type,
+    status: notification.status,
+    title: notification.title || "",
+    body: notification.body || "",
+    route: notification.route || notification.data?.href || notification.data?.route || null,
+    data: notification.data || null,
+    isRead: notification.isRead === true,
+    isArchived: notification.isArchived === true,
+    createdAt: notification.createdAt,
+    updatedAt: notification.updatedAt,
+  };
+}
+
+async function getOwnedAdminNotification(ctx: any, adminUserId: Id<"users">, notificationId: Id<"notifications">) {
+  const notification = await ctx.db.get(notificationId);
+  if (!notification || String(notification.toUid) !== String(adminUserId)) {
+    throw new Error("Notification not found.");
+  }
+  if (notification.recipientRole && notification.recipientRole !== "super_admin") {
+    throw new Error("Notification not found.");
+  }
+  return notification;
 }
 
 async function insertSuperAdminAuditLog(
@@ -304,6 +381,55 @@ function summarizeSupportTicketMetadata(metadata: any) {
     recentReports: Array.isArray(safeSupportContext?.recentReports)
       ? safeSupportContext.recentReports.slice(0, 3)
       : [],
+  };
+}
+
+function isZoneWithdrawalRequest(row: any) {
+  return row?.type === "withdrawal" && row?.metadata?.source === "zone_admin_withdrawal_request";
+}
+
+function sanitizeWithdrawalDecisionReason(reason: string) {
+  return String(reason || "")
+    .trim()
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/\+?\d[\d\s().-]{6,}\d/g, "[number]")
+    .slice(0, 300);
+}
+
+function serializeAdminZoneWithdrawal(row: any) {
+  const metadata = row.metadata || {};
+  return {
+    id: String(row._id),
+    _id: row._id,
+    userId: String(row.userId),
+    amount: Number(row.amount || 0),
+    status: row.status,
+    reference: row.reference || null,
+    createdAt: row.createdAt,
+    branchId: metadata.branchId || null,
+    branchName: metadata.branchName || null,
+    venueName: metadata.venueName || null,
+    bankName: metadata.bankName || null,
+    accountNumberMasked: metadata.accountNumberMasked || null,
+    accountNumberLast4: metadata.accountNumberLast4 || null,
+    ownerName: metadata.ownerName || null,
+    adminDecision: metadata.adminDecision || null,
+    decidedAt: metadata.decidedAt || null,
+  };
+}
+
+function buildWithdrawalDecisionMetadata(row: any, input: {
+  adminUserId: Id<"users">;
+  decision: "approved" | "rejected";
+  now: number;
+  rejectionReasonSafe?: string;
+}) {
+  return {
+    ...(row.metadata || {}),
+    adminDecision: input.decision,
+    decidedAt: input.now,
+    decidedBy: String(input.adminUserId),
+    ...(input.rejectionReasonSafe ? { rejectionReasonSafe: input.rejectionReasonSafe } : {}),
   };
 }
 
@@ -753,6 +879,16 @@ export const manuallyVerifyIdentityVerification = mutation({
       },
     });
 
+    if (verification.status !== "verified") {
+      await notifyKycStatusUpdated(ctx, {
+        verificationId: args.verificationId,
+        userId: verification.userId,
+        role: verification.role,
+        status: "verified",
+        now,
+      });
+    }
+
     return { ok: true };
   },
 });
@@ -1091,6 +1227,118 @@ export const listSupportTickets = query({
   },
 });
 
+export const listZoneWithdrawalRequests = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(
+      v.literal("any"),
+      v.literal("pending"),
+      v.literal("completed"),
+      v.literal("failed"),
+    )),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const scanLimit = Math.min(limit * 10, 200);
+    const status = args.status || "pending";
+    const rows = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_type", (q) => q.eq("type", "withdrawal"))
+      .order("desc")
+      .take(scanLimit);
+
+    return rows
+      .filter(isZoneWithdrawalRequest)
+      .filter((row) => status === "any" || row.status === status)
+      .slice(0, limit)
+      .map(serializeAdminZoneWithdrawal);
+  },
+});
+
+export const listMyNotifications = query({
+  args: {
+    sessionToken: v.string(),
+    tab: v.union(v.literal("unread"), v.literal("read")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.min(Math.max(args.limit || 50, 1), 100);
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", admin.profile._id))
+      .order("desc")
+      .take(limit * 4);
+
+    return notifications
+      .filter((notification: any) => notification.isArchived !== true)
+      .filter((notification: any) => !notification.recipientRole || notification.recipientRole === "super_admin")
+      .filter((notification: any) => (args.tab === "read" ? notification.isRead === true : notification.isRead !== true))
+      .slice(0, limit)
+      .map(serializeAdminNotification);
+  },
+});
+
+export const countMyUnreadNotifications = query({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.min(Math.max(args.limit || 300, 1), 1000);
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", admin.profile._id))
+      .order("desc")
+      .take(limit);
+    return notifications.filter((notification: any) =>
+      notification.isArchived !== true
+      && notification.isRead !== true
+      && (!notification.recipientRole || notification.recipientRole === "super_admin")
+    ).length;
+  },
+});
+
+export const markMyNotificationRead = mutation({
+  args: {
+    sessionToken: v.string(),
+    notificationId: v.id("notifications"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const notification = await getOwnedAdminNotification(ctx, admin.profile._id, args.notificationId);
+    if (notification.isRead === true) return { ok: true };
+    const now = Date.now();
+    await ctx.db.patch(args.notificationId, {
+      isRead: true,
+      readAt: now,
+      updatedAt: now,
+    });
+    return { ok: true };
+  },
+});
+
+export const archiveMyNotification = mutation({
+  args: {
+    sessionToken: v.string(),
+    notificationId: v.id("notifications"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    await getOwnedAdminNotification(ctx, admin.profile._id, args.notificationId);
+    const now = Date.now();
+    await ctx.db.patch(args.notificationId, {
+      isArchived: true,
+      archivedAt: now,
+      updatedAt: now,
+    });
+    return { ok: true };
+  },
+});
+
 export const getSupportTicketById = query({
   args: {
     sessionToken: v.string(),
@@ -1102,6 +1350,161 @@ export const getSupportTicketById = query({
     const ticket = await ctx.db.get(args.ticketId);
     if (!ticket) return null;
     return await serializeSupportTicket(ctx, ticket, true);
+  },
+});
+
+export const approveZoneWithdrawal = mutation({
+  args: {
+    sessionToken: v.string(),
+    withdrawalId: v.id("walletTransactions"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const withdrawal = await ctx.db.get(args.withdrawalId);
+    if (!withdrawal || !isZoneWithdrawalRequest(withdrawal)) {
+      throw new Error("Withdrawal request not found.");
+    }
+
+    const previousStatus = withdrawal.status;
+    if (previousStatus !== "pending") {
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "approve_withdrawal_noop",
+        module: "withdrawals",
+        targetType: "walletTransaction",
+        targetId: String(args.withdrawalId),
+        status: "success",
+        metadataSafe: {
+          changed: false,
+          previousStatus,
+          newStatus: previousStatus,
+          amountRounded: Math.round(Number(withdrawal.amount || 0)),
+        },
+      });
+      return { ok: true, changed: false, status: previousStatus };
+    }
+
+    const user = await ctx.db.get(withdrawal.userId);
+    if (!user) {
+      throw new Error("Withdrawal owner not found.");
+    }
+
+    const amount = Number(withdrawal.amount || 0);
+    const currentBalance = Number(user.walletBalance || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("Invalid withdrawal amount.");
+    }
+    if (!Number.isFinite(currentBalance) || currentBalance < amount) {
+      throw new Error("Wallet balance is no longer sufficient for this withdrawal.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      walletBalance: currentBalance - amount,
+      updatedAt: now,
+    });
+    await ctx.db.patch(args.withdrawalId, {
+      status: "completed",
+      metadata: buildWithdrawalDecisionMetadata(withdrawal, {
+        adminUserId: admin.profile._id,
+        decision: "approved",
+        now,
+      }),
+    });
+
+    await notifyZoneAdminWithdrawalDecision(ctx, {
+      withdrawalId: args.withdrawalId,
+      zoneAdminUserId: withdrawal.userId,
+      decision: "approved",
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "approve_withdrawal",
+      module: "withdrawals",
+      targetType: "walletTransaction",
+      targetId: String(args.withdrawalId),
+      status: "success",
+      metadataSafe: {
+        changed: true,
+        previousStatus,
+        newStatus: "completed",
+        amountRounded: Math.round(amount),
+      },
+    });
+    return { ok: true, changed: true, status: "completed" };
+  },
+});
+
+export const rejectZoneWithdrawal = mutation({
+  args: {
+    sessionToken: v.string(),
+    withdrawalId: v.id("walletTransactions"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const withdrawal = await ctx.db.get(args.withdrawalId);
+    if (!withdrawal || !isZoneWithdrawalRequest(withdrawal)) {
+      throw new Error("Withdrawal request not found.");
+    }
+
+    const reason = sanitizeWithdrawalDecisionReason(args.reason);
+    if (!reason) {
+      throw new Error("Rejection reason is required.");
+    }
+
+    const previousStatus = withdrawal.status;
+    if (previousStatus !== "pending") {
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "reject_withdrawal_noop",
+        module: "withdrawals",
+        targetType: "walletTransaction",
+        targetId: String(args.withdrawalId),
+        status: "success",
+        metadataSafe: {
+          changed: false,
+          previousStatus,
+          newStatus: previousStatus,
+          amountRounded: Math.round(Number(withdrawal.amount || 0)),
+          hasReason: true,
+          reasonLength: reason.length,
+        },
+      });
+      return { ok: true, changed: false, status: previousStatus };
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.withdrawalId, {
+      status: "failed",
+      metadata: buildWithdrawalDecisionMetadata(withdrawal, {
+        adminUserId: admin.profile._id,
+        decision: "rejected",
+        now,
+        rejectionReasonSafe: reason,
+      }),
+    });
+
+    await notifyZoneAdminWithdrawalDecision(ctx, {
+      withdrawalId: args.withdrawalId,
+      zoneAdminUserId: withdrawal.userId,
+      decision: "rejected",
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "reject_withdrawal",
+      module: "withdrawals",
+      targetType: "walletTransaction",
+      targetId: String(args.withdrawalId),
+      status: "success",
+      metadataSafe: {
+        changed: true,
+        previousStatus,
+        newStatus: "failed",
+        amountRounded: Math.round(Number(withdrawal.amount || 0)),
+        hasReason: true,
+        reasonLength: reason.length,
+      },
+    });
+    return { ok: true, changed: true, status: "failed" };
   },
 });
 
@@ -1125,12 +1528,13 @@ export const setZoneStatus = mutation({
       throw new Error("Zone not found.");
     }
 
+    const now = Date.now();
     const patch: Record<string, unknown> = {
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
 
     if (args.status === "active") {
-      patch.approvedAt = Date.now();
+      patch.approvedAt = now;
       patch.rejectedAt = undefined;
       patch.rejectionReason = undefined;
 
@@ -1145,33 +1549,35 @@ export const setZoneStatus = mutation({
             ...zone.migration,
             perBranchSeatModel: false,
             status: "pending",
-            lastAttemptAt: Date.now(),
+            lastAttemptAt: now,
             lastError: undefined,
           },
-          updatedAt: Date.now(),
+          updatedAt: now,
         });
 
         try {
           const migrationResult = await migrateZoneBranchesInternal(ctx, args.zoneId);
+          const migrationCompletedAt = Date.now();
           patch.status = "active";
           patch.migration = {
             ...zone.migration,
             perBranchSeatModel: true,
             status: "succeeded",
-            migratedAt: Date.now(),
-            lastAttemptAt: Date.now(),
+            migratedAt: migrationCompletedAt,
+            lastAttemptAt: migrationCompletedAt,
             lastError: undefined,
             branchCount: migrationResult.branchCount,
             resourceCount: migrationResult.resourceCount,
             resourceModelVersion: 1,
           };
         } catch (error: any) {
+          const migrationFailedAt = Date.now();
           patch.status = "approved_pending_migration";
           patch.migration = {
             ...zone.migration,
             perBranchSeatModel: false,
             status: "failed",
-            lastAttemptAt: Date.now(),
+            lastAttemptAt: migrationFailedAt,
             lastError: error?.message || "Migration failed.",
           };
         }
@@ -1190,7 +1596,7 @@ export const setZoneStatus = mutation({
 
     if (args.status === "rejected") {
       patch.status = "rejected";
-      patch.rejectedAt = Date.now();
+      patch.rejectedAt = now;
       patch.rejectionReason = args.rejectionReason || "Rejected by super admin";
     }
 
@@ -1202,6 +1608,21 @@ export const setZoneStatus = mutation({
 
     if (args.status === "suspended") {
       patch.status = "suspended";
+    }
+
+    const shouldStartPilot =
+      args.status === "active"
+      && zone.status === "pending-review"
+      && !zone.pilotStartedAt
+      && patch.status === "active";
+
+    if (shouldStartPilot) {
+      patch.pilotStatus = "active";
+      patch.pilotStartedAt = now;
+      patch.pilotEndsAt = addMonthsClamped(now, 1);
+      patch.pilotEndedAt = undefined;
+      patch.pilotPayoutRate = 1.0;
+      patch.normalPayoutRate = 0.9;
     }
 
     await ctx.db.patch(args.zoneId, patch);
@@ -1229,13 +1650,38 @@ export const setZoneStatus = mutation({
         },
       });
     }
+    if (zone.ownerUid && shouldStartPilot) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "zone.pilot_started",
+        toUid: zone.ownerUid,
+        recipientRole: "zone_admin",
+        status: "pending",
+        dedupeKey: `zone.pilot_started:${String(args.zoneId)}`,
+        dedupePolicy: "replace_active",
+        pushPolicy: "force",
+        route: "/zone/(tabs)/profile",
+        entity: { kind: "zone", id: String(args.zoneId) },
+        entityId: String(args.zoneId),
+        title: "Pilot period started",
+        body: "Your zone has been approved. For the first month, you'll receive 100% of Matchhai booking payouts. After the pilot period ends, the standard 90% payout rate will apply.",
+        data: {
+          zoneId: String(args.zoneId),
+          pilotStartedAt: patch.pilotStartedAt,
+          pilotEndsAt: patch.pilotEndsAt,
+          pilotPayoutRate: patch.pilotPayoutRate,
+          normalPayoutRate: patch.normalPayoutRate,
+          route: "/zone/(tabs)/profile",
+          href: "/zone/(tabs)/profile",
+        },
+      });
+    }
     await insertSuperAdminAuditLog(ctx, admin, {
       action: args.status === "active" ? "approve_zone" : args.status === "rejected" ? "reject_zone" : "update_zone_status",
       module: "zones",
       targetType: "zone",
       targetId: String(args.zoneId),
       status: "success",
-      metadataSafe: { previousStatus: zone.status, status: args.status },
+      metadataSafe: { previousStatus: zone.status, status: args.status, pilotStarted: shouldStartPilot },
     });
     return true;
   },
@@ -1323,15 +1769,25 @@ export const setReportStatus = mutation({
     }
 
     const now = Date.now();
+    const previousStatus = report.status;
+    const newStatus = args.status;
+    const hasReviewerNoteArg = Object.prototype.hasOwnProperty.call(args, "reviewerNote");
+    const hasResolutionSummaryArg = Object.prototype.hasOwnProperty.call(args, "resolutionSummary");
     const reviewerNote = args.reviewerNote?.trim() || undefined;
     const resolutionSummary = args.resolutionSummary?.trim() || undefined;
+    const reviewerNoteChanged = hasReviewerNoteArg
+      && (reviewerNote || undefined) !== (report.reviewerNote || undefined);
+    const resolutionSummaryChanged = hasResolutionSummaryArg
+      && (resolutionSummary || undefined) !== (report.resolutionSummary || undefined);
+    const statusChanged = previousStatus !== newStatus;
+    const anyChange = statusChanged || reviewerNoteChanged || resolutionSummaryChanged;
 
     const patch: Record<string, unknown> = {
-      status: args.status,
+      status: newStatus,
       updatedAt: now,
     };
 
-    if (args.status === "reviewed") {
+    if (newStatus === "reviewed") {
       patch.reviewedByUid = profile._id;
       patch.reviewedAt = now;
       patch.reviewerNote = reviewerNote;
@@ -1340,7 +1796,7 @@ export const setReportStatus = mutation({
       patch.resolutionSummary = undefined;
     }
 
-    if (args.status === "resolved") {
+    if (newStatus === "resolved") {
       if (!report.reviewedAt || !report.reviewedByUid) {
         patch.reviewedByUid = profile._id;
         patch.reviewedAt = now;
@@ -1351,7 +1807,7 @@ export const setReportStatus = mutation({
       patch.resolutionSummary = resolutionSummary;
     }
 
-    if (args.status === "pending") {
+    if (newStatus === "pending") {
       patch.reviewedByUid = undefined;
       patch.reviewedAt = undefined;
       patch.reviewerNote = undefined;
@@ -1362,35 +1818,61 @@ export const setReportStatus = mutation({
 
     await ctx.db.patch(args.reportId, patch);
 
-    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-      type: "moderation.report_updated",
-      toUid: report.reporterUid,
-      status: "pending",
-      dedupeKey: `moderation.report_updated:${String(args.reportId)}:${args.status}`,
-      dedupePolicy: "replace_active",
-      route: "/(player)/reports",
-      entity: { kind: "report", id: String(args.reportId) },
-      entityId: String(args.reportId),
-      title:
-        args.status === "resolved"
-          ? "Report resolved"
-          : args.status === "reviewed"
-            ? "Report reviewed"
-            : "Report pending review",
-      body:
-        args.status === "resolved"
-          ? (resolutionSummary || "Your report was resolved by the moderation team.")
-          : args.status === "reviewed"
-            ? (reviewerNote || "Your report is under review.")
-            : "Your report was moved back to pending review.",
-      data: {
-        reportId: String(args.reportId),
-        status: args.status,
-        reviewerNote: reviewerNote || null,
-        resolutionSummary: resolutionSummary || null,
-        href: "/(player)/reports",
-      },
-    });
+    if (statusChanged) {
+      if (!report.reporterUid) {
+        console.warn("[admin] report status notification skipped", {
+          reportId: String(args.reportId),
+          newStatus,
+          reason: "missing_reporter_user_id",
+        });
+      } else {
+        const reportRoute = "/(player)/reports";
+        const title = newStatus === "reviewed"
+          ? "Report reviewed"
+          : newStatus === "resolved"
+            ? "Report resolved"
+            : newStatus === "pending"
+              ? "Report reopened"
+              : "Report updated";
+        const body = newStatus === "resolved"
+          ? "Your report has been resolved."
+          : newStatus === "reviewed"
+            ? "Your report has been reviewed."
+            : newStatus === "pending"
+              ? "Your report has been reopened for review."
+              : "Your report status was updated.";
+
+        try {
+          await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+            type: "moderation.report_updated",
+            toUid: report.reporterUid,
+            status: "pending",
+            dedupeKey: `moderation.report_updated:${String(args.reportId)}:${newStatus}`,
+            dedupePolicy: "replace_active",
+            pushPolicy: "eligible",
+            route: reportRoute,
+            entity: { kind: "report", id: String(args.reportId) },
+            entityId: String(args.reportId),
+            title,
+            body,
+            data: {
+              reportId: String(args.reportId),
+              status: newStatus,
+              route: reportRoute,
+              href: reportRoute,
+            },
+          });
+        } catch {
+          console.warn("[admin] report status notification failed", {
+            reportId: String(args.reportId),
+            previousStatus,
+            newStatus,
+            statusChanged,
+            notificationType: "moderation.report_updated",
+          });
+        }
+      }
+    }
 
     await insertSuperAdminAuditLog(ctx, admin, {
       action: "update_report_status",
@@ -1398,7 +1880,14 @@ export const setReportStatus = mutation({
       targetType: "report",
       targetId: String(args.reportId),
       status: "success",
-      metadataSafe: { status: args.status },
+      metadataSafe: {
+        previousStatus,
+        status: newStatus,
+        changed: statusChanged,
+        updatedReviewerNote: reviewerNoteChanged,
+        updatedResolutionSummary: resolutionSummaryChanged,
+        anyChange,
+      },
     });
     return true;
   },
@@ -1422,6 +1911,10 @@ export const updateSupportTicketStatus = mutation({
       status: args.status,
       updatedAt: Date.now(),
     });
+
+    if (ticket.status !== args.status) {
+      await notifySupportTicketStatusChanged(ctx, ticket, args.status);
+    }
 
     await insertSuperAdminAuditLog(ctx, admin, {
       action: "update_support_ticket_status",
@@ -1634,6 +2127,10 @@ export const resolveSupportTicket = mutation({
       resolutionSummary: redactSupportText(summary).slice(0, 1000),
       updatedAt: Date.now(),
     });
+
+    if (ticket.status !== "resolved") {
+      await notifySupportTicketStatusChanged(ctx, ticket, "resolved");
+    }
 
     await insertSuperAdminAuditLog(ctx, admin, {
       action: "resolve_support_ticket",

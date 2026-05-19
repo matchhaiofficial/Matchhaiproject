@@ -55,6 +55,7 @@ export default function SuperAdminLayout() {
             }}
         >
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="notifications" options={{ headerShown: false }} />
             <Stack.Screen name="easypaisa" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="request/[id]" options={{ presentation: 'modal' }} />
             <Stack.Screen name="report/[id]" options={{ presentation: 'modal', headerShown: false }} />
@@ -62,6 +63,7 @@ export default function SuperAdminLayout() {
             <Stack.Screen name="support-ticket/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="audit-logs" options={{ headerShown: false }} />
             <Stack.Screen name="identity-verifications" options={{ headerShown: false }} />
+            <Stack.Screen name="withdrawals" options={{ headerShown: false }} />
             <Stack.Screen name="matchrooms" options={{ headerShown: false }} />
             <Stack.Screen name="matchroom/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="support" options={{ presentation: 'modal', headerShown: false }} />

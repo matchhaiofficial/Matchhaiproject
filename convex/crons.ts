@@ -10,4 +10,11 @@ crons.interval(
   { batchSize: 25 },
 );
 
+crons.interval(
+  "zone pilot expiry sweep",
+  { minutes: 60 },
+  (internal as any).zonePilot.expireEndedPilots,
+  { batchSize: 50 },
+);
+
 export default crons;

@@ -15,6 +15,7 @@ import { useEntrance } from "../../../src/motion/useEntrance";
 import {
   getDashboardSummary,
   getSuperAdminMatchrooms,
+  getSuperAdminUnreadNotificationCount,
   getSupportTickets,
   SuperAdminMatchroom,
   SuperAdminSupportTicket,
@@ -154,6 +155,7 @@ export default function SuperAdminDashboardTab() {
   const [summary, setSummary] = useState<SuperAdminSummary | null>(null);
   const [rooms, setRooms] = useState<SuperAdminMatchroom[]>([]);
   const [openTickets, setOpenTickets] = useState<SuperAdminSupportTicket[]>([]);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -163,10 +165,11 @@ export default function SuperAdminDashboardTab() {
     if (mode === "initial") setLoading(true);
     else setRefreshing(true);
     try {
-      const [summaryResult, roomsResult, ticketsResult] = await Promise.all([
+      const [summaryResult, roomsResult, ticketsResult, notificationCountResult] = await Promise.all([
         getDashboardSummary(),
         getSuperAdminMatchrooms(),
         getSupportTickets("open"),
+        getSuperAdminUnreadNotificationCount(),
       ]);
       if (!summaryResult.ok) throw new Error(summaryResult.message);
       if (!roomsResult.ok) throw new Error(roomsResult.message);
@@ -174,6 +177,7 @@ export default function SuperAdminDashboardTab() {
       setSummary(summaryResult.data);
       setRooms(roomsResult.data);
       setOpenTickets(ticketsResult.data);
+      setNotificationCount(notificationCountResult.ok ? notificationCountResult.data : 0);
     } catch (error: any) {
       showToast({ type: "error", title: "Dashboard failed", message: error?.message || "Unable to load dashboard." });
     } finally {
@@ -266,9 +270,11 @@ export default function SuperAdminDashboardTab() {
   const sidebarItems = useMemo(() => [
     { label: "Dashboard", icon: "dashboard" as const, onPress: () => navigateTo("/super-admin") },
     { label: "Payments", icon: "paymentWallet" as const, onPress: () => navigateTo("/super-admin/payments") },
+    { label: "Withdrawals", icon: "wallet" as const, onPress: () => navigateTo("/super-admin/withdrawals") },
     { label: "Reports", icon: "reports" as const, onPress: () => navigateTo("/super-admin/reports") },
     { label: "Matchrooms", icon: "matchroom" as const, onPress: () => navigateTo("/super-admin/matchrooms") },
     { label: "Support Tickets", icon: "support" as const, onPress: () => navigateTo("/super-admin/support-tickets") },
+    { label: "Notifications", icon: "notifications" as const, onPress: () => navigateTo("/super-admin/notifications") },
     { label: "Users", icon: "players" as const, onPress: () => navigateTo("/super-admin/users") },
     { label: "Identity Verifications", icon: "verified-user" as const, onPress: () => navigateTo("/super-admin/identity-verifications") },
     { label: "Audit Logs", icon: "reports" as const, onPress: () => navigateTo("/super-admin/audit-logs") },
@@ -332,8 +338,10 @@ export default function SuperAdminDashboardTab() {
               <AdminSectionHeader title="Quick Actions" compact />
               <View style={styles.operationsGrid}>
                 <OperationTile title="Payments" icon="paymentWallet" iconColor={COLORS.warning} onPress={() => navigateTo("/super-admin/payments")} />
+                <OperationTile title="Withdrawals" icon="wallet" iconColor={COLORS.success} onPress={() => navigateTo("/super-admin/withdrawals")} />
                 <OperationTile title="Reports" icon="reports" iconColor={COLORS.error} onPress={() => navigateTo("/super-admin/reports")} />
                 <OperationTile title="Matchrooms" icon="matchroom" iconColor={COLORS.accent} onPress={() => navigateTo("/super-admin/matchrooms")} />
+                <OperationTile title="Notifications" icon="notifications" badgeLabel={notificationCount ? String(notificationCount) : undefined} iconColor={COLORS.warning} onPress={() => navigateTo("/super-admin/notifications")} />
                 <OperationTile title="Support" icon="support" badgeLabel={String(openTickets.length)} iconColor={COLORS.success} onPress={() => navigateTo("/super-admin/support-tickets")} />
                 <OperationTile title="Users" icon="players" iconColor={COLORS.successBright} onPress={() => navigateTo("/super-admin/users")} />
                 <OperationTile title="Identity" icon="verified-user" iconColor={COLORS.accent} onPress={() => navigateTo("/super-admin/identity-verifications")} />

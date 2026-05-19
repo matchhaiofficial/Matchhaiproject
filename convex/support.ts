@@ -169,6 +169,81 @@ function supportRoleForUser(user: any) {
   return "unknown";
 }
 
+function supportRecipientRole(value?: string | null): "player" | "zone_admin" {
+  return value === "zone_admin" || value === "zone" ? "zone_admin" : "player";
+}
+
+function supportRouteForRecipientRole(role: "player" | "zone_admin") {
+  return role === "zone_admin" ? "/zone/modules/ai-support" : "/(player)/support";
+}
+
+async function notifySupportTicketCreated(ctx: any, input: {
+  ticketId: Id<"supportTickets">;
+  ticketReference: string;
+  userId: Id<"users">;
+  userRole?: string;
+  category?: string;
+  priority?: string;
+}) {
+  const recipientRole = supportRecipientRole(input.userRole);
+  const userRoute = supportRouteForRecipientRole(recipientRole);
+
+  await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+    type: "support.ticket_created",
+    toUid: input.userId,
+    recipientRole,
+    status: "pending",
+    dedupeKey: `support.ticket_created:${String(input.ticketId)}`,
+    dedupePolicy: "replace_active",
+    pushPolicy: "none",
+    route: userRoute,
+    entity: { kind: "supportTicket", id: String(input.ticketId) },
+    entityId: String(input.ticketId),
+    title: "Support ticket created",
+    body: `We received your ticket ${input.ticketReference}. A support agent will reply soon.`,
+    data: {
+      ticketId: String(input.ticketId),
+      ticketReference: input.ticketReference,
+      userId: String(input.userId),
+      userRole: input.userRole || null,
+      route: userRoute,
+      href: userRoute,
+    },
+  });
+
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .take(50);
+
+  for (const admin of superAdmins) {
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "support.new_ticket",
+      toUid: admin._id,
+      recipientRole: "super_admin",
+      status: "pending",
+      dedupeKey: `support.new_ticket:${String(input.ticketId)}:${String(admin._id)}`,
+      dedupePolicy: "replace_active",
+      pushPolicy: "force",
+      route: "/super-admin/support-tickets",
+      entity: { kind: "supportTicket", id: String(input.ticketId) },
+      entityId: String(input.ticketId),
+      title: "New support ticket",
+      body: `A new support ticket ${input.ticketReference} needs review.`,
+      data: {
+        ticketId: String(input.ticketId),
+        ticketReference: input.ticketReference,
+        userId: String(input.userId),
+        userRole: input.userRole || null,
+        category: input.category || null,
+        priority: input.priority || null,
+        route: "/super-admin/support-tickets",
+        href: "/super-admin/support-tickets",
+      },
+    });
+  }
+}
+
 function safeUser(user: any) {
   return {
     id: String(user._id),
@@ -1402,10 +1477,11 @@ export const createSupportTicket = mutation({
     const now = Date.now();
     const reference = `MH-SUP-${now.toString(36).toUpperCase().slice(-6)}`;
 
+    const userRole = args.userRole || supportRoleForUser(user);
     const ticketId = await ctx.db.insert("supportTickets", {
       reference,
       userId: user._id,
-      userRole: args.userRole || supportRoleForUser(user),
+      userRole,
       category: args.category,
       subcategory: args.subcategory,
       intent: args.intent,
@@ -1422,6 +1498,15 @@ export const createSupportTicket = mutation({
       source: "help_support_chat",
       createdAt: now,
       updatedAt: now,
+    });
+
+    await notifySupportTicketCreated(ctx, {
+      ticketId,
+      ticketReference: reference,
+      userId: user._id,
+      userRole,
+      category: args.category,
+      priority: args.priority,
     });
 
     return {

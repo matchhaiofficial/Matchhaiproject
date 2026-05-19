@@ -1213,6 +1213,16 @@ export default defineSchema({
     approvedAt: v.optional(v.number()),
     rejectedAt: v.optional(v.number()),
     rejectionReason: v.optional(v.string()),
+    pilotStatus: v.optional(v.union(
+      v.literal("none"),
+      v.literal("active"),
+      v.literal("ended")
+    )),
+    pilotStartedAt: v.optional(v.number()),
+    pilotEndsAt: v.optional(v.number()),
+    pilotEndedAt: v.optional(v.number()),
+    pilotPayoutRate: v.optional(v.number()),
+    normalPayoutRate: v.optional(v.number()),
     migration: v.optional(v.object({
       perBranchSeatModel: v.optional(v.boolean()),
       status: v.optional(v.union(
@@ -1237,7 +1247,8 @@ export default defineSchema({
     .index("by_seedSource", ["seedSource"])
     .index("by_status", ["status"])
     .index("by_updatedAt", ["updatedAt"])
-    .index("by_status_updatedAt", ["status", "updatedAt"]),
+    .index("by_status_updatedAt", ["status", "updatedAt"])
+    .index("by_pilotStatus_and_pilotEndsAt", ["pilotStatus", "pilotEndsAt"]),
 
   // ============================================
   // ZONE PRICING RULES
