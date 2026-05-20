@@ -1,10 +1,14 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 
-import AppHeader from "../../src/components/AppHeader";
-import { AdminEmptyStateCard, AdminInfoLine, AdminListCard } from "../../src/components/AdminSurface";
-import { AppIcon } from "../../src/components/AppIcon";
+import {
+  AdminEmptyStateCard,
+  AdminInfoLine,
+  AdminListCard,
+  AdminPageHeader,
+  AdminSearchFilterBar,
+} from "../../src/components/AdminSurface";
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
@@ -15,7 +19,7 @@ import {
   setUserSuspension,
   type SuperAdminUser,
 } from "../../src/services/convex/superAdminService";
-import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
+import { COLORS, SPACING } from "../../src/theme";
 
 type UserTab = "all" | "player" | "zone";
 
@@ -91,18 +95,13 @@ export default function SuperAdminUsersScreen() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader title="Users" subtitle="Review accounts and manage suspensions." onBack={() => router.back()} inlineTitle />
-      <View style={styles.searchBar}>
-        <AppIcon name="search" size={20} color={COLORS.textSecondary} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search users"
-          placeholderTextColor={COLORS.textSecondary}
-          style={styles.searchInput}
-          autoCapitalize="none"
-        />
-      </View>
+      <AdminPageHeader title="Users" subtitle="Review accounts and manage suspensions." onBack={() => router.back()} inlineTitle />
+      <AdminSearchFilterBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search users"
+        style={styles.searchBar}
+      />
       <SegmentedTabs
         items={[
           { key: "all", label: "All" },
@@ -165,19 +164,7 @@ export default function SuperAdminUsersScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { paddingTop: 0 },
-  searchBar: {
-    minHeight: 48,
-    borderRadius: RADII.lg,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.cardDark,
-    paddingHorizontal: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  searchInput: { flex: 1, color: COLORS.text, fontFamily: FONTS.body, fontSize: 14 },
+  searchBar: { marginBottom: SPACING.md },
   tabs: { marginBottom: SPACING.md },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },

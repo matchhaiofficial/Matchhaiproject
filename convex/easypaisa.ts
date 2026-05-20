@@ -5,7 +5,8 @@ import { Id } from "./_generated/dataModel";
 import { action, httpAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
 import { EasypaisaTransactionType } from "./easypaisaRest";
-import { EASYPAY_CHECKOUT_TTL_MS } from "./timing";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
+import { EASYPAY_CHECKOUT_TTL_MS, getMatchroomLockAt } from "./timing";
 
 const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
 const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest").trim().toLowerCase();
@@ -57,6 +58,13 @@ type FinalizeResult = {
   status: PaymentStatus;
   message?: string;
 };
+
+type CheckoutAttempt = "reused" | "created";
+
+const ACTIVE_PAYMENT_STATUSES: PaymentStatus[] = ["created", "redirected", "token_received", "pending"];
+const REUSED_ATTEMPT_MESSAGE = "Continuing previous payment attempt.";
+const CREATED_ATTEMPT_MESSAGE = "Starting a new payment attempt.";
+const ACTIVE_TOPUP_IN_PROGRESS_MESSAGE = "You already have a top-up in progress. Continue it or wait for it to finish.";
 
 type ProviderSnapshot = {
   responseCode?: string | null;
@@ -254,6 +262,116 @@ async function getPaymentUserWithFallback(ctx: any, fallbackUserId?: Id<"users">
 
 function isTerminalStatus(status: PaymentStatus) {
   return status === "paid" || status === "expired" || status === "cancelled" || status === "failed";
+}
+
+function isActiveCheckoutTransaction(transaction: any, now: number) {
+  return Boolean(
+    transaction
+    && ACTIVE_PAYMENT_STATUSES.includes(transaction.status)
+    && Number(transaction.expiresAt || 0) > now,
+  );
+}
+
+function chooseLatestActiveTransaction(transactions: any[], now: number) {
+  return transactions
+    .filter((transaction) => isActiveCheckoutTransaction(transaction, now))
+    .sort((a, b) =>
+      Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0),
+    )[0] || null;
+}
+
+function buildAttemptFields(attempt: CheckoutAttempt) {
+  return {
+    attempt,
+    attemptMessage: attempt === "reused" ? REUSED_ATTEMPT_MESSAGE : CREATED_ATTEMPT_MESSAGE,
+  };
+}
+
+function getSlotUserUid(slot: any): string {
+  return String(slot?.uid || slot?.user?.uid || "").trim();
+}
+
+function getMatchroomPlayerUids(room: any): string[] {
+  const fromPlayerUids = Array.isArray(room?.playerUids) ? room.playerUids.map(String) : [];
+  const fromPlayers = Array.isArray(room?.players)
+    ? room.players.map((player: any) => String(player?.uid || "")).filter(Boolean)
+    : [];
+  return Array.from(new Set([...fromPlayerUids, ...fromPlayers]));
+}
+
+function getAllMatchroomSlots(room: any): any[] {
+  return [...(room?.slotsA || []), ...(room?.slotsB || [])];
+}
+
+function getRequiredPlayerCount(room: any): number {
+  const maxPlayers = Number(room?.maxPlayers || 0);
+  if (Number.isFinite(maxPlayers) && maxPlayers > 0) return maxPlayers;
+  const slotCount = getAllMatchroomSlots(room).length;
+  return Math.max(1, slotCount || Number(room?.currentPlayers || 0) || 1);
+}
+
+function getConfirmedPlayerCount(room: any): number {
+  const slots = getAllMatchroomSlots(room);
+  const confirmedSlotUids = slots
+    .filter((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot))
+    .map(getSlotUserUid);
+  if (slots.length > 0) return new Set(confirmedSlotUids).size;
+  return getMatchroomPlayerUids(room).length;
+}
+
+function isPaymentRosterFull(room: any): boolean {
+  const required = getRequiredPlayerCount(room);
+  const slotsA = room?.slotsA || [];
+  const slotsB = room?.slotsB || [];
+  if (slotsA.length > 0 || slotsB.length > 0) {
+    const teamAFilled = slotsA.length === 0 || slotsA.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    const teamBFilled = slotsB.length === 0 || slotsB.every((slot: any) => slot?.status === "confirmed" && getSlotUserUid(slot));
+    return teamAFilled && teamBFilled && getConfirmedPlayerCount(room) >= required;
+  }
+  return getConfirmedPlayerCount(room) >= required;
+}
+
+function isPaymentMatchroomExpired(room: any, now = Date.now()): boolean {
+  if (!room) return false;
+  if (room.status === "expired" || room.status === "cancelled") return true;
+  const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
+  if (
+    ["open", "locked"].includes(String(room.status || ""))
+    && Number.isFinite(scheduledStartAt)
+    && scheduledStartAt > 0
+    && scheduledStartAt <= now
+    && !isPaymentRosterFull(room)
+  ) {
+    return true;
+  }
+  const expiresAt = Number(room.expiresAt || 0);
+  return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now && !isPaymentRosterFull(room);
+}
+
+function isPaymentJoinLocked(room: any, now = Date.now()): boolean {
+  if (!room || room.status === "cancelled" || room.status === "expired") return true;
+  if (isPaymentRosterFull(room)) return true;
+  const explicitLockAt = Number(room?.lockAt || 0);
+  const lockAt = Number.isFinite(explicitLockAt) && explicitLockAt > 0
+    ? explicitLockAt
+    : getMatchroomLockAt(room?.scheduledStartAt || room?.startTime);
+  return typeof lockAt === "number" && lockAt <= now;
+}
+
+function isActiveUnpaidBookingIntent(intent: any): boolean {
+  if (!intent) return false;
+  if (intent.paymentStatus === "paid") return false;
+  return !["cancelled", "expired", "rejected", "confirmed"].includes(String(intent.status || ""));
+}
+
+function getIntentSelectedSlotId(intent: any): string {
+  return String((intent?.selectedSlotIds || [])[0] || "").trim();
+}
+
+function hasTimeOverlap(startA: number, durationMinutesA: number, startB: number, durationMinutesB: number) {
+  const endA = startA + durationMinutesA * 60 * 1000;
+  const endB = startB + durationMinutesB * 60 * 1000;
+  return startA < endB && endA > startB;
 }
 
 function isRecoverableCheckoutStartError(error: unknown) {
@@ -500,7 +618,6 @@ export const getStartCheckoutContext = internalQuery({
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
     const now = Date.now();
-    const activeStatuses: PaymentStatus[] = ["created", "redirected", "token_received", "pending"];
 
     let bookingIntentId: Id<"bookingIntents"> | undefined;
     let amount = 0;
@@ -510,6 +627,8 @@ export const getStartCheckoutContext = internalQuery({
       if (!args.bookingIntentId) {
         throw new Error("Booking intent is required.");
       }
+      assertKycAccessAllowed(user, KYC_VERIFICATION_REQUIRED_MESSAGE);
+
       const intent = await ctx.db.get(args.bookingIntentId);
       if (!intent) {
         throw new Error("Booking intent not found.");
@@ -520,6 +639,9 @@ export const getStartCheckoutContext = internalQuery({
       if (intent.paymentStatus === "paid" || intent.status === "confirmed") {
         throw new Error("This booking is already paid.");
       }
+      if (intent.expiresAt && intent.expiresAt < now) {
+        throw new Error("This payment window has expired. Please request a new seat.");
+      }
       if (intent.status !== "approved_pending_payment" && intent.status !== "approved") {
         throw new Error("This booking is not ready for payment yet.");
       }
@@ -527,15 +649,144 @@ export const getStartCheckoutContext = internalQuery({
       bookingIntentId = args.bookingIntentId;
       amount = Number(intent.pricing?.totalCost || 0);
       currency = String(intent.pricing?.currency || "PKR");
+      if (!Number.isFinite(amount) || amount <= 0) {
+        console.warn("[easypaisa] booking checkout blocked: invalid server-derived amount", {
+          bookingIntentId: String(args.bookingIntentId),
+          matchroomId: String(intent.matchroomId),
+          userId: String(user._id),
+          amount,
+        });
+        throw new Error("This booking is not ready for payment yet.");
+      }
 
-      const existing = await ctx.db
-        .query("paymentTransactions")
-        .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", bookingIntentId!))
+      const room = await ctx.db.get(intent.matchroomId);
+      if (!room) {
+        throw new Error("This matchroom is no longer available.");
+      }
+      if (room.status === "cancelled" || isPaymentMatchroomExpired(room, now)) {
+        throw new Error("This matchroom is no longer available.");
+      }
+
+      const playerUids = getMatchroomPlayerUids(room);
+      const payerUid = String(user._id);
+      const side = String(intent.side || "");
+      const selectedSlotId = getIntentSelectedSlotId(intent);
+
+      if (!selectedSlotId) {
+        console.warn("[easypaisa] booking checkout blocked: missing selected slot", {
+          bookingIntentId: String(args.bookingIntentId),
+          matchroomId: String(intent.matchroomId),
+          userId: payerUid,
+        });
+        throw new Error("This slot is no longer available.");
+      }
+
+      const targetSlots = side === "A" ? (room.slotsA || []) : side === "B" ? (room.slotsB || []) : [];
+      const slot = targetSlots.find((entry: any) => String(entry?.slotId || "") === selectedSlotId);
+      if (!slot) {
+        console.warn("[easypaisa] booking checkout blocked: selected slot missing", {
+          bookingIntentId: String(args.bookingIntentId),
+          matchroomId: String(intent.matchroomId),
+          userId: payerUid,
+          side,
+          selectedSlotId,
+        });
+        throw new Error("This slot is no longer available.");
+      }
+
+      const slotUserUid = getSlotUserUid(slot);
+      if (playerUids.includes(payerUid) || slotUserUid === payerUid) {
+        throw new Error("You are already in this matchroom.");
+      }
+      if (isPaymentJoinLocked(room, now)) {
+        throw new Error("This matchroom is no longer available.");
+      }
+      if (slotUserUid) {
+        console.warn("[easypaisa] booking checkout blocked: selected slot occupied", {
+          bookingIntentId: String(args.bookingIntentId),
+          matchroomId: String(intent.matchroomId),
+          userId: payerUid,
+          side,
+          selectedSlotId,
+          occupiedByUid: slotUserUid,
+        });
+        throw new Error("This slot is no longer available.");
+      }
+
+      const relatedIntents = await ctx.db
+        .query("bookingIntents")
+        .withIndex("by_createdByUid_matchroomId", (q: any) =>
+          q.eq("createdByUid", user._id).eq("matchroomId", intent.matchroomId)
+        )
         .collect();
-      const activeTransaction = existing.find((transaction: any) =>
-        activeStatuses.includes(transaction.status)
-        && Number(transaction.expiresAt || 0) > now,
+      const duplicateIntent = relatedIntents.find((otherIntent: any) =>
+        String(otherIntent._id) !== String(args.bookingIntentId)
+        && isActiveUnpaidBookingIntent(otherIntent)
+        && getIntentSelectedSlotId(otherIntent) === selectedSlotId
       );
+      if (duplicateIntent) {
+        console.warn("[easypaisa] booking checkout blocked: duplicate payable intent", {
+          bookingIntentId: String(args.bookingIntentId),
+          duplicateIntentId: String(duplicateIntent._id),
+          matchroomId: String(intent.matchroomId),
+          userId: payerUid,
+          selectedSlotId,
+        });
+        throw new Error("You already have an active payment attempt for this slot.");
+      }
+
+      const targetStart = Number(room.scheduledStartAt || 0);
+      const targetDurationMinutes = Number(room.durationMinutes || 60);
+      if (
+        Number.isFinite(targetStart)
+        && targetStart > 0
+        && Number.isFinite(targetDurationMinutes)
+        && targetDurationMinutes > 0
+      ) {
+        const recentRooms = await ctx.db
+          .query("matchrooms")
+          .withIndex("by_createdAt")
+          .order("desc")
+          .take(100);
+        const conflict = recentRooms.find((candidate: any) => {
+          if (String(candidate._id) === String(room._id)) return false;
+          if (!getMatchroomPlayerUids(candidate).includes(payerUid)) return false;
+          if (!["open", "locked", "in-progress"].includes(String(candidate.status || ""))) return false;
+          const candidateStart = Number(candidate.scheduledStartAt || 0);
+          const candidateDurationMinutes = Number(candidate.durationMinutes || 60);
+          if (!Number.isFinite(candidateStart) || candidateStart <= 0) return false;
+          if (!Number.isFinite(candidateDurationMinutes) || candidateDurationMinutes <= 0) return false;
+          return hasTimeOverlap(targetStart, targetDurationMinutes, candidateStart, candidateDurationMinutes);
+        });
+        if (conflict) {
+          console.warn("[easypaisa] booking checkout blocked: time conflict", {
+            bookingIntentId: String(args.bookingIntentId),
+            matchroomId: String(intent.matchroomId),
+            conflictMatchroomId: String(conflict._id),
+            userId: payerUid,
+          });
+          throw new Error("You have another match at this time.");
+        }
+      }
+
+      let activeTransaction: any = null;
+      if (intent.activePaymentTransactionId) {
+        const pointedTransaction = await ctx.db.get(intent.activePaymentTransactionId);
+        if (
+          pointedTransaction
+          && String(pointedTransaction.bookingIntentId || "") === String(bookingIntentId)
+          && isActiveCheckoutTransaction(pointedTransaction, now)
+        ) {
+          activeTransaction = pointedTransaction;
+        }
+      }
+      if (!activeTransaction) {
+        const existing = await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", bookingIntentId!))
+          .collect();
+        activeTransaction = chooseLatestActiveTransaction(existing, now);
+      }
 
       return {
         userId: user._id,
@@ -554,19 +805,34 @@ export const getStartCheckoutContext = internalQuery({
     }
 
     let activeTransaction: any = null;
-    for (const status of activeStatuses) {
-      const rows = await ctx.db
-        .query("paymentTransactions")
-        .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
-        .collect();
-      activeTransaction = rows.find((transaction: any) =>
-        transaction.kind === "wallet_topup"
-        && Number(transaction.amount || 0) === amount
-        && Number(transaction.expiresAt || 0) > now,
-      );
-      if (activeTransaction) {
-        break;
+    if (user.activeTopupPaymentTransactionId) {
+      const pointedTransaction: any = await ctx.db.get(user.activeTopupPaymentTransactionId);
+      if (
+        pointedTransaction
+        && pointedTransaction.kind === "wallet_topup"
+        && String(pointedTransaction.userId) === String(user._id)
+        && isActiveCheckoutTransaction(pointedTransaction, now)
+      ) {
+        activeTransaction = pointedTransaction;
       }
+    }
+    if (!activeTransaction) {
+      const activeTopups: any[] = [];
+      for (const status of ACTIVE_PAYMENT_STATUSES) {
+        const rows = await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", user._id).eq("status", status))
+          .collect();
+        activeTopups.push(...rows.filter((transaction: any) =>
+          transaction.kind === "wallet_topup"
+          && isActiveCheckoutTransaction(transaction, now),
+        ));
+      }
+      activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
+    }
+
+    if (activeTransaction && Number(activeTransaction.amount || 0) !== amount) {
+      throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
     }
 
     return {
@@ -581,7 +847,7 @@ export const getStartCheckoutContext = internalQuery({
   },
 });
 
-export const insertCheckoutTransaction = internalMutation({
+export const createCheckoutTransactionWithLock = internalMutation({
   args: {
     kind: v.union(v.literal("booking_intent"), v.literal("wallet_topup")),
     userId: v.id("users"),
@@ -598,7 +864,94 @@ export const insertCheckoutTransaction = internalMutation({
     checkoutPhoneMasked: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("paymentTransactions", {
+    const now = Date.now();
+
+    if (args.kind === "booking_intent") {
+      if (!args.bookingIntentId) {
+        throw new Error("Booking intent is required.");
+      }
+
+      const intent = await ctx.db.get(args.bookingIntentId);
+      if (!intent) {
+        throw new Error("Booking intent not found.");
+      }
+      if (String(intent.createdByUid) !== String(args.userId)) {
+        throw new Error("You can only pay for your own booking.");
+      }
+
+      if (intent.activePaymentTransactionId) {
+        const pointedTransaction = await ctx.db.get(intent.activePaymentTransactionId);
+        if (
+          pointedTransaction
+          && String(pointedTransaction.bookingIntentId || "") === String(args.bookingIntentId)
+          && isActiveCheckoutTransaction(pointedTransaction, now)
+        ) {
+          return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+        }
+      }
+
+      const existing = await ctx.db
+        .query("paymentTransactions")
+        .withIndex("by_bookingIntentId", (q) => q.eq("bookingIntentId", args.bookingIntentId!))
+        .collect();
+      const activeTransaction = chooseLatestActiveTransaction(existing, now);
+      if (activeTransaction) {
+        await ctx.db.patch(args.bookingIntentId, {
+          activePaymentTransactionId: activeTransaction._id,
+          activePaymentOrderRefNum: activeTransaction.orderRefNum,
+          activePaymentExpiresAt: activeTransaction.expiresAt,
+          updatedAt: now,
+        });
+        return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+      }
+    } else {
+      const user = await ctx.db.get(args.userId);
+      if (!user) {
+        throw new Error("User profile not found.");
+      }
+
+      if (user.activeTopupPaymentTransactionId) {
+        const pointedTransaction: any = await ctx.db.get(user.activeTopupPaymentTransactionId);
+        if (
+          pointedTransaction
+          && pointedTransaction.kind === "wallet_topup"
+          && String(pointedTransaction.userId) === String(args.userId)
+          && isActiveCheckoutTransaction(pointedTransaction, now)
+        ) {
+          if (Number(pointedTransaction.amount || 0) !== Number(args.amount || 0)) {
+            throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
+          }
+          return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+        }
+      }
+
+      const activeTopups: any[] = [];
+      for (const status of ACTIVE_PAYMENT_STATUSES) {
+      const rows = await ctx.db
+        .query("paymentTransactions")
+        .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
+        .collect();
+        activeTopups.push(...rows.filter((transaction: any) =>
+        transaction.kind === "wallet_topup"
+          && isActiveCheckoutTransaction(transaction, now),
+        ));
+      }
+      const activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
+      if (activeTransaction) {
+        if (Number(activeTransaction.amount || 0) !== Number(args.amount || 0)) {
+          throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
+        }
+        await ctx.db.patch(args.userId, {
+          activeTopupPaymentTransactionId: activeTransaction._id,
+          activeTopupAmount: activeTransaction.amount,
+          activeTopupExpiresAt: activeTransaction.expiresAt,
+          updatedAt: now,
+        });
+        return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+      }
+    }
+
+    const transactionId = await ctx.db.insert("paymentTransactions", {
       provider: "easypaisa",
       kind: args.kind,
       status: "created",
@@ -627,11 +980,66 @@ export const insertCheckoutTransaction = internalMutation({
       },
       expiresAt: args.expiresAt,
       callbackCount: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     });
+
+    const transaction = await ctx.db.get(transactionId);
+    if (!transaction) {
+      throw new Error("Could not start the payment attempt.");
+    }
+
+    if (args.kind === "booking_intent" && args.bookingIntentId) {
+      await ctx.db.patch(args.bookingIntentId, {
+        activePaymentTransactionId: transactionId,
+        activePaymentOrderRefNum: args.orderRefNum,
+        activePaymentExpiresAt: args.expiresAt,
+        updatedAt: now,
+      });
+    } else if (args.kind === "wallet_topup") {
+      await ctx.db.patch(args.userId, {
+        activeTopupPaymentTransactionId: transactionId,
+        activeTopupAmount: args.amount,
+        activeTopupExpiresAt: args.expiresAt,
+        updatedAt: now,
+      });
+    }
+
+    return { transaction, ...buildAttemptFields("created") };
   },
 });
+
+async function clearActivePaymentPointerIfMatching(ctx: any, transaction: any, now: number) {
+  if (transaction.kind === "booking_intent" && transaction.bookingIntentId) {
+    const intent = await ctx.db.get(transaction.bookingIntentId);
+    if (
+      intent?.activePaymentTransactionId
+      && String(intent.activePaymentTransactionId) === String(transaction._id)
+    ) {
+      await ctx.db.patch(transaction.bookingIntentId, {
+        activePaymentTransactionId: undefined,
+        activePaymentOrderRefNum: undefined,
+        activePaymentExpiresAt: undefined,
+        updatedAt: now,
+      });
+    }
+  }
+
+  if (transaction.kind === "wallet_topup") {
+    const user = await ctx.db.get(transaction.userId);
+    if (
+      user?.activeTopupPaymentTransactionId
+      && String(user.activeTopupPaymentTransactionId) === String(transaction._id)
+    ) {
+      await ctx.db.patch(transaction.userId, {
+        activeTopupPaymentTransactionId: undefined,
+        activeTopupAmount: undefined,
+        activeTopupExpiresAt: undefined,
+        updatedAt: now,
+      });
+    }
+  }
+}
 
 export const markCheckoutFailed = internalMutation({
   args: {
@@ -644,6 +1052,7 @@ export const markCheckoutFailed = internalMutation({
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.transactionId);
     if (!existing) return;
+    const now = Date.now();
     await ctx.db.patch(args.transactionId, {
       status: "failed",
       lastError: args.message,
@@ -659,8 +1068,9 @@ export const markCheckoutFailed = internalMutation({
           },
         },
       },
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
+    await clearActivePaymentPointerIfMatching(ctx, existing, now);
   },
 });
 
@@ -776,6 +1186,7 @@ export const startCheckout = action({
         checkoutUrl: active.checkoutUrl || null,
         expiresAt: active.expiresAt,
         status: active.status,
+        ...buildAttemptFields("reused"),
         transactionType: active.providerPayload?.rest?.initiate?.request?.transactionType || "MA",
         hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
         actionRequired: active.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
@@ -798,7 +1209,7 @@ export const startCheckout = action({
       throw new Error("Hosted Easypaisa fallback is disabled.");
     }
 
-    const transactionId: Id<"paymentTransactions"> = await ctx.runMutation((internal as any).easypaisa.insertCheckoutTransaction, {
+    const checkoutStart: any = await ctx.runMutation((internal as any).easypaisa.createCheckoutTransactionWithLock, {
       kind: args.kind,
       userId,
       bookingIntentId,
@@ -813,6 +1224,34 @@ export const startCheckout = action({
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
     });
+    const transaction = checkoutStart.transaction;
+    const attempt = String(checkoutStart.attempt || "created") as CheckoutAttempt;
+    const attemptMessage = String(checkoutStart.attemptMessage || CREATED_ATTEMPT_MESSAGE);
+    const transactionId = transaction._id as Id<"paymentTransactions">;
+
+    if (attempt === "reused") {
+      logGatewayDebug("start.reuse_active_after_lock", {
+        transactionId: String(transaction._id),
+        orderRefNum: transaction.orderRefNum,
+        status: transaction.status,
+        amount: transaction.amount,
+        kind: transaction.kind,
+      });
+      return {
+        transactionId: transaction._id,
+        orderRefNum: transaction.orderRefNum,
+        checkoutUrl: transaction.checkoutUrl || null,
+        expiresAt: transaction.expiresAt,
+        status: transaction.status,
+        attempt,
+        attemptMessage,
+        transactionType: transaction.providerPayload?.rest?.initiate?.request?.transactionType || "MA",
+        hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
+        actionRequired: transaction.providerPayload?.rest?.initiate?.actionRequired || "approve_in_easypaisa",
+        paymentToken: transaction.providerPayload?.rest?.initiate?.response?.paymentToken || null,
+        paymentTokenExpiryDateTime: transaction.providerPayload?.rest?.initiate?.response?.paymentTokenExpiryDateTime || null,
+      };
+    }
 
     logGatewayDebug("start.transaction_created", {
       transactionId: String(transactionId),
@@ -832,6 +1271,8 @@ export const startCheckout = action({
         checkoutUrl,
         expiresAt,
         status: "created",
+        attempt,
+        attemptMessage,
         transactionType,
         hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
         actionRequired: "complete_hosted_checkout",
@@ -963,6 +1404,8 @@ export const startCheckout = action({
           checkoutUrl: EASYPAISA_HOSTED_FALLBACK_ENABLED ? checkoutUrl : null,
           expiresAt,
           status: "pending",
+          attempt,
+          attemptMessage,
           transactionType,
           hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
           actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
@@ -988,6 +1431,8 @@ export const startCheckout = action({
       checkoutUrl: EASYPAISA_HOSTED_FALLBACK_ENABLED ? checkoutUrl : null,
       expiresAt,
       status: initiateStatus,
+      attempt,
+      attemptMessage,
       transactionType,
       hostedFallbackAvailable: EASYPAISA_HOSTED_FALLBACK_ENABLED,
       actionRequired: transactionType === "OTC" ? "pay_with_token" : "approve_in_easypaisa",
@@ -1291,6 +1736,7 @@ export const applyProviderUpdate = internalMutation({
         ...callbackPatch,
         status: "paid",
       });
+      await clearActivePaymentPointerIfMatching(ctx, row, now);
       return {
         appReturnUrl: row.appReturnUrl,
         orderRefNum: row.orderRefNum,
@@ -1317,6 +1763,7 @@ export const applyProviderUpdate = internalMutation({
         status: "expired",
         lastError: undefined,
       });
+      await clearActivePaymentPointerIfMatching(ctx, row, now);
 
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
@@ -1375,6 +1822,7 @@ export const applyProviderUpdate = internalMutation({
         status: "expired",
         lastError: undefined,
       });
+      await clearActivePaymentPointerIfMatching(ctx, row, now);
 
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
@@ -1411,6 +1859,7 @@ export const applyProviderUpdate = internalMutation({
         status: "failed",
         lastError: undefined,
       });
+      await clearActivePaymentPointerIfMatching(ctx, row, now);
 
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
@@ -1487,6 +1936,7 @@ export const applyProviderUpdate = internalMutation({
         processedAt: now,
         lastError: undefined,
       });
+      await clearActivePaymentPointerIfMatching(ctx, row, now);
 
       logGatewayDebug("reconcile.complete", {
         transactionId: String(row._id),
@@ -1536,6 +1986,7 @@ export const applyProviderUpdate = internalMutation({
           processedAt: now,
           lastError: message,
         });
+        await clearActivePaymentPointerIfMatching(ctx, row, now);
 
         await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
           type: "match.payment_result",

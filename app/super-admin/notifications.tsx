@@ -2,11 +2,10 @@ import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import AppHeader from "../../src/components/AppHeader";
-import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
-import { AppIcon } from "../../src/components/AppIcon";
-import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
+import { AdminEmptyStateCard, AdminListCard, AdminPageHeader } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
+import SegmentedTabs from "../../src/components/SegmentedTabs";
+import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   archiveSuperAdminNotification,
@@ -39,17 +38,12 @@ function NotificationCard({
 }) {
   const route = item.route || String(item.data?.href || item.data?.route || "");
   return (
-    <AppCard variant="elevated" style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.iconWrap}>
-          <AppIcon name={item.isRead ? "notifications-none" : "notifications-active"} size={20} color={COLORS.accent} />
-        </View>
-        <View style={styles.titleWrap}>
-          <Text style={styles.title}>{item.title || labelForType(item.type)}</Text>
-          <Text style={styles.meta}>{formatDate(item.createdAt)}</Text>
-        </View>
-        <StatusPill tone={item.isRead ? "neutral" : "warning"} label={item.isRead ? "Read" : "Unread"} />
-      </View>
+    <AdminListCard
+      title={item.title || labelForType(item.type)}
+      subtitle={formatDate(item.createdAt)}
+      statusLabel={item.isRead ? "Read" : "Unread"}
+      statusTone={item.isRead ? "neutral" : "warning"}
+    >
       {item.body ? <Text style={styles.body}>{item.body}</Text> : null}
       <View style={styles.metaRow}>
         <Text style={styles.typeText}>{labelForType(item.type)}</Text>
@@ -70,12 +64,13 @@ function NotificationCard({
           <Text style={[styles.actionText, styles.archiveText]}>Archive</Text>
         </Pressable>
       </View>
-    </AppCard>
+    </AdminListCard>
   );
 }
 
 export default function SuperAdminNotificationsScreen() {
   const { showToast } = useToast();
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const [tab, setTab] = useState<SuperAdminNotificationTab>("unread");
   const [items, setItems] = useState<SuperAdminNotification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,27 +129,23 @@ export default function SuperAdminNotificationsScreen() {
 
   return (
     <Screen style={styles.screen} scroll={false} edges={["top"]}>
-      <AppHeader title="Notifications" subtitle="Super Admin inbox" onBack={() => router.back()} inlineTitle />
-      <View style={styles.tabs}>
-        {(["unread", "read"] as const).map((nextTab) => (
-          <Pressable
-            key={nextTab}
-            onPress={() => setTab(nextTab)}
-            style={[styles.tabButton, tab === nextTab && styles.tabButtonActive]}
-          >
-            <Text style={[styles.tabText, tab === nextTab && styles.tabTextActive]}>
-              {nextTab === "unread" ? `Unread${tab === "unread" && unreadCount ? ` (${unreadCount})` : ""}` : "Read"}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <AdminPageHeader title="Notifications" subtitle="Super Admin inbox" onBack={() => router.back()} inlineTitle />
+      <SegmentedTabs
+        items={[
+          { key: "unread", label: "Unread", badge: tab === "unread" && unreadCount ? unreadCount : undefined },
+          { key: "read", label: "Read" },
+        ]}
+        value={tab}
+        onChange={(value) => setTab(value as SuperAdminNotificationTab)}
+        style={styles.tabs}
+      />
       {loading ? (
         <View style={styles.loaderWrap}>
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
@@ -186,30 +177,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backgroundDark,
   },
   tabs: {
-    flexDirection: "row",
-    gap: SPACING.sm,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.sm,
-  },
-  tabButton: {
-    flex: 1,
-    alignItems: "center",
-    borderRadius: RADII.lg,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    paddingVertical: SPACING.sm,
-    backgroundColor: COLORS.cardDark,
-  },
-  tabButtonActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: `${COLORS.accent}18`,
-  },
-  tabText: {
-    color: COLORS.textSecondary,
-    fontFamily: FONTS.medium,
-  },
-  tabTextActive: {
-    color: COLORS.text,
+    marginBottom: SPACING.md,
   },
   loaderWrap: {
     flex: 1,
@@ -218,41 +186,6 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: SPACING.md,
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xl,
-  },
-  card: {
-    gap: SPACING.md,
-    padding: SPACING.lg,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.md,
-  },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: `${COLORS.accent}18`,
-    borderWidth: 1,
-    borderColor: `${COLORS.accent}44`,
-  },
-  titleWrap: {
-    flex: 1,
-  },
-  title: {
-    color: COLORS.text,
-    fontFamily: FONTS.bold,
-    fontSize: 16,
-  },
-  meta: {
-    color: COLORS.textSecondary,
-    fontFamily: FONTS.body,
-    fontSize: 12,
-    marginTop: 2,
   },
   body: {
     color: COLORS.text,

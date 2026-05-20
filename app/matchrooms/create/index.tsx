@@ -49,6 +49,7 @@ import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../../
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 
 import Logger from "../../../src/utils/logger";
+import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../src/utils/paymentUiCopy";
 import BasicFields from "./components/BasicFields";
 import BroadcastAreaSelector from "./components/BroadcastAreaSelector";
 import GameDynamicFields from "./components/GameDynamicFields";
@@ -2248,7 +2249,7 @@ export default function CreateMatchroom() {
               </Text>
               {easypaisaCheckoutStatus?.providerDescription ? (
                 <Text style={styles.paymentStatusMeta}>
-                  Gateway: {easypaisaCheckoutStatus.providerDescription}
+                  Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                 </Text>
               ) : null}
             </View>

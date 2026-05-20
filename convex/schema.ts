@@ -297,6 +297,9 @@ export default defineSchema({
     // Wallet
     walletBalance: v.optional(v.number()),
     walletHeldBalance: v.optional(v.number()),
+    activeTopupPaymentTransactionId: v.optional(v.id("paymentTransactions")),
+    activeTopupAmount: v.optional(v.number()),
+    activeTopupExpiresAt: v.optional(v.number()),
 
     // Chat presence & preferences
     lastActiveAt: v.optional(v.number()),
@@ -426,6 +429,7 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"])
     .index("by_type", ["type"])
+    .index("by_type_and_status", ["type", "status"])
     .index("by_reference", ["reference"]),
 
   phoneVerifications: defineTable({
@@ -766,6 +770,9 @@ export default defineSchema({
     captureScheduledAt: v.optional(v.number()),
     captureScheduledFnId: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
+    activePaymentTransactionId: v.optional(v.id("paymentTransactions")),
+    activePaymentOrderRefNum: v.optional(v.string()),
+    activePaymentExpiresAt: v.optional(v.number()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
