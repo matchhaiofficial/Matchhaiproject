@@ -390,12 +390,21 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
     resolvedStatus = "pending";
   } else if (source === "initiate" && paymentMode === "MA" && responseCode === "0000") {
     resolvedStatus = "paid";
+  } else if (
+    source === "inquiry" &&
+    paymentMode === "MA" &&
+    responseCode === "0000" &&
+    (combined.includes("SUCCESS") || combined.includes("PAID") || combined.includes("COMPLETE"))
+  ) {
+    resolvedStatus = "paid";
   } else if (!transactionStatus && (source === "ipn" || source === "hosted_finalize")) {
     // Provider webhooks/finalize responses sometimes omit a normalized transactionStatus.
     if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE")) {
       resolvedStatus = "failed";
     } else if (combined.includes("EXPIRE")) {
       resolvedStatus = "expired";
+    } else if (paymentMode === "MA" && combined.includes("SUCCESS")) {
+      resolvedStatus = "paid";
     } else if (combined.includes("PAID") || combined.includes("COMPLETE")) {
       resolvedStatus = "paid";
     } else if (responseCode === "0000") {
@@ -589,10 +598,11 @@ export const getStartCheckoutContext = internalQuery({
       }
     }
 
-    // Avoid reusing very old pending checkouts for wallet top-ups; users often need a fresh request.
+    // Avoid reusing old pending wallet top-ups; polling updates `updatedAt`, but does not resend
+    // the Easypaisa mobile-account approval request.
     if (
       activeTransaction &&
-      Number(activeTransaction.updatedAt || activeTransaction.createdAt || 0) + 2 * 60 * 1000 < now
+      Number(activeTransaction.createdAt || 0) + 2 * 60 * 1000 < now
     ) {
       activeTransaction = null;
     }
@@ -1051,6 +1061,11 @@ export const syncTransactionStatus = action({
       String(inquiryBody?.transactionStatus || "").toUpperCase() === "FAILED"
         ? inquiryBody?.errorReason || inquiryBody?.responseDesc
         : inquiryBody?.responseDesc || inquiryBody?.errorReason;
+    const storedTransactionType =
+      row.providerPayload?.rest?.initiate?.request?.transactionType ||
+      row.providerPayload?.rest?.initiate?.response?.paymentMode ||
+      row.paymentMethod ||
+      null;
     const applyResult: any = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
       orderRefNum: row.orderRefNum,
       source: "inquiry",
@@ -1062,8 +1077,8 @@ export const syncTransactionStatus = action({
         paymentToken: inquiryBody?.paymentToken || null,
         paymentTokenExpiryDateTime: inquiryBody?.paymentTokenExpiryDateTime || null,
         transactionDateTime: inquiryBody?.transactionDateTime || null,
-        paymentMode: inquiryBody?.paymentMode || null,
-        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || null,
+        paymentMode: inquiryBody?.paymentMode || storedTransactionType || null,
+        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || storedTransactionType || null,
         providerReference: inquiryBody?.transactionId || inquiryBody?.paymentToken || row.orderRefNum,
         rawPayload: {
           rest: {

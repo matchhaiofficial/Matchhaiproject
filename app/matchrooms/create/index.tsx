@@ -1227,6 +1227,8 @@ export default function CreateMatchroom() {
             ? "This Easypaisa payment session expired before confirmation."
             : easypaisaStartTimedOut
               ? "Easypaisa is slow to reply, but the prompt may still be waiting on your phone. Approve it there, then refresh this status."
+              : startingEasypaisaPayment && !activeEasypaisaOrderRef
+                ? "Sending the Easypaisa request to your mobile account..."
               : "Payment request sent. Approve it in your Easypaisa app or mobile account prompt.";
   const easypaisaStatusIcon =
     easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
@@ -2254,9 +2256,11 @@ export default function CreateMatchroom() {
                       : "Payment confirmed"}
               </Text>
               <Text style={styles.paymentStatusText}>{easypaisaStatusMessage}</Text>
-              <Text style={styles.paymentStatusMeta}>
-                Order: {activeEasypaisaOrderRef}
-              </Text>
+              {activeEasypaisaOrderRef ? (
+                <Text style={styles.paymentStatusMeta}>
+                  Order: {activeEasypaisaOrderRef}
+                </Text>
+              ) : null}
               {easypaisaCheckoutStatus?.providerDescription ? (
                 <Text style={styles.paymentStatusMeta}>
                   Gateway: {easypaisaCheckoutStatus.providerDescription}

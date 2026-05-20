@@ -23,6 +23,8 @@ const SKILL_JOIN_DELTA = 10;
 const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_request"]);
 export const MATCHROOM_LOCKED_MESSAGE =
   "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.";
+const MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE =
+  "This venue already has a matchroom for the same game at the same scheduled time. Please choose a different time or venue.";
 
 function getMatchroomPlayerUids(room: any): string[] {
   const fromPlayerUids = Array.isArray(room.playerUids) ? room.playerUids.map(String) : [];
@@ -89,6 +91,24 @@ function shouldExpireInProgressRoom(room: any, now = Date.now()): boolean {
   const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
   return scheduledStartAt <= now && !isRosterFull(room);
+}
+
+async function findVenueGameTimeConflict(
+  ctx: any,
+  args: { zoneId?: string | null; game: string; scheduledStartAt: number },
+) {
+  if (!args.zoneId || typeof args.scheduledStartAt !== "number") return null;
+
+  const existing = await ctx.db
+    .query("matchrooms")
+    .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId))
+    .take(100);
+
+  return existing.find((room: any) => {
+    if (String(room.game || "") !== String(args.game || "")) return false;
+    if (room.scheduledStartAt !== args.scheduledStartAt) return false;
+    return !["cancelled", "completed", "expired"].includes(String(room.status || ""));
+  }) || null;
 }
 
 function canStartMatchroom(room: any, now = Date.now()) {
@@ -1657,6 +1677,49 @@ export const checkTimeConflict = query({
   },
 });
 
+export const checkCreateAvailability = query({
+  args: {
+    locationMode: v.optional(v.string()),
+    zoneId: v.optional(v.string()),
+    game: v.string(),
+    scheduledStartAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const scheduleValidation = validateMatchroomScheduleWindow(args.scheduledStartAt, now);
+    if (!scheduleValidation.ok) {
+      return {
+        available: false,
+        message: scheduleValidation.message,
+        reason: "invalid_schedule",
+      };
+    }
+
+    if (args.locationMode === "zone" && args.zoneId) {
+      const conflict = await findVenueGameTimeConflict(ctx, {
+        game: args.game,
+        scheduledStartAt: args.scheduledStartAt,
+        zoneId: args.zoneId,
+      });
+
+      if (conflict) {
+        return {
+          available: false,
+          conflictId: String(conflict._id),
+          message: MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE,
+          reason: "venue_time_conflict",
+        };
+      }
+    }
+
+    return {
+      available: true,
+      message: null,
+      reason: null,
+    };
+  },
+});
+
 // ============================================
 // MUTATIONS
 // ============================================
@@ -1757,21 +1820,13 @@ export const create = mutation({
       && args.zoneId
       && typeof args.scheduledStartAt === "number"
     ) {
-      const existing = await ctx.db
-        .query("matchrooms")
-        .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId))
-        .collect();
-
-      const conflict = existing.find((room: any) => {
-        if (String(room.game || "") !== String(args.game || "")) return false;
-        if (room.scheduledStartAt !== args.scheduledStartAt) return false;
-        return !["cancelled", "completed", "expired"].includes(String(room.status || ""));
+      const conflict = await findVenueGameTimeConflict(ctx, {
+        game: args.game,
+        scheduledStartAt: args.scheduledStartAt,
+        zoneId: args.zoneId,
       });
-
       if (conflict) {
-        throw new Error(
-          "This venue already has a matchroom for the same game at the same scheduled time. Please choose a different time or venue."
-        );
+        throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
       }
     }
 

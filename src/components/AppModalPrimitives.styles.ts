@@ -44,7 +44,7 @@ export default StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
     paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.sm,
+    paddingBottom: 0,
   },
   sheet: {
     backgroundColor: COLORS.cardDark,

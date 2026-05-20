@@ -7,6 +7,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { convex } from "../../../../src/lib/convex";
 import {
+  checkMatchroomCreateAvailability,
   createMatchroom,
   getEnablePatchForGame,
   prepareProfileForMatchParticipation,
@@ -386,8 +387,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     }
 
     setStartingEasypaisaPayment(true);
+    setEasypaisaPaymentPhase("payment_sent");
+    setActiveEasypaisaOrderRef(null);
     try {
-      const forceNew = options?.forceNew === true;
+      const forceNew = options?.forceNew !== false;
       const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
       Logger.info("CreateMatchroomPayment", "Starting Easypaisa wallet top-up", {
         amount,
@@ -433,6 +436,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       }
     } catch (error: any) {
       Logger.error("CreateMatchroom", "Failed to start Easypaisa payment", error);
+      setEasypaisaPaymentPhase("idle");
+      setActiveEasypaisaOrderRef(null);
       notify({
         message: error?.message || "Could not start the Easypaisa payment.",
         title: "Payment failed",
@@ -678,6 +683,36 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           ...prev,
           skillLevel: participation.skill?.tier || prev.skillLevel,
         }));
+      }
+
+      if (!skipPaymentPrompt) {
+        const availability = await withTimeout(
+          checkMatchroomCreateAvailability({
+            game: selectedGame!,
+            locationMode,
+            scheduledDate: formData.date,
+            scheduledTime: formData.time,
+            zoneId: selectedZoneId,
+          }),
+          "Checking venue availability",
+          10000,
+        );
+        const availabilityMessage = availability.ok
+          ? availability.data?.message
+          : availability.message;
+
+        if (!availability.ok || availability.data?.available === false) {
+          setSubmitFeedback(null);
+          showToast({
+            message:
+              availabilityMessage ||
+              "This time slot is no longer available. Please choose a different time or venue.",
+            title: availability.ok ? "Time unavailable" : "Could not verify slot",
+            type: "error",
+          });
+          setSubmitting(false);
+          return false;
+        }
       }
 
       const amountDue = Math.max(0, Math.ceil(Number(effectivePriceValue || 0)));

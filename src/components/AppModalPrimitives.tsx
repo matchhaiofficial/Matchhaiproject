@@ -140,8 +140,6 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  // Use safe-area bottom inset on all platforms so buttons never sit under
-  // gesture nav / software buttons (Android) or the home indicator (iOS).
   const bottomInset = Math.max(0, insets.bottom || 0);
 
   return (
@@ -170,7 +168,7 @@ export function AppDialog({
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bottomClearance = Math.max(0, insets.bottom || 0);
-  const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
+  const verticalChrome = SPACING.xl + bottomClearance;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
     visible,
@@ -193,7 +191,6 @@ export function AppDialog({
           StyleSheet.absoluteFillObject,
           styles.overlayBase,
           styles.dialogOverlay,
-          { paddingBottom: bottomClearance + SPACING.md },
         ]}
         onPress={() => closeIfAllowed(onClose, dismissDisabled)}
       >
@@ -235,7 +232,6 @@ export function AppBottomSheet({
     axis: "y",
     distance: 22,
   });
-  const sheetOuterBottomPad = Math.max(SPACING.sm, bottomInset);
 
   return (
     <Modal
@@ -252,10 +248,7 @@ export function AppBottomSheet({
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
         <View
-          style={[
-            styles.sheetWrap,
-            { paddingBottom: sheetOuterBottomPad },
-          ]}
+          style={styles.sheetWrap}
         >
           <Animated.View style={entrance.animatedStyle}>
             <View
