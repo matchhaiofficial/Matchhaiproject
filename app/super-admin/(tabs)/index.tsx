@@ -3,10 +3,16 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
-import AppHeader from "../../../src/components/AppHeader";
-import { AdminEmptyStateCard, AdminSectionHeader } from "../../../src/components/AdminSurface";
+import {
+  AdminEmptyStateCard,
+  AdminMetricCard,
+  AdminPageHeader,
+  AdminQuickActionCard,
+  AdminSectionHeader,
+  AdminStatusBadge,
+} from "../../../src/components/AdminSurface";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
-import { AppCard, StatusPill } from "../../../src/components/AppPrimitives";
+import { AppCard } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -15,10 +21,7 @@ import { useEntrance } from "../../../src/motion/useEntrance";
 import {
   getDashboardSummary,
   getSuperAdminMatchrooms,
-  getSuperAdminUnreadNotificationCount,
-  getSupportTickets,
   SuperAdminMatchroom,
-  SuperAdminSupportTicket,
   SuperAdminSummary,
 } from "../../../src/services/convex/superAdminService";
 import { signOutUser } from "../../../src/services/convex/authService";
@@ -39,6 +42,12 @@ function formatMoney(value?: number, currency = "PKR") {
 
 function formatDateTime(room: SuperAdminMatchroom) {
   return [room.scheduledDate, room.scheduledTime].filter(Boolean).join(" ") || "Date/time TBD";
+}
+
+function formatBadgeCount(value?: number, capped?: boolean) {
+  const count = Number(value || 0);
+  if (count <= 0) return undefined;
+  return capped ? `${count}+` : String(count);
 }
 
 function lifecycleLabel(value: SuperAdminMatchroom["lifecycleStatus"]) {
@@ -68,53 +77,6 @@ function lifecycleTone(value: SuperAdminMatchroom["lifecycleStatus"]) {
   return "warning" as const;
 }
 
-function SuperAdminMetricCard({ metric }: { metric: MetricConfig }) {
-  return (
-    <AppCard variant="elevated" style={styles.metricCard}>
-      <View style={[styles.metricIconWrap, { backgroundColor: `${metric.tone}18`, borderColor: `${metric.tone}44` }]}>
-        <AppIcon name={metric.icon} size={18} color={metric.tone} />
-      </View>
-      <View style={styles.metricTextWrap}>
-        <Text style={styles.metricLabel}>{metric.label}</Text>
-        <Text style={styles.metricDetail} numberOfLines={2}>{metric.detail}</Text>
-      </View>
-      <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-        {metric.value}
-      </Text>
-    </AppCard>
-  );
-}
-
-function OperationTile({
-  badgeLabel,
-  icon,
-  iconColor,
-  onPress,
-  title,
-}: {
-  badgeLabel?: string;
-  icon: AppIconName;
-  iconColor: string;
-  onPress: () => void;
-  title: string;
-}) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.operationTilePressable, pressed && styles.pressed]}>
-      <AppCard variant="elevated" style={styles.operationTile}>
-        <View style={[styles.operationIconWrap, { backgroundColor: `${iconColor}18`, borderColor: `${iconColor}44` }]}>
-          <AppIcon name={icon} size={22} color={iconColor} />
-        </View>
-        {badgeLabel ? (
-          <View style={styles.operationBadge}>
-            <Text style={styles.operationBadgeText}>{badgeLabel}</Text>
-          </View>
-        ) : null}
-        <Text style={styles.operationTitle} numberOfLines={2}>{title}</Text>
-      </AppCard>
-    </Pressable>
-  );
-}
-
 function MatchroomPreviewCard({ room }: { room: SuperAdminMatchroom }) {
   return (
     <Pressable
@@ -127,7 +89,7 @@ function MatchroomPreviewCard({ room }: { room: SuperAdminMatchroom }) {
             <Text style={styles.matchGame}>{String(room.game || "Match").toUpperCase()}</Text>
             <Text style={styles.matchTitle} numberOfLines={1}>{room.title || "Untitled matchroom"}</Text>
           </View>
-          <StatusPill tone={lifecycleTone(room.lifecycleStatus)} label={lifecycleLabel(room.lifecycleStatus)} />
+          <AdminStatusBadge tone={lifecycleTone(room.lifecycleStatus)} label={lifecycleLabel(room.lifecycleStatus)} />
         </View>
         <View style={styles.matchMetaRow}>
           <View style={styles.matchMetaItem}>
@@ -154,8 +116,6 @@ export default function SuperAdminDashboardTab() {
   const { animatedStyle: entranceStyle } = useEntrance({ axis: "y", distance: 10, initialScale: 0.995 });
   const [summary, setSummary] = useState<SuperAdminSummary | null>(null);
   const [rooms, setRooms] = useState<SuperAdminMatchroom[]>([]);
-  const [openTickets, setOpenTickets] = useState<SuperAdminSupportTicket[]>([]);
-  const [notificationCount, setNotificationCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -165,19 +125,14 @@ export default function SuperAdminDashboardTab() {
     if (mode === "initial") setLoading(true);
     else setRefreshing(true);
     try {
-      const [summaryResult, roomsResult, ticketsResult, notificationCountResult] = await Promise.all([
-        getDashboardSummary(),
+      const [summaryResult, roomsResult] = await Promise.all([
+        getDashboardSummary({ forceRefresh: true }),
         getSuperAdminMatchrooms(),
-        getSupportTickets("open"),
-        getSuperAdminUnreadNotificationCount(),
       ]);
       if (!summaryResult.ok) throw new Error(summaryResult.message);
       if (!roomsResult.ok) throw new Error(roomsResult.message);
-      if (!ticketsResult.ok) throw new Error(ticketsResult.message);
       setSummary(summaryResult.data);
       setRooms(roomsResult.data);
-      setOpenTickets(ticketsResult.data);
-      setNotificationCount(notificationCountResult.ok ? notificationCountResult.data : 0);
     } catch (error: any) {
       showToast({ type: "error", title: "Dashboard failed", message: error?.message || "Unable to load dashboard." });
     } finally {
@@ -196,6 +151,12 @@ export default function SuperAdminDashboardTab() {
       .slice(0, 5),
     [rooms],
   );
+
+  const badgeLabels = useMemo(() => ({
+    zones: formatBadgeCount(summary?.badges?.pendingZones, summary?.badges?.pendingZonesCapped),
+    reports: formatBadgeCount(summary?.badges?.pendingReports),
+    withdrawals: formatBadgeCount(summary?.badges?.pendingWithdrawals, summary?.badges?.pendingWithdrawalsCapped),
+  }), [summary]);
 
   const metrics = useMemo<MetricConfig[]>(() => [
     {
@@ -269,6 +230,7 @@ export default function SuperAdminDashboardTab() {
 
   const sidebarItems = useMemo(() => [
     { label: "Dashboard", icon: "dashboard" as const, onPress: () => navigateTo("/super-admin") },
+    { label: "Zones", icon: "business" as const, onPress: () => navigateTo("/super-admin/zones") },
     { label: "Payments", icon: "paymentWallet" as const, onPress: () => navigateTo("/super-admin/payments") },
     { label: "Withdrawals", icon: "wallet" as const, onPress: () => navigateTo("/super-admin/withdrawals") },
     { label: "Reports", icon: "reports" as const, onPress: () => navigateTo("/super-admin/reports") },
@@ -283,7 +245,7 @@ export default function SuperAdminDashboardTab() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader
+      <AdminPageHeader
         title="Super Admin"
         subtitle="Operations dashboard"
         inlineTitle
@@ -328,34 +290,73 @@ export default function SuperAdminDashboardTab() {
                 </View>
               </View>
               <View style={styles.tagsRow}>
-                <StatusPill tone="info" label={`${summary?.counts.matchrooms || 0} matchrooms`} />
-                <StatusPill tone="warning" label={`${summary?.reports.pending || 0} pending reports`} />
-                <StatusPill tone="neutral" label={`${summary?.counts.teams || 0} teams`} />
+                <AdminStatusBadge tone="info" label={`${summary?.counts.matchrooms || 0} matchrooms`} />
+                <AdminStatusBadge tone="warning" label={`${summary?.reports.pending || 0} pending reports`} />
+                <AdminStatusBadge tone="neutral" label={`${summary?.counts.teams || 0} teams`} />
               </View>
             </AppCard>
 
             <View style={styles.section}>
-              <AdminSectionHeader title="Quick Actions" compact />
+              <AdminSectionHeader title="Quick Actions" actionLabel="More" onAction={() => setSidebarOpen(true)} compact />
               <View style={styles.operationsGrid}>
-                <OperationTile title="Payments" icon="paymentWallet" iconColor={COLORS.warning} onPress={() => navigateTo("/super-admin/payments")} />
-                <OperationTile title="Withdrawals" icon="wallet" iconColor={COLORS.success} onPress={() => navigateTo("/super-admin/withdrawals")} />
-                <OperationTile title="Reports" icon="reports" iconColor={COLORS.error} onPress={() => navigateTo("/super-admin/reports")} />
-                <OperationTile title="Matchrooms" icon="matchroom" iconColor={COLORS.accent} onPress={() => navigateTo("/super-admin/matchrooms")} />
-                <OperationTile title="Notifications" icon="notifications" badgeLabel={notificationCount ? String(notificationCount) : undefined} iconColor={COLORS.warning} onPress={() => navigateTo("/super-admin/notifications")} />
-                <OperationTile title="Support" icon="support" badgeLabel={String(openTickets.length)} iconColor={COLORS.success} onPress={() => navigateTo("/super-admin/support-tickets")} />
-                <OperationTile title="Users" icon="players" iconColor={COLORS.successBright} onPress={() => navigateTo("/super-admin/users")} />
-                <OperationTile title="Identity" icon="verified-user" iconColor={COLORS.accent} onPress={() => navigateTo("/super-admin/identity-verifications")} />
-                <OperationTile title="Audit Logs" icon="reports" iconColor={COLORS.textSecondary} onPress={() => navigateTo("/super-admin/audit-logs")} />
+                <AdminQuickActionCard
+                  title="Payments"
+                  description="Review payment activity"
+                  icon="paymentWallet"
+                  iconColor={COLORS.warning}
+                  cardStyle={styles.quickActionCard}
+                  iconStyle={styles.quickActionPaymentsIcon}
+                  onPress={() => navigateTo("/super-admin/payments")}
+                />
+                <AdminQuickActionCard
+                  title="Withdrawals"
+                  description="Process payout requests"
+                  icon="wallet"
+                  badgeLabel={badgeLabels.withdrawals}
+                  iconColor={COLORS.success}
+                  cardStyle={styles.quickActionCard}
+                  iconStyle={styles.quickActionWithdrawalsIcon}
+                  onPress={() => navigateTo("/super-admin/withdrawals")}
+                />
+                <AdminQuickActionCard
+                  title="Reports"
+                  description="Triage player reports"
+                  icon="reports"
+                  badgeLabel={badgeLabels.reports}
+                  iconColor={COLORS.error}
+                  cardStyle={styles.quickActionCard}
+                  iconStyle={styles.quickActionReportsIcon}
+                  onPress={() => navigateTo("/super-admin/reports")}
+                />
+                <AdminQuickActionCard
+                  title="Zones"
+                  description="Approve zone requests"
+                  icon="business"
+                  badgeLabel={badgeLabels.zones}
+                  iconColor={COLORS.warning}
+                  cardStyle={styles.quickActionCard}
+                  iconStyle={styles.quickActionZonesIcon}
+                  onPress={() => navigateTo("/super-admin/zones")}
+                />
               </View>
             </View>
 
             <View style={styles.section}>
               <AdminSectionHeader title="At a Glance" compact />
-            <View style={styles.snapshotPanel}>
-              {metrics.map((metric) => (
-                <SuperAdminMetricCard key={metric.label} metric={metric} />
-              ))}
-            </View>
+              <View style={styles.snapshotPanel}>
+                {metrics.map((metric) => (
+                  <AdminMetricCard
+                    key={metric.label}
+                    label={metric.label}
+                    value={metric.value}
+                    subtitle={metric.detail}
+                    icon={metric.icon}
+                    iconColor={metric.tone}
+                    iconStyle={{ backgroundColor: `${metric.tone}18`, borderColor: `${metric.tone}44` }}
+                    style={styles.metricCard}
+                  />
+                ))}
+              </View>
             </View>
 
             <View style={styles.section}>

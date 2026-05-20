@@ -11,6 +11,76 @@ import {
 } from "../theme";
 
 export default StyleSheet.create({
+  searchFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
+  searchBar: {
+    minHeight: 48,
+    flex: 1,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardDark,
+    paddingHorizontal: SPACING.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
+  searchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontFamily: FONTS.montserratRegular,
+    fontSize: TEXT_SIZES.body,
+    paddingVertical: 0,
+    minWidth: 0,
+  },
+  filterButton: {
+    width: 48,
+    minHeight: 48,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardDark,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filterBadge: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: COLORS.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filterBadgeText: {
+    color: "#FFFFFF",
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  filterDrawer: {
+    flex: 1,
+    backgroundColor: COLORS.backgroundDark,
+  },
+  filterDrawerContent: {
+    flex: 1,
+  },
+  filterDrawerBody: {
+    gap: SPACING.lg,
+  },
+  filterDrawerFooterRow: {
+    flexDirection: "row",
+    gap: SPACING.sm,
+  },
+  filterDrawerFooterButton: {
+    flex: 1,
+  },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",

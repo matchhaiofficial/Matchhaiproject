@@ -161,6 +161,13 @@ export default StyleSheet.create({
     fontFamily: FONTS.heading,
     fontSize: 18,
   },
+  statHelperText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 4,
+  },
   transactionCard: {
     gap: SPACING.xs,
   },

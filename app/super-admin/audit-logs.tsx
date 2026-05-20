@@ -1,16 +1,17 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import AppHeader from "../../src/components/AppHeader";
-import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
-import { AppIcon } from "../../src/components/AppIcon";
-import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
-import { AppButton } from "../../src/components/AppPrimitives";
-import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
+import {
+  AdminEmptyStateCard,
+  AdminFilterDrawer,
+  AdminListCard,
+  AdminPageHeader,
+  AdminSearchFilterBar,
+} from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
+import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   getSuperAdminAllowlistConfig,
@@ -19,8 +20,6 @@ import {
   type SuperAdminAuditLog,
 } from "../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
-
-const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -72,15 +71,12 @@ function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
     : [];
 
   return (
-    <AppCard style={styles.card}>
-      <View style={styles.cardTop}>
-        <View style={styles.titleWrap}>
-          <Text style={styles.action}>{formatLabel(item.action)}</Text>
-          <Text style={styles.timestamp}>{formatDate(item.createdAt)}</Text>
-        </View>
-        <StatusPill tone={statusTone(item.status)} label={formatLabel(item.status)} />
-      </View>
-
+    <AdminListCard
+      title={formatLabel(item.action)}
+      subtitle={formatDate(item.createdAt)}
+      statusLabel={formatLabel(item.status)}
+      statusTone={statusTone(item.status)}
+    >
       <View style={styles.adminBox}>
         <Text style={styles.adminName}>{item.superAdminName || "Unknown Super Admin"}</Text>
         <Text style={styles.adminEmail}>{item.superAdminEmail || "unknown"}</Text>
@@ -110,12 +106,12 @@ function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
           ))}
         </View>
       ) : null}
-    </AppCard>
+    </AdminListCard>
   );
 }
 
 export default function SuperAdminAuditLogsScreen() {
-  const insets = useSafeAreaInsets();
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [rows, setRows] = useState<SuperAdminAuditLog[]>([]);
   const [admins, setAdmins] = useState<SuperAdminAllowlistEntry[]>([]);
@@ -185,41 +181,27 @@ export default function SuperAdminAuditLogsScreen() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader
+      <AdminPageHeader
         title="Audit Logs"
         subtitle="Super Admin access and action history."
         onBack={() => router.back()}
         inlineTitle
       />
 
-      <View style={styles.filters}>
-        <View style={styles.searchBar}>
-          <AppIcon name="search" size={20} color={COLORS.textSecondary} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search target/action/reference"
-            placeholderTextColor={COLORS.textSecondary}
-            style={styles.searchInput}
-            autoCapitalize="none"
-          />
-        </View>
-        <Pressable onPress={() => setDrawerOpen(true)} style={styles.filterButton}>
-          <AppIcon name="filters" size={20} color={COLORS.text} />
-          <Text style={styles.filterButtonText}>Filters</Text>
-          {activeFilterCount ? (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </View>
+      <AdminSearchFilterBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search target/action/reference"
+        onFilterPress={() => setDrawerOpen(true)}
+        activeFilterCount={activeFilterCount}
+        style={styles.searchBar}
+      />
 
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
@@ -234,62 +216,45 @@ export default function SuperAdminAuditLogsScreen() {
         </ScrollView>
       )}
 
-      <AppDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} drawerStyle={styles.drawer}>
-        <View style={styles.drawerContent}>
-          <AppModalHeader
-            title="Audit filters"
-            subtitle={`${activeFilterCount} active filters`}
-            onClose={() => setDrawerOpen(false)}
-            compact
-          />
-          <AppModalBody scroll contentContainerStyle={styles.drawerBody}>
-            <DiscoverFilterRow
-              label="Super Admin"
-              options={adminOptions}
-              selected={adminFilter}
-              onSelect={setAdminFilter}
-            />
-            <DiscoverFilterRow
-              label="Status"
-              options={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
-              selected={statusFilter}
-              onSelect={(value) => setStatusFilter(value as typeof statusFilter)}
-            />
-            <DiscoverFilterRow
-              label="Action"
-              options={COMMON_ACTION_FILTERS}
-              selected={actionFilter}
-              onSelect={setActionFilter}
-            />
-            <DiscoverFilterRow
-              label="Module"
-              options={MODULE_FILTERS}
-              selected={moduleFilter}
-              onSelect={setModuleFilter}
-            />
-          </AppModalBody>
-          <AppModalFooter>
-            <View style={[styles.drawerFooterRow, { paddingBottom: insets.bottom + 8 }]}>
-              <AppButton
-                variant="secondary"
-                style={styles.drawerFooterButton}
-                onPress={() => {
-                  setAdminFilter("all");
-                  setStatusFilter("all");
-                  setActionFilter("all");
-                  setModuleFilter("all");
-                }}
-                disabled={!activeFilterCount}
-              >
-                Reset
-              </AppButton>
-              <AppButton style={styles.drawerFooterButton} onPress={() => setDrawerOpen(false)}>
-                Done
-              </AppButton>
-            </View>
-          </AppModalFooter>
-        </View>
-      </AppDrawer>
+      <AdminFilterDrawer
+        visible={drawerOpen}
+        title="Audit filters"
+        activeFilterCount={activeFilterCount}
+        onClose={() => setDrawerOpen(false)}
+        onReset={() => {
+          setAdminFilter("all");
+          setStatusFilter("all");
+          setActionFilter("all");
+          setModuleFilter("all");
+        }}
+        onDone={() => setDrawerOpen(false)}
+        resetDisabled={!activeFilterCount}
+      >
+        <DiscoverFilterRow
+          label="Super Admin"
+          options={adminOptions}
+          selected={adminFilter}
+          onSelect={setAdminFilter}
+        />
+        <DiscoverFilterRow
+          label="Status"
+          options={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
+          selected={statusFilter}
+          onSelect={(value) => setStatusFilter(value as typeof statusFilter)}
+        />
+        <DiscoverFilterRow
+          label="Action"
+          options={COMMON_ACTION_FILTERS}
+          selected={actionFilter}
+          onSelect={setActionFilter}
+        />
+        <DiscoverFilterRow
+          label="Module"
+          options={MODULE_FILTERS}
+          selected={moduleFilter}
+          onSelect={setModuleFilter}
+        />
+      </AdminFilterDrawer>
     </Screen>
   );
 }
@@ -297,64 +262,11 @@ export default function SuperAdminAuditLogsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { flex: 1 },
-  filters: {
-    paddingTop: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-  },
   searchBar: {
-    minHeight: 48,
-    flex: 1,
-    borderRadius: RADII.lg,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.cardDark,
-    paddingHorizontal: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
+    marginBottom: SPACING.md,
   },
-  searchInput: { flex: 1, color: COLORS.text, fontFamily: FONTS.montserratRegular },
-  filterButton: {
-    width: 48,
-    minHeight: 46,
-    borderRadius: RADII.md,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.cardDark,
-    paddingHorizontal: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-  },
-  filterButtonText: {
-    display: "none",
-    color: COLORS.text,
-    fontFamily: FONTS.interSemiBold,
-    fontSize: 13,
-  },
-  filterBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filterBadgeText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 11 },
-  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
-  drawerContent: { flex: 1 },
-  drawerBody: { gap: SPACING.lg },
-  drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
-  drawerFooterButton: { flex: 1 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { paddingBottom: SPACING.xxl, gap: SPACING.md },
-  card: { gap: SPACING.md },
-  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: SPACING.md },
-  titleWrap: { flex: 1, minWidth: 0 },
-  action: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
-  timestamp: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 2 },
+  content: { gap: SPACING.md },
   adminBox: {
     borderRadius: RADII.md,
     borderWidth: 1,

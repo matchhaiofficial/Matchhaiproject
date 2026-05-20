@@ -9,6 +9,8 @@ type StartCheckoutResult =
       orderRefNum: string;
       checkoutUrl: string | null;
       status: string;
+      attempt: "reused" | "created";
+      attemptMessage: string;
       transactionType: "MA" | "OTC";
       actionRequired: string | null;
       hostedFallbackAvailable: boolean;
@@ -35,6 +37,8 @@ export async function startEasypaisaBookingCheckout(intentId: string): Promise<S
       checkoutUrl: result.checkoutUrl ? String(result.checkoutUrl) : null,
       expiresAt: typeof result.expiresAt === "number" ? result.expiresAt : undefined,
       status: String(result.status || "pending"),
+      attempt: result.attempt === "reused" ? "reused" : "created",
+      attemptMessage: String(result.attemptMessage || "Starting a new payment attempt."),
       transactionType: String(result.transactionType || "MA") as "MA" | "OTC",
       actionRequired: result.actionRequired ? String(result.actionRequired) : null,
       hostedFallbackAvailable: Boolean(result.hostedFallbackAvailable),
@@ -60,6 +64,8 @@ export async function startEasypaisaWalletTopup(amount: number): Promise<StartCh
       checkoutUrl: result.checkoutUrl ? String(result.checkoutUrl) : null,
       expiresAt: typeof result.expiresAt === "number" ? result.expiresAt : undefined,
       status: String(result.status || "pending"),
+      attempt: result.attempt === "reused" ? "reused" : "created",
+      attemptMessage: String(result.attemptMessage || "Starting a new payment attempt."),
       transactionType: String(result.transactionType || "MA") as "MA" | "OTC",
       actionRequired: result.actionRequired ? String(result.actionRequired) : null,
       hostedFallbackAvailable: Boolean(result.hostedFallbackAvailable),

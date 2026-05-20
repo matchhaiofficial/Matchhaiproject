@@ -23,12 +23,13 @@ import { useToast } from "../../../src/hooks/useToast";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import {
   approveZone,
+  getAdminZoneById,
   reactivateZone,
   rejectZone,
   retryZoneMigration,
   suspendZone,
 } from "../../../src/services/convex/superAdminService";
-import { getZoneById, Zone } from "../../../src/services/convex/zoneService";
+import type { Zone } from "../../../src/services/convex/zoneService";
 import { COLORS, FONTS, RADII, SPACING } from "../../../src/theme";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
 import { getZoneLifecycleLabel, getZoneMigrationLabel } from "../../../src/utils/zoneLifecycle";
@@ -65,7 +66,7 @@ export default function RequestDetail() {
     async function fetchRequest() {
       if (!id) return;
       try {
-        const result = await getZoneById(id);
+        const result = await getAdminZoneById(id, { forceRefresh: true });
         if (result.ok && result.data) {
           setRequest(result.data);
         }

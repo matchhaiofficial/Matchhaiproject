@@ -388,6 +388,23 @@ function isZoneWithdrawalRequest(row: any) {
   return row?.type === "withdrawal" && row?.metadata?.source === "zone_admin_withdrawal_request";
 }
 
+async function countUnreadSuperAdminNotifications(ctx: any, adminUserId: Id<"users">, limit = 300) {
+  const cappedLimit = Math.min(Math.max(limit, 1), 1000);
+  const notifications = await ctx.db
+    .query("notifications")
+    .withIndex("by_toUid", (q: any) => q.eq("toUid", adminUserId))
+    .order("desc")
+    .take(cappedLimit);
+  return {
+    count: notifications.filter((notification: any) =>
+      notification.isArchived !== true
+      && notification.isRead !== true
+      && (!notification.recipientRole || notification.recipientRole === "super_admin")
+    ).length,
+    capped: notifications.length >= cappedLimit,
+  };
+}
+
 function sanitizeWithdrawalDecisionReason(reason: string) {
   return String(reason || "")
     .trim()
@@ -542,7 +559,9 @@ function zoneStatusNotificationCopy(status: string, rejectionReason?: string | n
 export const getDashboardSummary = query({
   args: { sessionToken: v.string() },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const badgeCountLimit = 100;
+    const unreadNotificationLimit = 300;
 
     const [
       allUsers,
@@ -561,6 +580,14 @@ export const getDashboardSummary = query({
       capturedBookingPayments,
       legacyBookingWalletPayments,
       teams,
+      notStartedKyc,
+      pendingKyc,
+      inProgressKyc,
+      inReviewKyc,
+      openSupportTickets,
+      inReviewSupportTickets,
+      pendingWithdrawalCandidates,
+      unreadNotifications,
     ] = await Promise.all([
       ctx.db.query("users").collect(),
       ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).collect(),
@@ -578,7 +605,23 @@ export const getDashboardSummary = query({
       ctx.db.query("walletTransactions").withIndex("by_type", (q) => q.eq("type", "hold_capture")).collect(),
       ctx.db.query("walletTransactions").withIndex("by_type", (q) => q.eq("type", "booking_payment")).collect(),
       ctx.db.query("teams").collect(),
+      ctx.db.query("identityVerifications").withIndex("by_status_and_submittedAt", (q) => q.eq("status", "not_started")).take(badgeCountLimit),
+      ctx.db.query("identityVerifications").withIndex("by_status_and_submittedAt", (q) => q.eq("status", "pending")).take(badgeCountLimit),
+      ctx.db.query("identityVerifications").withIndex("by_status_and_submittedAt", (q) => q.eq("status", "in_progress")).take(badgeCountLimit),
+      ctx.db.query("identityVerifications").withIndex("by_status_and_submittedAt", (q) => q.eq("status", "in_review")).take(badgeCountLimit),
+      ctx.db.query("supportTickets").withIndex("by_status_createdAt", (q) => q.eq("status", "open")).take(badgeCountLimit),
+      ctx.db.query("supportTickets").withIndex("by_status_createdAt", (q) => q.eq("status", "in_review")).take(badgeCountLimit),
+      ctx.db.query("walletTransactions").withIndex("by_type_and_status", (q) => q.eq("type", "withdrawal").eq("status", "pending")).take(badgeCountLimit),
+      countUnreadSuperAdminNotifications(ctx, admin.profile._id, unreadNotificationLimit),
     ]);
+
+    const pendingKycRows = [
+      ...notStartedKyc,
+      ...pendingKyc,
+      ...inProgressKyc,
+      ...inReviewKyc,
+    ];
+    const pendingZoneWithdrawalRows = pendingWithdrawalCandidates.filter(isZoneWithdrawalRequest);
 
     const legacyBookingWalletReferences = new Set(
       legacyBookingWalletPayments
@@ -639,6 +682,19 @@ export const getDashboardSummary = query({
       revenue: {
         total: capturedBookingRevenue + legacyBookingWalletRevenue + legacyPaymentRevenue,
         currency: "PKR",
+      },
+      badges: {
+        pendingZones: pendingZones.length + pendingMigrationZones.length,
+        pendingZonesCapped: false,
+        pendingKyc: pendingKycRows.length,
+        pendingKycCapped: [notStartedKyc, pendingKyc, inProgressKyc, inReviewKyc].some((rows) => rows.length >= badgeCountLimit),
+        supportNeedsAttention: openSupportTickets.length + inReviewSupportTickets.length,
+        supportNeedsAttentionCapped: [openSupportTickets, inReviewSupportTickets].some((rows) => rows.length >= badgeCountLimit),
+        pendingReports: pendingReports.length,
+        pendingWithdrawals: pendingZoneWithdrawalRows.length,
+        pendingWithdrawalsCapped: pendingWithdrawalCandidates.length >= badgeCountLimit,
+        unreadNotifications: unreadNotifications.count,
+        unreadNotificationsCapped: unreadNotifications.capped,
       },
     };
   },
@@ -1102,6 +1158,22 @@ export const listZones = query({
   },
 });
 
+export const getZoneById = query({
+  args: {
+    sessionToken: v.string(),
+    zoneId: v.id("zones"),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) return null;
+    return {
+      id: zone._id,
+      ...zone,
+    };
+  },
+});
+
 export const listUsers = query({
   args: {
     sessionToken: v.string(),
@@ -1288,17 +1360,8 @@ export const countMyUnreadNotifications = query({
   },
   handler: async (ctx, args) => {
     const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
-    const limit = Math.min(Math.max(args.limit || 300, 1), 1000);
-    const notifications = await ctx.db
-      .query("notifications")
-      .withIndex("by_toUid", (q: any) => q.eq("toUid", admin.profile._id))
-      .order("desc")
-      .take(limit);
-    return notifications.filter((notification: any) =>
-      notification.isArchived !== true
-      && notification.isRead !== true
-      && (!notification.recipientRole || notification.recipientRole === "super_admin")
-    ).length;
+    const result = await countUnreadSuperAdminNotifications(ctx, admin.profile._id, args.limit || 300);
+    return result.count;
   },
 });
 

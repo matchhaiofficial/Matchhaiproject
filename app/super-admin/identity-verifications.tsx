@@ -1,15 +1,18 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import AppHeader from "../../src/components/AppHeader";
-import { AppIcon } from "../../src/components/AppIcon";
-import { AdminEmptyStateCard } from "../../src/components/AdminSurface";
-import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
-import { AppButton, AppCard, StatusPill } from "../../src/components/AppPrimitives";
+import {
+  AdminEmptyStateCard,
+  AdminFilterDrawer,
+  AdminPageHeader,
+  AdminSearchFilterBar,
+  AdminStatusBadge,
+} from "../../src/components/AdminSurface";
+import { AppButton, AppCard } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
+import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   getIdentityVerifications,
@@ -17,8 +20,6 @@ import {
   type SuperAdminIdentityVerification,
 } from "../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
-
-const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -82,7 +83,7 @@ function VerificationCard({
           <Text style={styles.userName} numberOfLines={1}>{item.userName}</Text>
           {item.userEmail ? <Text style={styles.userEmail} numberOfLines={1}>{item.userEmail}</Text> : null}
         </View>
-        <StatusPill tone={statusTone(item.status)} label={formatLabel(item.status)} />
+        <AdminStatusBadge tone={statusTone(item.status)} label={formatLabel(item.status)} />
       </View>
 
       <View style={styles.metaGrid}>
@@ -140,7 +141,7 @@ function VerificationCard({
 }
 
 export default function SuperAdminIdentityVerificationsScreen() {
-  const insets = useSafeAreaInsets();
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["key"]>("all");
   const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]["key"]>("all");
@@ -214,41 +215,27 @@ export default function SuperAdminIdentityVerificationsScreen() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader
+      <AdminPageHeader
         title="Identity Verifications"
         subtitle="Safe Didit KYC status overview."
         onBack={() => router.back()}
         inlineTitle
       />
 
-      <View style={styles.topControls}>
-        <View style={styles.searchBar}>
-          <AppIcon name="search" size={20} color={COLORS.textSecondary} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search user, role, workflow, status"
-            placeholderTextColor={COLORS.textSecondary}
-            style={styles.searchInput}
-            autoCapitalize="none"
-          />
-        </View>
-        <Pressable onPress={() => setDrawerOpen(true)} style={styles.filterButton}>
-          <AppIcon name="filters" size={20} color={COLORS.text} />
-          <Text style={styles.filterButtonText}>Filters</Text>
-          {activeFilterCount ? (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </View>
+      <AdminSearchFilterBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search user, role, workflow, status"
+        onFilterPress={() => setDrawerOpen(true)}
+        activeFilterCount={activeFilterCount}
+        style={styles.searchBar}
+      />
 
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
@@ -272,48 +259,31 @@ export default function SuperAdminIdentityVerificationsScreen() {
         </ScrollView>
       )}
 
-      <AppDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} drawerStyle={styles.drawer}>
-        <View style={styles.drawerContent}>
-          <AppModalHeader
-            title="Verification filters"
-            subtitle={`${activeFilterCount} active filters`}
-            onClose={() => setDrawerOpen(false)}
-            compact
-          />
-          <AppModalBody scroll contentContainerStyle={styles.drawerBody}>
-            <DiscoverFilterRow
-              label="Status"
-              options={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
-              selected={statusFilter}
-              onSelect={(value) => setStatusFilter(value as typeof statusFilter)}
-            />
-            <DiscoverFilterRow
-              label="Role"
-              options={ROLE_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
-              selected={roleFilter}
-              onSelect={(value) => setRoleFilter(value as typeof roleFilter)}
-            />
-          </AppModalBody>
-          <AppModalFooter>
-            <View style={[styles.drawerFooterRow, { paddingBottom: insets.bottom + 8 }]}>
-              <AppButton
-                variant="secondary"
-                style={styles.drawerFooterButton}
-                onPress={() => {
-                  setStatusFilter("all");
-                  setRoleFilter("all");
-                }}
-                disabled={!activeFilterCount}
-              >
-                Reset
-              </AppButton>
-              <AppButton style={styles.drawerFooterButton} onPress={() => setDrawerOpen(false)}>
-                Done
-              </AppButton>
-            </View>
-          </AppModalFooter>
-        </View>
-      </AppDrawer>
+      <AdminFilterDrawer
+        visible={drawerOpen}
+        title="Verification filters"
+        activeFilterCount={activeFilterCount}
+        onClose={() => setDrawerOpen(false)}
+        onReset={() => {
+          setStatusFilter("all");
+          setRoleFilter("all");
+        }}
+        onDone={() => setDrawerOpen(false)}
+        resetDisabled={!activeFilterCount}
+      >
+        <DiscoverFilterRow
+          label="Status"
+          options={STATUS_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
+          selected={statusFilter}
+          onSelect={(value) => setStatusFilter(value as typeof statusFilter)}
+        />
+        <DiscoverFilterRow
+          label="Role"
+          options={ROLE_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
+          selected={roleFilter}
+          onSelect={(value) => setRoleFilter(value as typeof roleFilter)}
+        />
+      </AdminFilterDrawer>
     </Screen>
   );
 }
@@ -326,68 +296,15 @@ const styles = StyleSheet.create({
   screenContent: {
     flex: 1,
   },
-  topControls: {
-    marginTop: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-  },
   searchBar: {
-    borderRadius: RADII.lg,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.cardDark,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: SPACING.md,
-    minHeight: 48,
-    flex: 1,
+    marginBottom: SPACING.md,
   },
-  searchInput: {
-    flex: 1,
-    color: COLORS.text,
-    fontFamily: FONTS.montserratRegular,
-    marginLeft: SPACING.sm,
-  },
-  filterButton: {
-    width: 48,
-    minHeight: 46,
-    borderRadius: RADII.md,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    backgroundColor: COLORS.cardDark,
-    paddingHorizontal: SPACING.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-  },
-  filterButtonText: {
-    display: "none",
-    color: COLORS.text,
-    fontFamily: FONTS.interSemiBold,
-    fontSize: 13,
-  },
-  filterBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filterBadgeText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 11 },
-  drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
-  drawerContent: { flex: 1 },
-  drawerBody: { gap: SPACING.lg },
-  drawerFooterRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
-  drawerFooterButton: { flex: 1 },
   loaderWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   content: {
-    paddingBottom: SPACING.xxl,
     gap: SPACING.md,
   },
   card: {

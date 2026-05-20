@@ -22,6 +22,7 @@ import { useToast } from "../../../../src/hooks/useToast";
 import { cancelBookingIntent } from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
+import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../../src/utils/paymentUiCopy";
 import { buildLegacyMatchroomsHref } from "../../../../src/navigation/routes";
 import styles from "./status.styles";
 
@@ -343,7 +344,7 @@ export default function BookingStatusScreen() {
                     ) : null}
                     {checkoutStatus?.providerDescription ? (
                         <Text style={styles.expiredHint}>
-                            Gateway message: {checkoutStatus.providerDescription}
+                            Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                         </Text>
                     ) : null}
                     {checkoutStatus?.actionRequired ? (

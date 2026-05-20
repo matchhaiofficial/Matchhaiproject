@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,12 +14,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
-import { AdminEmptyStateCard, AdminInfoLine, AdminListCard } from "../../src/components/AdminSurface";
+import { AdminEmptyStateCard, AdminInfoLine, AdminListCard, AdminPageHeader } from "../../src/components/AdminSurface";
 import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import { AppButton, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
+import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   approveZoneWithdrawal,
@@ -49,6 +49,7 @@ function statusTone(status?: string | null) {
 
 export default function SuperAdminWithdrawalsScreen() {
   const insets = useSafeAreaInsets();
+  const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [withdrawals, setWithdrawals] = useState<SuperAdminWithdrawalRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -152,14 +153,14 @@ export default function SuperAdminWithdrawalsScreen() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AppHeader title="Withdrawals" subtitle="Pending zone withdrawal requests" inlineTitle />
+      <AdminPageHeader title="Withdrawals" subtitle="Pending zone withdrawal requests" onBack={() => router.back()} inlineTitle />
       {loading ? (
         <View style={styles.loaderWrap}>
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
@@ -272,7 +273,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { paddingTop: 0 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { gap: SPACING.md, paddingBottom: SPACING.xl },
+  content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm, marginTop: SPACING.sm },
   referenceText: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
   drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },

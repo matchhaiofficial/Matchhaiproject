@@ -124,7 +124,8 @@ export default function MockPaymentScreen() {
                 const message = checkout.transactionType === "OTC"
                     ? `Use the Easypaisa OTC token ${checkout.paymentToken || ""}`.trim()
                     : "Approve the payment in Easypaisa. MatchHai will keep checking the status.";
-                showToast({ type: "info", title: "Payment started", message });
+                const attemptMessage = String(checkout.attemptMessage || "Starting a new payment attempt.");
+                showToast({ type: "info", title: "Payment started", message: `${attemptMessage} ${message}` });
                 router.replace({
                     pathname: "/matchrooms/book/status/[intentId]",
                     params: {

@@ -40,6 +40,19 @@ export type SuperAdminSummary = {
     total: number;
     currency: string;
   };
+  badges?: {
+    pendingZones?: number;
+    pendingZonesCapped?: boolean;
+    pendingKyc?: number;
+    pendingKycCapped?: boolean;
+    supportNeedsAttention?: number;
+    supportNeedsAttentionCapped?: boolean;
+    pendingReports?: number;
+    pendingWithdrawals?: number;
+    pendingWithdrawalsCapped?: boolean;
+    unreadNotifications?: number;
+    unreadNotificationsCapped?: boolean;
+  };
 };
 
 export type SuperAdminUser = {
@@ -422,12 +435,13 @@ function mapZone(doc: any): Zone {
   } as Zone;
 }
 
-export async function getDashboardSummary(): Promise<Result<SuperAdminSummary>> {
+export async function getDashboardSummary(options?: { forceRefresh?: boolean }): Promise<Result<SuperAdminSummary>> {
   try {
     const sessionToken = await getRequiredSessionToken();
     const summary = await getCachedOrLoad(
       `summary:${sessionToken}`,
-      () => convex.query(api.admin.getDashboardSummary, { sessionToken })
+      () => convex.query(api.admin.getDashboardSummary, { sessionToken }),
+      options
     );
     await recordSuperAdminAuditSafe({ action: "super_admin_route_access", module: "super_admin", metadataSafe: { screen: "dashboard" } });
     return { ok: true, data: summary };
@@ -438,7 +452,8 @@ export async function getDashboardSummary(): Promise<Result<SuperAdminSummary>> 
 }
 
 export async function getZones(
-  status?: "pending-review" | "approved_pending_migration" | "active" | "rejected" | "suspended"
+  status?: "pending-review" | "approved_pending_migration" | "active" | "rejected" | "suspended",
+  options?: { forceRefresh?: boolean }
 ): Promise<Result<Zone[]>> {
   try {
     const sessionToken = await getRequiredSessionToken();
@@ -449,7 +464,8 @@ export async function getZones(
           sessionToken,
           status,
           limit: 100,
-        })
+        }),
+      options
     );
     await recordSuperAdminAuditSafe({ action: "view_zone", module: "zones", metadataSafe: { status: status || "all", count: zones.length } });
     return { ok: true, data: zones.map(mapZone) };
@@ -461,6 +477,35 @@ export async function getZones(
 
 export async function getPendingZones(): Promise<Result<Zone[]>> {
   return getZones("pending-review");
+}
+
+export async function getAdminZoneById(
+  zoneId: string,
+  options?: { forceRefresh?: boolean }
+): Promise<Result<Zone | null>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const zone = await getCachedOrLoad(
+      `zone:${sessionToken}:${zoneId}`,
+      () =>
+        convex.query(api.admin.getZoneById, {
+          sessionToken,
+          zoneId: zoneId as Id<"zones">,
+        }),
+      options,
+    );
+    await recordSuperAdminAuditSafe({
+      action: "view_zone_detail",
+      module: "zones",
+      targetType: "zone",
+      targetId: zoneId,
+      metadataSafe: { found: Boolean(zone) },
+    });
+    return { ok: true, data: zone ? mapZone(zone) : null };
+  } catch (error: any) {
+    console.error("[superAdminService] getAdminZoneById error", error);
+    return { ok: false, message: "Failed to load zone." };
+  }
 }
 
 export async function getUsers(
