@@ -35,7 +35,7 @@ type InboxActionDeps = {
   deleting: boolean;
   setDeleting: React.Dispatch<React.SetStateAction<boolean>>;
   userId?: string;
-  markAllAsRead: () => Promise<void>;
+  markAllAsRead: () => Promise<number | void>;
   updateStatus: (
     notificationId: string,
     status: "pending" | "accepted" | "rejected" | "read" | "expired" | "declined",

@@ -12,6 +12,12 @@ import { TimelineFilterKey } from '../constants/timelineFilters';
  * - scheduledDate + scheduledTime fallback
  */
 export function getRoomStartDate(room: any): Date | null {
+    // Preferred: scheduledStartAt (Convex stores this as ms epoch for scheduled start)
+    if (typeof room?.scheduledStartAt === 'number') {
+        const parsed = new Date(room.scheduledStartAt);
+        if (!isNaN(parsed.getTime())) return parsed;
+    }
+
     // Primary: startTime
     if (room.startTime) {
         if (typeof room.startTime === 'object' && 'seconds' in room.startTime) {

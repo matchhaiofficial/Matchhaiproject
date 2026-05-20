@@ -116,8 +116,6 @@ export default function MatchhaiLaunchScreen({ exiting = false }: MatchhaiLaunch
 
   return (
     <Animated.View style={[styles.screen, screenStyle]}>
-      <View style={styles.topShade} />
-
       <View style={styles.content}>
         <View style={styles.logoStage}>
           <Animated.View style={[styles.logoShell, logoStyle]}>
@@ -143,14 +141,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#050607",
     overflow: "hidden",
-  },
-  topShade: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: "46%",
-    backgroundColor: "rgba(66, 165, 245, 0.035)",
   },
   content: {
     flex: 1,

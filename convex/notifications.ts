@@ -790,6 +790,34 @@ export const listByFromUidAndType = query({
   },
 });
 
+export const listOutgoingMatchroomJoinRequests = query({
+  args: {
+    fromUid: v.id("users"),
+    matchroomId: v.optional(v.id("matchrooms")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit || DEFAULT_LIMIT;
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_fromUid_type_status", (q: any) =>
+        q.eq("fromUid", args.fromUid).eq("type", "match.join_request").eq("status", "pending")
+      )
+      .order("desc")
+      .take(limit * 3);
+
+    return collapsePendingMatchJoinDuplicates(notifications)
+      .filter(isNotificationActive)
+      .filter((notification: any) => {
+        if (!args.matchroomId) return true;
+        const data = notification.data as any;
+        return String(notification.matchroomId || data?.matchroomId || "") === String(args.matchroomId);
+      })
+      .map(serializeNotification)
+      .slice(0, limit);
+  },
+});
+
 export const listByFromUid = query({
   args: {
     fromUid: v.id("users"),

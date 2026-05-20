@@ -6,6 +6,9 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.backgroundDark,
     },
+    screenContent: {
+        paddingBottom: 0,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -37,15 +40,13 @@ export default StyleSheet.create({
         flex: 1,
     },
     content: {
-        padding: SPACING.screenPadding,
         alignItems: 'stretch',
-        paddingBottom: SPACING.xl,
+        paddingBottom: SPACING.xxl,
     },
     statusDisplay: {
         width: '100%',
         alignItems: 'center',
         marginBottom: SPACING.xl,
-        marginTop: SPACING.md,
     },
     statusPill: {
         marginTop: SPACING.sm,
@@ -91,6 +92,9 @@ export default StyleSheet.create({
         borderColor: COLORS.cardBorder,
         marginBottom: SPACING.lg,
         ...SHADOWS.cardSoft,
+    },
+    sectionCardSpacing: {
+        marginBottom: SPACING.lg,
     },
     cardTitle: {
         color: COLORS.textSecondary,
@@ -193,11 +197,28 @@ export default StyleSheet.create({
         marginTop: SPACING.md,
         fontStyle: 'italic',
     },
+    settlementRow: {
+        alignItems: 'flex-start',
+        gap: SPACING.lg,
+    },
+    settlementLabel: {
+        flex: 0,
+        minWidth: 56,
+    },
+    settlementValue: {
+        flex: 1,
+        textAlign: 'right',
+        lineHeight: 18,
+    },
 
     // Footer Actions
     footer: {
         gap: SPACING.md,
         width: '100%',
+    },
+    footerBlock: {
+        width: '100%',
+        marginTop: SPACING.xs,
     },
     footerRow: {
         flexDirection: 'row',

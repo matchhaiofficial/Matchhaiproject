@@ -8,7 +8,6 @@ import {
     Pressable,
     View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -33,7 +32,6 @@ import styles from "./pay.styles";
 export default function MockPaymentScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const { showToast } = useToast();
     const startCheckout = useAction((api as any).easypaisa.startCheckout);
@@ -43,7 +41,7 @@ export default function MockPaymentScreen() {
     const [processing, setProcessing] = useState(false);
     const [walletBalance, setWalletBalance] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
-    const ctaBottomGuard = insets.bottom + 24;
+    const [nowMs, setNowMs] = useState(Date.now());
 
     useEffect(() => {
         const fetchIntent = async () => {
@@ -80,8 +78,22 @@ export default function MockPaymentScreen() {
         loadWallet();
     }, [user?._id]);
 
+    useEffect(() => {
+        if (!intent?.expiresAt) return;
+        const timer = setInterval(() => setNowMs(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [intent?.expiresAt]);
+
     const handleMockPayment = async () => {
         if (!intentId || !user) return;
+        if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
+            showToast({
+                type: "warning",
+                title: "Slot hold expired",
+                message: "Please request the slot again to continue.",
+            });
+            return;
+        }
         setProcessing(true);
 
         try {
@@ -93,6 +105,7 @@ export default function MockPaymentScreen() {
                         bookingIntentId: intentId as Id<"bookingIntents">,
                         userId: user._id as Id<"users">,
                         transactionType: "MA",
+                        forceNew: true,
                     });
                 } catch (error: any) {
                     const message = String(error?.message || error || "");
@@ -105,6 +118,7 @@ export default function MockPaymentScreen() {
                         bookingIntentId: intentId as Id<"bookingIntents">,
                         userId: user._id as Id<"users">,
                         transactionType: "OTC",
+                        forceNew: true,
                     });
                 }
                 const message = checkout.transactionType === "OTC"
@@ -153,6 +167,8 @@ export default function MockPaymentScreen() {
 
     if (!intent) return null;
     const hasEnoughWallet = walletBalance >= Number(intent.pricing?.totalCost || 0);
+    const isPaymentWindowExpired = Boolean(intent.expiresAt && intent.expiresAt <= nowMs);
+    const payDisabled = processing || !intent || isPaymentWindowExpired || (paymentMethod === "wallet" && !hasEnoughWallet);
 
     return (
         <Screen
@@ -160,7 +176,7 @@ export default function MockPaymentScreen() {
             variant="stack"
             scroll={false}
             edges={["top", "bottom"]}
-            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
+            contentStyle={styles.screenContent}
         >
             <AppHeader
                 title="Review & Pay"
@@ -192,7 +208,7 @@ export default function MockPaymentScreen() {
                 </AppCard>
 
                 {/* Summary */}
-                <DetailSectionCard title="Booking Summary">
+                <DetailSectionCard title="Booking Summary" style={styles.sectionCardSpacing}>
                     <DetailKeyValueRow label="Lobby" value={intent.game} />
                     <DetailKeyValueRow
                         label="Price per seat"
@@ -205,6 +221,7 @@ export default function MockPaymentScreen() {
                 <DetailSectionCard
                     title="Payment Method"
                     subtitle="Choose how to reserve your seat."
+                    style={styles.sectionCardSpacing}
                 >
                     <Pressable
                         style={[
@@ -249,28 +266,37 @@ export default function MockPaymentScreen() {
                             Insufficient wallet balance. Please add funds from Wallet.
                         </Text>
                     ) : null}
+                    {isPaymentWindowExpired ? (
+                        <Text style={styles.expiredText}>
+                            This slot hold expired. Please request the slot again to continue.
+                        </Text>
+                    ) : null}
                 </DetailSectionCard>
-                <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
+                <View style={styles.footerBlock}>
                     <View style={styles.footer}>
                 <AppButton
                     size="lg"
                     onPress={handleMockPayment}
-                    disabled={processing || !intent || (paymentMethod === "wallet" && !hasEnoughWallet)}
+                    disabled={payDisabled}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={(processing || !intent || (paymentMethod === "wallet" && !hasEnoughWallet)) ? styles.payBtnDisabled : undefined}
+                    style={payDisabled ? styles.payBtnDisabled : undefined}
                 >
                     {processing ? (
                         <ActivityIndicator color="#FFF" />
                     ) : (
                         <>
                             <Text style={styles.payBtnText}>
-                                {paymentMethod === "wallet" ? "Reserve with Wallet" : "Continue to Easypaisa"}
+                                {isPaymentWindowExpired
+                                    ? "Slot Hold Expired"
+                                    : paymentMethod === "wallet" ? "Reserve with Wallet" : "Continue to Easypaisa"}
                             </Text>
-                            <AppIcon
-                                name={paymentMethod === "wallet" ? "lock" : "open-in-new"}
-                                size={18}
-                                color="#FFF"
-                            />
+                            {!isPaymentWindowExpired ? (
+                                <AppIcon
+                                    name={paymentMethod === "wallet" ? "lock" : "open-in-new"}
+                                    size={18}
+                                    color="#FFF"
+                                />
+                            ) : null}
                         </>
                     )}
                 </AppButton>

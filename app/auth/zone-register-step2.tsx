@@ -2,7 +2,7 @@ import { Picker } from "@react-native-picker/picker";
 import { router } from "expo-router";
 import debounce from "lodash.debounce";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import {
   DEFAULT_CITY,
@@ -470,7 +470,11 @@ export default function AdminRegisterStep2() {
           onClose={() => setModalVisible(false)}
         />
 
-        <View style={[styles.branchModalBody, { height: branchModalBodyHeight }]}>
+        <KeyboardAvoidingView
+          style={[styles.branchModalBody, { height: branchModalBodyHeight }]}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+        >
           <ScrollView
             style={styles.branchModalScroller}
             contentContainerStyle={styles.branchModalContent}
@@ -490,6 +494,7 @@ export default function AdminRegisterStep2() {
                     value={branchDisplayName}
                     onChangeText={setBranchDisplayName}
                     selectionColor={COLORS.accent}
+                    returnKeyType="next"
                   />
                 </View>
               </View>
@@ -627,7 +632,7 @@ export default function AdminRegisterStep2() {
               </View>
             ) : null}
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
 
         <AppModalFooter>
           <View style={styles.branchModalActions}>

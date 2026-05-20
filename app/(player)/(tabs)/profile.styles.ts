@@ -62,6 +62,11 @@ export default StyleSheet.create({
         justifyContent: 'center',
         marginBottom: SPACING.md,
     },
+    avatarImage: {
+        width: "100%",
+        height: "100%",
+        borderRadius: 40,
+    },
     avatarText: {
         color: COLORS.text,
         fontSize: TEXT_SIZES.xxl,

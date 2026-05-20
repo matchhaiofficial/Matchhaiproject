@@ -189,6 +189,7 @@ export const listIntentsByUser = query({
 export const listActiveIntentsByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const intents = await ctx.db
       .query("bookingIntents")
       .withIndex("by_createdByUid", (q) => q.eq("createdByUid", args.userId))
@@ -197,6 +198,7 @@ export const listActiveIntentsByUser = query({
 
     return intents.filter((intent: any) =>
       intent.paymentStatus !== "paid" &&
+      (!intent.expiresAt || intent.expiresAt > now) &&
       (intent.status === "approved_pending_payment" ||
         intent.status === "pending_approvals" ||
         intent.status === "approved")
@@ -210,6 +212,7 @@ export const listActiveIntentsByUserForMatchroom = query({
     matchroomId: v.id("matchrooms"),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const intents = await ctx.db
       .query("bookingIntents")
       .withIndex("by_createdByUid_matchroomId", (q) =>
@@ -219,6 +222,7 @@ export const listActiveIntentsByUserForMatchroom = query({
 
     return intents.filter((intent: any) =>
       intent.paymentStatus !== "paid" &&
+      (!intent.expiresAt || intent.expiresAt > now) &&
       (intent.status === "approved_pending_payment" ||
         intent.status === "pending_approvals" ||
         intent.status === "approved")

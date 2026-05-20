@@ -176,8 +176,23 @@ type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
 type ErrorResult = { ok: false; message: string; code?: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
 
+function cleanConvexErrorMessage(error: unknown, fallback = "Something went wrong. Please try again.") {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const cleaned = raw
+    .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
+    .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
+    .replace(/\bServer Error\b/gi, "")
+    .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
+    .replace(/\bat handler\s*\([^)]*\)/gi, "")
+    .split("Called by client")[0]
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return cleaned || fallback;
+}
+
 function normalizeMatchroomRequestError(error: any) {
-  const message = String(error?.message || "").trim();
+  const message = cleanConvexErrorMessage(error, "Failed to send request");
   if (message.includes("Request already pending")) {
     return "Your join request is already pending captain approval.";
   }
@@ -488,7 +503,56 @@ export async function createMatchroom(
     return { ok: true, id: matchroomId };
   } catch (error: any) {
     console.error("[matchService] createMatchroom error:", error);
-    return { ok: false, message: error?.message || "Failed to create matchroom" };
+    return { ok: false, message: cleanConvexErrorMessage(error, "Failed to create matchroom") };
+  }
+}
+
+export async function checkMatchroomCreateAvailability(input: {
+  game: string;
+  locationMode?: "zone" | "broadcast";
+  scheduledDate?: string;
+  scheduledTime?: string;
+  zoneId?: string | null;
+}): Promise<Result<{ available: boolean; message?: string | null; reason?: string | null }>> {
+  try {
+    const scheduledStartAt = parseScheduledStartAt(input.scheduledDate, input.scheduledTime);
+    if (!scheduledStartAt) {
+      return { ok: false, message: "Scheduled date/time is required." };
+    }
+
+    const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, Date.now());
+    if (!scheduleValidation.ok) {
+      return {
+        ok: true,
+        data: {
+          available: false,
+          message: scheduleValidation.message,
+          reason: "invalid_schedule",
+        },
+      };
+    }
+
+    const result = await convex.query((api as any).matchrooms.checkCreateAvailability, {
+      game: input.game,
+      locationMode: input.locationMode,
+      scheduledStartAt,
+      zoneId: input.zoneId || undefined,
+    });
+
+    return {
+      ok: true,
+      data: {
+        available: Boolean(result?.available),
+        message: result?.message ? String(result.message) : null,
+        reason: result?.reason ? String(result.reason) : null,
+      },
+    };
+  } catch (error: any) {
+    console.error("[matchService] checkMatchroomCreateAvailability error:", error);
+    return {
+      ok: false,
+      message: cleanConvexErrorMessage(error, "Could not verify this time slot. Please try again."),
+    };
   }
 }
 
@@ -836,10 +900,9 @@ export async function cancelMatchJoinRequest(
 ): Promise<Result> {
   try {
     const me = await getCurrentIdentity();
-    const requests = await convex.query(api.notifications.listByFromUidAndType, {
+    const requests = await convex.query(api.notifications.listOutgoingMatchroomJoinRequests, {
       fromUid: me.convexId,
-      type: "match.join_request",
-      status: "pending",
+      matchroomId: roomId as Id<"matchrooms">,
       limit: 100,
     });
 
