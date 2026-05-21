@@ -206,6 +206,84 @@ export type EasypaisaAdminTransaction = {
   };
 };
 
+export type SuperAdminPaymentDetail = {
+  paymentTransaction: {
+    _id: string;
+    orderRefNum: string;
+    kind: "booking_intent" | "wallet_topup";
+    status: string;
+    amount: number;
+    currency: string;
+    provider: string;
+    paymentMethod?: string | null;
+    providerReference?: string | null;
+    providerStatus?: string | null;
+    providerDescription?: string | null;
+    providerDescriptionTruncated?: boolean;
+    createdAt: number;
+    expiresAt?: number | null;
+    processedAt?: number | null;
+    updatedAt: number;
+    callbackCount: number;
+    lastCallbackAt?: number | null;
+    lastError?: string | null;
+  };
+  providerContext: {
+    flow?: string | null;
+    lastSyncAt?: number | null;
+    lastProviderStatus?: string | null;
+  };
+  linkedWalletTransaction?: {
+    _id: string;
+    type: string;
+    status: string;
+    amount: number;
+    createdAt: number;
+    reference?: string | null;
+    metadataSource?: string | null;
+  } | null;
+  linkedBookingIntent?: {
+    _id: string;
+    matchroomId: string;
+    paymentStatus: string;
+    pricingTotalCost?: number | null;
+    createdAt: number;
+  } | null;
+  linkedMatchroom?: {
+    _id: string;
+    title: string;
+    status: string;
+    scheduledDate?: string | null;
+    scheduledTime?: string | null;
+    scheduledStartAt?: number | null;
+    createdAt: number;
+  } | null;
+  linkedUser?: {
+    _id: string;
+    displayName: string;
+    username?: string | null;
+    emailMasked?: string | null;
+  } | null;
+  support: {
+    orderRefNum: string;
+    paymentTransactionId: string;
+    walletTransactionId?: string | null;
+    bookingIntentId?: string | null;
+    matchroomId?: string | null;
+    userId: string;
+  };
+  reconciliation: {
+    paymentPaidNoWalletTx: boolean;
+    walletTxWithoutPaid: boolean;
+    bookingIntentUnpaidButPaymentPaid: boolean;
+    paymentFailedButWalletTxExists: boolean;
+    paymentPendingPastExpiry: boolean;
+    bookingIntentMissing: boolean;
+    matchroomMissing: boolean;
+    messages: string[];
+  };
+};
+
 export type SuperAdminWithdrawalStatus = "pending" | "completed" | "failed";
 
 export type SuperAdminWithdrawalRequest = {
@@ -863,6 +941,29 @@ export async function getEasypaisaTransactions(
   } catch (error: any) {
     console.error("[superAdminService] getEasypaisaTransactions error", error);
     return { ok: false, message: "Failed to load Easypaisa transactions." };
+  }
+}
+
+export async function getPaymentDetailByOrderRefNum(
+  orderRefNum: string
+): Promise<Result<SuperAdminPaymentDetail | null>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const detail = await convex.query(api.admin.getPaymentDetailByOrderRefNum, {
+      sessionToken,
+      orderRefNum,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_payment_detail",
+      module: "payments",
+      targetType: "payment",
+      targetId: detail?.support?.paymentTransactionId || orderRefNum,
+      metadataSafe: { orderRefNum, found: Boolean(detail) },
+    });
+    return { ok: true, data: detail as SuperAdminPaymentDetail | null };
+  } catch (error: any) {
+    console.error("[superAdminService] getPaymentDetailByOrderRefNum error", error);
+    return { ok: false, message: "Failed to load payment detail." };
   }
 }
 

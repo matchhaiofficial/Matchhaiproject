@@ -176,6 +176,8 @@ function canonicalizeType(rawType: string) {
       return "kyc.review_needed";
     case "operations.general":
       return "operations.general";
+    case "payments.attention_required":
+      return "payments.attention_required";
     case "general":
     case "system.general":
       return "system.general";
@@ -250,6 +252,7 @@ function defaultDedupePolicy(type: string): DedupePolicy {
     case "team.challenge_received":
     case "moderation.report_submitted":
     case "moderation.review_needed":
+    case "payments.attention_required":
       return "upsert_active";
     case "team.invite":
     case "team.invite_response":

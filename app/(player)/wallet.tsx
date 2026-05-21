@@ -43,7 +43,9 @@ import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import {
     PAYMENT_VERIFICATION_SAFE_MESSAGE,
+    RESERVED_WALLET_HELPER_TEXT,
     UNPAID_BOOKINGS_HELPER_TEXT,
+    WALLET_BALANCE_HELPER_TEXT,
 } from "../../src/utils/paymentUiCopy";
 import { Perf } from "../../src/utils/perfInstrumentation";
 import {
@@ -69,6 +71,13 @@ const getMillis = (value: any) => {
 };
 
 const formatCurrency = (value: number) => `Rs ${Math.round(value)}`;
+
+const ACTIVE_CHECKOUT_STATUSES = new Set([
+  "created",
+  "redirected",
+  "token_received",
+  "pending",
+]);
 
 const formatReferenceLabel = (value?: string | null) => {
   if (!value) return "N/A";
@@ -143,8 +152,12 @@ export default function WalletScreen() {
   const startCheckout = useAction((api as any).easypaisa.startCheckout);
   const repairRejectedRefunds = useMutation(api.teamChallenges.repairRejectedRefundsForCaptain);
 
-  const walletBalance =
-    useQuery(api.wallet.getBalance, userId ? { userId } : "skip") ?? 0;
+  const walletSummary = useQuery(
+    api.wallet.getSummary,
+    userId ? { userId } : "skip",
+  );
+  const walletBalance = walletSummary?.balance ?? 0;
+  const walletHeldBalance = walletSummary?.heldBalance ?? 0;
   const walletHistory = useQuery(
     api.wallet.listHistory,
     userId ? { userId } : "skip",
@@ -308,7 +321,6 @@ export default function WalletScreen() {
     return {
       totalSpent,
       pendingAmount,
-      paidCount: intents.filter((item) => item.paymentStatus === "paid").length,
       pendingCount: unpaidIntents.length,
     };
   }, [intents]);
@@ -316,8 +328,12 @@ export default function WalletScreen() {
   const loading =
     authLoading ||
     serviceLoading ||
+    (Boolean(userId) && walletSummary === undefined) ||
     (Boolean(userId) && bookingIntents === undefined);
   const quickAmounts = [500, 1000, 2000, 5000];
+  const hasActiveCheckout = ACTIVE_CHECKOUT_STATUSES.has(
+    String(checkoutStatus?.status || ""),
+  );
   const loadingDeps = useMemo(
     () => ({
       authLoading,
@@ -555,9 +571,12 @@ export default function WalletScreen() {
           {activeTab === "overview" ? (
             <>
               <AppCard style={styles.balanceCard}>
-                <Text style={styles.balanceLabel}>Available Wallet Balance</Text>
+                <Text style={styles.balanceLabel}>Wallet Balance</Text>
                 <Text style={styles.balanceValue}>
                   {formatCurrency(walletBalance)}
+                </Text>
+                <Text style={styles.balanceHelperText}>
+                  {WALLET_BALANCE_HELPER_TEXT}
                 </Text>
               </AppCard>
 
@@ -612,23 +631,20 @@ export default function WalletScreen() {
                 </View>
               </AppCard>
 
-              {checkoutStatus ? (
+              {checkoutStatus && hasActiveCheckout ? (
                 <AppCard>
                   <Text style={styles.summaryTitle}>
-                    Latest Easypaisa Checkout
-                  </Text>
-                  <Text style={styles.summaryValue}>
-                    {getCheckoutStatusLabel(checkoutStatus.status)}
+                    Pending Easypaisa Payment
                   </Text>
                   <Text style={styles.summarySubText}>
-                    Order {checkoutStatus.orderRefNum} |{" "}
-                    {formatCurrency(Number(checkoutStatus.amount || 0))}
+                    Status: {getCheckoutStatusLabel(checkoutStatus.status)}
                   </Text>
-                  {checkoutStatus.providerDescription ? (
-                    <Text style={[styles.summarySubText, { marginTop: 8 }]}>
-                      Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
-                    </Text>
-                  ) : null}
+                  <Text style={styles.summarySubText}>
+                    Order: {checkoutStatus.orderRefNum}
+                  </Text>
+                  <Text style={styles.summarySubText}>
+                    Amount: {formatCurrency(Number(checkoutStatus.amount || 0))}
+                  </Text>
                   {checkoutStatus.actionRequired ? (
                     <Text style={[styles.summarySubText, { marginTop: 8 }]}>
                       Next step:{" "}
@@ -647,54 +663,49 @@ export default function WalletScreen() {
                       Last sync note: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                     </Text>
                   ) : null}
-                  {checkoutStatus.status === "created" ||
-                  checkoutStatus.status === "redirected" ||
-                  checkoutStatus.status === "token_received" ||
-                  checkoutStatus.status === "pending" ? (
-                    <AppButton
-                      onPress={async () => {
-                        try {
-                          if (!userId) {
-                            throw new Error("Profile unavailable.");
-                          }
-                          await Perf.measureAsync(
-                            "Wallet.SyncCheckoutStatus",
-                            () =>
-                              syncCheckoutStatus({
-                                orderRefNum: String(checkoutStatus.orderRefNum),
-                                userId,
-                              } as any),
-                          );
-                          showToast({
-                            type: "info",
-                            title: "Refreshing",
-                            message:
-                              "Asked MatchHai to sync the latest Easypaisa status.",
-                          });
-                        } catch (error) {
-                          Logger.error(
-                            "Wallet",
-                            "Failed to refresh checkout",
-                            error,
-                          );
-                          showToast({
-                            type: "error",
-                            title: "Refresh failed",
-                            message: "Could not sync the Easypaisa status.",
-                          });
+                  <AppButton
+                    onPress={async () => {
+                      try {
+                        if (!userId) {
+                          throw new Error("Profile unavailable.");
                         }
-                      }}
-                      style={[styles.addFundsBtn, { marginTop: 16 }]}
-                      perf={{
-                        actionKey: "wallet_checkout_refresh",
-                        meta: {
-                          orderRefNum: checkoutStatus.orderRefNum,
-                        },
-                      }}
-                    >
-                      Refresh Easypaisa Status
-                    </AppButton>
-                  ) : null}
+                        await Perf.measureAsync(
+                          "Wallet.SyncCheckoutStatus",
+                          () =>
+                            syncCheckoutStatus({
+                              orderRefNum: String(checkoutStatus.orderRefNum),
+                              userId,
+                            } as any),
+                        );
+                        showToast({
+                          type: "info",
+                          title: "Refreshing",
+                          message:
+                            "Asked MatchHai to sync the latest Easypaisa status.",
+                        });
+                      } catch (error) {
+                        Logger.error(
+                          "Wallet",
+                          "Failed to refresh checkout",
+                          error,
+                        );
+                        showToast({
+                          type: "error",
+                          title: "Refresh failed",
+                          message: "Could not sync the Easypaisa status.",
+                        });
+                      }
+                    }}
+                    style={[styles.addFundsBtn, { marginTop: 16 }]}
+                    perf={{
+                      actionKey: "wallet_checkout_refresh",
+                      meta: {
+                        orderRefNum: checkoutStatus.orderRefNum,
+                      },
+                    }}
+                  >
+                    Refresh Easypaisa Status
+                  </AppButton>
                 </AppCard>
               ) : null}
 
@@ -719,8 +730,13 @@ export default function WalletScreen() {
                   </Text>
                 </AppCard>
                 <AppCard style={styles.statCard}>
-                  <Text style={styles.statLabel}>Paid Bookings</Text>
-                  <Text style={styles.statValue}>{totals.paidCount}</Text>
+                  <Text style={styles.statLabel}>Reserved</Text>
+                  <Text style={styles.statValue}>
+                    {formatCurrency(walletHeldBalance)}
+                  </Text>
+                  <Text style={styles.statHelperText}>
+                    {RESERVED_WALLET_HELPER_TEXT}
+                  </Text>
                 </AppCard>
                 <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>My Requests</Text>

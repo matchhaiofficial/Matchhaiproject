@@ -2781,8 +2781,8 @@ export const respondToMatchroomInvite = mutation({
       dedupePolicy: "upsert_active",
       matchroomId: matchroomId as Id<"matchrooms">,
       route: `/matchrooms/${String(matchroomId)}`,
-      title: "Pay to Confirm Slot",
-      body: `Your invite to ${room.title} was accepted. Pay now to secure your slot.`,
+      title: "Payment required",
+      body: `Your invite to ${room.title} was accepted. Pay now to confirm your slot.`,
       data: {
         matchroomId: String(matchroomId),
         matchroomTitle: room.title,
@@ -2970,8 +2970,8 @@ export const respondToMatchroomJoinRequest = mutation({
         dedupePolicy: "upsert_active",
         matchroomId: matchroomId as Id<"matchrooms">,
         route: `/matchrooms/${String(matchroomId)}`,
-        title: "Request Accepted",
-        body: `Your request for ${room.title} has been accepted. Pay now to confirm your slot.`,
+        title: "Payment required",
+        body: `Your request for ${room.title} was accepted. Pay now to confirm your slot.`,
         data: {
           matchroomId,
           matchroomTitle: room.title,
@@ -3050,8 +3050,8 @@ export const respondToMatchroomJoinRequest = mutation({
       dedupePolicy: "upsert_active",
       matchroomId: matchroomId as Id<"matchrooms">,
       route: `/matchrooms/${String(matchroomId)}`,
-      title: "Request Accepted",
-      body: `Your request for ${room.title} has been accepted. Pay now to confirm your slot.`,
+      title: "Payment required",
+      body: `Your request for ${room.title} was accepted. Pay now to confirm your slot.`,
       data: {
         matchroomId,
         matchroomTitle: room.title,
@@ -3112,8 +3112,8 @@ export const payMatchroomSeatIntent = mutation({
         dedupePolicy: "replace_active",
         matchroomId: intent.matchroomId,
         route: `/matchrooms/${String(intent.matchroomId)}`,
-        title: "Payment Expired",
-        body: "Your payment window expired before the slot could be confirmed.",
+        title: "Payment expired",
+        body: "Your payment window expired before the slot was confirmed. Start a new payment if the slot is still available.",
         data: {
           intentId: String(args.intentId),
           matchroomId: String(intent.matchroomId),
@@ -3170,8 +3170,8 @@ export const payMatchroomSeatIntent = mutation({
         dedupePolicy: "replace_active",
         matchroomId: intent.matchroomId,
         route: `/matchrooms/${String(intent.matchroomId)}`,
-        title: "Payment Expired",
-        body: "This slot is no longer available, so the pending payment was closed.",
+        title: "Payment expired",
+        body: "This slot is no longer available, so the pending payment was closed. Choose another slot to continue.",
         data: {
           intentId: String(args.intentId),
           matchroomId: String(intent.matchroomId),
@@ -3268,12 +3268,15 @@ export const payMatchroomSeatIntent = mutation({
       dedupePolicy: "replace_active",
       matchroomId: intent.matchroomId,
       route: `/matchrooms/${String(intent.matchroomId)}`,
-      title: "Payment Successful",
-      body: `Your slot for ${room.title} is now confirmed.`,
+      title: "Payment successful",
+      body: `Your payment was received. Your slot for ${room.title} is now confirmed.`,
       data: {
         intentId: String(args.intentId),
         matchroomId: String(intent.matchroomId),
         matchroomTitle: room.title,
+        orderRefNum: String(args.externalPaymentReference || "").startsWith("easypaisa:")
+          ? String(args.externalPaymentReference).replace(/^easypaisa:/, "")
+          : null,
         decision: "paid",
         href: `/matchrooms/${String(intent.matchroomId)}`,
       },

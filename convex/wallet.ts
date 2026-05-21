@@ -49,6 +49,17 @@ export const getBalance = query({
   },
 });
 
+export const getSummary = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    return {
+      balance: user?.walletBalance ?? 0,
+      heldBalance: user?.walletHeldBalance ?? 0,
+    };
+  },
+});
+
 // List wallet transactions for a user
 export const listTransactions = query({
   args: { userId: v.id("users") },
@@ -110,8 +121,7 @@ export const listHistory = query({
         createdAt: row.createdAt,
         provider: linkedPayment?.provider || metadata.provider || null,
         subtitle:
-          linkedPayment?.providerDescription
-          || metadata.sourceLabel
+          metadata.sourceLabel
           || metadata.paymentMethod
           || null,
         support: {
@@ -143,7 +153,7 @@ export const listHistory = query({
         reference: row.orderRefNum,
         createdAt: row.createdAt,
         provider: row.provider,
-        subtitle: row.providerDescription || row.paymentMethod || null,
+        subtitle: row.paymentMethod || null,
         support: {
           walletTransactionId: null,
           paymentTransactionId: String(row._id),

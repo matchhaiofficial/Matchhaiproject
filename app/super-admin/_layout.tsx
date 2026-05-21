@@ -64,6 +64,7 @@ export default function SuperAdminLayout() {
             <Stack.Screen name="audit-logs" options={{ headerShown: false }} />
             <Stack.Screen name="identity-verifications" options={{ headerShown: false }} />
             <Stack.Screen name="withdrawals" options={{ headerShown: false }} />
+            <Stack.Screen name="payment/[orderRefNum]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="matchrooms" options={{ headerShown: false }} />
             <Stack.Screen name="matchroom/[id]" options={{ presentation: 'modal', headerShown: false }} />
             <Stack.Screen name="support" options={{ presentation: 'modal', headerShown: false }} />

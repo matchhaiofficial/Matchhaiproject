@@ -46,6 +46,8 @@ const BOOKING_ACCEPT_TYPES = new Set(["booking.request_accepted", "booking_reque
 const BOOKING_REJECT_TYPES = new Set(["booking.request_rejected", "booking_request_rejected"]);
 const BOOKING_COUNTER_TYPES = new Set(["booking.counter_offer", "booking_counter_offer"]);
 const MATCH_CANCELLED_TYPES = new Set(["match.cancelled", "match_cancelled_admin"]);
+const WALLET_PAYMENT_RESULT_TYPES = new Set(["wallet.topup_result"]);
+const MATCH_PAYMENT_RESULT_TYPES = new Set(["match.payment_result"]);
 
 const getTimeAgo = (timestamp: any): string => {
   if (!timestamp) return "Just now";
@@ -81,6 +83,9 @@ const getNotificationTeamId = (item: Notification) =>
   item.teamId || item.meta?.teamId || item.data?.teamId;
 
 const getNotificationIntentId = (item: Notification) => item.meta?.intentId;
+
+const getNotificationOrderRefNum = (item: Notification) =>
+  String(item.meta?.orderRefNum || item.data?.orderRefNum || "").trim();
 
 const getNotificationGameLabel = (item: Notification) =>
   formatGameLabel(item.meta?.gameKey || item.meta?.game);
@@ -188,6 +193,9 @@ export function InboxNotificationCard({
   const isBookingRequestRejected = BOOKING_REJECT_TYPES.has(item.type);
   const isBookingCounterOffer = BOOKING_COUNTER_TYPES.has(item.type);
   const isMatchCancelledAdmin = MATCH_CANCELLED_TYPES.has(item.type);
+  const isWalletPaymentResult = WALLET_PAYMENT_RESULT_TYPES.has(item.type);
+  const isMatchPaymentResult = MATCH_PAYMENT_RESULT_TYPES.has(item.type);
+  const isPaymentResult = isWalletPaymentResult || isMatchPaymentResult;
   const isBookingNotification =
     isBookingRequestAccepted || isBookingRequestRejected || isBookingCounterOffer;
   const isPending = item.status === "pending";
@@ -227,7 +235,8 @@ export function InboxNotificationCard({
     isTeamChallenge ||
     isTeamChallengeUpdate ||
     isBookingNotification ||
-    isMatchCancelledAdmin;
+    isMatchCancelledAdmin ||
+    isPaymentResult;
   const typeLabel = isRequest
     ? "Friend Request"
     : isJoinRequest
@@ -252,8 +261,12 @@ export function InboxNotificationCard({
                       ? "Team Match Challenge"
                       : isTeamChallengeUpdate
                         ? "Challenge Update"
-                        : isMatchCancelledAdmin
-                          ? "Matchroom Closed"
+                    : isMatchCancelledAdmin
+                      ? "Matchroom Closed"
+                      : isWalletPaymentResult
+                        ? "Wallet Update"
+                        : isMatchPaymentResult
+                          ? "Payment Update"
                           : "Team Update";
 
   const isInfoType =
@@ -264,7 +277,8 @@ export function InboxNotificationCard({
     isPaymentRequired ||
     isSeatInv ||
     isTeamChallenge ||
-    isTeamChallengeUpdate;
+    isTeamChallengeUpdate ||
+    isPaymentResult;
   const iconColor = isInfoType ? COLORS.accent : COLORS.success;
   const iconContainerStyle = isInfoType ? styles.iconContainerInfo : styles.iconContainerSuccess;
   const headerIconName: AppIconName = isRequest
@@ -275,12 +289,17 @@ export function InboxNotificationCard({
       ? "gavel"
         : isPaymentRequired || isSeatInv
           ? "event-seat"
+          : isWalletPaymentResult
+            ? "paymentWallet"
+            : isMatchPaymentResult
+              ? "receipt-long"
           : isTeamChallenge || isTeamChallengeUpdate
             ? "sports-esports"
             : "info";
   const matchroomId = getNotificationMatchroomId(item);
   const teamId = getNotificationTeamId(item);
   const intentId = getNotificationIntentId(item);
+  const orderRefNum = getNotificationOrderRefNum(item);
 
   const handleAcceptPressIn = useCallback(() => {
     if (!touchDebugEnabled) return;
@@ -428,7 +447,7 @@ export function InboxNotificationCard({
       <View style={[styles.cardBody, isUnread && styles.cardBodyUnread]}>
         <View style={styles.messageWrap}>
           <Text style={styles.messageText}>
-            {!isPaymentRequired && (
+            {!isPaymentRequired && !isPaymentResult && (
               <Text
                 style={styles.highlightText}
                 onPress={item.fromUid ? () => openProfile(item.fromUid) : undefined}
@@ -558,9 +577,24 @@ export function InboxNotificationCard({
                 {!!item.meta?.note && ` Note: ${item.meta.note}`}
               </>
             )}
+            {isPaymentResult && (
+              <>
+                {!!item.title && (
+                  <Text style={styles.highlightText}>{item.title}</Text>
+                )}
+                {item.title && item.message ? ": " : ""}
+                {item.message || "Review this payment update."}
+              </>
+            )}
             {!hasKnownMessage && fallbackMessage}
           </Text>
         </View>
+
+        {isPaymentResult && orderRefNum ? (
+          <View style={styles.requestMetaBox}>
+            <Text style={styles.requestMetaText}>Order: {orderRefNum}</Text>
+          </View>
+        ) : null}
 
         {isJoinRequest && isPending && item.meta?.requesterSnapshot && (
           <View style={styles.requestMetaBox}>

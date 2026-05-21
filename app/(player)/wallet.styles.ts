@@ -40,6 +40,12 @@ export default StyleSheet.create({
     fontFamily: FONTS.heading,
     fontSize: 30,
   },
+  balanceHelperText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    marginTop: 4,
+  },
   addFundsCard: {
     gap: SPACING.sm,
   },

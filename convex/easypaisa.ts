@@ -65,6 +65,32 @@ const ACTIVE_PAYMENT_STATUSES: PaymentStatus[] = ["created", "redirected", "toke
 const REUSED_ATTEMPT_MESSAGE = "Continuing previous payment attempt.";
 const CREATED_ATTEMPT_MESSAGE = "Starting a new payment attempt.";
 const ACTIVE_TOPUP_IN_PROGRESS_MESSAGE = "You already have a top-up in progress. Continue it or wait for it to finish.";
+const PLAYER_WALLET_PAYMENT_ROUTE = "/(player)/wallet";
+const PLAYER_INBOX_ROUTE = "/(player)/inbox";
+const SUPER_ADMIN_PAYMENT_ATTENTION_TYPE = "payments.attention_required";
+
+const PAYMENT_ATTENTION_COPY: Record<string, { title: string; body: string }> = {
+  paid_no_wallet_tx: {
+    title: "Payment attention required",
+    body: "Paid payment has no linked wallet transaction. Review this order.",
+  },
+  wallet_tx_without_paid: {
+    title: "Payment attention required",
+    body: "Wallet transaction exists while payment is not paid. Review this order.",
+  },
+  booking_intent_unpaid_but_payment_paid: {
+    title: "Payment attention required",
+    body: "Booking intent is unpaid while payment is paid. Review this order.",
+  },
+  payment_pending_past_expiry: {
+    title: "Payment attention required",
+    body: "Payment is still pending after expiry. Review this order.",
+  },
+  failed_but_wallet_tx_exists: {
+    title: "Payment attention required",
+    body: "Failed payment has a linked wallet transaction. Review this order.",
+  },
+};
 
 type ProviderSnapshot = {
   responseCode?: string | null;
@@ -80,6 +106,13 @@ type ProviderSnapshot = {
   authToken?: string | null;
   rawPayload?: any;
 };
+
+type PaymentAttentionFlag =
+  | "paid_no_wallet_tx"
+  | "wallet_tx_without_paid"
+  | "booking_intent_unpaid_but_payment_paid"
+  | "payment_pending_past_expiry"
+  | "failed_but_wallet_tx_exists";
 
 function maskStoreId(value?: string | null) {
   const text = String(value || "");
@@ -393,6 +426,168 @@ function buildPaymentStatusForReturn(status: PaymentStatus) {
   return "failed";
 }
 
+function getPlayerPaymentOutcomeCopy(kind: PaymentKind, decision: "paid" | "failed" | "expired" | "wallet_credit_only") {
+  if (kind === "wallet_topup") {
+    if (decision === "paid") {
+      return {
+        title: "Top-up successful",
+        body: "Funds were added to your wallet. You can use them for bookings now.",
+      };
+    }
+    if (decision === "expired") {
+      return {
+        title: "Top-up expired",
+        body: "This top-up session expired before payment completed. Start a new top-up if you still want to add funds.",
+      };
+    }
+    return {
+      title: "Top-up not completed",
+      body: "Your wallet top-up did not complete. You can try again or contact support with this order number if money was deducted.",
+    };
+  }
+
+  if (decision === "wallet_credit_only") {
+    return {
+      title: "Payment added to wallet",
+      body: "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
+    };
+  }
+  if (decision === "expired") {
+    return {
+      title: "Payment expired",
+      body: "This booking payment session expired before the slot was confirmed. Start a new payment if the slot is still available.",
+    };
+  }
+  if (decision === "paid") {
+    return {
+      title: "Payment successful",
+      body: "Your payment was received and your booking is being confirmed.",
+    };
+  }
+  return {
+    title: "Payment not completed",
+    body: "Your booking payment did not complete. You can try again or contact support with this order number if money was deducted.",
+  };
+}
+
+function getPlayerPaymentRoute(kind: PaymentKind, decision: "paid" | "failed" | "expired" | "wallet_credit_only") {
+  if (kind === "wallet_topup" || decision === "wallet_credit_only") return PLAYER_WALLET_PAYMENT_ROUTE;
+  return PLAYER_INBOX_ROUTE;
+}
+
+async function notifyPlayerPaymentOutcome(ctx: any, input: {
+  payment: any;
+  decision: "paid" | "failed" | "expired" | "wallet_credit_only";
+  status: "accepted" | "rejected" | "expired";
+}) {
+  const kind = input.payment.kind as PaymentKind;
+  const route = getPlayerPaymentRoute(kind, input.decision);
+  const copy = getPlayerPaymentOutcomeCopy(kind, input.decision);
+  await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+    type: kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
+    toUid: input.payment.userId,
+    status: input.status,
+    dedupeKey: `${kind}:payment_result:${String(input.payment._id)}:${input.decision}`,
+    dedupePolicy: "replace_active",
+    route,
+    title: copy.title,
+    body: copy.body,
+    data: {
+      paymentTransactionId: String(input.payment._id),
+      bookingIntentId: input.payment.bookingIntentId ? String(input.payment.bookingIntentId) : null,
+      orderRefNum: input.payment.orderRefNum,
+      decision: input.decision,
+      href: route,
+    },
+  });
+}
+
+function collectPaymentAttentionFlags(input: {
+  payment: any;
+  bookingIntent: any | null;
+  walletTxExists: boolean;
+  now: number;
+}): PaymentAttentionFlag[] {
+  const status = String(input.payment.status || "");
+  const isPaid = status === "paid";
+  const activePastExpiry =
+    ["created", "redirected", "token_received", "pending"].includes(status)
+    && Boolean(input.payment.expiresAt)
+    && Number(input.payment.expiresAt) < input.now;
+  const flags: PaymentAttentionFlag[] = [];
+
+  if (isPaid && !input.walletTxExists) flags.push("paid_no_wallet_tx");
+  if (input.walletTxExists && !isPaid) flags.push("wallet_tx_without_paid");
+  if (isPaid && input.payment.kind === "booking_intent" && input.bookingIntent?.paymentStatus === "unpaid") {
+    flags.push("booking_intent_unpaid_but_payment_paid");
+  }
+  if (activePastExpiry) flags.push("payment_pending_past_expiry");
+  if (status === "failed" && input.walletTxExists) flags.push("failed_but_wallet_tx_exists");
+
+  return flags;
+}
+
+async function notifySuperAdminsPaymentAttentionRequired(ctx: any, input: {
+  payment: any;
+  status?: PaymentStatus;
+  now: number;
+}) {
+  const payment = {
+    ...input.payment,
+    status: input.status || input.payment.status,
+  };
+  const orderRefNum = String(payment.orderRefNum || "").trim();
+  if (!orderRefNum) return;
+
+  const [walletRows, bookingIntent] = await Promise.all([
+    ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q: any) => q.eq("reference", `easypaisa:${orderRefNum}`))
+      .collect(),
+    payment.bookingIntentId ? ctx.db.get(payment.bookingIntentId) : Promise.resolve(null),
+  ]);
+  const flags = collectPaymentAttentionFlags({
+    payment,
+    bookingIntent,
+    walletTxExists: walletRows.length > 0,
+    now: input.now,
+  });
+  if (flags.length === 0) return;
+
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .collect();
+  const route = `/super-admin/payment/${encodeURIComponent(orderRefNum)}`;
+
+  for (const flagName of flags) {
+    const copy = PAYMENT_ATTENTION_COPY[flagName];
+    for (const superAdmin of superAdmins) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: SUPER_ADMIN_PAYMENT_ATTENTION_TYPE,
+        toUid: superAdmin._id,
+        recipientRole: "super_admin",
+        status: "pending",
+        dedupeKey: `payments.attention_required:${orderRefNum}:${flagName}:${String(superAdmin._id)}`,
+        dedupePolicy: "upsert_active",
+        pushPolicy: "eligible",
+        route,
+        entity: { kind: "paymentTransaction", id: String(payment._id) },
+        entityId: String(payment._id),
+        title: copy.title,
+        body: copy.body,
+        data: {
+          orderRefNum,
+          paymentTransactionId: String(payment._id),
+          flagName,
+          route,
+          href: route,
+        },
+      });
+    }
+  }
+}
+
 function getDefaultIpnAllowedHosts() {
   return [
     "easypay.easypaisa.com.pk",
@@ -550,6 +745,33 @@ function getProviderReference(snapshot: ProviderSnapshot, orderRefNum: string) {
 
 function getRestInquiryResponse(snapshot: ProviderSnapshot) {
   return snapshot.rawPayload?.rest?.inquiry?.response || {};
+}
+
+function isInvalidOrderInquiryFailure(source: ProviderSource, snapshot: ProviderSnapshot, normalized: ReturnType<typeof normalizeProviderUpdate>) {
+  if (source !== "inquiry" || normalized.resolvedStatus !== "failed") {
+    return false;
+  }
+
+  const inquiryResponse = getRestInquiryResponse(snapshot);
+  const values = [
+    inquiryResponse.errorCode,
+    inquiryResponse.responseCode,
+    inquiryResponse.errorReason,
+    inquiryResponse.responseDesc,
+    snapshot.rawPayload?.errorCode,
+    snapshot.rawPayload?.responseCode,
+    snapshot.rawPayload?.errorReason,
+    snapshot.rawPayload?.responseDesc,
+    normalized.responseCode,
+    normalized.responseDesc,
+  ];
+
+  return values.some((value) => {
+    const text = String(value || "").trim().toUpperCase();
+    if (!text) return false;
+    const compact = text.replace(/[^A-Z0-9]/g, "");
+    return compact.includes("INVALIDORDER");
+  });
 }
 
 function isMaNoResponseFailure(source: ProviderSource, snapshot: ProviderSnapshot, normalized: ReturnType<typeof normalizeProviderUpdate>) {
@@ -1071,6 +1293,11 @@ export const markCheckoutFailed = internalMutation({
       updatedAt: now,
     });
     await clearActivePaymentPointerIfMatching(ctx, existing, now);
+    await notifySuperAdminsPaymentAttentionRequired(ctx, {
+      payment: existing,
+      status: "failed",
+      now,
+    });
   },
 });
 
@@ -1672,6 +1899,10 @@ export const applyProviderUpdate = internalMutation({
     const snapshot = args.snapshot as ProviderSnapshot;
     const normalized = normalizeProviderUpdate(args.source, snapshot);
     const keepMaNoResponsePending = isMaNoResponseFailure(args.source, snapshot, normalized);
+    const keepInvalidOrderInquiryPending =
+      isInvalidOrderInquiryFailure(args.source, snapshot, normalized)
+      && Number(row.expiresAt || 0) > now;
+    const keepInquiryPending = keepMaNoResponsePending || keepInvalidOrderInquiryPending;
     const providerReference = getProviderReference(snapshot, row.orderRefNum);
     logGatewayDebug("provider.update", {
       transactionId: String(row._id),
@@ -1681,7 +1912,12 @@ export const applyProviderUpdate = internalMutation({
       amount: row.amount,
       previousStatus: row.status,
       resolvedStatus: normalized.resolvedStatus,
-      keepPending: keepMaNoResponsePending,
+      keepPending: keepInquiryPending,
+      keepPendingReason: keepInvalidOrderInquiryPending
+        ? "invalid_order_inquiry"
+        : keepMaNoResponsePending
+          ? "ma_no_response"
+          : null,
       providerStatus: normalized.transactionStatus || normalized.responseCode || null,
       providerDescription: normalized.responseDesc || null,
       providerReference,
@@ -1737,6 +1973,11 @@ export const applyProviderUpdate = internalMutation({
         status: "paid",
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "paid",
+        now,
+      });
       return {
         appReturnUrl: row.appReturnUrl,
         orderRefNum: row.orderRefNum,
@@ -1749,7 +1990,7 @@ export const applyProviderUpdate = internalMutation({
     if (
       Number(row.expiresAt || 0) > 0
       && now > Number(row.expiresAt || 0)
-      && (normalized.resolvedStatus === "pending" || keepMaNoResponsePending)
+      && (normalized.resolvedStatus === "pending" || keepInquiryPending)
     ) {
       if (row.bookingIntentId) {
         await ctx.db.patch(row.bookingIntentId, {
@@ -1765,24 +2006,15 @@ export const applyProviderUpdate = internalMutation({
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
 
-      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-        type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
-        toUid: row.userId,
+      await notifyPlayerPaymentOutcome(ctx, {
+        payment: row,
+        decision: "expired",
         status: "expired",
-        dedupeKey: `${row.kind}:payment_result:${String(row._id)}:expired`,
-        dedupePolicy: "replace_active",
-        route: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        title: row.kind === "wallet_topup" ? "Top-up Expired" : "Payment Expired",
-        body: row.kind === "wallet_topup"
-          ? "Your wallet top-up session expired before payment completed."
-          : "Your booking payment session expired before the slot was confirmed.",
-        data: {
-          paymentTransactionId: String(row._id),
-          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
-          orderRefNum: row.orderRefNum,
-          decision: "expired",
-          href: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        },
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "expired",
+        now,
       });
 
       return {
@@ -1794,11 +2026,16 @@ export const applyProviderUpdate = internalMutation({
       };
     }
 
-    if (normalized.resolvedStatus === "pending" || keepMaNoResponsePending) {
+    if (normalized.resolvedStatus === "pending" || keepInquiryPending) {
       await ctx.db.patch(row._id, {
         ...callbackPatch,
         status: row.status === "redirected" || row.status === "token_received" ? row.status : "pending",
-        lastError: keepMaNoResponsePending ? normalized.responseDesc || undefined : undefined,
+        lastError: keepInquiryPending ? "inquiry_unverified" : undefined,
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: row.status === "redirected" || row.status === "token_received" ? row.status : "pending",
+        now,
       });
       return {
         appReturnUrl: row.appReturnUrl,
@@ -1824,24 +2061,15 @@ export const applyProviderUpdate = internalMutation({
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
 
-      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-        type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
-        toUid: row.userId,
+      await notifyPlayerPaymentOutcome(ctx, {
+        payment: row,
+        decision: "expired",
         status: "expired",
-        dedupeKey: `${row.kind}:payment_result:${String(row._id)}:expired`,
-        dedupePolicy: "replace_active",
-        route: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        title: row.kind === "wallet_topup" ? "Top-up Expired" : "Payment Expired",
-        body: row.kind === "wallet_topup"
-          ? "Your wallet top-up session expired before payment completed."
-          : "Your booking payment session expired before the slot was confirmed.",
-        data: {
-          paymentTransactionId: String(row._id),
-          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
-          orderRefNum: row.orderRefNum,
-          decision: "expired",
-          href: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        },
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "expired",
+        now,
       });
 
       return {
@@ -1861,24 +2089,15 @@ export const applyProviderUpdate = internalMutation({
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
 
-      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-        type: row.kind === "wallet_topup" ? "wallet.topup_result" : "match.payment_result",
-        toUid: row.userId,
+      await notifyPlayerPaymentOutcome(ctx, {
+        payment: row,
+        decision: "failed",
         status: "rejected",
-        dedupeKey: `${row.kind}:payment_result:${String(row._id)}:failed`,
-        dedupePolicy: "replace_active",
-        route: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        title: row.kind === "wallet_topup" ? "Top-up Failed" : "Payment Failed",
-        body: row.kind === "wallet_topup"
-          ? "Your wallet top-up did not complete."
-          : "Your booking payment did not complete.",
-        data: {
-          paymentTransactionId: String(row._id),
-          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
-          orderRefNum: row.orderRefNum,
-          decision: "failed",
-          href: row.kind === "wallet_topup" ? "/(player)/wallet" : "/(player)/inbox",
-        },
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "failed",
+        now,
       });
 
       return {
@@ -1947,23 +2166,17 @@ export const applyProviderUpdate = internalMutation({
       });
 
       if (row.kind === "wallet_topup") {
-        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-          type: "wallet.topup_result",
-          toUid: row.userId,
+        await notifyPlayerPaymentOutcome(ctx, {
+          payment: row,
+          decision: "paid",
           status: "accepted",
-          dedupeKey: `wallet_topup:payment_result:${String(row._id)}:paid`,
-          dedupePolicy: "replace_active",
-          route: "/(player)/wallet",
-          title: "Top-up Successful",
-          body: "Funds were added to your wallet successfully.",
-          data: {
-            paymentTransactionId: String(row._id),
-            orderRefNum: row.orderRefNum,
-            decision: "paid",
-            href: "/(player)/wallet",
-          },
         });
       }
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "paid",
+        now,
+      });
 
       return {
         appReturnUrl: row.appReturnUrl,
@@ -1988,22 +2201,15 @@ export const applyProviderUpdate = internalMutation({
         });
         await clearActivePaymentPointerIfMatching(ctx, row, now);
 
-        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-          type: "match.payment_result",
-          toUid: row.userId,
+        await notifyPlayerPaymentOutcome(ctx, {
+          payment: row,
+          decision: "wallet_credit_only",
           status: "accepted",
-          dedupeKey: `booking_intent:payment_result:${String(row._id)}:wallet_credit_only`,
-          dedupePolicy: "replace_active",
-          route: "/(player)/wallet",
-          title: "Payment added to wallet",
-          body: "Your Easypaisa payment was received, but the booking could not be confirmed. Funds are available in your MatchHai wallet.",
-          data: {
-            paymentTransactionId: String(row._id),
-            bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
-            orderRefNum: row.orderRefNum,
-            decision: "wallet_credit_only",
-            href: "/(player)/wallet",
-          },
+        });
+        await notifySuperAdminsPaymentAttentionRequired(ctx, {
+          payment: row,
+          status: "paid",
+          now,
         });
 
         return {
@@ -2033,6 +2239,7 @@ export const applyProviderUpdate = internalMutation({
         .query("users")
         .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
         .collect();
+      const adminRoute = `/super-admin/payment/${encodeURIComponent(row.orderRefNum)}`;
       for (const superAdmin of superAdmins) {
         await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
           type: "operations.general",
@@ -2041,17 +2248,22 @@ export const applyProviderUpdate = internalMutation({
           status: "pending",
           dedupeKey: `payment.reconciliation_failure:${String(row._id)}:${String(superAdmin._id)}`,
           dedupePolicy: "replace_active",
-          route: "/super-admin",
+          route: adminRoute,
           title: "Payment reconciliation needs attention",
-          body: message,
+          body: "A payment reconciliation update needs review. Open the payment detail screen for this order.",
           data: {
             paymentTransactionId: String(row._id),
             orderRefNum: row.orderRefNum,
             kind: row.kind,
-            href: "/super-admin",
+            href: adminRoute,
           },
         });
       }
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: "pending",
+        now,
+      });
 
       return {
         appReturnUrl: row.appReturnUrl,

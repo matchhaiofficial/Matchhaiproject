@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 
@@ -10,6 +10,7 @@ import {
   AdminPageHeader,
   AdminSearchFilterBar,
 } from "../../../src/components/AdminSurface";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import { DiscoverFilterRow } from "../../../src/features/discover/components/DiscoverShared";
 import Screen from "../../../src/components/Screen";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -113,6 +114,19 @@ export default function SuperAdminPaymentsTab() {
                 statusLabel={item.status}
                 statusTone={statusTone(item.status)}
                 onPress={() => setExpandedId(expanded ? null : item.id)}
+                actions={
+                  <AppButton
+                    size="sm"
+                    variant="secondary"
+                    leadingIcon="visibility"
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      router.push(`/super-admin/payment/${encodeURIComponent(item.orderRefNum)}` as any);
+                    }}
+                  >
+                    View detail
+                  </AppButton>
+                }
               >
                 <View style={styles.cardBody}>
                   <AdminInfoLine label="Created" value={`${formatDateTime(item.createdAt)} | ${item.currency} ${Math.round(item.amount).toLocaleString("en-US")}`} />

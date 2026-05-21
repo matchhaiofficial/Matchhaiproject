@@ -44,6 +44,8 @@ export interface Notification {
     matchroomId?: string;
     matchroomTitle?: string;
     intentId?: string;
+    orderRefNum?: string;
+    paymentTransactionId?: string;
     requestId?: string;
     offerId?: string;
     scheduleOptions?: Array<{
@@ -90,6 +92,8 @@ function transformNotification(notif: any): Notification {
     teamName: notif.teamName || rawMeta.teamName,
     matchroomId: toStringId(notif.matchroomId) || toStringId(rawMeta.matchroomId),
     intentId: toStringId(rawMeta.intentId),
+    orderRefNum: toStringId(rawMeta.orderRefNum),
+    paymentTransactionId: toStringId(rawMeta.paymentTransactionId),
     requestId: toStringId(rawMeta.requestId),
     offerId: toStringId(rawMeta.offerId),
     scheduleOptions: Array.isArray(rawMeta.scheduleOptions)

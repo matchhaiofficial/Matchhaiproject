@@ -211,20 +211,19 @@ Goal:
 Avoid marking uncertain provider inquiry failures as final failure too early.
 
 Sub-tasks:
-- [ ] Audit current `syncTransactionStatus` handling for inquiry failures.
-- [ ] Identify cases like `INVALID ORDER ID`.
-- [ ] Decide safe backend state:
-  - keep pending with verification note
-  - verifying
-  - confirmation_pending
-  - manual_review
-- [ ] Do not terminally fail uncertain inquiry errors while inside confirmation window.
-- [ ] Mark failed only when provider clearly confirms failure, TTL expires, or manual review confirms.
-- [ ] Keep raw provider error in admin/support metadata only.
-- [ ] Update UI states for verifying/confirmation pending.
-- [ ] Add expiry/stale cleanup if required.
-- [ ] Run `npx convex codegen` if schema/API changes.
-- [ ] Run `npx tsc --noEmit`.
+- [x] Audit current `syncTransactionStatus` handling for inquiry failures.
+- [x] Identify cases like `INVALID ORDER ID`.
+- [x] Decide safe backend state:
+  - keep active status (`redirected` / `token_received`) or set `pending`
+  - use `lastError = "inquiry_unverified"` as a safe internal code
+  - do not add `verifying`, `confirmation_pending`, or `manual_review` statuses
+- [x] Do not terminally fail uncertain inquiry errors while inside confirmation window.
+- [x] Mark failed only when provider clearly confirms failure, TTL expires, or manual review confirms.
+- [x] Keep raw provider error in admin/support metadata only.
+- [x] Update UI states for verifying/confirmation pending.
+- [x] Add expiry/stale cleanup if required.
+- [x] Run `npx convex codegen` if schema/API changes.
+- [x] Run `npx tsc --noEmit`.
 - [ ] Manual test delayed verification.
 
 Expected files:
@@ -236,17 +235,26 @@ Expected files:
 - `app/super-admin/(tabs)/payments.tsx`
 
 Files actually changed:
-- TBD
+- `TEMP_PAYMENT_WALLET_EASYPAY_AUDIT_AND_FIX_CHECKLIST.md`
+- `convex/easypaisa.ts`
+- `convex/wallet.ts`
 
 Handoff summary:
-- Status:
-- Files changed:
-- New/changed statuses:
-- User-facing behavior:
-- Admin-facing behavior:
-- Tests run:
-- Known risks:
-- Next phase starting point:
+- Status: Implemented; manual gateway simulation still pending.
+- Files changed: `convex/easypaisa.ts`, `convex/wallet.ts`, and this tracking file.
+- New/changed statuses: None. Existing `created`, `redirected`, `token_received`, `pending`, `paid`, `failed`, `expired`, and `cancelled` statuses are unchanged.
+- Backend inquiry rules: `source === "inquiry"` plus normalized `resolvedStatus === "failed"` plus an inquiry payload/description/code containing invalid-order style text (`INVALID ORDER`, `INVALID_ORDER_ID`, etc.) is treated as uncertain only while `Date.now() < paymentTransactions.expiresAt`.
+- Active-window behavior: uncertain invalid-order inquiry keeps `redirected` or `token_received` as-is; otherwise it stores `status: "pending"` and `lastError: "inquiry_unverified"` so Phase 3 retry reuse still returns the same active `orderRefNum`.
+- Expiry behavior: after `expiresAt`, invalid-order inquiry ambiguity is not kept pending; existing expiry/terminal handling is allowed to run.
+- Definitive failures: cancelled, declined, rejected, reversed, expired, and non-invalid-order failed inquiry responses still follow existing terminal handling.
+- Paid behavior: IPN/finalize/callback paid flow and wallet-first reconciliation are unchanged; `wallet.addFunds` and booking hold logic were not edited.
+- User-facing behavior: existing checkout/status screens continue polling active statuses and already show safe copy instead of raw provider strings; `orderRefNum` remains visible.
+- Wallet history sanitization: `convex/wallet.ts` no longer uses `providerDescription` as player-facing `subtitle`; payment method/source label can still be shown, while raw provider details remain in payment/admin/debug records.
+- Tests run: `npx tsc --noEmit` passed.
+- Tests run: `git diff --check` passed with line-ending warnings for touched files only.
+- Codegen: Not run because no schema, generated API, or public API type changes were made.
+- Known risks: Manual provider simulation is still needed for INVALID ORDER ID during active checkout, definitive rejection, paid IPN after ambiguity, retry reuse, and post-expiry behavior.
+- Next phase starting point: Phase 5 should separate wallet balance, reserved/held amount, unpaid bookings, and pending provider payment concepts without changing wallet math.
 
 ---
 
@@ -256,16 +264,18 @@ Goal:
 Separate wallet concepts clearly so users understand what each number means.
 
 Sub-tasks:
-- [ ] Define Wallet Balance.
-- [ ] Define Reserved / Held Amount.
-- [ ] Define Unpaid Bookings.
-- [ ] Define Pending Provider Payments.
-- [ ] Update wallet overview cards.
-- [ ] Decide whether to show `walletHeldBalance` as "Reserved Amount".
-- [ ] Keep unpaid booking intents separate from held balance.
-- [ ] Update transaction tab labels/copy if needed.
-- [ ] Avoid changing backend wallet math unless approved.
-- [ ] Run `npx tsc --noEmit`.
+- [x] Define Wallet Balance.
+- [x] Define Reserved / Held Amount.
+- [x] Define Unpaid Bookings.
+- [x] Define Pending Provider Payments.
+- [x] Update wallet overview cards.
+- [x] Decide whether to show `walletHeldBalance` as "Reserved Amount".
+- [x] Keep unpaid booking intents separate from held balance.
+- [x] Update transaction tab labels/copy if needed.
+- [x] Avoid changing backend wallet math unless approved.
+- [x] Run `npx convex codegen`.
+- [x] Run `npx tsc --noEmit`.
+- [x] Run `git diff --check`.
 - [ ] Manual wallet UI check.
 
 Expected files:
@@ -274,16 +284,26 @@ Expected files:
 - `convex/wallet.ts` only if a new read-only summary query is needed
 
 Files actually changed:
-- TBD
+- `TEMP_PAYMENT_WALLET_EASYPAY_AUDIT_AND_FIX_CHECKLIST.md`
+- `convex/wallet.ts`
+- `src/utils/paymentUiCopy.ts`
+- `app/(player)/wallet.tsx`
+- `app/(player)/wallet.styles.ts`
 
 Handoff summary:
-- Status:
-- Files changed:
-- Wallet cards final labels:
-- Data source for each card:
-- Tests run:
-- Known risks:
-- Next phase starting point:
+- Status: Implemented; manual device checks still pending.
+- Files changed: `convex/wallet.ts`, `src/utils/paymentUiCopy.ts`, `app/(player)/wallet.tsx`, `app/(player)/wallet.styles.ts`, and this tracking file.
+- New API: `api.wallet.getSummary({ userId })` returns `{ balance: users.walletBalance ?? 0, heldBalance: users.walletHeldBalance ?? 0 }` without reading wallet transactions or recomputing balances.
+- Security note: `getSummary` follows existing `getBalance` userId pattern for Phase 5 only. A future security cleanup should derive user from auth/session and avoid arbitrary userId wallet reads.
+- Wallet cards final labels: `Wallet Balance`, `Reserved`, `Unpaid Bookings`, and `Pending Easypaisa Payment`.
+- Wallet Balance definition/data source: available funds to pay for bookings and withdraw; `api.wallet.getSummary.balance`.
+- Reserved definition/data source: wallet-held funds for bookings, captured later or released if cancelled; `api.wallet.getSummary.heldBalance` from `users.walletHeldBalance`.
+- Unpaid Bookings definition/data source: bookings started but not paid; existing deduped booking intents sum, unchanged from Phase 3 semantics.
+- Pending Easypaisa definition/data source: active provider attempts only; `api.easypaisa.getCheckoutStatus` shown only for `created`, `redirected`, `token_received`, and `pending`.
+- User-facing provider safety: player wallet no longer gates any displayed copy on `providerDescription`; booking status and matchroom create were scanned and do not render raw `providerDescription` values, only safe copy.
+- Tests run: `npx convex codegen` passed; `npx tsc --noEmit` passed; `git diff --check` passed with line-ending warnings only.
+- Known risks: Manual wallet UI checks are still needed for live held-balance scenarios and active Easypaisa checkout display.
+- Next phase starting point: Phase 6 should add read-only Super Admin visibility for payment detail and reconciliation investigation.
 
 ---
 
@@ -293,18 +313,18 @@ Goal:
 Give Super Admin a read-only way to investigate payment problems.
 
 Sub-tasks:
-- [ ] Add or plan Payment Detail screen.
-- [ ] Show paymentTransaction details.
-- [ ] Show linked walletTransaction by `reference = easypaisa:{orderRefNum}`.
-- [ ] Show linked bookingIntent if available.
-- [ ] Show linked matchroom if available.
-- [ ] Show user summary without exposing sensitive data.
-- [ ] Show provider status, providerDescription, last inquiry/IPN/finalize timestamps.
-- [ ] Show reconciliation state.
-- [ ] Keep this read-only.
-- [ ] Do not add manual repair actions without approval.
-- [ ] Run `npx convex codegen` if backend API changes.
-- [ ] Run `npx tsc --noEmit`.
+- [x] Add Payment Detail screen.
+- [x] Show paymentTransaction details.
+- [x] Show linked walletTransaction by `reference = easypaisa:{orderRefNum}`.
+- [x] Show linked bookingIntent if available.
+- [x] Show linked matchroom if available.
+- [x] Show user summary without exposing sensitive data.
+- [x] Show provider status, providerDescription, provider context timestamps/status.
+- [x] Show reconciliation state.
+- [x] Keep this read-only.
+- [x] Do not add manual repair actions without approval.
+- [x] Run `npx convex codegen` if backend API changes.
+- [x] Run `npx tsc --noEmit`.
 - [ ] Manual check failed/pending/paid payment.
 
 Expected files:
@@ -314,18 +334,25 @@ Expected files:
 - `src/services/convex/superAdminService.ts`
 
 Files actually changed:
-- TBD
+- `convex/admin.ts`
+- `src/services/convex/superAdminService.ts`
+- `app/super-admin/(tabs)/payments.tsx`
+- `app/super-admin/_layout.tsx`
+- `app/super-admin/payment/[orderRefNum].tsx`
+- `TEMP_PAYMENT_WALLET_EASYPAY_AUDIT_AND_FIX_CHECKLIST.md`
 
 Handoff summary:
-- Status:
-- Files changed:
-- New read-only APIs:
-- New route:
-- Fields shown:
-- Sensitive fields hidden:
-- Tests run:
-- Known risks:
-- Next phase starting point:
+- Status: Implemented Phase 6 read-only Super Admin payment detail visibility.
+- Files changed: `convex/admin.ts`, `src/services/convex/superAdminService.ts`, `app/super-admin/(tabs)/payments.tsx`, `app/super-admin/_layout.tsx`, `app/super-admin/payment/[orderRefNum].tsx`, this checklist.
+- New read-only APIs: `api.admin.getPaymentDetailByOrderRefNum({ sessionToken, orderRefNum })`, sessionToken-gated with existing `getAuthenticatedAdmin`.
+- New route: `/super-admin/payment/[orderRefNum]`.
+- Fields shown: payment core fields, provider status/reference/short description, provider context `flow`/`lastSyncAt`/`lastProviderStatus`, linked wallet transaction summary, booking intent summary, matchroom summary, masked linked user summary, support IDs.
+- Reconciliation flags: `paymentPaidNoWalletTx`, `walletTxWithoutPaid`, `bookingIntentUnpaidButPaymentPaid`, `paymentFailedButWalletTxExists`, `paymentPendingPastExpiry`, `bookingIntentMissing`, `matchroomMissing`.
+- Sensitive fields hidden: raw `providerPayload`, IPN bodies, hosted payloads, phone numbers, CNIC, bank/account details, raw secrets, full raw gateway payloads, authId, unmasked email.
+- Tests run: `npx convex codegen` passed; `npx tsc --noEmit` passed; `git diff --check` passed with line-ending warnings only.
+- Manual test notes: click wallet_topup and booking_intent rows from Super Admin Payments using "View detail"; verify safe empty states for missing wallet/booking/matchroom; verify providerDescription truncation; verify non-admin is blocked by the existing Super Admin layout and backend guard.
+- Known risks: Manual verification still needs seeded/live examples for paid wallet top-up, paid booking intent, missing wallet link, expired pending payment, and non-admin access.
+- Next phase starting point: Phase 7 should add notifications/user-safe payment errors without exposing provider payloads or changing payment/wallet behavior.
 
 ---
 
@@ -335,15 +362,35 @@ Goal:
 Notify users/admins about payment states without spam or raw gateway noise.
 
 Sub-tasks:
-- [ ] Audit existing `wallet.topup_result`.
-- [ ] Audit existing `match.payment_result`.
-- [ ] Add or improve "verification pending" notification if needed.
-- [ ] Add payment stuck/manual review alert for Super Admin if needed.
-- [ ] Keep raw provider errors admin-only.
-- [ ] Add dedupe keys.
-- [ ] Avoid duplicate notifications from repeated polling.
-- [ ] Run `npx convex codegen` if backend APIs change.
-- [ ] Run `npx tsc --noEmit`.
+- [x] Audit existing `wallet.topup_result`.
+- [x] Audit existing `match.payment_result`.
+- [x] Add or improve "verification pending" notification if needed.
+- [x] Add payment stuck/manual review alert for Super Admin if needed.
+- [x] Keep raw provider errors admin-only.
+- [x] Add dedupe keys.
+- [x] Avoid duplicate notifications from repeated polling.
+- [x] Run `npx convex codegen` if backend APIs change.
+- [x] Run `npx tsc --noEmit`.
+
+Notification inventory:
+- `wallet.topup_result`: triggered in `convex/easypaisa.ts` from Easypaisa provider update outcomes for wallet top-up paid/failed/expired; recipient role is player; dedupe key format is `wallet_topup:payment_result:{paymentTransactionId}:{paid|failed|expired}` with `replace_active`; low spam risk because each final outcome uses a deterministic payment transaction id; player copy is now curated and does not include `providerDescription`; covers wallet top-up paid/failed/expired.
+- `match.payment_result`: triggered in `convex/easypaisa.ts` for booking-intent Easypaisa failed/expired/wallet-credit-only outcomes and in `convex/matchrooms.ts` for booking intent paid/expired/slot-unavailable outcomes; recipient role is player; dedupe key formats are `booking_intent:payment_result:{paymentTransactionId}:{failed|expired|wallet_credit_only}` and `match.payment_result:{intentId}:{paid|expired|slot_unavailable}`; repeated outcomes replace the active notification; player copy is now curated and gateway-safe; orderRefNum is included when the result comes from Easypaisa.
+- `match.payment_required`: triggered in `convex/matchrooms.ts` when an invite/join request creates a booking payment intent; recipient role is player; dedupe key format is `match.payment_required:{matchroomId}:{userId}:{intentId}` with `upsert_active`; low spam risk per intent; copy is now direct "payment required" text with no provider details.
+- Existing `operations.general`: triggered in `convex/easypaisa.ts` when reconciliation throws after provider payment handling; recipient role is Super Admin; dedupe key format is `payment.reconciliation_failure:{paymentTransactionId}:{superAdminId}` with `replace_active`; retained for continuity, but body and route are now safe and deep-link to the payment detail screen instead of exposing the raw exception message.
+- New `payments.attention_required`: triggered only from existing Easypaisa write/update paths after stored payment state changes; recipient role is Super Admin; dedupe key format is `payments.attention_required:{orderRefNum}:{flagName}:{superAdminId}` with `upsert_active`; covers `paid_no_wallet_tx`, `wallet_tx_without_paid`, `booking_intent_unpaid_but_payment_paid`, `payment_pending_past_expiry`, and `failed_but_wallet_tx_exists`.
+
+Player-safe copy rules implemented:
+- Player notifications never include `providerDescription`, gateway response codes, raw provider payloads, phone/CNIC/payment token, or secrets.
+- Player notifications answer what happened and what to do next: use wallet funds, retry/start a new payment, choose another slot, wait, or contact support with the order number.
+- Player inbox now treats `wallet.topup_result` and `match.payment_result` as first-class payment notifications, shows title/body directly, and shows `Order: {orderRefNum}` only when that safe reference exists.
+
+Super Admin anomaly alert rules implemented:
+- `paid_no_wallet_tx`: payment status is `paid` and no wallet transaction exists with `reference = easypaisa:{orderRefNum}`.
+- `wallet_tx_without_paid`: a linked wallet transaction exists while payment status is not `paid`.
+- `booking_intent_unpaid_but_payment_paid`: booking-intent payment status is `paid` while linked booking intent `paymentStatus` is `unpaid`.
+- `payment_pending_past_expiry`: payment status is `created`, `redirected`, `token_received`, or `pending` after `expiresAt`.
+- `failed_but_wallet_tx_exists`: payment status is `failed` while a linked wallet transaction exists.
+- Alert route/href is `/super-admin/payment/{orderRefNum}` and data contains only `orderRefNum`, `paymentTransactionId`, `flagName`, `route`, and `href`.
 
 Expected files:
 - `convex/easypaisa.ts`
@@ -352,16 +399,22 @@ Expected files:
 - `app/super-admin/notifications.tsx`
 
 Files actually changed:
-- TBD
+- `TEMP_PAYMENT_WALLET_EASYPAY_AUDIT_AND_FIX_CHECKLIST.md`
+- `convex/easypaisa.ts`
+- `convex/matchrooms.ts`
+- `convex/notifications.ts`
+- `src/hooks/useNotifications.ts`
+- `app/(player)/components/InboxNotificationCard.tsx`
 
 Handoff summary:
-- Status:
-- Files changed:
-- Notification types:
-- Dedupe strategy:
-- Tests run:
-- Known risks:
-- Next phase starting point:
+- Status: Implemented; validation commands passed.
+- Files changed: see list above.
+- Notification types: updated `wallet.topup_result`, `match.payment_result`, `match.payment_required`, retained safer `operations.general`, added `payments.attention_required`.
+- Dedupe strategy: player result notifications continue using deterministic `replace_active`; `match.payment_required` continues `upsert_active`; Super Admin anomaly notifications use `payments.attention_required:{orderRefNum}:{flagName}:{superAdminId}` with `upsert_active`.
+- Tests run: `npx convex codegen` passed; `npx tsc --noEmit` passed; `git diff --check` passed with line-ending warnings only.
+- Manual matrix: verify wallet top-up paid/failed/expired inbox copy; booking payment paid/failed/expired inbox copy; orderRefNum appears when present; providerDescription does not appear for players; Super Admin alert opens `/super-admin/payment/{orderRefNum}`; repeated reconciliation keeps one active alert per orderRefNum + flag + Super Admin.
+- Known risks: No historical anomaly backfill by design; anomaly alerts only emit when existing Easypaisa write/update paths run.
+- Next phase starting point: Phase 8 can focus on operational follow-up workflows or support tooling only after explicit approval, without introducing manual money repair actions by default.
 
 ---
 

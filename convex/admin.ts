@@ -169,6 +169,21 @@ function supportRouteForRecipientRole(role: "player" | "zone_admin") {
   return role === "zone_admin" ? "/zone/modules/ai-support" : "/(player)/support";
 }
 
+function maskAdminEmail(email?: string | null) {
+  const text = normalizeEmail(email || "");
+  const [local, domain] = text.split("@");
+  if (!local || !domain) return null;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
+}
+
+function truncateAdminProviderText(value?: string | null, maxLength = 180) {
+  const sanitized = redactSupportText(String(value || "").replace(/\s+/g, " ").trim());
+  if (!sanitized) return { text: null, truncated: false };
+  if (sanitized.length <= maxLength) return { text: sanitized, truncated: false };
+  return { text: `${sanitized.slice(0, maxLength - 3).trimEnd()}...`, truncated: true };
+}
+
 async function notifySupportTicketStatusChanged(ctx: any, ticket: any, status: "open" | "in_review" | "resolved") {
   const recipientRole = supportRecipientRole(ticket.userRole);
   const route = supportRouteForRecipientRole(recipientRole);
@@ -1121,6 +1136,154 @@ export const listEasypaisaTransactions = query({
         },
       };
     }));
+  },
+});
+
+export const getPaymentDetailByOrderRefNum = query({
+  args: {
+    sessionToken: v.string(),
+    orderRefNum: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const orderRefNum = String(args.orderRefNum || "").trim();
+    if (!orderRefNum) return null;
+
+    const paymentRows = await ctx.db
+      .query("paymentTransactions")
+      .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", orderRefNum))
+      .collect();
+
+    const payment = paymentRows
+      .filter((row) => row.provider === "easypaisa")
+      .sort((left, right) => {
+        const createdDiff = Number(right.createdAt || 0) - Number(left.createdAt || 0);
+        if (createdDiff !== 0) return createdDiff;
+        return Number(right._creationTime || 0) - Number(left._creationTime || 0);
+      })[0];
+
+    if (!payment) return null;
+
+    const walletRows = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", `easypaisa:${orderRefNum}`))
+      .collect();
+    const walletTransaction = walletRows
+      .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))[0] || null;
+
+    const [bookingIntent, linkedUser] = await Promise.all([
+      payment.bookingIntentId ? ctx.db.get(payment.bookingIntentId as Id<"bookingIntents">) : Promise.resolve(null),
+      ctx.db.get(payment.userId),
+    ]);
+    const linkedMatchroom = bookingIntent?.matchroomId
+      ? await ctx.db.get(bookingIntent.matchroomId as Id<"matchrooms">)
+      : null;
+
+    const providerDescription = truncateAdminProviderText(payment.providerDescription || null);
+    const paymentIsPaid = payment.status === "paid";
+    const walletTxExists = Boolean(walletTransaction);
+    const bookingIntentMissing = payment.kind === "booking_intent" && Boolean(payment.bookingIntentId) && !bookingIntent;
+    const matchroomMissing = Boolean(bookingIntent?.matchroomId) && !linkedMatchroom;
+    const reconciliationMessages = [
+      paymentIsPaid && !walletTxExists ? "Payment is paid but no linked wallet transaction was found." : null,
+      walletTxExists && !paymentIsPaid ? "A linked wallet transaction exists while the payment is not paid." : null,
+      paymentIsPaid && bookingIntent?.paymentStatus === "unpaid" ? "Payment is paid but the linked booking intent is still unpaid." : null,
+      payment.status === "failed" && walletTxExists ? "Payment failed but a linked wallet transaction exists." : null,
+      ["created", "redirected", "token_received", "pending"].includes(payment.status) && Boolean(payment.expiresAt) && Number(payment.expiresAt) < Date.now()
+        ? "Payment is still pending after its expiry time."
+        : null,
+      bookingIntentMissing ? "Payment points to a booking intent that was not found." : null,
+      matchroomMissing ? "Booking intent points to a matchroom that was not found." : null,
+    ].filter(Boolean) as string[];
+
+    return {
+      paymentTransaction: {
+        _id: String(payment._id),
+        orderRefNum: payment.orderRefNum,
+        kind: payment.kind,
+        status: payment.status,
+        amount: payment.amount,
+        currency: payment.currency,
+        provider: payment.provider,
+        paymentMethod: payment.paymentMethod || null,
+        providerReference: payment.providerReference || null,
+        providerStatus: payment.providerStatus || null,
+        providerDescription: providerDescription.text,
+        providerDescriptionTruncated: providerDescription.truncated,
+        createdAt: payment.createdAt,
+        expiresAt: payment.expiresAt || null,
+        processedAt: payment.processedAt || null,
+        updatedAt: payment.updatedAt,
+        callbackCount: payment.callbackCount || 0,
+        lastCallbackAt: payment.lastCallbackAt || null,
+        lastError: payment.lastError || null,
+      },
+      providerContext: {
+        flow: payment.providerPayload?.flow || null,
+        lastSyncAt: payment.providerPayload?.lastSyncAt || null,
+        lastProviderStatus: payment.providerPayload?.lastProviderStatus || null,
+      },
+      linkedWalletTransaction: walletTransaction
+        ? {
+            _id: String(walletTransaction._id),
+            type: walletTransaction.type,
+            status: walletTransaction.status,
+            amount: walletTransaction.amount,
+            createdAt: walletTransaction.createdAt,
+            reference: walletTransaction.reference || null,
+            metadataSource: walletTransaction.metadata?.source || null,
+          }
+        : null,
+      linkedBookingIntent: bookingIntent
+        ? {
+            _id: String(bookingIntent._id),
+            matchroomId: String(bookingIntent.matchroomId),
+            paymentStatus: bookingIntent.paymentStatus,
+            pricingTotalCost: bookingIntent.pricing?.totalCost || null,
+            createdAt: bookingIntent.createdAt,
+          }
+        : null,
+      linkedMatchroom: linkedMatchroom
+        ? {
+            _id: String(linkedMatchroom._id),
+            title: linkedMatchroom.title || linkedMatchroom.matchCode || "Untitled matchroom",
+            status: linkedMatchroom.status,
+            scheduledDate: linkedMatchroom.scheduledDate || null,
+            scheduledTime: linkedMatchroom.scheduledTime || null,
+            scheduledStartAt: linkedMatchroom.scheduledStartAt || null,
+            createdAt: linkedMatchroom.createdAt,
+          }
+        : null,
+      linkedUser: linkedUser
+        ? {
+            _id: String(linkedUser._id),
+            displayName: linkedUser.fullName || linkedUser.username || "Unknown user",
+            username: linkedUser.username || null,
+            emailMasked: maskAdminEmail(linkedUser.email),
+          }
+        : null,
+      support: {
+        orderRefNum: payment.orderRefNum,
+        paymentTransactionId: String(payment._id),
+        walletTransactionId: walletTransaction ? String(walletTransaction._id) : null,
+        bookingIntentId: bookingIntent ? String(bookingIntent._id) : payment.bookingIntentId ? String(payment.bookingIntentId) : null,
+        matchroomId: linkedMatchroom ? String(linkedMatchroom._id) : bookingIntent?.matchroomId ? String(bookingIntent.matchroomId) : null,
+        userId: String(payment.userId),
+      },
+      reconciliation: {
+        paymentPaidNoWalletTx: paymentIsPaid && !walletTxExists,
+        walletTxWithoutPaid: walletTxExists && !paymentIsPaid,
+        bookingIntentUnpaidButPaymentPaid: paymentIsPaid && bookingIntent?.paymentStatus === "unpaid",
+        paymentFailedButWalletTxExists: payment.status === "failed" && walletTxExists,
+        paymentPendingPastExpiry: ["created", "redirected", "token_received", "pending"].includes(payment.status)
+          && Boolean(payment.expiresAt)
+          && Number(payment.expiresAt) < Date.now(),
+        bookingIntentMissing,
+        matchroomMissing,
+        messages: reconciliationMessages,
+      },
+    };
   },
 });
 
