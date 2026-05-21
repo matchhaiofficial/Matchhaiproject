@@ -13,6 +13,10 @@ import {
   getMatchroomLockAtMs,
   validateMatchroomScheduleWindow,
 } from "../../constants/timing";
+import {
+  cleanConvexErrorMessage,
+  getUserFacingErrorMessage,
+} from "../../utils/userFacingErrors";
 
 export interface Slot {
   slotId: string;
@@ -175,21 +179,6 @@ export interface Matchroom {
 type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
 type ErrorResult = { ok: false; message: string; code?: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
-
-function cleanConvexErrorMessage(error: unknown, fallback = "Something went wrong. Please try again.") {
-  const raw = error instanceof Error ? error.message : String(error || "");
-  const cleaned = raw
-    .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
-    .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
-    .replace(/\bServer Error\b/gi, "")
-    .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
-    .replace(/\bat handler\s*\([^)]*\)/gi, "")
-    .split("Called by client")[0]
-    .trim()
-    .replace(/\s+/g, " ");
-
-  return cleaned || fallback;
-}
 
 function normalizeMatchroomRequestError(error: any) {
   const message = cleanConvexErrorMessage(error, "Failed to send request");
@@ -691,7 +680,7 @@ export async function joinMatchroom(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] joinMatchroom error:", error);
-    return { ok: false, message: error?.message || "Failed to join matchroom" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to join matchroom") };
   }
 }
 
@@ -772,7 +761,7 @@ export async function submitCaptainReport(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitCaptainReport error:", error);
-    return { ok: false, message: error?.message || "Failed to submit report" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report") };
   }
 }
 
@@ -793,7 +782,7 @@ export async function submitParticipantVote(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitParticipantVote error:", error);
-    return { ok: false, message: error?.message || "Failed to submit vote" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit vote") };
   }
 }
 
@@ -816,7 +805,7 @@ export async function adminCancelMatchroom(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] adminCancelMatchroom error:", error);
-    return { ok: false, message: error?.message || "Failed to cancel lobby" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to cancel lobby") };
   }
 }
 
@@ -970,6 +959,6 @@ export async function respondToMatchJoinRequest(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] respondToMatchJoinRequest error:", error);
-    return { ok: false, message: error?.message || "Failed to process request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to process request") };
   }
 }

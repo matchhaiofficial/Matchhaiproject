@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
 import { authClient } from "../lib/auth-client";
+import { getUserFacingErrorMessage } from "../utils/userFacingErrors";
 
 export type KycRole = "player" | "zone_owner" | "venue_admin";
 
@@ -44,7 +45,7 @@ export function useStartDiditKyc() {
         verificationUrl: result.verificationUrl,
       };
     } catch (error: any) {
-      return { ok: false, message: error?.message || "Could not start identity verification." };
+      return { ok: false, message: getUserFacingErrorMessage(error, "Could not start identity verification.") };
     }
   }, [createIntent, startSession, user?.email]);
 }

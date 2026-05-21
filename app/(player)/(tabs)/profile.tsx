@@ -738,17 +738,6 @@ export default function Profile() {
                 </View>
 
                 {/* Logout */}
-                {touchDebugEnabled ? (
-                    <AppButton
-                        variant="secondary"
-                        style={[styles.logoutButton, { marginBottom: 12 }]}
-                        onPress={() => router.push("/debug/perf")}
-                        perf={{ actionKey: "open_perf_debug", toRouteKey: "/debug/perf" }}
-                    >
-                        Open Perf Debug
-                    </AppButton>
-                ) : null}
-
                 <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
                     <AppIcon name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>

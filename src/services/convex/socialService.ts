@@ -5,6 +5,7 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser } from "./authService";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export interface Friend {
   friendshipId: string;
@@ -167,7 +168,7 @@ export async function sendFriendRequest(
     return { ok: true, data: { notificationId } };
   } catch (error: any) {
     console.error("[socialService] sendFriendRequest error:", error);
-    return { ok: false, message: error?.message || "Failed to send friend request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send friend request") };
   }
 }
 
@@ -195,7 +196,7 @@ export async function sendFriendRequestToUser(
     return { ok: true, data: { notificationId }, message: "Request sent." };
   } catch (error: any) {
     console.error("[socialService] sendFriendRequestToUser error:", error);
-    return { ok: false, message: error?.message || "Failed to send friend request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send friend request") };
   }
 }
 
@@ -214,7 +215,7 @@ export async function respondFriendRequest(
     return { ok: true };
   } catch (error: any) {
     console.error("[socialService] respondFriendRequest error:", error);
-    return { ok: false, message: error?.message || "Failed to respond to friend request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to friend request") };
   }
 }
 

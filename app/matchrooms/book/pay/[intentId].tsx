@@ -38,8 +38,8 @@ import {
     isValidPakistaniPhone,
     normalizePakistaniPhone,
 } from "../../../../src/utils/phoneUtils";
-import { SLOT_ALREADY_FILLED_PAYMENT_MESSAGE } from "../../../../src/utils/paymentUiCopy";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
+import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
 import styles from "./pay.styles";
 
 const shouldFallbackToOtc = (error: unknown) => {
@@ -47,25 +47,8 @@ const shouldFallbackToOtc = (error: unknown) => {
     return /ACCOUNT DOES N[O']?T? EXIST|ACCOUNT DOES NO EXIST|PAYMENT METHOD NOT ENABLED/i.test(message);
 };
 
-const getEasypaisaStartErrorMessage = (error: unknown) => {
-    const raw = error instanceof Error ? error.message : String(error || "");
-    const cleaned = raw
-        .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
-        .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
-        .replace(/\bServer Error\b/gi, "")
-        .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
-        .split("Called by client")[0]
-        .trim();
-
-    if (/PAYMENT METHOD NOT ENABLED/i.test(raw)) {
-        return "Easypaisa could not start this payment right now. Try again or use MatchHai Wallet.";
-    }
-    if (/slot is no longer available|selected slot is no longer available/i.test(raw)) {
-        return SLOT_ALREADY_FILLED_PAYMENT_MESSAGE;
-    }
-
-    return cleaned || "Could not start the Easypaisa payment. Please try again.";
-};
+const getEasypaisaStartErrorMessage = (error: unknown) =>
+    getUserFacingErrorMessage(error, "Could not start the Easypaisa payment. Please try again.");
 
 export default function MockPaymentScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };

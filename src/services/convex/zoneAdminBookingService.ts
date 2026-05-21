@@ -15,6 +15,7 @@ import {
     SharedPollingState,
 } from "./sharedPollingRegistry";
 import { getMatchroomLockAtMs } from "../../constants/timing";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
 export type ZoneBookingQueueStatus =
@@ -597,7 +598,7 @@ export async function acceptZoneBookingRequest(input: {
         };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to accept request", error);
-        return { ok: false, message: error?.message || "Failed to accept request." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to accept request.") };
     }
 }
 
@@ -624,7 +625,7 @@ export async function rejectZoneBookingRequest(input: {
         return { ok: true };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to reject request", error);
-        return { ok: false, message: error?.message || "Failed to reject request." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reject request.") };
     }
 }
 
@@ -669,7 +670,7 @@ export async function sendZoneCounterOffer(input: {
         return { ok: true, id: offerId };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to send counter offer", error);
-        return { ok: false, message: error?.message || "Failed to send counter-offer." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send counter-offer.") };
     }
 }
 
@@ -694,7 +695,7 @@ export async function respondToZoneCounterOffer(input: {
         };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to respond to counter offer", error);
-        return { ok: false, message: error?.message || "Failed to respond to time options." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to time options.") };
     }
 }
 
@@ -900,6 +901,6 @@ export async function createZoneWalkInMatchroom(input: {
         return { ok: true, id: matchroomId };
     } catch (error: any) {
         Logger.error("zoneAdminBooking", "Failed to create walk-in matchroom", error);
-        return { ok: false, message: error?.message || "Failed to create walk-in booking." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create walk-in booking.") };
     }
 }
