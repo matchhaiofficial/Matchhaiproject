@@ -7,6 +7,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { Matchroom } from "./matchService";
 import { isRoomExpired, isRoomLocked } from "../../utils/matchroomLifecycle";
 import { getUnavailablePaymentMessage } from "../../config/featureReadiness";
+import { SLOT_ALREADY_FILLED_PAYMENT_MESSAGE } from "../../utils/paymentUiCopy";
 import Logger from "../../utils/logger";
 
 export interface BookingIntent {
@@ -273,7 +274,7 @@ export async function confirmBookingTransaction(
     if (/slot is no longer available/i.test(message)) {
       return {
         ok: false,
-        message: "This slot is no longer available.",
+        message: SLOT_ALREADY_FILLED_PAYMENT_MESSAGE,
       };
     }
     if (/insufficient/i.test(message)) {

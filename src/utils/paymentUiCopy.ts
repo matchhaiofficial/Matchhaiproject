@@ -9,3 +9,6 @@ export const RESERVED_WALLET_HELPER_TEXT =
 
 export const UNPAID_BOOKINGS_HELPER_TEXT =
   "Bookings you started but have not paid for yet.";
+
+export const SLOT_ALREADY_FILLED_PAYMENT_MESSAGE =
+  "Oops! this slot has already been filled";

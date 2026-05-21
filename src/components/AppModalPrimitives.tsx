@@ -66,6 +66,7 @@ type AppModalBodyProps = {
 type AppModalFooterProps = {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  compactBottomInset?: boolean;
 };
 
 function closeIfAllowed(onClose: () => void, dismissDisabled?: boolean) {
@@ -120,7 +121,14 @@ export function AppModalBody({
       <View style={[styles.bodyScrollWrap, style]}>
         <ScrollView
           style={styles.bodyScroll}
-          contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
+          // NOTE: `styles.bodyContent` includes `flexShrink: 1` for non-scroll layouts.
+          // In a ScrollView, `flexShrink` on the content container can prevent the
+          // content from exceeding the viewport, which breaks scrolling. Override it.
+          contentContainerStyle={[
+            styles.bodyContent,
+            { flexShrink: 0 },
+            contentContainerStyle,
+          ]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -138,7 +146,11 @@ export function AppModalBody({
   );
 }
 
-export function AppModalFooter({ children, style }: AppModalFooterProps) {
+export function AppModalFooter({
+  children,
+  style,
+  compactBottomInset = false,
+}: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(0, insets.bottom || 0);
 
@@ -148,7 +160,9 @@ export function AppModalFooter({ children, style }: AppModalFooterProps) {
         styles.footer,
         style,
         {
-          paddingBottom: Math.max(SPACING.md, bottomInset + SPACING.md),
+          paddingBottom: compactBottomInset
+            ? Math.max(SPACING.md, bottomInset)
+            : Math.max(SPACING.md, bottomInset + SPACING.md),
         },
       ]}
     >

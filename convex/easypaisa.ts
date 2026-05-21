@@ -932,9 +932,6 @@ export const getStartCheckoutContext = internalQuery({
       if (playerUids.includes(payerUid) || slotUserUid === payerUid) {
         throw new Error("You are already in this matchroom.");
       }
-      if (isPaymentJoinLocked(room, now)) {
-        throw new Error("This matchroom is no longer available.");
-      }
       if (slotUserUid) {
         console.warn("[easypaisa] booking checkout blocked: selected slot occupied", {
           bookingIntentId: String(args.bookingIntentId),
@@ -945,6 +942,9 @@ export const getStartCheckoutContext = internalQuery({
           occupiedByUid: slotUserUid,
         });
         throw new Error("This slot is no longer available.");
+      }
+      if (isPaymentJoinLocked(room, now)) {
+        throw new Error("This matchroom is no longer available.");
       }
 
       const relatedIntents = await ctx.db

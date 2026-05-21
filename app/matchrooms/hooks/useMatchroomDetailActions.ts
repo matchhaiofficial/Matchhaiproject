@@ -129,6 +129,7 @@ export function useMatchroomDetailActions({
   const { showToast } = useToast();
   const roomRef = useRef(room);
   roomRef.current = room;
+  const inviteInFlightRef = useRef(false);
 
   const ensureBookingRequestLink = async () => {
     if (bookingRequestId) return bookingRequestId;
@@ -810,7 +811,12 @@ export function useMatchroomDetailActions({
 
   const handleSendInvite = async (friend: any) => {
     if (!invitingSlot || !id || !room) return;
-    const inviteeUid = friend?.uid || friend?._id || friend?.id;
+
+    if (inviteInFlightRef.current) {
+      return;
+    }
+
+    const inviteeUid = friend?.uid ?? friend?.friendId ?? friend?._id ?? null;
     if (!inviteeUid) {
       showToast({
         message: "This friend profile is missing an invite id. Refresh and try again.",
@@ -821,6 +827,7 @@ export function useMatchroomDetailActions({
     }
 
     setJoining(true);
+    inviteInFlightRef.current = true;
     try {
       const res = await inviteToMatchroomAction({
         matchroomId: id,
@@ -854,6 +861,7 @@ export function useMatchroomDetailActions({
         type: "error",
       });
     } finally {
+      inviteInFlightRef.current = false;
       setJoining(false);
     }
   };

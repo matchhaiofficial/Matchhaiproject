@@ -3271,9 +3271,6 @@ export const payMatchroomSeatIntent = mutation({
     const room = await ctx.db.get(intent.matchroomId);
     if (!room) throw new Error("Matchroom not found.");
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
-    if (isJoinLocked(room) && !(room.playerUids || []).includes(payerUid)) {
-      throw new Error("This matchroom is locked.");
-    }
     if ((room.playerUids || []).includes(payerUid)) {
       const now = Date.now();
       await ctx.db.patch(args.intentId, {
@@ -3325,6 +3322,9 @@ export const payMatchroomSeatIntent = mutation({
         },
       });
       throw new Error("This slot is no longer available.");
+    }
+    if (isJoinLocked(room)) {
+      throw new Error("This matchroom is locked.");
     }
 
     const amount = Number(intent.pricing?.totalCost || room.pricing?.perPlayer || 0);
