@@ -376,6 +376,30 @@ function generateSlots(teamSize: number, side: "A" | "B", players: any[] = []): 
   });
 }
 
+function normalizeMaxPlayersForFixedFormats(roomData: Matchroom): number {
+  const normalizedGameKey = normalizeGameKey(roomData.game) as GameKey | null;
+  const gameKey = normalizedGameKey || (roomData.game as any);
+  const format = String(roomData.format || "").trim();
+
+  if (gameKey === "fc25" || gameKey === "fc26" || gameKey === "tekken8") {
+    if (format === "2v2") return 4;
+    if (format === "1v1") return 2;
+    return roomData.maxPlayers;
+  }
+
+  if (gameKey === "padel") {
+    return 4;
+  }
+
+  if (gameKey === "pickleball") {
+    if (format === "2v2") return 4;
+    if (format === "1v1") return 2;
+    return roomData.maxPlayers;
+  }
+
+  return roomData.maxPlayers;
+}
+
 /**
  * Create a new matchroom
  */
@@ -407,6 +431,8 @@ export async function createMatchroom(
       }
     }
 
+    const normalizedMaxPlayers = normalizeMaxPlayersForFixedFormats(roomData);
+
     // Prepare players array
     let players = roomData.players || [];
     if (players.length === 0) {
@@ -428,10 +454,10 @@ export async function createMatchroom(
 
     if (
       (!slotsA.length || !slotsB.length) &&
-      roomData.maxPlayers &&
-      roomData.maxPlayers % 2 === 0
+      normalizedMaxPlayers &&
+      normalizedMaxPlayers % 2 === 0
     ) {
-      const teamSize = roomData.maxPlayers / 2;
+      const teamSize = normalizedMaxPlayers / 2;
       slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
       slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
     }
@@ -450,7 +476,7 @@ export async function createMatchroom(
       game: roomData.game,
       title: roomData.title || `${roomData.game} Match`,
       description: roomData.description,
-      maxPlayers: roomData.maxPlayers,
+      maxPlayers: normalizedMaxPlayers,
       players: players.map((p) => ({
         uid: p.uid,
         username: p.username,
