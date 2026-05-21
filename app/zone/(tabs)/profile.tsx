@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Pressable,
     ScrollView,
     Text,
@@ -146,6 +145,7 @@ export default function ZoneProfile() {
     const [withdrawBankName, setWithdrawBankName] = useState("");
     const [withdrawAccountNumber, setWithdrawAccountNumber] = useState("");
     const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const [showLogoutDialog, setShowLogoutDialog] = useState(false);
     const tabBarScrollClearance = useTabBarClearance(SPACING.lg);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.lg, tabBarScrollClearance);
     const kycVerified = isUserFullyVerified(authUser, user);
@@ -248,26 +248,22 @@ export default function ZoneProfile() {
     };
 
     const handleLogout = () => {
-        Alert.alert("Logout", "Are you sure you want to logout?", [
-            { text: "Cancel", style: "cancel" },
-            {
-                text: "Logout",
-                style: "destructive",
-                onPress: async () => {
-                    setLoggingOut(true);
-                    try {
-                        const result = await signOutUser();
-                        if (result.ok) {
-                            router.replace("/auth/login");
-                        } else {
-                            showToast({ type: "error", title: "Logout Failed", message: result.message });
-                        }
-                    } finally {
-                        setLoggingOut(false);
-                    }
-                },
-            },
-        ]);
+        setShowLogoutDialog(true);
+    };
+
+    const confirmLogout = async () => {
+        setShowLogoutDialog(false);
+        setLoggingOut(true);
+        try {
+            const result = await signOutUser();
+            if (result.ok) {
+                router.replace("/auth/login");
+            } else {
+                showToast({ type: "error", title: "Logout Failed", message: result.message });
+            }
+        } finally {
+            setLoggingOut(false);
+        }
     };
 
     const handleStartVerification = async () => {
@@ -588,6 +584,23 @@ export default function ZoneProfile() {
                             <Text style={styles.withdrawSubmitText}>Send request</Text>
                         )}
                     </Pressable>
+                </AppModalFooter>
+            </AppDialog>
+
+            <AppDialog visible={showLogoutDialog} onClose={() => setShowLogoutDialog(false)}>
+                <AppModalHeader title="Logout" onClose={() => setShowLogoutDialog(false)} />
+                <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+                    <Text style={styles.profileEmail}>Are you sure you want to logout?</Text>
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md }}>
+                        <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setShowLogoutDialog(false)}>
+                            Cancel
+                        </AppButton>
+                        <AppButton variant="danger" style={{ flex: 1 }} onPress={confirmLogout} disabled={loggingOut} loading={loggingOut}>
+                            Logout
+                        </AppButton>
+                    </View>
                 </AppModalFooter>
             </AppDialog>
         </Screen>

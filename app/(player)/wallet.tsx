@@ -855,6 +855,7 @@ export default function WalletScreen() {
         onClose={() => !addingFunds && setPhoneModalVisible(false)}
         dismissDisabled={addingFunds}
         cardStyle={styles.phoneDialogCard}
+        keyboardAware={true}
       >
         <AppModalHeader
           title="Confirm Easypaisa Number"

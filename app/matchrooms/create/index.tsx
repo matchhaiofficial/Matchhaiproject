@@ -1107,14 +1107,15 @@ export default function CreateMatchroom() {
     closeEasypaisaPhonePrompt,
     completeAssessment,
     confirmEasypaisaPayment,
-    resendEasypaisaPayment,
     confirmActivation,
+    hideEasypaisaPhonePrompt,
     easypaisaCheckoutPhone,
     easypaisaCheckoutStatus,
     easypaisaPaymentAmount,
     easypaisaPaymentPhase,
     handleEasypaisaPhoneChange,
     handleSubmit,
+    openEasypaisaPhonePrompt,
     refreshEasypaisaPaymentStatus,
     refreshingEasypaisaStatus,
     resetEasypaisaPaymentPrompt,
@@ -1189,11 +1190,14 @@ export default function CreateMatchroom() {
         ? COLORS.error
         : COLORS.warning;
   const isEasypaisaPaymentActive = Boolean(activeEasypaisaOrderRef);
+  const showEasypaisaRecoveryBanner =
+    isEasypaisaPaymentActive && !showEasypaisaPhonePrompt;
   const isEasypaisaPaymentLocked =
     startingEasypaisaPayment ||
     easypaisaPaymentPhase === "payment_sent" ||
     easypaisaPaymentPhase === "confirmed" ||
-    easypaisaPaymentPhase === "completing";
+    easypaisaPaymentPhase === "completing" ||
+    easypaisaPaymentPhase === "completion_failed";
   const easypaisaDialogTitle = isEasypaisaPaymentActive
     ? easypaisaPaymentPhase === "completion_failed"
       ? "Completion Pending"
@@ -1247,6 +1251,79 @@ export default function CreateMatchroom() {
         : easypaisaPaymentPhase === "failed" || easypaisaPaymentPhase === "expired"
         ? COLORS.error
         : COLORS.warning;
+  const easypaisaRecoveryStatusLabel =
+    easypaisaPaymentPhase === "confirmed"
+      ? "Payment confirmed"
+      : easypaisaPaymentPhase === "completing"
+        ? "Completing matchroom"
+        : easypaisaPaymentPhase === "completion_failed"
+          ? "Completion pending"
+          : easypaisaPaymentPhase === "failed"
+            ? "Payment not completed"
+            : easypaisaPaymentPhase === "expired"
+              ? "Payment expired"
+              : "Payment pending";
+  const renderEasypaisaRecoveryBanner = () => {
+    if (!showEasypaisaRecoveryBanner) return null;
+
+    return (
+      <View
+        style={{
+          gap: 14,
+          marginHorizontal: 16,
+          marginBottom: 20,
+          padding: 16,
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: COLORS.cardBorder,
+          backgroundColor: COLORS.cardBackground,
+        }}
+      >
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+          <AppIcon name={easypaisaStatusIcon as any} size={20} color={easypaisaStatusColor} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text
+              style={{
+                color: COLORS.text,
+                fontFamily: FONTS.interSemiBold,
+                fontSize: 15,
+                lineHeight: 22,
+              }}
+            >
+              {easypaisaRecoveryStatusLabel}
+            </Text>
+            <Text
+              style={{
+                color: COLORS.textSecondary,
+                fontFamily: FONTS.body,
+                fontSize: 12,
+                lineHeight: 18,
+              }}
+            >
+              {easypaisaStatusMessage}
+            </Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <AppButton
+            variant="secondary"
+            style={{ flex: 1 }}
+            onPress={openEasypaisaPhonePrompt}
+          >
+            Open payment status
+          </AppButton>
+          <AppButton
+            style={{ flex: 1 }}
+            onPress={() => refreshEasypaisaPaymentStatus("manual")}
+            loading={refreshingEasypaisaStatus}
+            disabled={refreshingEasypaisaStatus}
+          >
+            I've paid / Continue
+          </AppButton>
+        </View>
+      </View>
+    );
+  };
   if (loading) {
     return (
       <Screen style={styles.screen} scroll={false}>
@@ -1476,6 +1553,7 @@ export default function CreateMatchroom() {
 
           </>
         ) : null}
+        {renderEasypaisaRecoveryBanner()}
         </Animated.ScrollView>
 
         {selectedGame ? (
@@ -1483,15 +1561,19 @@ export default function CreateMatchroom() {
               <Pressable
                 style={({ pressed }) => [
                   styles.primaryButton,
-                  (!canSubmit || submitting || emailVerificationLocked) &&
+                  (!isEasypaisaPaymentActive && (!canSubmit || submitting || emailVerificationLocked)) &&
                     styles.primaryButtonDisabled,
                   pressed &&
-                  canSubmit &&
+                  (isEasypaisaPaymentActive || canSubmit) &&
                   !submitting &&
                   !emailVerificationLocked &&
                   styles.primaryButtonPressed,
                 ]}
                 onPress={() => {
+                  if (isEasypaisaPaymentActive) {
+                    openEasypaisaPhonePrompt();
+                    return;
+                  }
                   setSubmitFeedback(null);
                   if (emailVerificationLocked) {
                     showKycVerificationRequiredAlert();
@@ -1500,13 +1582,13 @@ export default function CreateMatchroom() {
                   if (!validateForm()) return;
                   handleSubmit();
                 }}
-                disabled={submitting}
+                disabled={submitting && !isEasypaisaPaymentActive}
               >
-                {submitting ? (
+                {submitting && !isEasypaisaPaymentActive ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <Text style={styles.primaryButtonText}>
-                    Create Walk-in Matchroom
+                    {isEasypaisaPaymentActive ? "Open Payment Status" : "Create Walk-in Matchroom"}
                   </Text>
                 )}
               </Pressable>
@@ -2134,6 +2216,7 @@ export default function CreateMatchroom() {
           </View>
         </Animated.View>
       )}
+      {renderEasypaisaRecoveryBanner()}
       </Animated.ScrollView>
 
       {selectedGame ? (
@@ -2143,16 +2226,20 @@ export default function CreateMatchroom() {
             onPressOut={onSubmitPressOut}
             style={({ pressed }) => [
               styles.primaryButton,
-              (!canSubmit || submitting || emailVerificationLocked) &&
+              (!isEasypaisaPaymentActive && (!canSubmit || submitting || emailVerificationLocked)) &&
                 styles.primaryButtonDisabled,
               pressed &&
-              canSubmit &&
+              (isEasypaisaPaymentActive || canSubmit) &&
               !submitting &&
               !emailVerificationLocked &&
               styles.primaryButtonPressed,
             ]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             onPress={() => {
+              if (isEasypaisaPaymentActive) {
+                openEasypaisaPhonePrompt();
+                return;
+              }
               setSubmitFeedback(null);
               if (emailVerificationLocked) {
                 showKycVerificationRequiredAlert();
@@ -2169,16 +2256,18 @@ export default function CreateMatchroom() {
               if (!validateForm()) return;
               handleSubmit();
             }}
-            disabled={submitting}
+            disabled={submitting && !isEasypaisaPaymentActive}
           >
             <Animated.View style={submitMotionStyle}>
-              {submitting ? (
+              {submitting && !isEasypaisaPaymentActive ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  {locationMode === "broadcast"
-                    ? "Send Broadcast"
-                    : "Send Booking Request"}
+                  {isEasypaisaPaymentActive
+                    ? "Open Payment Status"
+                    : locationMode === "broadcast"
+                      ? "Send Broadcast"
+                      : "Send Booking Request"}
                 </Text>
               )}
             </Animated.View>
@@ -2223,6 +2312,7 @@ export default function CreateMatchroom() {
         onClose={closeEasypaisaPhonePrompt}
         dismissDisabled={isEasypaisaPaymentLocked}
         cardStyle={styles.phoneDialogCard}
+        keyboardAware={true}
       >
         <AppModalHeader
           title={easypaisaDialogTitle}
@@ -2291,9 +2381,9 @@ export default function CreateMatchroom() {
                   <AppButton
                     variant="secondary"
                     style={styles.phoneActionBtn}
-                    onPress={closeEasypaisaPhonePrompt}
+                    onPress={hideEasypaisaPhonePrompt}
                   >
-                    Close
+                    Do this later
                   </AppButton>
                   <AppButton
                     style={styles.phoneActionBtn}
@@ -2327,21 +2417,26 @@ export default function CreateMatchroom() {
                     <AppButton
                       variant="secondary"
                       style={styles.phoneActionBtn}
-                      onPress={() => void resendEasypaisaPayment()}
-                      disabled={refreshingEasypaisaStatus || startingEasypaisaPayment}
+                      onPress={hideEasypaisaPhonePrompt}
                     >
-                      Resend Request
+                      Do this later
                     </AppButton>
-                  ) : null}
+                  ) : (
+                    <AppButton
+                      variant="secondary"
+                      style={styles.phoneActionBtn}
+                      onPress={hideEasypaisaPhonePrompt}
+                    >
+                      Do this later
+                    </AppButton>
+                  )}
                   <AppButton
                     style={styles.phoneActionBtn}
                     onPress={() => refreshEasypaisaPaymentStatus("manual")}
                     loading={refreshingEasypaisaStatus}
                     disabled={refreshingEasypaisaStatus}
                   >
-                    {easypaisaPaymentPhase === "confirmed" || easypaisaPaymentPhase === "completing"
-                      ? "Refresh Status"
-                      : "Refresh Status"}
+                    I've paid / Continue
                   </AppButton>
                 </>
               )}

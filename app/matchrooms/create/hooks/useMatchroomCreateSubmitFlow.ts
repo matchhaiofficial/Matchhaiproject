@@ -311,13 +311,22 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       !startingEasypaisaPayment &&
       easypaisaPaymentPhase !== "payment_sent" &&
       easypaisaPaymentPhase !== "confirmed" &&
-      easypaisaPaymentPhase !== "completing"
+      easypaisaPaymentPhase !== "completing" &&
+      easypaisaPaymentPhase !== "completion_failed"
     ) {
       setShowEasypaisaPhonePrompt(false);
       setActiveEasypaisaOrderRef(null);
       setEasypaisaPaymentPhase("idle");
     }
   }, [easypaisaPaymentPhase, startingEasypaisaPayment]);
+
+  const hideEasypaisaPhonePrompt = useCallback(() => {
+    setShowEasypaisaPhonePrompt(false);
+  }, []);
+
+  const openEasypaisaPhonePrompt = useCallback(() => {
+    setShowEasypaisaPhonePrompt(true);
+  }, []);
 
   const resetEasypaisaPaymentPrompt = useCallback(() => {
     if (startingEasypaisaPayment || easypaisaPaymentPhase === "completing") return;
@@ -1143,11 +1152,13 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     confirmEasypaisaPayment,
     resendEasypaisaPayment,
     confirmActivation,
+    hideEasypaisaPhonePrompt,
     activeEasypaisaOrderRef,
     easypaisaCheckoutStatus: checkoutStatus,
     easypaisaCheckoutPhone,
     easypaisaPaymentAmount,
     easypaisaPaymentPhase,
+    openEasypaisaPhonePrompt,
     refreshEasypaisaPaymentStatus,
     refreshingEasypaisaStatus,
     resetEasypaisaPaymentPrompt,

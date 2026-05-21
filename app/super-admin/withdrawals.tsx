@@ -2,9 +2,7 @@ import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,11 +10,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppIcon } from "../../src/components/AppIcon";
 import { AdminEmptyStateCard, AdminInfoLine, AdminListCard, AdminPageHeader } from "../../src/components/AdminSurface";
-import { AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
+import { AppDialog, AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import { AppButton, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
@@ -48,7 +45,6 @@ function statusTone(status?: string | null) {
 }
 
 export default function SuperAdminWithdrawalsScreen() {
-  const insets = useSafeAreaInsets();
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [withdrawals, setWithdrawals] = useState<SuperAdminWithdrawalRequest[]>([]);
@@ -57,6 +53,7 @@ export default function SuperAdminWithdrawalsScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null);
 
   const selected = useMemo(
     () => withdrawals.find((item) => item.id === selectedId) || null,
@@ -78,40 +75,33 @@ export default function SuperAdminWithdrawalsScreen() {
   }, [load]));
 
   const closeDrawer = useCallback(() => {
-    if (submitting) return;
     setSelectedId(null);
     setRejectReason("");
-  }, [submitting]);
+  }, []);
 
   const handleApprove = useCallback(() => {
     if (!selected || submitting) return;
-    Alert.alert(
-      "Approve withdrawal",
-      `Approve ${formatAmount(selected.amount)} for payout? This will deduct the zone admin wallet balance once.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Approve",
-          onPress: async () => {
-            setSubmitting("approve");
-            const result = await approveZoneWithdrawal(selected.id);
-            setSubmitting(null);
-            if (!result.ok) {
-              showToast({ type: "error", title: "Approval failed", message: result.message });
-              return;
-            }
-            showToast({
-              type: result.changed ? "success" : "info",
-              title: result.changed ? "Withdrawal approved" : "Already processed",
-              message: result.changed ? "The wallet balance was deducted." : "This withdrawal was already processed.",
-            });
-            setSelectedId(null);
-            setRejectReason("");
-            await load("refresh");
-          },
-        },
-      ],
-    );
+    setConfirmAction("approve");
+  }, [selected, submitting]);
+
+  const confirmApprove = useCallback(async () => {
+    if (!selected || submitting) return;
+    setConfirmAction(null);
+    setSubmitting("approve");
+    const result = await approveZoneWithdrawal(selected.id);
+    setSubmitting(null);
+    if (!result.ok) {
+      showToast({ type: "error", title: "Approval failed", message: result.message });
+      return;
+    }
+    showToast({
+      type: result.changed ? "success" : "info",
+      title: result.changed ? "Withdrawal approved" : "Already processed",
+      message: result.changed ? "The wallet balance was deducted." : "This withdrawal was already processed.",
+    });
+    setSelectedId(null);
+    setRejectReason("");
+    await load("refresh");
   }, [load, selected, showToast, submitting]);
 
   const handleReject = useCallback(() => {
@@ -121,34 +111,33 @@ export default function SuperAdminWithdrawalsScreen() {
       showToast({ type: "error", title: "Reason required", message: "Add a rejection reason before continuing." });
       return;
     }
-    Alert.alert(
-      "Reject withdrawal",
-      "Reject this withdrawal request? The reason is stored for admin context and is not sent in the notification.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reject",
-          style: "destructive",
-          onPress: async () => {
-            setSubmitting("reject");
-            const result = await rejectZoneWithdrawal(selected.id, reason);
-            setSubmitting(null);
-            if (!result.ok) {
-              showToast({ type: "error", title: "Rejection failed", message: result.message });
-              return;
-            }
-            showToast({
-              type: result.changed ? "success" : "info",
-              title: result.changed ? "Withdrawal rejected" : "Already processed",
-              message: result.changed ? "The request was marked failed." : "This withdrawal was already processed.",
-            });
-            setSelectedId(null);
-            setRejectReason("");
-            await load("refresh");
-          },
-        },
-      ],
-    );
+    setConfirmAction("reject");
+  }, [rejectReason, selected, showToast, submitting]);
+
+  const confirmReject = useCallback(async () => {
+    if (!selected || submitting) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      showToast({ type: "error", title: "Reason required", message: "Add a rejection reason before continuing." });
+      setConfirmAction(null);
+      return;
+    }
+    setConfirmAction(null);
+    setSubmitting("reject");
+    const result = await rejectZoneWithdrawal(selected.id, reason);
+    setSubmitting(null);
+    if (!result.ok) {
+      showToast({ type: "error", title: "Rejection failed", message: result.message });
+      return;
+    }
+    showToast({
+      type: result.changed ? "success" : "info",
+      title: result.changed ? "Withdrawal rejected" : "Already processed",
+      message: result.changed ? "The request was marked failed." : "This withdrawal was already processed.",
+    });
+    setSelectedId(null);
+    setRejectReason("");
+    await load("refresh");
   }, [load, rejectReason, selected, showToast, submitting]);
 
   return (
@@ -194,13 +183,12 @@ export default function SuperAdminWithdrawalsScreen() {
         </ScrollView>
       )}
 
-      <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={styles.drawer}>
+      <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={styles.drawer} keyboardAware>
         <View style={styles.drawerContent}>
           <AppModalHeader
             title="Withdrawal detail"
             subtitle={selected ? `${formatAmount(selected.amount)} - ${selected.status}` : undefined}
             onClose={closeDrawer}
-            closeDisabled={Boolean(submitting)}
             compact
           />
           <AppModalBody scroll contentContainerStyle={styles.drawerBody}>
@@ -242,7 +230,7 @@ export default function SuperAdminWithdrawalsScreen() {
             ) : null}
           </AppModalBody>
           <AppModalFooter>
-            <View style={[styles.footerRow, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.footerRow}>
               <AppButton
                 variant="danger"
                 style={styles.footerButton}
@@ -265,6 +253,58 @@ export default function SuperAdminWithdrawalsScreen() {
           </AppModalFooter>
         </View>
       </AppDrawer>
+
+      <AppDialog visible={confirmAction === "approve"} onClose={() => setConfirmAction(null)}>
+        <AppModalHeader title="Approve withdrawal" onClose={() => setConfirmAction(null)} />
+        <AppModalBody contentContainerStyle={styles.confirmBody}>
+          <Text style={styles.confirmText}>
+            {selected
+              ? `Approve ${formatAmount(selected.amount)} for payout? This will deduct the zone admin wallet balance once.`
+              : "Approve this withdrawal for payout? This will deduct the zone admin wallet balance once."}
+          </Text>
+        </AppModalBody>
+        <AppModalFooter>
+          <View style={styles.footerRow}>
+            <AppButton variant="secondary" style={styles.footerButton} onPress={() => setConfirmAction(null)}>
+              Cancel
+            </AppButton>
+            <AppButton
+              variant="success"
+              style={styles.footerButton}
+              onPress={confirmApprove}
+              disabled={!selected || Boolean(submitting)}
+              loading={submitting === "approve"}
+            >
+              Approve
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
+
+      <AppDialog visible={confirmAction === "reject"} onClose={() => setConfirmAction(null)}>
+        <AppModalHeader title="Reject withdrawal" onClose={() => setConfirmAction(null)} />
+        <AppModalBody contentContainerStyle={styles.confirmBody}>
+          <Text style={styles.confirmText}>
+            Reject this withdrawal request? The reason is stored for admin context and is not sent in the notification.
+          </Text>
+        </AppModalBody>
+        <AppModalFooter>
+          <View style={styles.footerRow}>
+            <AppButton variant="secondary" style={styles.footerButton} onPress={() => setConfirmAction(null)}>
+              Cancel
+            </AppButton>
+            <AppButton
+              variant="danger"
+              style={styles.footerButton}
+              onPress={confirmReject}
+              disabled={!selected || Boolean(submitting)}
+              loading={submitting === "reject"}
+            >
+              Reject
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
     </Screen>
   );
 }
@@ -289,6 +329,8 @@ const styles = StyleSheet.create({
   reasonLabel: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 13 },
   reasonInput: { minHeight: 96, borderRadius: RADII.md, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardDark, color: COLORS.text, fontFamily: FONTS.body, fontSize: 14, padding: SPACING.md, textAlignVertical: "top" },
   reasonCounter: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, textAlign: "right" },
+  confirmBody: { gap: SPACING.md },
+  confirmText: { color: COLORS.textSecondary, fontFamily: FONTS.body, fontSize: 14, lineHeight: 20 },
   footerRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
   footerButton: { flex: 1 },
 });

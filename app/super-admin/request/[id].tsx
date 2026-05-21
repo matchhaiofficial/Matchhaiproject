@@ -2,7 +2,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,12 @@ import {
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminEmptyStateCard, AdminSectionHeader } from "../../../src/components/AdminSurface";
 import { AppIcon } from "../../../src/components/AppIcon";
+import {
+  AppDialog,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import {
   DetailKeyValueRow,
@@ -58,6 +63,7 @@ export default function RequestDetail() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [showRejectComposer, setShowRejectComposer] = useState(false);
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const { showToast } = useToast();
   const { animatedStyle: entranceStyle } = useEntrance({ axis: "y", distance: 12 });
@@ -87,29 +93,22 @@ export default function RequestDetail() {
 
   const handleApprove = async () => {
     if (!id) return;
+    setShowApproveDialog(true);
+  };
 
-    Alert.alert(
-      "Approve Venue",
-      "This approves the venue and starts migration. The venue goes live only after migration succeeds.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Approve",
-          onPress: async () => {
-            setProcessing(true);
-            const res = await approveZone(id);
-            setProcessing(false);
+  const confirmApprove = async () => {
+    if (!id) return;
+    setShowApproveDialog(false);
+    setProcessing(true);
+    const res = await approveZone(id);
+    setProcessing(false);
 
-            if (!res.ok) {
-              showToast({ type: "error", title: "Error", message: res.message });
-              return;
-            }
+    if (!res.ok) {
+      showToast({ type: "error", title: "Error", message: res.message });
+      return;
+    }
 
-            closeWithResult("Approved", "Venue approval saved. Migration status has been updated.");
-          },
-        },
-      ],
-    );
+    closeWithResult("Approved", "Venue approval saved. Migration status has been updated.");
   };
 
   const handleReject = () => {
@@ -343,6 +342,25 @@ export default function RequestDetail() {
           </View>
         </AppCard>
       </ScrollView>
+
+      <AppDialog visible={showApproveDialog} onClose={() => setShowApproveDialog(false)}>
+        <AppModalHeader title="Approve Venue" onClose={() => setShowApproveDialog(false)} />
+        <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+          <Text style={styles.helperText}>
+            This approves the venue and starts migration. The venue goes live only after migration succeeds.
+          </Text>
+        </AppModalBody>
+        <AppModalFooter>
+          <View style={styles.dialogActionRow}>
+            <AppButton variant="secondary" style={styles.dialogAction} onPress={() => setShowApproveDialog(false)}>
+              Cancel
+            </AppButton>
+            <AppButton style={styles.dialogAction} onPress={confirmApprove} disabled={processing} loading={processing}>
+              Approve
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
     </Screen>
   );
 }
@@ -458,5 +476,14 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: SPACING.sm,
     marginTop: SPACING.md,
+  },
+  dialogActionRow: {
+    flexDirection: "row",
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
+  },
+  dialogAction: {
+    flex: 1,
   },
 });

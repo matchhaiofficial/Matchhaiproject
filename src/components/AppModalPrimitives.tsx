@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   Platform,
@@ -12,7 +13,11 @@ import {
   ViewStyle,
 } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+  type Edge,
+} from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
 import { useEntrance } from "../motion/useEntrance";
@@ -27,6 +32,9 @@ type BaseProps = {
   children: React.ReactNode;
   dismissDisabled?: boolean;
   animationType?: "none" | "slide" | "fade";
+  keyboardAware?: boolean;
+  keyboardAvoidBehavior?: "padding" | "height" | "position";
+  keyboardVerticalOffset?: number;
 };
 
 type HeaderProps = {
@@ -54,6 +62,7 @@ export type AppPickerSheetProps = BaseProps & {
 
 export type AppDrawerProps = BaseProps & {
   drawerStyle?: StyleProp<ViewStyle>;
+  contentSafeAreaEdges?: Edge[];
 };
 
 type AppModalBodyProps = {
@@ -66,10 +75,47 @@ type AppModalBodyProps = {
 type AppModalFooterProps = {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  includeSafeAreaBottom?: boolean;
+  minBottomPadding?: number;
+  extraBottomPadding?: number;
 };
 
 function closeIfAllowed(onClose: () => void, dismissDisabled?: boolean) {
   if (!dismissDisabled) onClose();
+}
+
+function getKeyboardAvoidBehavior(
+  keyboardAvoidBehavior?: BaseProps["keyboardAvoidBehavior"],
+) {
+  return keyboardAvoidBehavior ?? (Platform.OS === "ios" ? "padding" : "height");
+}
+
+function MaybeKeyboardAvoidingView({
+  enabled,
+  behavior,
+  keyboardVerticalOffset = 0,
+  style,
+  children,
+}: {
+  enabled?: boolean;
+  behavior?: BaseProps["keyboardAvoidBehavior"];
+  keyboardVerticalOffset?: number;
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  if (!enabled) {
+    return <>{children}</>;
+  }
+
+  return (
+    <KeyboardAvoidingView
+      behavior={getKeyboardAvoidBehavior(behavior)}
+      keyboardVerticalOffset={keyboardVerticalOffset}
+      style={style}
+    >
+      {children}
+    </KeyboardAvoidingView>
+  );
 }
 
 export function AppModalHeader({
@@ -123,6 +169,9 @@ export function AppModalBody({
           contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={
+            Platform.OS === "ios" ? "interactive" : "on-drag"
+          }
           showsVerticalScrollIndicator={false}
         >
           {children}
@@ -138,9 +187,15 @@ export function AppModalBody({
   );
 }
 
-export function AppModalFooter({ children, style }: AppModalFooterProps) {
+export function AppModalFooter({
+  children,
+  style,
+  includeSafeAreaBottom = true,
+  minBottomPadding = SPACING.md,
+  extraBottomPadding = 0,
+}: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  const bottomInset = Math.max(0, insets.bottom || 0);
+  const bottomInset = includeSafeAreaBottom ? Math.max(0, insets.bottom || 0) : 0;
 
   return (
     <View
@@ -148,7 +203,9 @@ export function AppModalFooter({ children, style }: AppModalFooterProps) {
         styles.footer,
         style,
         {
-          paddingBottom: Math.max(SPACING.md, bottomInset + SPACING.md),
+          paddingBottom:
+            Math.max(minBottomPadding, bottomInset + minBottomPadding) +
+            extraBottomPadding,
         },
       ]}
     >
@@ -164,11 +221,15 @@ export function AppDialog({
   dismissDisabled,
   animationType = "fade",
   cardStyle,
+  keyboardAware = false,
+  keyboardAvoidBehavior,
+  keyboardVerticalOffset = 0,
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bottomClearance = Math.max(0, insets.bottom || 0);
-  const verticalChrome = SPACING.xl + bottomClearance;
+  const topClearance = Math.max(0, insets.top || 0);
+  const verticalChrome = topClearance + bottomClearance + SPACING.xl + SPACING.md;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
     visible,
@@ -194,13 +255,20 @@ export function AppDialog({
         ]}
         onPress={() => closeIfAllowed(onClose, dismissDisabled)}
       >
-        <Animated.View style={[styles.dialogFrame, entrance.animatedStyle]}>
-          <Pressable
-            style={[styles.dialogCard, { maxHeight: maxCardHeight }, cardStyle]}
-          >
-            {children}
-          </Pressable>
-        </Animated.View>
+        <MaybeKeyboardAvoidingView
+          enabled={keyboardAware}
+          behavior={keyboardAvoidBehavior}
+          keyboardVerticalOffset={keyboardVerticalOffset}
+          style={styles.dialogKeyboardAvoiding}
+        >
+          <Animated.View style={[styles.dialogFrame, entrance.animatedStyle]}>
+            <Pressable
+              style={[styles.dialogCard, { maxHeight: maxCardHeight }, cardStyle]}
+            >
+              {children}
+            </Pressable>
+          </Animated.View>
+        </MaybeKeyboardAvoidingView>
       </Pressable>
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
         <Toast config={toastConfig} />
@@ -217,6 +285,9 @@ export function AppBottomSheet({
   animationType = "slide",
   sheetStyle,
   contentStyle,
+  keyboardAware = false,
+  keyboardAvoidBehavior,
+  keyboardVerticalOffset = 0,
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -247,22 +318,29 @@ export function AppBottomSheet({
           style={styles.backdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
-        <View
-          style={styles.sheetWrap}
+        <MaybeKeyboardAvoidingView
+          enabled={keyboardAware}
+          behavior={keyboardAvoidBehavior}
+          keyboardVerticalOffset={keyboardVerticalOffset}
+          style={styles.sheetKeyboardAvoiding}
         >
-          <Animated.View style={entrance.animatedStyle}>
-            <View
-              style={[
-                styles.sheet,
-                sheetStyle,
-                contentStyle,
-                { maxHeight: maxSheetHeight },
-              ]}
-            >
-              {children}
-            </View>
-          </Animated.View>
-        </View>
+          <View
+            style={styles.sheetWrap}
+          >
+            <Animated.View style={entrance.animatedStyle}>
+              <View
+                style={[
+                  styles.sheet,
+                  sheetStyle,
+                  contentStyle,
+                  { maxHeight: maxSheetHeight },
+                ]}
+              >
+                {children}
+              </View>
+            </Animated.View>
+          </View>
+        </MaybeKeyboardAvoidingView>
       </View>
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
         <Toast config={toastConfig} />
@@ -302,6 +380,10 @@ export function AppDrawer({
   dismissDisabled,
   animationType = "fade",
   drawerStyle,
+  keyboardAware = false,
+  keyboardAvoidBehavior,
+  keyboardVerticalOffset = 0,
+  contentSafeAreaEdges,
 }: AppDrawerProps) {
   const entrance = useEntrance({
     visible,
@@ -319,9 +401,27 @@ export function AppDrawer({
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
       <View style={[styles.overlayBase, styles.drawerOverlay]}>
-        <Animated.View style={entrance.animatedStyle}>
-          <View style={[styles.drawerPanel, drawerStyle]}>{children}</View>
-        </Animated.View>
+        <MaybeKeyboardAvoidingView
+          enabled={keyboardAware}
+          behavior={keyboardAvoidBehavior}
+          keyboardVerticalOffset={keyboardVerticalOffset}
+          style={styles.drawerKeyboardAvoiding}
+        >
+          <Animated.View style={entrance.animatedStyle}>
+            <View style={[styles.drawerPanel, drawerStyle]}>
+              {contentSafeAreaEdges ? (
+                <SafeAreaView
+                  style={styles.drawerSafeArea}
+                  edges={contentSafeAreaEdges}
+                >
+                  {children}
+                </SafeAreaView>
+              ) : (
+                children
+              )}
+            </View>
+          </Animated.View>
+        </MaybeKeyboardAvoidingView>
         <Pressable
           style={styles.drawerBackdrop}
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}

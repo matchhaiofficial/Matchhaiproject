@@ -89,7 +89,6 @@ export function MatchroomJoinTeamSheet({
         title="Choose Team"
         subtitle="Pick which side you want to request."
         onClose={onClose}
-        closeDisabled={joining}
       />
       <AppModalBody contentContainerStyle={localStyles.bodyContent}>
         <View style={localStyles.options}>
@@ -98,7 +97,7 @@ export function MatchroomJoinTeamSheet({
         </View>
       </AppModalBody>
       <AppModalFooter style={styles.modalFooter}>
-        <AppButton variant="secondary" onPress={onClose} disabled={joining}>
+        <AppButton variant="secondary" onPress={onClose}>
           Cancel
         </AppButton>
       </AppModalFooter>

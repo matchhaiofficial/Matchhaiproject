@@ -164,7 +164,22 @@ export function ZoneBookingsRequestsSection({
             </View>
           </AppModalBody>
           <AppModalFooter style={styles.filterDrawerFooter}>
-            <AppButton onPress={onToggleFilters}>Done</AppButton>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <AppButton
+                variant="ghost"
+                disabled={activeFilterCount === 0}
+                style={{ flex: 1 }}
+                onPress={() => {
+                  onSelectGameFilter("all");
+                  onSelectTimeFilter("all");
+                }}
+              >
+                Reset
+              </AppButton>
+              <AppButton style={{ flex: 1 }} onPress={onToggleFilters}>
+                Done
+              </AppButton>
+            </View>
           </AppModalFooter>
         </View>
       </AppDrawer>

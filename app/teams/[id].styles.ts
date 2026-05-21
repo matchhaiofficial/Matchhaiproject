@@ -726,7 +726,6 @@ export default StyleSheet.create({
     },
     roleRequiredFooter: {
         paddingHorizontal: SPACING.xl,
-        paddingBottom: SPACING.xl,
     },
     roleRequiredActions: {
         flexDirection: "row",

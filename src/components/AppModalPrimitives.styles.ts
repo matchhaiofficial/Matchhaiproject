@@ -13,15 +13,20 @@ export default StyleSheet.create({
     justifyContent: "flex-end",
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.xl,
-    paddingBottom: 0,
+    paddingBottom: SPACING.sm,
   },
   dialogFrame: {
     width: "100%",
     alignItems: "center",
   },
+  dialogKeyboardAvoiding: {
+    width: "100%",
+  },
   dialogCard: {
     width: "100%",
     maxWidth: 560,
+    flexShrink: 1,
+    minHeight: 0,
     backgroundColor: COLORS.cardDark,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
@@ -44,9 +49,14 @@ export default StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
     paddingHorizontal: SPACING.md,
-    paddingBottom: 0,
+    paddingBottom: SPACING.sm,
+  },
+  sheetKeyboardAvoiding: {
+    flex: 1,
   },
   sheet: {
+    flexShrink: 1,
+    minHeight: 0,
     backgroundColor: COLORS.cardDark,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
@@ -136,6 +146,8 @@ export default StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.45)",
   },
   drawerPanel: {
+    flexShrink: 1,
+    minHeight: 0,
     backgroundColor: COLORS.cardDark,
     borderTopRightRadius: 24,
     borderBottomRightRadius: 24,
@@ -145,6 +157,13 @@ export default StyleSheet.create({
     ...SHADOWS.cardElevated,
   },
   drawerBackdrop: {
+    flex: 1,
+  },
+  drawerKeyboardAvoiding: {
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  drawerSafeArea: {
     flex: 1,
   },
 });
