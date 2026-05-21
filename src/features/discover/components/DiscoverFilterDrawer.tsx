@@ -491,7 +491,6 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: "row",
     gap: SPACING.sm,
-    paddingBottom: SPACING.md,
   },
   footerButton: {
     flex: 1,

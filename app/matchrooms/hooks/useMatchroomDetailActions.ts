@@ -22,6 +22,7 @@ import {
   sendZoneCounterOffer,
 } from "../../../src/services/convex/zoneAdminBookingService";
 import { useToast } from "../../../src/hooks/useToast";
+import { choose, confirm } from "../../../src/ui/confirm";
 import Logger from "../../../src/utils/logger";
 import { isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
 import { getUserProfile } from "../../../src/services/userService";
@@ -267,7 +268,7 @@ export function useMatchroomDetailActions({
     }
   };
 
-  const handleZoneReject = () => {
+  const handleZoneReject = async () => {
     if (!room?.zoneId || !user?._id) {
       Alert.alert(
         "Missing data",
@@ -275,73 +276,69 @@ export function useMatchroomDetailActions({
       );
       return;
     }
-    Alert.alert(
-      "Reject Booking",
-      "Are you sure you want to reject this booking request?",
-      [
-        { text: "Cancel", style: "cancel" },
+    const confirmed = await confirm({
+      title: "Reject Booking",
+      message: "Are you sure you want to reject this booking request?",
+      cancelText: "Cancel",
+      confirmText: "Reject",
+      confirmStyle: "destructive",
+    });
+    if (!confirmed) return;
+
+    const requestId = await ensureBookingRequestLink();
+    if (!requestId) {
+      showToast({
+        message:
+          "Cannot reject because the booking request or zone info is missing.",
+        title: "Missing data",
+        type: "warning",
+      });
+      return;
+    }
+    setAdminProcessing("reject");
+    try {
+      logFlowEvent(
+        "MatchroomDetails",
+        "Zone rejected booking request",
         {
-          text: "Reject",
-          style: "destructive",
-          onPress: async () => {
-            const requestId = await ensureBookingRequestLink();
-            if (!requestId) {
-              showToast({
-                message:
-                  "Cannot reject because the booking request or zone info is missing.",
-                title: "Missing data",
-                type: "warning",
-              });
-              return;
-            }
-            setAdminProcessing("reject");
-            try {
-              logFlowEvent(
-                "MatchroomDetails",
-                "Zone rejected booking request",
-                {
-                  matchroomId: room!.id,
-                  requestId,
-                  zoneId: room!.zoneId,
-                  adminUid: user!._id,
-                },
-              );
-              const result = await rejectZoneBookingRequest({
-                requestId,
-                adminUid: user!._id,
-                zoneId: room!.zoneId!,
-                requestOwnerUid: room!.hostUid,
-                reason: "fully_booked",
-                note: "Rejected from matchroom detail",
-              });
-              if (!result.ok) {
-                showToast({
-                  message: result.message || "Unable to reject the booking request.",
-                  title: "Reject failed",
-                  type: "error",
-                });
-              } else {
-                showToast({
-                  message: "Booking request has been declined.",
-                  title: "Rejected",
-                  type: "success",
-                });
-                await fetchRoom();
-              }
-            } catch (e: any) {
-              Logger.error("MatchroomDetails", "Zone reject error", e);
-              showToast({
-                message: "An unexpected error occurred.",
-                title: "Reject failed",
-                type: "error",
-              });
-            } finally {
-              setAdminProcessing(null);
-            }
-          },
+          matchroomId: room!.id,
+          requestId,
+          zoneId: room!.zoneId,
+          adminUid: user!._id,
         },
-      ],
-    );
+      );
+      const result = await rejectZoneBookingRequest({
+        requestId,
+        adminUid: user!._id,
+        zoneId: room!.zoneId!,
+        requestOwnerUid: room!.hostUid,
+        reason: "fully_booked",
+        note: "Rejected from matchroom detail",
+      });
+      if (!result.ok) {
+        showToast({
+          message: result.message || "Unable to reject the booking request.",
+          title: "Reject failed",
+          type: "error",
+        });
+      } else {
+        showToast({
+          message: "Booking request has been declined.",
+          title: "Rejected",
+          type: "success",
+        });
+        await fetchRoom();
+      }
+    } catch (e: any) {
+      Logger.error("MatchroomDetails", "Zone reject error", e);
+      showToast({
+        message: "An unexpected error occurred.",
+        title: "Reject failed",
+        type: "error",
+      });
+    } finally {
+      setAdminProcessing(null);
+    }
   };
 
   const handleZoneSuggest = async () => {
@@ -573,7 +570,7 @@ export function useMatchroomDetailActions({
     }
   };
 
-  const handleLeave = () => {
+  const handleLeave = async () => {
     if (!room || !user || !id) return;
 
     if (isLeaveLocked(room)) {
@@ -584,49 +581,45 @@ export function useMatchroomDetailActions({
       return;
     }
 
-    Alert.alert(
-      "Leave Matchroom",
-      "Are you sure you want to leave? If you have paid, there will be NO REFUND.",
-      [
-        { text: "Stay", style: "cancel" },
-        {
-          text: "Leave",
-          style: "destructive",
-          onPress: async () => {
-            setJoining(true);
-            try {
-              const res = await leaveMatchroom(id, user._id);
-              if (res.ok) {
-                showToast({
-                  message: "You have left the matchroom.",
-                  title: "Left",
-                  type: "success",
-                });
-                await fetchRoom();
-              } else {
-                showToast({
-                  message: res.message || "Failed to leave.",
-                  title: "Leave failed",
-                  type: "error",
-                });
-              }
-            } catch (e) {
-              Logger.error("MatchroomDetails", "Leave error", e);
-              showToast({
-                message: "Failed to leave the matchroom.",
-                title: "Leave failed",
-                type: "error",
-              });
-            } finally {
-              setJoining(false);
-            }
-          },
-        },
-      ],
-    );
+    const confirmed = await confirm({
+      title: "Leave Matchroom",
+      message: "Are you sure you want to leave? If you have paid, there will be NO REFUND.",
+      cancelText: "Stay",
+      confirmText: "Leave",
+      confirmStyle: "destructive",
+    });
+    if (!confirmed) return;
+
+    setJoining(true);
+    try {
+      const res = await leaveMatchroom(id, user._id);
+      if (res.ok) {
+        showToast({
+          message: "You have left the matchroom.",
+          title: "Left",
+          type: "success",
+        });
+        await fetchRoom();
+      } else {
+        showToast({
+          message: res.message || "Failed to leave.",
+          title: "Leave failed",
+          type: "error",
+        });
+      }
+    } catch (e) {
+      Logger.error("MatchroomDetails", "Leave error", e);
+      showToast({
+        message: "Failed to leave the matchroom.",
+        title: "Leave failed",
+        type: "error",
+      });
+    } finally {
+      setJoining(false);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!room) return;
     if (room.zoneAdminApproved) {
       Alert.alert(
@@ -658,36 +651,32 @@ export function useMatchroomDetailActions({
       return;
     }
 
-    Alert.alert(
-      "Delete Lobby",
-      "Are you sure you want to delete this lobby? This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await deleteMatchroom(id);
-              if (res.ok) {
-                if (isZoneAdmin) {
-                  router.replace("/zone/modules/bookings");
-                } else {
-                  router.replace(buildLegacyMatchroomsHref() as any);
-                }
-              } else {
-                Alert.alert("Error", res.message || "Failed to delete");
-                setLoading(false);
-              }
-            } catch (e) {
-              Logger.error("DeleteMatch", "Error", e);
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
+    const confirmed = await confirm({
+      title: "Delete Lobby",
+      message: "Are you sure you want to delete this lobby? This cannot be undone.",
+      cancelText: "Cancel",
+      confirmText: "Delete",
+      confirmStyle: "destructive",
+    });
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      const res = await deleteMatchroom(id);
+      if (res.ok) {
+        if (isZoneAdmin) {
+          router.replace("/zone/modules/bookings");
+        } else {
+          router.replace(buildLegacyMatchroomsHref() as any);
+        }
+      } else {
+        Alert.alert("Error", res.message || "Failed to delete");
+        setLoading(false);
+      }
+    } catch (e) {
+      Logger.error("DeleteMatch", "Error", e);
+      setLoading(false);
+    }
   };
 
   const handleAdminForceCancel = async () => {
@@ -746,49 +735,45 @@ export function useMatchroomDetailActions({
   ) => {
     if (!user || !id || !room) return;
 
-    Alert.alert(
-      "Transfer Captaincy",
-      `Are you sure you want to make ${teammateName} the captain of Team ${team}? You will lose your captain powers for this team.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Transfer",
-          onPress: async () => {
-            setJoining(true);
-            try {
-              const res = await transferMatchroomCaptainAction({
-                matchroomId: id,
-                team,
-                newCaptainUid,
-              });
-              if (res.ok) {
-                showToast({
-                  message: res.message || "Captaincy transferred.",
-                  title: "Captain updated",
-                  type: "success",
-                });
-                await fetchRoom();
-              } else {
-                showToast({
-                  message: res.message || "Transfer failed.",
-                  title: "Transfer failed",
-                  type: "error",
-                });
-              }
-            } catch (e) {
-              Logger.error("TransferCaptain", "Error", e);
-              showToast({
-                message: "Failed to transfer captaincy.",
-                title: "Transfer failed",
-                type: "error",
-              });
-            } finally {
-              setJoining(false);
-            }
-          },
-        },
-      ],
-    );
+    const confirmed = await confirm({
+      title: "Transfer Captaincy",
+      message: `Are you sure you want to make ${teammateName} the captain of Team ${team}? You will lose your captain powers for this team.`,
+      cancelText: "Cancel",
+      confirmText: "Transfer",
+    });
+    if (!confirmed) return;
+
+    setJoining(true);
+    try {
+      const res = await transferMatchroomCaptainAction({
+        matchroomId: id,
+        team,
+        newCaptainUid,
+      });
+      if (res.ok) {
+        showToast({
+          message: res.message || "Captaincy transferred.",
+          title: "Captain updated",
+          type: "success",
+        });
+        await fetchRoom();
+      } else {
+        showToast({
+          message: res.message || "Transfer failed.",
+          title: "Transfer failed",
+          type: "error",
+        });
+      }
+    } catch (e) {
+      Logger.error("TransferCaptain", "Error", e);
+      showToast({
+        message: "Failed to transfer captaincy.",
+        title: "Transfer failed",
+        type: "error",
+      });
+    } finally {
+      setJoining(false);
+    }
   };
 
   const handleInvitePress = (team: "A" | "B", slotId: string) => {
@@ -914,7 +899,7 @@ export function useMatchroomDetailActions({
   //   );
   // };
 
-  const handleManagePlayer = (
+  const handleManagePlayer = async (
     team: "A" | "B",
     playerUid: string,
     playerName: string,
@@ -926,20 +911,25 @@ export function useMatchroomDetailActions({
         ? identityMatches(playerUid, [captainUidAResolved])
         : identityMatches(playerUid, [captainUidBResolved]);
 
-    Alert.alert("Manage Player", `Choose an action for ${playerName}`, [
-      { text: "Cancel", style: "cancel" },
-      ...(!isCurrentCaptain
+    const action = await choose({
+      title: "Manage Player",
+      message: `Choose an action for ${playerName}`,
+      cancelText: "Cancel",
+      choices: !isCurrentCaptain
         ? [{
+          key: "make_captain" as const,
           text: "Make Captain",
-          onPress: () => handleTransferCaptain(team, playerUid, playerName),
         }]
-        : []),
-      // {
-      //   text: "Kick Player",
-      //   style: "destructive",
-      //   onPress: () => handleKick(playerUid, playerName),
-      // },
-    ]);
+        : [],
+    });
+    if (action === "make_captain") {
+      void handleTransferCaptain(team, playerUid, playerName);
+    }
+    // {
+    //   text: "Kick Player",
+    //   style: "destructive",
+    //   onPress: () => handleKick(playerUid, playerName),
+    // },
   };
 
   return {

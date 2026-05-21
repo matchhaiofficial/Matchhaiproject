@@ -64,12 +64,12 @@ export default function ReportIssueModal({
       onClose={onClose}
       dismissDisabled={loading}
       sheetStyle={styles.content}
+      keyboardAware
     >
       <AppModalHeader
         title={title}
         subtitle={subtitle}
         onClose={onClose}
-        closeDisabled={loading}
       />
 
       <AppModalBody
@@ -156,7 +156,6 @@ export default function ReportIssueModal({
             onPress={onClose}
             variant="secondary"
             style={styles.actionButton}
-            disabled={loading}
           >
             Cancel
           </AppButton>

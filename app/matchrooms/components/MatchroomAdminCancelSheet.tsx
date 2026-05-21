@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  ActivityIndicator,
   Pressable,
   Text,
   TextInput,
@@ -46,12 +45,12 @@ export function MatchroomAdminCancelSheet({
       onClose={onClose}
       dismissDisabled={adminProcessing === "cancel"}
       sheetStyle={styles.modalContent}
+      keyboardAware
     >
       <AppModalHeader
         title="Force Cancel Matchroom"
         subtitle="Select a reason for venue cancellation"
         onClose={onClose}
-        closeDisabled={adminProcessing === "cancel"}
       />
 
       <AppModalBody
@@ -109,7 +108,6 @@ export function MatchroomAdminCancelSheet({
             variant="secondary"
             style={styles.modalActionButton}
             onPress={onClose}
-            disabled={adminProcessing === "cancel"}
           >
             Cancel
           </AppButton>

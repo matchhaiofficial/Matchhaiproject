@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import {
@@ -12,7 +12,13 @@ import {
   AdminStatusBadge,
 } from "../../../src/components/AdminSurface";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
-import { AppCard } from "../../../src/components/AppPrimitives";
+import {
+  AppDialog,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton, AppCard } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SidebarMenu from "../../../src/components/SidebarMenu";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
@@ -119,6 +125,7 @@ export default function SuperAdminDashboardTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const navigationGuardRef = useRef<{ route: string; at: number } | null>(null);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
@@ -207,25 +214,21 @@ export default function SuperAdminDashboardTab() {
   }, [showToast]);
 
   const handleLogout = useCallback(() => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await signOutUser();
-            router.replace("/auth/login");
-          } catch (error: any) {
-            showToast({
-              type: "error",
-              title: "Logout failed",
-              message: error?.message || "Please try again.",
-            });
-          }
-        },
-      },
-    ]);
+    setShowLogoutDialog(true);
+  }, []);
+
+  const confirmLogout = useCallback(async () => {
+    setShowLogoutDialog(false);
+    try {
+      await signOutUser();
+      router.replace("/auth/login");
+    } catch (error: any) {
+      showToast({
+        type: "error",
+        title: "Logout failed",
+        message: error?.message || "Please try again.",
+      });
+    }
   }, [showToast]);
 
   const sidebarItems = useMemo(() => [
@@ -263,6 +266,23 @@ export default function SuperAdminDashboardTab() {
       />
 
       <SidebarMenu visible={sidebarOpen} onClose={() => setSidebarOpen(false)} items={sidebarItems} />
+
+      <AppDialog visible={showLogoutDialog} onClose={() => setShowLogoutDialog(false)}>
+        <AppModalHeader title="Logout" onClose={() => setShowLogoutDialog(false)} />
+        <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+          <Text style={styles.profileSubtitle}>Are you sure you want to logout?</Text>
+        </AppModalBody>
+        <AppModalFooter>
+          <View style={{ flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md }}>
+            <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setShowLogoutDialog(false)}>
+              Cancel
+            </AppButton>
+            <AppButton variant="danger" style={{ flex: 1 }} onPress={confirmLogout}>
+              Logout
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
 
       {loading ? (
         <View style={styles.loaderWrap}>

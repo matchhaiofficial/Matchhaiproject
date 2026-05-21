@@ -2,7 +2,6 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import {
     ActivityIndicator,
-    Alert,
     Dimensions,
     Pressable,
     ScrollView,
@@ -16,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import {
+    AppDialog,
     AppDrawer,
     AppModalBody,
     AppModalFooter,
@@ -40,7 +40,7 @@ import {
     type PricingRuleType,
 } from "../../../src/services/pricingRuleService";
 import { subscribeZoneBranches, type ZoneBranch } from "../../../src/services/convex/zoneAdminResourceService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./pricing.styles";
 
@@ -222,6 +222,7 @@ export default function ZonePricingModule() {
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [dateTarget, setDateTarget] = useState<null | "valid_from" | "valid_to">(null);
     const [timeTarget, setTimeTarget] = useState<null | "start_time" | "end_time">(null);
+    const [ruleToDelete, setRuleToDelete] = useState<PricingRule | null>(null);
     const [dateDraft, setDateDraft] = useState<Date | null>(null);
     const [monthCursor, setMonthCursor] = useState<Date>(() => {
         const base = new Date();
@@ -359,20 +360,18 @@ export default function ZonePricingModule() {
 
     const removeRule = useCallback(async (rule: PricingRule) => {
         if (!zone?.id || !user?._id) return;
-        Alert.alert("Delete rule", `Delete "${rule.name}"?`, [
-            { text: "Cancel", style: "cancel" },
-            {
-                text: "Delete",
-                style: "destructive",
-                onPress: async () => {
-                    const result = await deleteZonePricingRule(zone.id, rule.id, user._id);
-                    if (!result.ok) {
-                        showToast({ type: "error", title: "Delete failed", message: result.message });
-                    }
-                },
-            },
-        ]);
-    }, [showToast, user?._id, zone?.id]);
+        setRuleToDelete(rule);
+    }, [user?._id, zone?.id]);
+
+    const confirmRemoveRule = useCallback(async () => {
+        if (!zone?.id || !user?._id || !ruleToDelete) return;
+        const rule = ruleToDelete;
+        setRuleToDelete(null);
+        const result = await deleteZonePricingRule(zone.id, rule.id, user._id);
+        if (!result.ok) {
+            showToast({ type: "error", title: "Delete failed", message: result.message });
+        }
+    }, [ruleToDelete, showToast, user?._id, zone?.id]);
 
     const summary = useMemo(() => {
         const enabled = rules.filter((item) => item.isEnabled).length;
@@ -983,6 +982,23 @@ export default function ZonePricingModule() {
                             </View>
                         </View>
             </AppPickerSheet>
+
+            <AppDialog visible={Boolean(ruleToDelete)} onClose={() => setRuleToDelete(null)}>
+                <AppModalHeader title="Delete rule" onClose={() => setRuleToDelete(null)} />
+                <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+                    <Text style={styles.ruleMeta}>Delete "{ruleToDelete?.name}"?</Text>
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md }}>
+                        <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setRuleToDelete(null)}>
+                            Cancel
+                        </AppButton>
+                        <AppButton variant="danger" style={{ flex: 1 }} onPress={confirmRemoveRule} disabled={!ruleToDelete}>
+                            Delete
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
 
             <AppPickerSheet
                 visible={showTimePicker}

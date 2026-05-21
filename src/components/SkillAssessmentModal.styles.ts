@@ -5,12 +5,6 @@ export default StyleSheet.create({
     container: {
         ...SHADOWS.cardElevated,
     },
-    body: {
-        minHeight: 0,
-    },
-    scroller: {
-        flex: 1,
-    },
     content: {
         paddingHorizontal: SPACING.xl,
         paddingTop: SPACING.lg,

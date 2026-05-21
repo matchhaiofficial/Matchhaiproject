@@ -1,13 +1,19 @@
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import React, { memo, useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminEmptyStateCard } from "../../../src/components/AdminSurface";
 import { AppIcon } from "../../../src/components/AppIcon";
+import {
+    AppDialog,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
 import { AppButton } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import SegmentedTabs from "../../../src/components/SegmentedTabs";
@@ -21,7 +27,7 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
 import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
 import { rejectZoneBookingRequest } from "../../../src/services/convex/zoneAdminBookingService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
 import styles from "./notifications.styles";
@@ -208,6 +214,7 @@ export default function ZoneNotificationsModule() {
     const [statusFilter, setStatusFilter] = useState<"pending" | "resolved">("pending");
     const [processingId, setProcessingId] = useState<string | null>(null);
     const [clearing, setClearing] = useState(false);
+    const [clearDialogMode, setClearDialogMode] = useState<"pending" | "history" | null>(null);
     useRouteLogger("ZoneNotificationsModule", {
         statusFilter,
         userId: user?._id,
@@ -304,38 +311,32 @@ export default function ZoneNotificationsModule() {
 
     const handleClearAll = useCallback(async () => {
         if (!user?._id || items.length === 0) return;
-        const hasPending = pendingCount > 0;
-        Alert.alert(
-            hasPending ? "Mark all as read" : "Clear history",
-            hasPending ? "This will mark all pending notifications as read." : "This will archive resolved notifications.",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: hasPending ? "Mark Read" : "Clear",
-                    onPress: async () => {
-                        setClearing(true);
-                        try {
-                            if (hasPending) {
-                                await markManyAsReadMutation({
-                                    notificationIds: items
-                                        .filter(isPendingZoneAdminNotification)
-                                        .map((item) => item._id as Id<"notifications">),
-                                });
-                            } else {
-                                await archiveManyMutation({
-                                    notificationIds: items
-                                        .filter((item) => item.status !== "pending")
-                                        .map((item) => item._id as Id<"notifications">),
-                                });
-                            }
-                        } finally {
-                            setClearing(false);
-                        }
-                    },
-                },
-            ],
-        );
-    }, [archiveManyMutation, items, markManyAsReadMutation, pendingCount, user?._id]);
+        setClearDialogMode(pendingCount > 0 ? "pending" : "history");
+    }, [items.length, pendingCount, user?._id]);
+
+    const confirmClearAll = useCallback(async () => {
+        if (!user?._id || items.length === 0 || !clearDialogMode) return;
+        const hasPending = clearDialogMode === "pending";
+        setClearDialogMode(null);
+        setClearing(true);
+        try {
+            if (hasPending) {
+                await markManyAsReadMutation({
+                    notificationIds: items
+                        .filter(isPendingZoneAdminNotification)
+                        .map((item) => item._id as Id<"notifications">),
+                });
+            } else {
+                await archiveManyMutation({
+                    notificationIds: items
+                        .filter((item) => item.status !== "pending")
+                        .map((item) => item._id as Id<"notifications">),
+                });
+            }
+        } finally {
+            setClearing(false);
+        }
+    }, [archiveManyMutation, clearDialogMode, items, markManyAsReadMutation, user?._id]);
 
     const handleAcceptRejectBooking = useCallback(async (item: AdminNotification, decision: "accept" | "reject") => {
         if (!user?._id || !item.data?.requestId) return;
@@ -454,6 +455,30 @@ export default function ZoneNotificationsModule() {
                     ))
                 )}
             </ScrollView>
+
+            <AppDialog visible={Boolean(clearDialogMode)} onClose={() => setClearDialogMode(null)}>
+                <AppModalHeader
+                    title={clearDialogMode === "pending" ? "Mark all as read" : "Clear history"}
+                    onClose={() => setClearDialogMode(null)}
+                />
+                <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+                    <Text style={styles.messageText}>
+                        {clearDialogMode === "pending"
+                            ? "This will mark all pending notifications as read."
+                            : "This will archive resolved notifications."}
+                    </Text>
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md }}>
+                        <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setClearDialogMode(null)}>
+                            Cancel
+                        </AppButton>
+                        <AppButton style={{ flex: 1 }} onPress={confirmClearAll} disabled={clearing} loading={clearing}>
+                            {clearDialogMode === "pending" ? "Mark Read" : "Clear"}
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
         </Screen>
     );
 }

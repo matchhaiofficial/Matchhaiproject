@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Pressable,
     ScrollView,
     Text,
@@ -11,6 +10,13 @@ import {
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon } from "../../../src/components/AppIcon";
+import {
+    AppDialog,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
+import { AppButton } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
 import { useAuth } from "../../../src/context/AuthContext";
 import { logFlowEvent, useRouteLogger } from "../../../src/hooks/useRouteLogger";
@@ -20,7 +26,7 @@ import {
     getZoneBranchesFromSubcollection,
     migrateZoneBranchesToSubcollection,
 } from "../../../src/services/zoneBranchMigrationService";
-import { COLORS } from "../../../src/theme";
+import { COLORS, SPACING } from "../../../src/theme";
 import {
     getZoneLifecycleLabel,
     getZoneMigrationLabel,
@@ -43,6 +49,7 @@ export default function ZoneMigrationToolsModule() {
     const [branchCount, setBranchCount] = useState(0);
     const [loading, setLoading] = useState(false);
     const [migrating, setMigrating] = useState(false);
+    const [showMigrationDialog, setShowMigrationDialog] = useState(false);
 
     const refresh = useCallback(async () => {
         if (!zone?.id) {
@@ -90,32 +97,26 @@ export default function ZoneMigrationToolsModule() {
             adminUid: user._id,
         });
 
-        Alert.alert(
-            migrationStatus === "failed" ? "Retry Branch Migration" : "Run Branch Migration",
-            "This will create per-branch documents and seat/court resources from your existing branch data. The venue goes live only after migration succeeds.",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: migrationStatus === "failed" ? "Retry" : "Run Migration",
-                    onPress: async () => {
-                        setMigrating(true);
-                        const result = await migrateZoneBranchesToSubcollection(zone.id, user._id);
-                        setMigrating(false);
+        setShowMigrationDialog(true);
+    };
 
-                        if (result.ok) {
-                            await refresh();
-                            showToast({
-                                type: "success",
-                                title: "Migration Complete",
-                                message: `Branches: ${result.branchCount} | Resources: ${result.resourceCount}`,
-                            });
-                        } else {
-                            showToast({ type: "error", title: "Migration Failed", message: result.message });
-                        }
-                    },
-                },
-            ],
-        );
+    const confirmMigration = async () => {
+        if (!zone?.id || !user?._id) return;
+        setShowMigrationDialog(false);
+        setMigrating(true);
+        const result = await migrateZoneBranchesToSubcollection(zone.id, user._id);
+        setMigrating(false);
+
+        if (result.ok) {
+            await refresh();
+            showToast({
+                type: "success",
+                title: "Migration Complete",
+                message: `Branches: ${result.branchCount} | Resources: ${result.resourceCount}`,
+            });
+        } else {
+            showToast({ type: "error", title: "Migration Failed", message: result.message });
+        }
     };
 
     return (
@@ -206,6 +207,28 @@ export default function ZoneMigrationToolsModule() {
                     </View>
                 </View>
             </ScrollView>
+
+            <AppDialog visible={showMigrationDialog} onClose={() => setShowMigrationDialog(false)}>
+                <AppModalHeader
+                    title={migrationStatus === "failed" ? "Retry Branch Migration" : "Run Branch Migration"}
+                    onClose={() => setShowMigrationDialog(false)}
+                />
+                <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+                    <Text style={styles.cardDescription}>
+                        This will create per-branch documents and seat/court resources from your existing branch data. The venue goes live only after migration succeeds.
+                    </Text>
+                </AppModalBody>
+                <AppModalFooter>
+                    <View style={{ flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md }}>
+                        <AppButton variant="secondary" style={{ flex: 1 }} onPress={() => setShowMigrationDialog(false)}>
+                            Cancel
+                        </AppButton>
+                        <AppButton style={{ flex: 1 }} onPress={confirmMigration} disabled={migrating} loading={migrating}>
+                            {migrationStatus === "failed" ? "Retry" : "Run Migration"}
+                        </AppButton>
+                    </View>
+                </AppModalFooter>
+            </AppDialog>
         </Screen>
     );
 }

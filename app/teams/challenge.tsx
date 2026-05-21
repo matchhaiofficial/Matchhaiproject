@@ -528,6 +528,7 @@ export default function TeamMatchChallengeDetails() {
                 visible={easypaisaModalVisible}
                 onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
                 dismissDisabled={startingEasypaisa || finishingEasypaisa}
+                keyboardAware={true}
             >
                 <AppModalHeader
                     title="Confirm Easypaisa Number"
@@ -564,22 +565,44 @@ export default function TeamMatchChallengeDetails() {
                 </AppModalBody>
                 <AppModalFooter>
                     <View style={{ flexDirection: "row", gap: 10 }}>
-                        <AppButton
-                            variant="secondary"
-                            style={{ flex: 1 }}
-                            onPress={() => setEasypaisaModalVisible(false)}
-                            disabled={startingEasypaisa || finishingEasypaisa}
-                        >
-                            Cancel
-                        </AppButton>
-                        <AppButton
-                            style={{ flex: 1 }}
-                            onPress={handleStartEasypaisaTopup}
-                            loading={startingEasypaisa || finishingEasypaisa}
-                            disabled={startingEasypaisa || finishingEasypaisa || Boolean(activeEasypaisaOrderRef)}
-                        >
-                            Continue to Pay
-                        </AppButton>
+                        {activeEasypaisaOrderRef ? (
+                            <>
+                                <AppButton
+                                    variant="secondary"
+                                    style={{ flex: 1 }}
+                                    onPress={() => setEasypaisaModalVisible(false)}
+                                >
+                                    Do this later
+                                </AppButton>
+                                <AppButton
+                                    style={{ flex: 1 }}
+                                    onPress={() => refreshEasypaisaPaymentStatus(activeEasypaisaOrderRef)}
+                                    loading={finishingEasypaisa}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    I've paid / Continue
+                                </AppButton>
+                            </>
+                        ) : (
+                            <>
+                                <AppButton
+                                    variant="secondary"
+                                    style={{ flex: 1 }}
+                                    onPress={() => setEasypaisaModalVisible(false)}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    Cancel
+                                </AppButton>
+                                <AppButton
+                                    style={{ flex: 1 }}
+                                    onPress={handleStartEasypaisaTopup}
+                                    loading={startingEasypaisa || finishingEasypaisa}
+                                    disabled={startingEasypaisa || finishingEasypaisa}
+                                >
+                                    Continue to Pay
+                                </AppButton>
+                            </>
+                        )}
                     </View>
                 </AppModalFooter>
             </AppDialog>

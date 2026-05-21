@@ -4,9 +4,8 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import { AppImage } from "../../src/components/AppImage";
@@ -120,7 +119,6 @@ export default function TeamDetails() {
     const params = useLocalSearchParams();
     const { id } = params;
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { user, authUser } = useAuth();
     const { showToast } = useToast();
     const [submitting, setSubmitting] = useState(false);
@@ -151,12 +149,6 @@ export default function TeamDetails() {
 
     useRouteLogger("TeamDetailsScreen", { teamId: id, userId: user?._id });
     const touchDebugEnabled = false;
-    const roleRequiredSheetBottomOffset = Platform.OS === "android"
-        ? Math.max(insets.bottom, 48)
-        : 0;
-    const roleRequiredFooterBottomPadding = Platform.OS === "android"
-        ? SPACING.xl
-        : Math.max(insets.bottom, SPACING.xl);
     const { animatedStyle: contentEntranceStyle } = useEntrance({ distance: 18 });
 
     // ---- Convex reactive queries ----
@@ -1062,7 +1054,7 @@ export default function TeamDetails() {
                 dismissDisabled={submitting}
                 cardStyle={styles.renameDialogCard}
             >
-                <AppModalHeader title="Rename Team" onClose={() => setShowRenameModal(false)} closeDisabled={submitting} />
+                <AppModalHeader title="Rename Team" onClose={() => setShowRenameModal(false)} />
                 <AppModalBody contentContainerStyle={styles.renameDialogContent}>
                     <TextInput
                         style={styles.renameInput}
@@ -1075,7 +1067,7 @@ export default function TeamDetails() {
                 </AppModalBody>
                 <AppModalFooter style={styles.dialogFooter}>
                     <View style={styles.renameActions}>
-                        <AppButton variant="ghost" onPress={() => setShowRenameModal(false)} disabled={submitting}>
+                        <AppButton variant="ghost" onPress={() => setShowRenameModal(false)}>
                             Cancel
                         </AppButton>
                         <AppButton onPress={handleRenameTeam} disabled={submitting} loading={submitting}>
@@ -1088,12 +1080,7 @@ export default function TeamDetails() {
             <AppBottomSheet
                 visible={showRoleRequiredSheet}
                 onClose={() => setShowRoleRequiredSheet(false)}
-                sheetStyle={[
-                    styles.roleRequiredSheet,
-                    roleRequiredSheetBottomOffset
-                        ? { marginBottom: roleRequiredSheetBottomOffset }
-                        : null,
-                ]}
+                sheetStyle={styles.roleRequiredSheet}
             >
                 <AppModalHeader
                     title="Set your role first"
@@ -1104,12 +1091,7 @@ export default function TeamDetails() {
                         Choose your role for {getCanonicalGameLabel(team?.game)} to request teams.
                     </Text>
                 </AppModalBody>
-                <AppModalFooter
-                    style={[
-                        styles.roleRequiredFooter,
-                        { paddingBottom: roleRequiredFooterBottomPadding },
-                    ]}
-                >
+                <AppModalFooter style={styles.roleRequiredFooter}>
                     <View style={styles.roleRequiredActions}>
                         <AppButton
                             variant="secondary"
@@ -1141,7 +1123,6 @@ export default function TeamDetails() {
                     title={memberActionTarget?.username ?? "Member Actions"}
                     subtitle="Choose an action for this teammate."
                     onClose={() => setMemberActionTarget(null)}
-                    closeDisabled={submitting}
                 />
                 <AppModalBody contentContainerStyle={styles.memberDialogContent}>
                     <AppButton
@@ -1188,7 +1169,6 @@ export default function TeamDetails() {
                 <AppModalHeader
                     title={confirmationDialog?.title ?? ""}
                     onClose={closeConfirmationDialog}
-                    closeDisabled={submitting}
                 />
                 <AppModalBody contentContainerStyle={styles.confirmationDialogContent}>
                     <Text style={styles.confirmationMessage}>{confirmationDialog?.message}</Text>
@@ -1198,7 +1178,6 @@ export default function TeamDetails() {
                         <AppButton
                             variant="secondary"
                             onPress={closeConfirmationDialog}
-                            disabled={submitting}
                             style={[
                                 styles.confirmationActionButton,
                                 styles.confirmationCancelButton,

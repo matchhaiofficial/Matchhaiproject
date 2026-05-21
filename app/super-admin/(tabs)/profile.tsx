@@ -1,9 +1,15 @@
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminInfoLine } from "../../../src/components/AdminSurface";
+import {
+  AppDialog,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../../src/components/AppModalPrimitives";
 import { BlockingLoader } from "../../../src/components/BlockingLoader";
 import { AppButton, AppCard, StatusPill } from "../../../src/components/AppPrimitives";
 import Screen from "../../../src/components/Screen";
@@ -16,24 +22,21 @@ export default function SuperAdminProfileTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { user } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          setLoggingOut(true);
-          try {
-            await signOutUser();
-            router.replace("/auth/login");
-          } finally {
-            setLoggingOut(false);
-          }
-        },
-      },
-    ]);
+    setShowLogoutDialog(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutDialog(false);
+    setLoggingOut(true);
+    try {
+      await signOutUser();
+      router.replace("/auth/login");
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -66,6 +69,23 @@ export default function SuperAdminProfileTab() {
 
         <AppButton variant="danger" onPress={handleLogout} leadingIcon="logout">Sign Out</AppButton>
       </ScrollView>
+
+      <AppDialog visible={showLogoutDialog} onClose={() => setShowLogoutDialog(false)}>
+        <AppModalHeader title="Logout" onClose={() => setShowLogoutDialog(false)} />
+        <AppModalBody contentContainerStyle={{ gap: SPACING.md }}>
+          <Text style={styles.helperText}>Are you sure you want to logout?</Text>
+        </AppModalBody>
+        <AppModalFooter>
+          <View style={styles.dialogActionRow}>
+            <AppButton variant="secondary" style={styles.dialogAction} onPress={() => setShowLogoutDialog(false)}>
+              Cancel
+            </AppButton>
+            <AppButton variant="danger" style={styles.dialogAction} onPress={confirmLogout} disabled={loggingOut} loading={loggingOut}>
+              Logout
+            </AppButton>
+          </View>
+        </AppModalFooter>
+      </AppDialog>
     </Screen>
   );
 }
@@ -83,4 +103,6 @@ const styles = StyleSheet.create({
   sectionTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
   helperText: { color: COLORS.textSecondary, fontFamily: FONTS.martelRegular, fontSize: 13, lineHeight: 20 },
   actionsRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
+  dialogActionRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
+  dialogAction: { flex: 1 },
 });

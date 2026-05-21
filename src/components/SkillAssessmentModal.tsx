@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { SKILL_ASSESSMENT_CONFIG } from '../constants/skillQuestions';
 import { GameKey, saveSelfAssessment } from '../services/skillRatingService';
-import { AppBottomSheet, AppModalFooter, AppModalHeader } from './AppModalPrimitives';
+import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from './AppModalPrimitives';
 import { AppButton } from './AppPrimitives';
 import styles from './SkillAssessmentModal.styles';
 
@@ -15,12 +15,10 @@ interface Props {
 }
 
 export default function SkillAssessmentModal({ visible, onClose, gameKey, userId, onSuccess }: Props) {
-    const { height: windowHeight } = useWindowDimensions();
     const [answers, setAnswers] = useState<Record<string, number>>({});
     const [loading, setLoading] = useState(false);
 
     const config = SKILL_ASSESSMENT_CONFIG[gameKey];
-    const bodyHeight = Math.max(260, Math.min(430, Math.floor(windowHeight * 0.52)));
 
     // Reset when opening
     useEffect(() => {
@@ -69,46 +67,37 @@ export default function SkillAssessmentModal({ visible, onClose, gameKey, userId
                 title="One-time Setup"
                 subtitle="Rate your skill to continue"
                 onClose={onClose}
-                closeDisabled={loading}
             />
 
-            <View style={[styles.body, { height: bodyHeight }]}>
-                <ScrollView
-                    style={styles.scroller}
-                    contentContainerStyle={styles.content}
-                    nestedScrollEnabled
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator
-                >
-                    {config.questions.map((q) => (
-                        <View key={q.id} style={styles.questionSection}>
-                            <Text style={styles.questionLabel}>{q.label}</Text>
-                            <View style={styles.optionsGrid}>
-                                {q.options.map((opt, index) => {
-                                    const selected = answers[q.id] === opt.value;
-                                    return (
-                                        <Pressable
-                                            key={`${q.id}:${index}:${opt.label}`}
-                                            onPress={() => handleSelect(q.id, opt.value)}
-                                            style={[
-                                                styles.option,
-                                                selected && styles.optionSelected
-                                            ]}
-                                        >
-                                            <Text style={[
-                                                styles.optionText,
-                                                selected && styles.optionTextSelected
-                                            ]}>
-                                                {opt.label}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                            </View>
+            <AppModalBody scroll contentContainerStyle={styles.content}>
+                {config.questions.map((q) => (
+                    <View key={q.id} style={styles.questionSection}>
+                        <Text style={styles.questionLabel}>{q.label}</Text>
+                        <View style={styles.optionsGrid}>
+                            {q.options.map((opt, index) => {
+                                const selected = answers[q.id] === opt.value;
+                                return (
+                                    <Pressable
+                                        key={`${q.id}:${index}:${opt.label}`}
+                                        onPress={() => handleSelect(q.id, opt.value)}
+                                        style={[
+                                            styles.option,
+                                            selected && styles.optionSelected
+                                        ]}
+                                    >
+                                        <Text style={[
+                                            styles.optionText,
+                                            selected && styles.optionTextSelected
+                                        ]}>
+                                            {opt.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
                         </View>
-                    ))}
-                </ScrollView>
-            </View>
+                    </View>
+                ))}
+            </AppModalBody>
 
             <AppModalFooter style={styles.footer}>
                 <AppButton

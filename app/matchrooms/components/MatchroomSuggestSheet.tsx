@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  ActivityIndicator,
   Text,
   TextInput,
   View,
@@ -56,12 +55,12 @@ export function MatchroomSuggestSheet({
       onClose={onClose}
       dismissDisabled={dismissDisabled}
       sheetStyle={styles.modalContent}
+      keyboardAware
     >
       <AppModalHeader
         title="Suggest Alternative"
         subtitle="Propose a different time or price"
         onClose={onClose}
-        closeDisabled={dismissDisabled}
       />
 
       <AppModalBody
@@ -140,7 +139,6 @@ export function MatchroomSuggestSheet({
             variant="secondary"
             style={styles.modalActionButton}
             onPress={onClose}
-            disabled={adminProcessing === "counter"}
           >
             Cancel
           </AppButton>

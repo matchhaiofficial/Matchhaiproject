@@ -23,7 +23,7 @@ export default function GameActivationPromptModal({
 }: Props) {
   return (
     <AppDialog visible={visible} onClose={onClose} dismissDisabled={loading} cardStyle={styles.card}>
-      <AppModalHeader title={`Enable ${gameLabel}`} onClose={onClose} closeDisabled={loading} />
+      <AppModalHeader title={`Enable ${gameLabel}`} onClose={onClose} />
       <AppModalBody contentContainerStyle={styles.content}>
         <View style={styles.sectionCard}>
           <View style={styles.iconWrap}>
@@ -36,7 +36,7 @@ export default function GameActivationPromptModal({
       </AppModalBody>
       <AppModalFooter style={styles.footer}>
         <View style={styles.actions}>
-          <AppButton variant="secondary" onPress={onClose} disabled={loading} style={styles.actionButton}>
+          <AppButton variant="secondary" onPress={onClose} style={styles.actionButton}>
             Cancel
           </AppButton>
           <AppButton onPress={onConfirm} disabled={loading} loading={loading} style={styles.actionButton}>
