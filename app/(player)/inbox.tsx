@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -125,13 +125,13 @@ export default function Inbox() {
   const [activeTab, setActiveTab] = useState<"pending" | "resolved">("pending");
   const [processing, setProcessing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const autoMarkedReadForUserRef = useRef<string | null>(null);
   const touchDebugEnabled = __DEV__ && process.env.EXPO_PUBLIC_TOUCH_DEBUG === "1";
 
   const {
     notifications,
     loading,
     markAllAsRead: markAllReadHook,
-    markManyAsRead,
     updateStatus,
     deleteNotification: deleteNotificationHook,
     deleteNotifications,
@@ -157,7 +157,7 @@ export default function Inbox() {
     router.push(`/teams/challenge?id=${challengeId}` as any);
   }, [router]);
 
-  const { unreadIds, hasUnread, pendingCount, filteredNotifications, resolvedCount } =
+  const { hasUnread, pendingCount, filteredNotifications, resolvedCount } =
     useInboxViewModel({
       notifications,
       activeTab,
@@ -194,22 +194,26 @@ export default function Inbox() {
   }, [handleDeleteNotification]);
 
   useEffect(() => {
-    if (unreadIds.length === 0) return;
+    if (loading || !user?._id || autoMarkedReadForUserRef.current === user._id) return;
 
-    const markUnreadBatch = async () => {
+    autoMarkedReadForUserRef.current = user._id;
+
+    const markInboxRead = async () => {
       try {
-        await markManyAsRead(unreadIds);
-        Logger.info("Inbox", `Marked ${unreadIds.length} notifications as read`);
-        recordCountMetric("inbox.open_write_count", unreadIds.length, {
-          tab: activeTab,
+        const updatedCount = await markAllReadHook();
+        Logger.info("Inbox", `Marked ${updatedCount || 0} inbox notifications as read`);
+        recordCountMetric("inbox.open_write_count", Number(updatedCount || 0), {
+          tab: "all",
+          source: "screen_open",
         });
       } catch (error) {
+        autoMarkedReadForUserRef.current = null;
         Logger.error("Inbox", "Error auto-marking notifications as read", error);
       }
     };
 
-    void markUnreadBatch();
-  }, [activeTab, markManyAsRead, unreadIds]);
+    void markInboxRead();
+  }, [loading, markAllReadHook, user?._id]);
 
   const renderItem = useCallback(({ item }: { item: Notification }) => {
     return (

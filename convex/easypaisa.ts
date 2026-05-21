@@ -32,6 +32,8 @@ const EASYPAISA_IPN_ALLOWED_HOSTS = String(process.env.EASYPAISA_IPN_ALLOWED_HOS
 const APP_SCHEME = String(process.env.EXPO_PUBLIC_APP_SCHEME || "matchhai").trim().replace(/:\/?\/?$/, "");
 const CHECKOUT_TTL_MS = EASYPAY_CHECKOUT_TTL_MS;
 const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
+const BOOKING_CHECKOUT_RETRY_WINDOW_MS = CHECKOUT_TTL_MS;
+const MAX_BOOKING_CHECKOUT_ATTEMPTS_PER_WINDOW = 5;
 
 const CHECKOUT_PATH = "/payments/easypaisa/checkout";
 const TOKEN_PATH = "/payments/easypaisa/token";
@@ -701,12 +703,21 @@ function normalizeProviderUpdate(source: ProviderSource, snapshot: ProviderSnaps
     resolvedStatus = "pending";
   } else if (source === "initiate" && paymentMode === "MA" && responseCode === "0000") {
     resolvedStatus = "paid";
+  } else if (
+    source === "inquiry" &&
+    paymentMode === "MA" &&
+    responseCode === "0000" &&
+    (combined.includes("SUCCESS") || combined.includes("PAID") || combined.includes("COMPLETE"))
+  ) {
+    resolvedStatus = "paid";
   } else if (!transactionStatus && (source === "ipn" || source === "hosted_finalize")) {
     // Provider webhooks/finalize responses sometimes omit a normalized transactionStatus.
     if (combined.includes("CANCEL") || combined.includes("REJECT") || combined.includes("DECLIN") || combined.includes("REVERSE")) {
       resolvedStatus = "failed";
     } else if (combined.includes("EXPIRE")) {
       resolvedStatus = "expired";
+    } else if (paymentMode === "MA" && combined.includes("SUCCESS")) {
+      resolvedStatus = "paid";
     } else if (combined.includes("PAID") || combined.includes("COMPLETE")) {
       resolvedStatus = "paid";
     } else if (responseCode === "0000") {
@@ -836,6 +847,7 @@ export const getStartCheckoutContext = internalQuery({
     amount: v.optional(v.number()),
     userId: v.optional(v.id("users")),
     phone: v.optional(v.string()),
+    forceNew: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
@@ -1055,6 +1067,15 @@ export const getStartCheckoutContext = internalQuery({
 
     if (activeTransaction && Number(activeTransaction.amount || 0) !== amount) {
       throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
+    }
+
+    // Avoid reusing old pending wallet top-ups; polling updates `updatedAt`, but does not resend
+    // the Easypaisa mobile-account approval request.
+    if (
+      activeTransaction &&
+      Number(activeTransaction.createdAt || 0) + 2 * 60 * 1000 < now
+    ) {
+      activeTransaction = null;
     }
 
     return {
@@ -1365,6 +1386,7 @@ export const startCheckout = action({
     flow: v.optional(v.union(v.literal("rest"), v.literal("hosted"))),
     transactionType: v.optional(v.union(v.literal("MA"), v.literal("OTC"))),
     phone: v.optional(v.string()),
+    forceNew: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<any> => {
     ensurePaymentConfig();
@@ -1376,6 +1398,7 @@ export const startCheckout = action({
       amount: args.amount,
       userId: args.userId,
       phone: args.phone,
+      forceNew: args.forceNew,
     });
     const userId = context.userId as Id<"users">;
     const userPhone = String(context.userPhone || "");
@@ -1693,6 +1716,11 @@ export const syncTransactionStatus = action({
       String(inquiryBody?.transactionStatus || "").toUpperCase() === "FAILED"
         ? inquiryBody?.errorReason || inquiryBody?.responseDesc
         : inquiryBody?.responseDesc || inquiryBody?.errorReason;
+    const storedTransactionType =
+      row.providerPayload?.rest?.initiate?.request?.transactionType ||
+      row.providerPayload?.rest?.initiate?.response?.paymentMode ||
+      row.paymentMethod ||
+      null;
     const applyResult: any = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
       orderRefNum: row.orderRefNum,
       source: "inquiry",
@@ -1704,8 +1732,8 @@ export const syncTransactionStatus = action({
         paymentToken: inquiryBody?.paymentToken || null,
         paymentTokenExpiryDateTime: inquiryBody?.paymentTokenExpiryDateTime || null,
         transactionDateTime: inquiryBody?.transactionDateTime || null,
-        paymentMode: inquiryBody?.paymentMode || null,
-        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || null,
+        paymentMode: inquiryBody?.paymentMode || storedTransactionType || null,
+        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || storedTransactionType || null,
         providerReference: inquiryBody?.transactionId || inquiryBody?.paymentToken || row.orderRefNum,
         rawPayload: {
           rest: {

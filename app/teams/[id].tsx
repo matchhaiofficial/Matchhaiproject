@@ -208,8 +208,9 @@ export default function TeamDetails() {
         id: r._id,
     }));
 
-    // Non-member: check if viewer has a pending join request
-    const entityKey = id && user?._id ? `team_join_request_${id}_${user._id}` : "";
+    // Non-member: check if viewer has a pending join request.
+    // Must match the server-side notification dedupe key used in `convex/teams.ts:requestToJoinTeam`.
+    const entityKey = id && user?._id ? `team.join_request:${id}:${user._id}` : "";
     const myPendingRequest = useQuery(
         api.notifications.checkPendingTeamJoinRequest,
         id && user?._id && !isMember && entityKey
@@ -1013,7 +1014,6 @@ export default function TeamDetails() {
                                 )}
                                 {buttonState === 'requested' && (
                                     <AppCard style={styles.actionButtonDisabled}>
-                                        <ActivityIndicator size="small" color={COLORS.warning} style={styles.headerIcon} />
                                         <Text style={styles.actionButtonTextDisabled}>Requested</Text>
                                     </AppCard>
                                 )}

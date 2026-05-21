@@ -140,7 +140,7 @@ export function AppModalBody({
 
 export function AppModalFooter({ children, style }: AppModalFooterProps) {
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomInset = Math.max(0, insets.bottom || 0);
 
   return (
     <View
@@ -167,8 +167,8 @@ export function AppDialog({
 }: AppDialogProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomClearance = Platform.OS === "ios" ? insets.bottom : 0;
-  const verticalChrome = SPACING.xl + bottomClearance + SPACING.md;
+  const bottomClearance = Math.max(0, insets.bottom || 0);
+  const verticalChrome = SPACING.xl + bottomClearance;
   const maxCardHeight = Math.floor(Math.min(windowHeight * 0.75, windowHeight - verticalChrome));
   const entrance = useEntrance({
     visible,
@@ -191,7 +191,6 @@ export function AppDialog({
           StyleSheet.absoluteFillObject,
           styles.overlayBase,
           styles.dialogOverlay,
-          { paddingBottom: bottomClearance + SPACING.md },
         ]}
         onPress={() => closeIfAllowed(onClose, dismissDisabled)}
       >
@@ -221,7 +220,7 @@ export function AppBottomSheet({
 }: AppBottomSheetProps) {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0;
+  const bottomInset = Math.max(0, insets.bottom || 0);
   const maxSheetHeight = Math.floor(
     Math.min(
       windowHeight * 0.82,
@@ -233,8 +232,6 @@ export function AppBottomSheet({
     axis: "y",
     distance: 22,
   });
-  const sheetOuterBottomPad =
-    Platform.OS === "ios" ? Math.max(SPACING.sm, bottomInset) : 0;
 
   return (
     <Modal
@@ -251,10 +248,7 @@ export function AppBottomSheet({
           onPress={() => closeIfAllowed(onClose, dismissDisabled)}
         />
         <View
-          style={[
-            styles.sheetWrap,
-            { paddingBottom: sheetOuterBottomPad },
-          ]}
+          style={styles.sheetWrap}
         >
           <Animated.View style={entrance.animatedStyle}>
             <View

@@ -179,8 +179,8 @@ export function useNotifications(tab: "pending" | "resolved" = "pending") {
   };
 
   const markAllAsRead = async () => {
-    if (!userId) return;
-    await markAllAsReadMutation({ userId });
+    if (!userId) return 0;
+    return await markAllAsReadMutation({ userId });
   };
 
   const markManyAsRead = async (notificationIds: string[]) => {

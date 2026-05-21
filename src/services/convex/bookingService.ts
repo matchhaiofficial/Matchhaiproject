@@ -7,6 +7,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { Matchroom } from "./matchService";
 import { isRoomExpired, isRoomLocked } from "../../utils/matchroomLifecycle";
 import { getUnavailablePaymentMessage } from "../../config/featureReadiness";
+import Logger from "../../utils/logger";
 
 export interface BookingIntent {
   id?: string;
@@ -261,8 +262,27 @@ export async function confirmBookingTransaction(
 
     return { ok: true };
   } catch (error: any) {
-    console.error("[bookingService] confirmBookingTransaction error:", error);
-    return { ok: false, message: error?.message || "Transaction failed" };
+    const message = String(error?.message || error || "");
+    Logger.warn("bookingService", "confirmBookingTransaction failed", { message });
+    if (/payment window expired/i.test(message)) {
+      return {
+        ok: false,
+        message: "This slot hold expired. Please request the slot again to continue.",
+      };
+    }
+    if (/slot is no longer available/i.test(message)) {
+      return {
+        ok: false,
+        message: "This slot is no longer available.",
+      };
+    }
+    if (/insufficient/i.test(message)) {
+      return {
+        ok: false,
+        message: "Insufficient wallet balance. Please add funds from Wallet.",
+      };
+    }
+    return { ok: false, message: "Payment could not be completed. Please try again." };
   }
 }
 

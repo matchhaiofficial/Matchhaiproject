@@ -100,7 +100,7 @@ function matchesTimeline(room: any, timeline: string) {
 }
 
 function isRoomExpired(room: any) {
-  if (["completed", "cancelled"].includes(String(room?.status || ""))) {
+  if (["completed", "cancelled", "expired"].includes(String(room?.status || ""))) {
     return true;
   }
   return false;

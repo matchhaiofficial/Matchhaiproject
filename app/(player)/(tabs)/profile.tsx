@@ -96,6 +96,8 @@ interface FullUserProfile {
     username?: string;
     city?: string;
     ageRange?: string;
+    photoURL?: string;
+    profileImageUpdatedAt?: number;
 
     // Generic Play Flags & Roles
     playsCs2?: boolean; cs2Role?: string;
@@ -127,6 +129,13 @@ interface FullUserProfile {
     platformLastSynced?: Record<string, any>; // Reserved for future detailed timestamps per platform if structure changes
     lastExternalSyncAt?: number;
     updatedAt?: any;
+}
+
+function withCacheBust(url: string, version?: number | null) {
+    const v = Number(version || 0);
+    if (!url) return url;
+    if (!Number.isFinite(v) || v <= 0) return url;
+    return url.includes("?") ? `${url}&v=${v}` : `${url}?v=${v}`;
 }
 
 export default function Profile() {
@@ -455,7 +464,15 @@ export default function Profile() {
             {/* Profile Card */}
             <AppCard style={styles.profileCard}>
                     <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{getInitials()}</Text>
+                        {profile?.photoURL ? (
+                            <AppImage
+                                source={{ uri: withCacheBust(profile.photoURL, profile.profileImageUpdatedAt) }}
+                                containerStyle={styles.avatarImage}
+                                contentFit="cover"
+                            />
+                        ) : (
+                            <Text style={styles.avatarText}>{getInitials()}</Text>
+                        )}
                     </View>
                     <Text style={styles.profileName}>{profile?.fullName || 'Player'}</Text>
                     {profile?.username && <Text style={styles.profileUsername}>@{profile.username}</Text>}

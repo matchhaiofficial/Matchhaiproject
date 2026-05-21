@@ -10,7 +10,6 @@ import {
     Text,
     View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -35,12 +34,10 @@ export default function BookingStatusScreen() {
         orderRefNum?: string;
     };
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
-    const ctaBottomGuard = insets.bottom + 24;
 
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
@@ -197,7 +194,7 @@ export default function BookingStatusScreen() {
             variant="stack"
             scroll={false}
             edges={["top", "bottom"]}
-            contentStyle={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
+            contentStyle={styles.screenContent}
         >
             <AppHeader
                 title="Booking Status"
@@ -240,7 +237,7 @@ export default function BookingStatusScreen() {
                 </AppCard>
 
                 {/* Progress Stepper */}
-                <DetailSectionCard title="Progress">
+                <DetailSectionCard title="Progress" style={styles.sectionCardSpacing}>
                     <View style={styles.stepper}>
                         <View style={styles.stepContainer}>
                             <View style={styles.stepLineWrapper}>
@@ -315,7 +312,7 @@ export default function BookingStatusScreen() {
                     </View>
                 </DetailSectionCard>
 
-                <DetailSectionCard title="Summary">
+                <DetailSectionCard title="Summary" style={styles.sectionCardSpacing}>
                     <DetailKeyValueRow label="Seats Reserved" value={intent.selectedSlots.length} />
                     <DetailKeyValueRow
                         label="Total Amount"
@@ -359,7 +356,7 @@ export default function BookingStatusScreen() {
                     ) : null}
                 </DetailSectionCard>
                 {settlementSummary ? (
-                    <DetailSectionCard title="Payment">
+                    <DetailSectionCard title="Payment" style={styles.sectionCardSpacing}>
                         <DetailKeyValueRow
                             label="Funds"
                             value={settlementSummary.merchantSettlementStatus === "captured" ? "Captured" : "Reserved"}
@@ -367,6 +364,9 @@ export default function BookingStatusScreen() {
                         <DetailKeyValueRow
                             label="Refunds"
                             value="Approved refunds return to your MatchHai Wallet"
+                            style={styles.settlementRow}
+                            labelStyle={styles.settlementLabel}
+                            valueStyle={styles.settlementValue}
                         />
                         <DetailKeyValueRow
                             label="Venue"
@@ -376,10 +376,13 @@ export default function BookingStatusScreen() {
                                     : "Payout after match completion"
                             }
                             last
+                            style={styles.settlementRow}
+                            labelStyle={styles.settlementLabel}
+                            valueStyle={styles.settlementValue}
                         />
                     </DetailSectionCard>
                 ) : null}
-                <View style={{ width: '100%', marginTop: 8, marginBottom: ctaBottomGuard }}>
+                <View style={styles.footerBlock}>
                     <View style={styles.footer}>
                     {isGatewayPending ? (
                         <AppButton
