@@ -5,6 +5,7 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser, requireKycAccess } from "./authService";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export interface TeamMember {
   uid: string;
@@ -83,7 +84,7 @@ export async function createTeam(
     return { ok: true, id: teamId };
   } catch (error: any) {
     console.error("[teamService] createTeam error:", error);
-    return { ok: false, message: error?.message || "Failed to create team" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create team") };
   }
 }
 
@@ -174,7 +175,7 @@ export async function joinTeam(
     return { ok: true, message: "Joined team" };
   } catch (error: any) {
     console.error("[teamService] joinTeam error:", error);
-    return { ok: false, message: error?.message || "Failed to join team" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to join team") };
   }
 }
 
@@ -200,7 +201,7 @@ export async function leaveTeam(teamId: string, uid: string): Promise<Result> {
     return { ok: true, message: "Left team" };
   } catch (error: any) {
     console.error("[teamService] leaveTeam error:", error);
-    return { ok: false, message: error?.message || "Failed to leave team" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to leave team") };
   }
 }
 
@@ -298,7 +299,7 @@ export async function deleteTeam(teamId: string): Promise<Result> {
     return { ok: true, message: "Team deleted" };
   } catch (error: any) {
     console.error("[teamService] deleteTeam error:", error);
-    return { ok: false, message: error?.message || "Failed to delete team" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to delete team") };
   }
 }
 
@@ -317,7 +318,7 @@ export async function updateTeamName(
     return { ok: true };
   } catch (error: any) {
     console.error("[teamService] updateTeamName error:", error);
-    return { ok: false, message: error?.message || "Failed to update team name" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to update team name") };
   }
 }
 

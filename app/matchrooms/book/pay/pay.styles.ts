@@ -266,6 +266,48 @@ export default StyleSheet.create({
         textAlign: 'center',
         fontStyle: 'italic',
     },
+    easypaisaDialogCard: {
+        width: '100%',
+    },
+    easypaisaDialogContent: {
+        paddingHorizontal: SPACING.lg,
+        paddingTop: SPACING.lg,
+        paddingBottom: SPACING.md,
+    },
+    easypaisaAmountLabel: {
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.heading,
+        marginBottom: SPACING.lg,
+    },
+    easypaisaPhoneLabel: {
+        color: COLORS.textSecondary,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.heading,
+        marginBottom: SPACING.sm,
+    },
+    easypaisaPhoneInput: {
+        minHeight: 52,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        borderRadius: RADII.md,
+        backgroundColor: COLORS.backgroundDark,
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.body,
+        fontFamily: FONTS.body,
+        paddingHorizontal: SPACING.md,
+    },
+    easypaisaDialogFooter: {
+        paddingHorizontal: SPACING.lg,
+        paddingBottom: SPACING.lg,
+    },
+    easypaisaActions: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    easypaisaActionButton: {
+        flex: 1,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',

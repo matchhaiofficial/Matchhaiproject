@@ -1,6 +1,7 @@
 // src/hooks/useToast.ts
 import { useCallback } from "react";
 import Toast from "react-native-toast-message";
+import { sanitizeToastMessage } from "../utils/userFacingErrors";
 
 type ToastType = "success" | "error" | "info" | "warning" | "delete";
 
@@ -29,7 +30,7 @@ export function useToast() {
       Toast.show({
         type: mappedType, // "success" | "error" | "warning" | "delete"
         text1: title,
-        text2: message,
+        text2: sanitizeToastMessage(message),
         visibilityTime: 3500,
         autoHide: true,
         position: "bottom",

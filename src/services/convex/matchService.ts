@@ -13,6 +13,10 @@ import {
   getMatchroomLockAtMs,
   validateMatchroomScheduleWindow,
 } from "../../constants/timing";
+import {
+  cleanConvexErrorMessage,
+  getUserFacingErrorMessage,
+} from "../../utils/userFacingErrors";
 
 export interface Slot {
   slotId: string;
@@ -175,21 +179,6 @@ export interface Matchroom {
 type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
 type ErrorResult = { ok: false; message: string; code?: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
-
-function cleanConvexErrorMessage(error: unknown, fallback = "Something went wrong. Please try again.") {
-  const raw = error instanceof Error ? error.message : String(error || "");
-  const cleaned = raw
-    .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
-    .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
-    .replace(/\bServer Error\b/gi, "")
-    .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
-    .replace(/\bat handler\s*\([^)]*\)/gi, "")
-    .split("Called by client")[0]
-    .trim()
-    .replace(/\s+/g, " ");
-
-  return cleaned || fallback;
-}
 
 function normalizeMatchroomRequestError(error: any) {
   const message = cleanConvexErrorMessage(error, "Failed to send request");
@@ -376,6 +365,30 @@ function generateSlots(teamSize: number, side: "A" | "B", players: any[] = []): 
   });
 }
 
+function normalizeMaxPlayersForFixedFormats(roomData: Matchroom): number {
+  const normalizedGameKey = normalizeGameKey(roomData.game) as GameKey | null;
+  const gameKey = normalizedGameKey || (roomData.game as any);
+  const format = String(roomData.format || "").trim();
+
+  if (gameKey === "fc25" || gameKey === "fc26" || gameKey === "tekken8") {
+    if (format === "2v2") return 4;
+    if (format === "1v1") return 2;
+    return roomData.maxPlayers;
+  }
+
+  if (gameKey === "padel") {
+    return 4;
+  }
+
+  if (gameKey === "pickleball") {
+    if (format === "2v2") return 4;
+    if (format === "1v1") return 2;
+    return roomData.maxPlayers;
+  }
+
+  return roomData.maxPlayers;
+}
+
 /**
  * Create a new matchroom
  */
@@ -407,6 +420,8 @@ export async function createMatchroom(
       }
     }
 
+    const normalizedMaxPlayers = normalizeMaxPlayersForFixedFormats(roomData);
+
     // Prepare players array
     let players = roomData.players || [];
     if (players.length === 0) {
@@ -428,10 +443,10 @@ export async function createMatchroom(
 
     if (
       (!slotsA.length || !slotsB.length) &&
-      roomData.maxPlayers &&
-      roomData.maxPlayers % 2 === 0
+      normalizedMaxPlayers &&
+      normalizedMaxPlayers % 2 === 0
     ) {
-      const teamSize = roomData.maxPlayers / 2;
+      const teamSize = normalizedMaxPlayers / 2;
       slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
       slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
     }
@@ -450,7 +465,7 @@ export async function createMatchroom(
       game: roomData.game,
       title: roomData.title || `${roomData.game} Match`,
       description: roomData.description,
-      maxPlayers: roomData.maxPlayers,
+      maxPlayers: normalizedMaxPlayers,
       players: players.map((p) => ({
         uid: p.uid,
         username: p.username,
@@ -665,7 +680,7 @@ export async function joinMatchroom(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] joinMatchroom error:", error);
-    return { ok: false, message: error?.message || "Failed to join matchroom" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to join matchroom") };
   }
 }
 
@@ -746,7 +761,7 @@ export async function submitCaptainReport(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitCaptainReport error:", error);
-    return { ok: false, message: error?.message || "Failed to submit report" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report") };
   }
 }
 
@@ -767,7 +782,7 @@ export async function submitParticipantVote(
     return { ok: true };
   } catch (error: any) {
     console.error("[matchService] submitParticipantVote error:", error);
-    return { ok: false, message: error?.message || "Failed to submit vote" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit vote") };
   }
 }
 
@@ -790,7 +805,7 @@ export async function adminCancelMatchroom(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] adminCancelMatchroom error:", error);
-    return { ok: false, message: error?.message || "Failed to cancel lobby" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to cancel lobby") };
   }
 }
 
@@ -944,6 +959,6 @@ export async function respondToMatchJoinRequest(
     return { ok: true, message: result.message };
   } catch (error: any) {
     console.error("[matchService] respondToMatchJoinRequest error:", error);
-    return { ok: false, message: error?.message || "Failed to process request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to process request") };
   }
 }

@@ -4,6 +4,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -53,6 +54,9 @@ export default function ReportIssueModal({
   onChangeTarget,
 }: ReportIssueModalProps) {
   const showTargetSelector = Boolean(targetLabel && targetOptions?.length && onChangeTarget);
+  const { height: windowHeight } = useWindowDimensions();
+  // Leave space for header/footer so the ScrollView always has visible height.
+  const maxBodyHeight = Math.max(220, Math.floor(windowHeight * 0.55));
 
   return (
     <AppBottomSheet
@@ -70,7 +74,7 @@ export default function ReportIssueModal({
 
       <AppModalBody
         scroll
-        style={styles.body}
+        style={[styles.body, { maxHeight: maxBodyHeight }]}
         contentContainerStyle={styles.bodyContent}
       >
         {showTargetSelector ? (
@@ -146,7 +150,7 @@ export default function ReportIssueModal({
         </View>
       </AppModalBody>
 
-      <AppModalFooter style={styles.footer}>
+      <AppModalFooter style={styles.footer} compactBottomInset>
         <View style={styles.actionsRow}>
           <AppButton
             onPress={onClose}
@@ -175,7 +179,7 @@ const styles = StyleSheet.create({
     maxHeight: "90%",
   },
   body: {
-    maxHeight: 480,
+    // Height is capped inline to keep footer visible while allowing scroll.
   },
   bodyContent: {
     paddingHorizontal: SPACING.xl,

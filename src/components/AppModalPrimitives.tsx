@@ -166,7 +166,14 @@ export function AppModalBody({
       <View style={[styles.bodyScrollWrap, style]}>
         <ScrollView
           style={styles.bodyScroll}
-          contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
+          // NOTE: `styles.bodyContent` includes `flexShrink: 1` for non-scroll layouts.
+          // In a ScrollView, `flexShrink` on the content container can prevent the
+          // content from exceeding the viewport, which breaks scrolling. Override it.
+          contentContainerStyle={[
+            styles.bodyContent,
+            { flexShrink: 0 },
+            contentContainerStyle,
+          ]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={

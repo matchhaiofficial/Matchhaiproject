@@ -5,6 +5,7 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { Perf } from "../../utils/perfInstrumentation";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export interface BookingRequest {
   id?: string;
@@ -254,7 +255,7 @@ export async function createBookingRequest(
     return { ok: true, id: requestId };
   } catch (error: any) {
     console.error("[bookingRequestService] createBookingRequest error:", error);
-    return { ok: false, message: error?.message || "Failed to create booking request" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create booking request") };
   }
 }
 
@@ -398,7 +399,7 @@ export async function createOffer(data: {
     return { ok: true, data: { id: offerId } };
   } catch (error: any) {
     console.error("[bookingRequestService] createOffer error:", error);
-    return { ok: false, message: error?.message || "Failed to create offer" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create offer") };
   }
 }
 

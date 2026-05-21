@@ -1,6 +1,7 @@
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { convex } from "../../lib/convex";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 type StartCheckoutResult =
   | {
@@ -46,7 +47,7 @@ export async function startEasypaisaBookingCheckout(intentId: string): Promise<S
       paymentTokenExpiryDateTime: result.paymentTokenExpiryDateTime ? String(result.paymentTokenExpiryDateTime) : null,
     };
   } catch (error: any) {
-    return { ok: false, message: error?.message || "Failed to start Easypaisa checkout." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to start Easypaisa checkout.") };
   }
 }
 
@@ -73,7 +74,7 @@ export async function startEasypaisaWalletTopup(amount: number): Promise<StartCh
       paymentTokenExpiryDateTime: result.paymentTokenExpiryDateTime ? String(result.paymentTokenExpiryDateTime) : null,
     };
   } catch (error: any) {
-    return { ok: false, message: error?.message || "Failed to start Easypaisa top-up." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to start Easypaisa top-up.") };
   }
 }
 

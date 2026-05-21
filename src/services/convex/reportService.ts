@@ -3,6 +3,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser } from "./authService";
 import Logger from "../../utils/logger";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type ReportStatus = "pending" | "reviewed" | "resolved";
 export type ReportType = "matchroom_complaint" | "user_report" | "zone_complaint";
@@ -125,7 +126,7 @@ export async function submitMatchroomComplaint(
     };
   } catch (error: any) {
     Logger.error("reportService", "submitMatchroomComplaint failed", error);
-    return { ok: false, message: error?.message || "Failed to submit report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
   }
 }
 
@@ -151,7 +152,7 @@ export async function submitUserReport(
     };
   } catch (error: any) {
     Logger.error("reportService", "submitUserReport failed", error);
-    return { ok: false, message: error?.message || "Failed to submit report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
   }
 }
 
@@ -179,7 +180,7 @@ export async function submitZoneComplaint(
     };
   } catch (error: any) {
     Logger.error("reportService", "submitZoneComplaint failed", error);
-    return { ok: false, message: error?.message || "Failed to submit report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
   }
 }
 
@@ -193,7 +194,7 @@ export async function getMyReports(status?: ReportStatus): Promise<Result<AppRep
     return { ok: true, data: filtered.map(toAppReport) };
   } catch (error: any) {
     Logger.error("reportService", "getMyReports failed", error);
-    return { ok: false, message: error?.message || "Failed to load reports." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load reports.") };
   }
 }
 
@@ -208,7 +209,7 @@ export async function getMyReportById(reportId: string): Promise<Result<AppRepor
     return { ok: true, data: toAppReport(row) };
   } catch (error: any) {
     Logger.error("reportService", "getMyReportById failed", error);
-    return { ok: false, message: error?.message || "Failed to load report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load report.") };
   }
 }
 
@@ -218,7 +219,7 @@ export async function getZoneReports(status?: ReportStatus): Promise<Result<AppR
     return { ok: true, data: (rows || []).map(toAppReport) };
   } catch (error: any) {
     Logger.error("reportService", "getZoneReports failed", error);
-    return { ok: false, message: error?.message || "Failed to load zone reports." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load zone reports.") };
   }
 }
 
@@ -230,7 +231,7 @@ export async function getZoneReportById(reportId: string): Promise<Result<AppRep
     return { ok: true, data: toAppReport(row) };
   } catch (error: any) {
     Logger.error("reportService", "getZoneReportById failed", error);
-    return { ok: false, message: error?.message || "Failed to load zone report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load zone report.") };
   }
 }
 
@@ -246,7 +247,7 @@ export async function markZoneReportReviewed(
     return { ok: true, data: undefined, message: result?.message };
   } catch (error: any) {
     Logger.error("reportService", "markZoneReportReviewed failed", error);
-    return { ok: false, message: error?.message || "Failed to update report." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to update report.") };
   }
 }
 
