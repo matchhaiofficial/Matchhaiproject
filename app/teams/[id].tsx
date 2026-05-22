@@ -1104,7 +1104,7 @@ export default function TeamDetails() {
                             style={styles.roleRequiredActionButton}
                             onPress={() => {
                                 setShowRoleRequiredSheet(false);
-                                router.push('/(player)/profile/edit' as any);
+                                router.push(`/profile/game-details?gameId=${team.game}` as any);
                             }}
                         >
                             Set Role

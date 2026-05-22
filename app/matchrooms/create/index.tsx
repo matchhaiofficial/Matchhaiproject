@@ -1108,6 +1108,7 @@ export default function CreateMatchroom() {
     completeAssessment,
     confirmEasypaisaPayment,
     confirmActivation,
+    continueEasypaisaPayment,
     hideEasypaisaPhonePrompt,
     easypaisaCheckoutPhone,
     easypaisaCheckoutStatus,
@@ -1116,7 +1117,6 @@ export default function CreateMatchroom() {
     handleEasypaisaPhoneChange,
     handleSubmit,
     openEasypaisaPhonePrompt,
-    refreshEasypaisaPaymentStatus,
     refreshingEasypaisaStatus,
     resetEasypaisaPaymentPrompt,
     showEasypaisaPhonePrompt,
@@ -1263,6 +1263,9 @@ export default function CreateMatchroom() {
             : easypaisaPaymentPhase === "expired"
               ? "Payment expired"
               : "Payment pending";
+  const showEasypaisaUnverifiedStatus =
+    easypaisaPaymentPhase === "payment_sent" &&
+    Boolean(easypaisaCheckoutStatus?.providerDescription);
   const renderEasypaisaRecoveryBanner = () => {
     if (!showEasypaisaRecoveryBanner) return null;
 
@@ -1314,7 +1317,7 @@ export default function CreateMatchroom() {
           </AppButton>
           <AppButton
             style={{ flex: 1 }}
-            onPress={() => refreshEasypaisaPaymentStatus("manual")}
+            onPress={() => void continueEasypaisaPayment()}
             loading={refreshingEasypaisaStatus}
             disabled={refreshingEasypaisaStatus}
           >
@@ -2352,7 +2355,7 @@ export default function CreateMatchroom() {
                   Order: {activeEasypaisaOrderRef}
                 </Text>
               ) : null}
-              {easypaisaCheckoutStatus?.providerDescription ? (
+              {showEasypaisaUnverifiedStatus ? (
                 <Text style={styles.paymentStatusMeta}>
                   Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                 </Text>
@@ -2432,7 +2435,7 @@ export default function CreateMatchroom() {
                   )}
                   <AppButton
                     style={styles.phoneActionBtn}
-                    onPress={() => refreshEasypaisaPaymentStatus("manual")}
+                    onPress={() => void continueEasypaisaPayment()}
                     loading={refreshingEasypaisaStatus}
                     disabled={refreshingEasypaisaStatus}
                   >

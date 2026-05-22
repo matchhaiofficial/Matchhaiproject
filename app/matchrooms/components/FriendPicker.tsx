@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -109,8 +108,6 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
     const renderFriendRow = useCallback((item: { uid: string; username: string; skillScore?: number }) => {
         return <FriendRow friend={item} onSelectFriend={handleSelectFriend} />;
     }, [handleSelectFriend]);
-    const hasScrollableFriendList = filteredFriends.length > 5;
-
     const handleConfirm = useCallback(() => {
         if (selectedFriend && (selectedRole || !matchroomRoles?.length)) {
             onSelect(selectedFriend, selectedRole || "Flex");
@@ -125,14 +122,14 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
     }, []);
 
     return (
-        <AppBottomSheet visible={visible} onClose={onClose}>
+        <AppBottomSheet visible={visible} onClose={onClose} keyboardAware>
             <AppModalHeader
                 title={selectedFriend ? "Confirm Teammate" : "Invite Teammate"}
                 onClose={onClose}
             />
 
             {!selectedFriend ? (
-                <AppModalBody contentContainerStyle={styles.bodyContent}>
+                <AppModalBody scroll contentContainerStyle={styles.bodyContent}>
                     <View style={styles.searchBar}>
                         <AppIcon name="search" size={20} color={COLORS.muted} />
                         <TextInput
@@ -148,18 +145,6 @@ export default function FriendPicker({ visible, onClose, onSelect, game, matchro
                         <ActivityIndicator style={styles.loadingIndicator} color={COLORS.accent} />
                     ) : filteredFriends.length === 0 ? (
                         <Text style={styles.emptyText}>No friends found</Text>
-                    ) : hasScrollableFriendList ? (
-                        <ScrollView
-                            style={styles.list}
-                            keyboardShouldPersistTaps="handled"
-                            showsVerticalScrollIndicator={false}
-                        >
-                            {filteredFriends.map((friend) => (
-                                <View key={keyExtractor(friend)}>
-                                    {renderFriendRow(friend)}
-                                </View>
-                            ))}
-                        </ScrollView>
                     ) : (
                         <View>
                             {filteredFriends.map((friend) => (
@@ -247,9 +232,6 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         color: COLORS.text,
-    },
-    list: {
-        maxHeight: 400,
     },
     emptyText: {
         color: COLORS.muted,

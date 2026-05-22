@@ -12,6 +12,7 @@ import {
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
+import BottomActionBar from "../../../../src/components/BottomActionBar";
 import {
     AppDialog,
     AppModalBody,
@@ -235,9 +236,17 @@ export default function MockPaymentScreen() {
     }
 
     if (!intent) return null;
-    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.totalCost || 0);
+    const currency = (intent.pricing as any)?.currency || "PKR";
+    const seatCount = intent.selectedSlots.length;
+    const pricePerSeat = Number(intent.pricing?.perPlayerCost || 0);
+    const totalCost = Number(intent.pricing?.totalCost || 0);
+    const hasEnoughWallet = walletBalance >= totalCost;
     const isPaymentWindowExpired = Boolean(intent.expiresAt && intent.expiresAt <= nowMs);
     const payDisabled = processing || !intent || isPaymentWindowExpired || (paymentMethod === "wallet" && !hasEnoughWallet);
+    const paymentStateMessage =
+        paymentMethod === "wallet"
+            ? "Wallet funds reserve your seat now and are captured when the match starts or is confirmed."
+            : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed.";
 
     return (
         <Screen
@@ -259,29 +268,28 @@ export default function MockPaymentScreen() {
                 contentContainerStyle={styles.content}
             >
                 <AppCard variant="elevated" style={styles.amountCard}>
-                    <Text style={styles.amountLabel}>TOTAL AMOUNT</Text>
+                    <Text style={styles.amountLabel}>TOTAL DUE</Text>
                     <Text style={styles.amountValue}>
-                        {(intent.pricing as any)?.currency || "PKR"} {intent.pricing?.totalCost}
+                        {currency} {totalCost}
                     </Text>
                     <Text style={styles.seatCount}>
-                        Pay now to reserve {intent.selectedSlots.length} seat{intent.selectedSlots.length === 1 ? "" : "s"}
-                    </Text>
-                </AppCard>
-
-                {/* Secure Payment Info */}
-                <AppCard style={styles.infoBox}>
-                    <AppIcon name="security" size={20} color={COLORS.success} />
-                    <Text style={styles.infoText}>
-                        Your payment reserves your seat first. Funds are captured when the match starts or is confirmed.
+                        Reserve {seatCount} seat{seatCount === 1 ? "" : "s"} after payment confirms
                     </Text>
                 </AppCard>
 
                 {/* Summary */}
-                <DetailSectionCard title="Booking Summary" style={styles.sectionCardSpacing}>
+                <DetailSectionCard title="Amount Breakdown" style={styles.sectionCardSpacing}>
                     <DetailKeyValueRow label="Lobby" value={intent.game} />
+                    <DetailKeyValueRow label="Seats" value={seatCount} />
                     <DetailKeyValueRow
                         label="Price per seat"
-                        value={`${(intent.pricing as any)?.currency || "PKR"}${intent.pricing?.perPlayerCost}`}
+                        value={`${currency} ${pricePerSeat}`}
+                    />
+                    <DetailKeyValueRow
+                        label="Total due"
+                        value={`${currency} ${totalCost}`}
+                        valueTone="accent"
+                        valueStyle={styles.totalAmount}
                         last
                     />
                 </DetailSectionCard>
@@ -304,7 +312,7 @@ export default function MockPaymentScreen() {
                         </View>
                         <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>MatchHai Wallet</Text>
-                            <Text style={styles.methodDetail}>Balance: {(intent.pricing as any)?.currency || "PKR"} {Math.round(walletBalance)}</Text>
+                            <Text style={styles.methodDetail}>Balance: {currency} {Math.round(walletBalance)}</Text>
                         </View>
                         <StatusPill
                             tone={paymentMethod === "wallet" ? "info" : "neutral"}
@@ -331,7 +339,7 @@ export default function MockPaymentScreen() {
                         />
                     </Pressable>
                     {!hasEnoughWallet && paymentMethod === "wallet" ? (
-                        <Text style={[styles.methodDetail, { marginTop: 10, color: COLORS.warning }]}>
+                        <Text style={styles.walletWarning}>
                             Insufficient wallet balance. Please add funds from Wallet.
                         </Text>
                     ) : null}
@@ -340,9 +348,17 @@ export default function MockPaymentScreen() {
                             This slot hold expired. Please request the slot again to continue.
                         </Text>
                     ) : null}
+                    {!isPaymentWindowExpired ? (
+                        <View style={styles.paymentStateRow}>
+                            <AppIcon name="security" size={18} color={COLORS.success} />
+                            <Text style={styles.paymentStateText}>{paymentStateMessage}</Text>
+                        </View>
+                    ) : null}
                 </DetailSectionCard>
-                <View style={styles.footerBlock}>
-                    <View style={styles.footer}>
+            </ScrollView>
+            </View>
+
+            <BottomActionBar contentStyle={styles.bottomActionContent}>
                 <AppButton
                     size="lg"
                     onPress={handleMockPayment}
@@ -369,21 +385,14 @@ export default function MockPaymentScreen() {
                         </>
                     )}
                 </AppButton>
-                <Text style={styles.cancelHint}>
-                    {paymentMethod === "wallet"
-                        ? "Your Wallet funds are reserved now and captured when the match starts or is confirmed."
-                        : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed."}
-                </Text>
-                    </View>
-                </View>
-            </ScrollView>
-            </View>
+            </BottomActionBar>
 
             <AppDialog
                 visible={easypaisaPhoneVisible}
                 onClose={() => !processing && setEasypaisaPhoneVisible(false)}
                 dismissDisabled={processing}
                 cardStyle={styles.easypaisaDialogCard}
+                keyboardAware
             >
                 <AppModalHeader
                     title="Confirm Easypaisa Number"
@@ -391,9 +400,9 @@ export default function MockPaymentScreen() {
                     onClose={() => !processing && setEasypaisaPhoneVisible(false)}
                     closeDisabled={processing}
                 />
-                <AppModalBody contentContainerStyle={styles.easypaisaDialogContent}>
+                <AppModalBody scroll contentContainerStyle={styles.easypaisaDialogContent}>
                     <Text style={styles.easypaisaAmountLabel}>
-                        Amount: {(intent.pricing as any)?.currency || "PKR"} {intent.pricing?.totalCost ?? 0}
+                        Amount: {currency} {totalCost}
                     </Text>
                     <Text style={styles.easypaisaPhoneLabel}>Mobile Account Number</Text>
                     <TextInput
