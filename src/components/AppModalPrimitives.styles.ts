@@ -80,6 +80,7 @@ export default StyleSheet.create({
     marginBottom: SPACING.xs,
   },
   header: {
+    flexShrink: 0,
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
@@ -108,13 +109,12 @@ export default StyleSheet.create({
     marginTop: 4,
   },
   bodyScroll: {
-    flexGrow: 0,
+    flexGrow: 1,
     flexShrink: 1,
     minHeight: 0,
   },
   bodyScrollWrap: {
-    // The wrapper participates in the card layout so the body keeps its
-    // intrinsic height until the modal hits its cap, then it shrinks and scrolls.
+    flexGrow: 1,
     flexShrink: 1,
     minHeight: 0,
   },
@@ -125,6 +125,7 @@ export default StyleSheet.create({
     flexShrink: 1,
   },
   footer: {
+    flexShrink: 0,
     paddingHorizontal: SPACING.xl,
     paddingTop: SPACING.md,
     borderTopWidth: 1,

@@ -331,12 +331,6 @@ export default StyleSheet.create({
     fontSize: TEXT_SIZES.label - 1,
   },
 
-  branchModalBody: {
-    minHeight: 0,
-  },
-  branchModalScroller: {
-    flex: 1,
-  },
   branchModalContent: {
     gap: SPACING.sm,
     paddingHorizontal: SPACING.xl,

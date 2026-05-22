@@ -262,6 +262,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
   const startCheckout = useAction((api as any).easypaisa.startCheckout);
   const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
   const resumedEasypaisaOrderRef = useRef<string | null>(null);
+  const completingEasypaisaOrderRef = useRef<string | null>(null);
   const checkoutStatus = useQuery(
     api.easypaisa.getCheckoutStatus,
     user?._id && activeEasypaisaOrderRef
@@ -978,6 +979,59 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     walkInTeamBCaptainSeatNumber,
   ]);
 
+  const completeConfirmedEasypaisaPayment = useCallback(async () => {
+    const orderRefNum = activeEasypaisaOrderRef;
+    if (!orderRefNum || completingEasypaisaOrderRef.current === orderRefNum) return;
+
+    completingEasypaisaOrderRef.current = orderRefNum;
+    setEasypaisaPaymentPhase("completing");
+
+    try {
+      const completed = await withTimeout(
+        submit({ skipPaymentPrompt: true }),
+        "Completing matchroom after payment",
+        PAYMENT_RESUME_TIMEOUT_MS,
+      );
+      if (!completed && activeEasypaisaOrderRef === orderRefNum) {
+        setEasypaisaPaymentPhase("completion_failed");
+        notify({
+          message: "Payment was confirmed, but MatchHai could not finish creating the matchroom yet. Wait a few seconds and tap Try Again.",
+          title: "Completion pending",
+          type: "warning",
+        });
+      }
+    } catch (error) {
+      Logger.error("CreateMatchroom", "Failed to resume after Easypaisa payment", error);
+      if (activeEasypaisaOrderRef === orderRefNum) {
+        setEasypaisaPaymentPhase("completion_failed");
+        notify({
+          message: "Payment was confirmed, but completing the matchroom timed out. Wait a few seconds and tap Try Again.",
+          title: "Completion timed out",
+          type: "warning",
+        });
+      }
+    } finally {
+      if (completingEasypaisaOrderRef.current === orderRefNum) {
+        completingEasypaisaOrderRef.current = null;
+      }
+    }
+  }, [activeEasypaisaOrderRef, notify, submit]);
+
+  const continueEasypaisaPayment = useCallback(async () => {
+    await refreshEasypaisaPaymentStatus("manual");
+
+    if (
+      easypaisaPaymentPhase === "confirmed" ||
+      easypaisaPaymentPhase === "completing"
+    ) {
+      await completeConfirmedEasypaisaPayment();
+    }
+  }, [
+    completeConfirmedEasypaisaPayment,
+    easypaisaPaymentPhase,
+    refreshEasypaisaPaymentStatus,
+  ]);
+
   useEffect(() => {
     if (!activeEasypaisaOrderRef || !checkoutStatus) return;
     const status = String(checkoutStatus.status || "");
@@ -1017,37 +1071,16 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     });
 
     const timer = setTimeout(() => {
-      setEasypaisaPaymentPhase("completing");
-      withTimeout(
-        submit({ skipPaymentPrompt: true }),
-        "Completing matchroom after payment",
-        PAYMENT_RESUME_TIMEOUT_MS,
-      )
-        .then((completed) => {
-          if (!completed && resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
-            setEasypaisaPaymentPhase("completion_failed");
-            notify({
-              message: "Payment was confirmed, but MatchHai could not finish creating the matchroom yet. Wait a few seconds and tap Try Again.",
-              title: "Completion pending",
-              type: "warning",
-            });
-          }
-        })
-        .catch((error) => {
-          Logger.error("CreateMatchroom", "Failed to resume after Easypaisa payment", error);
-          if (resumedEasypaisaOrderRef.current === activeEasypaisaOrderRef) {
-            setEasypaisaPaymentPhase("completion_failed");
-            notify({
-              message: "Payment was confirmed, but completing the matchroom timed out. Wait a few seconds and tap Try Again.",
-              title: "Completion timed out",
-              type: "warning",
-            });
-          }
-        });
+      void completeConfirmedEasypaisaPayment();
     }, 900);
 
     return () => clearTimeout(timer);
-  }, [activeEasypaisaOrderRef, checkoutStatus, notify, submit]);
+  }, [
+    activeEasypaisaOrderRef,
+    checkoutStatus,
+    completeConfirmedEasypaisaPayment,
+    notify,
+  ]);
 
   useEffect(() => {
     if (!activeEasypaisaOrderRef || !checkoutStatus) return;
@@ -1150,6 +1183,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     completeAssessment,
     closeEasypaisaPhonePrompt,
     confirmEasypaisaPayment,
+    continueEasypaisaPayment,
     resendEasypaisaPayment,
     confirmActivation,
     hideEasypaisaPhonePrompt,

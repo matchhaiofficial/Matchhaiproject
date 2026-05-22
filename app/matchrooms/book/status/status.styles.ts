@@ -41,7 +41,7 @@ export default StyleSheet.create({
     },
     content: {
         alignItems: 'stretch',
-        paddingBottom: SPACING.xxl,
+        paddingBottom: SPACING.lg,
     },
     statusDisplay: {
         width: '100%',
@@ -197,6 +197,18 @@ export default StyleSheet.create({
         marginTop: SPACING.md,
         fontStyle: 'italic',
     },
+    orderRow: {
+        marginTop: SPACING.md,
+        alignItems: 'flex-start',
+        gap: SPACING.md,
+    },
+    orderLabel: {
+        flex: 0,
+    },
+    orderValue: {
+        flex: 1,
+        textAlign: 'right',
+    },
     settlementRow: {
         alignItems: 'flex-start',
         gap: SPACING.lg,
@@ -216,9 +228,8 @@ export default StyleSheet.create({
         gap: SPACING.md,
         width: '100%',
     },
-    footerBlock: {
-        width: '100%',
-        marginTop: SPACING.xs,
+    bottomActionContent: {
+        gap: SPACING.md,
     },
     footerRow: {
         flexDirection: 'row',

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 
 import { getGameFields } from "../../../../constants/matchConfig";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../../../constants/profileOptions";
 import { AppIcon } from "../../../../src/components/AppIcon";
 import {
+  AppModalBody,
   AppModalHeader,
   AppPickerSheet,
 } from "../../../../src/components/AppModalPrimitives";
@@ -310,25 +311,28 @@ export default function GameDynamicFields({
       <>
         <AppModalHeader title={title} onClose={closeModal} compact />
 
-        {(modalType === "club_team" || modalType === "tekken_character") && (
-          <View style={styles.modalSearchBox}>
-            <AppIcon name="search" size={20} color={COLORS.muted} />
-            <TextInput
-              style={styles.modalSearchInput}
-              placeholder="Search..."
-              placeholderTextColor={COLORS.muted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-        )}
+        <AppModalBody scroll contentContainerStyle={styles.modalPickerBody}>
+          {(modalType === "club_team" || modalType === "tekken_character") && (
+            <View style={styles.modalSearchBox}>
+              <AppIcon name="search" size={20} color={COLORS.muted} />
+              <TextInput
+                style={styles.modalSearchInput}
+                placeholder="Search..."
+                placeholderTextColor={COLORS.muted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+          )}
 
-        <FlatList
-          data={data}
-          renderItem={renderItem}
-          keyExtractor={listKeyExtractor}
-          contentContainerStyle={{ paddingBottom: 20 }}
-        />
+          {renderItem
+            ? data.map((item, index) => (
+                <React.Fragment key={listKeyExtractor(item, index)}>
+                  {renderItem({ item, index })}
+                </React.Fragment>
+              ))
+            : null}
+        </AppModalBody>
       </>
     );
   };
@@ -338,6 +342,7 @@ export default function GameDynamicFields({
       visible={modalVisible}
       onClose={closeModal}
       sheetStyle={styles.modalContainer}
+      keyboardAware={modalType === "club_team" || modalType === "tekken_character"}
     >
       {renderModalContent()}
     </AppPickerSheet>

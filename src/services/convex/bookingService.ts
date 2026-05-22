@@ -47,6 +47,9 @@ export interface BookingIntent {
     | "rejected"
     | "cancelled";
   paymentStatus: "unpaid" | "paid";
+  activePaymentTransactionId?: string;
+  activePaymentOrderRefNum?: string;
+  activePaymentExpiresAt?: number;
   selectedSlotIds?: string[];
   createdByUsername?: string;
   role?: string;

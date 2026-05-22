@@ -1,5 +1,5 @@
 import React from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { AppIcon } from "../../../../src/components/AppIcon";
 import { AppModalBody, AppModalHeader, AppPickerSheet } from "../../../../src/components/AppModalPrimitives";
@@ -62,8 +62,7 @@ export default function TeamPicker({ teams, selectedTeamId, onSelectTeam, curren
             >
                 <AppModalHeader title="Select Team" onClose={() => setShowModal(false)} compact />
 
-                <AppModalBody contentContainerStyle={{ paddingTop: 12, paddingBottom: 8 }}>
-                <ScrollView>
+                <AppModalBody scroll contentContainerStyle={{ paddingTop: 12, paddingBottom: 8 }}>
                     {teams.map((team) => (
                         <MotionPressable
                             key={team.id}
@@ -93,7 +92,6 @@ export default function TeamPicker({ teams, selectedTeamId, onSelectTeam, curren
                             </View>
                         </MotionPressable>
                     ))}
-                </ScrollView>
                 </AppModalBody>
             </AppPickerSheet>
         </View>

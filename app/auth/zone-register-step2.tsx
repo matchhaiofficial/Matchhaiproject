@@ -2,7 +2,7 @@ import { Picker } from "@react-native-picker/picker";
 import { router } from "expo-router";
 import debounce from "lodash.debounce";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import {
   DEFAULT_CITY,
@@ -14,6 +14,7 @@ import RegistrationStepHeader from "./components/RegistrationStepHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import {
   AppBottomSheet,
+  AppModalBody,
   AppModalFooter,
   AppModalHeader,
 } from "../../src/components/AppModalPrimitives";
@@ -34,7 +35,6 @@ type LocationSearchResult = {
 };
 
 export default function AdminRegisterStep2() {
-  const { height: windowHeight } = useWindowDimensions();
   const { step1, branches, addBranch, updateBranch, removeBranch, setBranches, setCurrentStep } =
     useZoneOnboardingStore();
   const { showToast } = useToast();
@@ -87,8 +87,6 @@ export default function AdminRegisterStep2() {
     () => (branches.length === 1 ? "1 branch added" : `${branches.length} branches added`),
     [branches.length],
   );
-  const branchModalBodyHeight = Math.max(300, Math.min(500, Math.floor(windowHeight * 0.58)));
-
   const detectAreaFromLocation = (locationText: string) => {
     const normalized = locationText.toLowerCase();
     const areaAliases: Record<string, string[]> = {
@@ -464,24 +462,17 @@ export default function AdminRegisterStep2() {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         sheetStyle={{ backgroundColor: COLORS.backgroundDark, maxHeight: "92%" }}
+        keyboardAware
       >
         <AppModalHeader
           title={editingBranchId ? "Edit branch" : "Add branch"}
           onClose={() => setModalVisible(false)}
         />
 
-        <KeyboardAvoidingView
-          style={[styles.branchModalBody, { height: branchModalBodyHeight }]}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+        <AppModalBody
+          scroll
+          contentContainerStyle={styles.branchModalContent}
         >
-          <ScrollView
-            style={styles.branchModalScroller}
-            contentContainerStyle={styles.branchModalContent}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator
-          >
             <View style={styles.fieldGroup}>
               <RegistrationFieldLabel label="Branch name" required />
               <View style={styles.inputBox}>
@@ -631,8 +622,7 @@ export default function AdminRegisterStep2() {
                 </View>
               </View>
             ) : null}
-          </ScrollView>
-        </KeyboardAvoidingView>
+        </AppModalBody>
 
         <AppModalFooter>
           <View style={styles.branchModalActions}>
