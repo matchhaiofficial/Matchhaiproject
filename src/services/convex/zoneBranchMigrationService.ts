@@ -6,6 +6,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import Logger from "../../utils/logger";
 import { ResourceKind, ResourceLifecycleStatus } from "../../features/zoneAdmin/types";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export interface MigratedBranch {
     id: string;
@@ -93,6 +94,6 @@ export async function migrateZoneBranchesToSubcollection(
         };
     } catch (error: any) {
         Logger.error("zoneBranchMigration", "Migration failed", error);
-        return { ok: false, message: error?.message || "Failed to migrate branch model." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to migrate branch model.") };
     }
 }

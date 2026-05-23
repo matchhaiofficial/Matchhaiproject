@@ -418,7 +418,7 @@ export default function BasicFields({ formData, onChange, selectedGame, minimumD
                 </View>
             </Modal>
 
-            {selectedGame !== "cs2" && selectedGame !== "fc26" && (
+            {selectedGame !== "cs2" && selectedGame !== "fc26" && selectedGame !== "tekken8" && (
                 <View style={styles.section}>
                     <Text style={styles.sectionLabel}>
                         Max Players<Text style={styles.requiredAsterisk}>*</Text>

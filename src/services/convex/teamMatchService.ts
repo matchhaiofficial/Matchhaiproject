@@ -9,6 +9,7 @@ import { createMatchroom } from "./matchService";
 import Logger from "../../utils/logger";
 import { parseScheduledDateTime } from "../../utils/matchroomTime";
 import { getTeamMainRosterSize } from "../../constants/teamRosterRules";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 // Re-export types from original
 export type TeamMatchChallengeStatus =
@@ -449,7 +450,7 @@ export const acceptTeamMatchChallenge = async (input: {
         return { ok: true, challengeId: input.challengeId, chatId };
     } catch (error: any) {
         Logger.error("teamMatchService", "acceptTeamMatchChallenge failed", error);
-        return { ok: false, message: error?.message || "Failed to accept challenge." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to accept challenge.") };
     }
 };
 
@@ -516,7 +517,7 @@ export const rejectTeamMatchChallenge = async (input: {
         return { ok: true, challengeId: input.challengeId };
     } catch (error: any) {
         Logger.error("teamMatchService", "rejectTeamMatchChallenge failed", error);
-        return { ok: false, message: error?.message || "Failed to reject challenge." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reject challenge.") };
     }
 };
 
@@ -553,7 +554,7 @@ export const suggestTeamMatchChallengeAlternativeZone = async (input: {
         return { ok: true };
     } catch (error: any) {
         Logger.error("teamMatchService", "suggestTeamMatchChallengeAlternativeZone failed", error);
-        return { ok: false, message: error?.message || "Failed to suggest alternative zone." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to suggest alternative zone.") };
     }
 };
 
@@ -595,7 +596,7 @@ export const respondToTeamMatchChallenge = async (input: {
         return accepted;
     } catch (error: any) {
         Logger.error("teamMatchService", "respondToTeamMatchChallenge failed", error);
-        return { ok: false, message: error?.message || "Failed to respond to challenge." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to challenge.") };
     }
 };
 
@@ -712,7 +713,7 @@ export const proposeTeamChallengeVenue = async (input: {
         return { ok: true };
     } catch (error: any) {
         Logger.error("teamMatchService", "proposeTeamChallengeVenue failed", error);
-        return { ok: false, message: error?.message || "Failed to propose venue." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to propose venue.") };
     }
 };
 
@@ -730,7 +731,7 @@ export const getTeamMatchChallengeById = async (challengeId: string): Promise<Se
         return { ok: true, data: { ...challenge, id: challenge._id } };
     } catch (error: any) {
         Logger.error("teamMatchService", "getTeamMatchChallengeById failed", error);
-        return { ok: false, message: error?.message || "Failed to load challenge." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load challenge.") };
     }
 };
 
@@ -779,7 +780,7 @@ export const getCaptainedTeams = async (uid: string): Promise<ServerResponse> =>
         return { ok: true, data: sorted.map((t: any) => ({ ...t, id: t._id })) };
     } catch (error: any) {
         Logger.error("teamMatchService", "getCaptainedTeams failed", error);
-        return { ok: false, message: error?.message || "Failed to load captain teams." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load captain teams.") };
     }
 };
 
@@ -795,7 +796,7 @@ export const getChallengesForCaptain = async (uid: string): Promise<ServerRespon
         return { ok: true, data: rows };
     } catch (error: any) {
         Logger.error("teamMatchService", "getChallengesForCaptain failed", error);
-        return { ok: false, message: error?.message || "Failed to load challenges." };
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load challenges.") };
     }
 };
 

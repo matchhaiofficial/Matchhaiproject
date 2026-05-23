@@ -166,7 +166,14 @@ export function AppModalBody({
       <View style={[styles.bodyScrollWrap, style]}>
         <ScrollView
           style={styles.bodyScroll}
-          contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
+          // NOTE: `styles.bodyContent` includes `flexShrink: 1` for non-scroll layouts.
+          // In a ScrollView, `flexShrink` on the content container can prevent the
+          // content from exceeding the viewport, which breaks scrolling. Override it.
+          contentContainerStyle={[
+            styles.bodyContent,
+            { flexShrink: 0 },
+            contentContainerStyle,
+          ]}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={
@@ -247,14 +254,17 @@ export function AppDialog({
       navigationBarTranslucent={false}
       onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
     >
-      <Pressable
+      <View
         style={[
           StyleSheet.absoluteFillObject,
           styles.overlayBase,
           styles.dialogOverlay,
         ]}
-        onPress={() => closeIfAllowed(onClose, dismissDisabled)}
       >
+        <Pressable
+          style={StyleSheet.absoluteFillObject}
+          onPress={() => closeIfAllowed(onClose, dismissDisabled)}
+        />
         <MaybeKeyboardAvoidingView
           enabled={keyboardAware}
           behavior={keyboardAvoidBehavior}
@@ -262,14 +272,12 @@ export function AppDialog({
           style={styles.dialogKeyboardAvoiding}
         >
           <Animated.View style={[styles.dialogFrame, entrance.animatedStyle]}>
-            <Pressable
-              style={[styles.dialogCard, { maxHeight: maxCardHeight }, cardStyle]}
-            >
+            <View style={[styles.dialogCard, { maxHeight: maxCardHeight }, cardStyle]}>
               {children}
-            </Pressable>
+            </View>
           </Animated.View>
         </MaybeKeyboardAvoidingView>
-      </Pressable>
+      </View>
       <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
         <Toast config={toastConfig} />
       </View>
@@ -357,6 +365,9 @@ export function AppPickerSheet({
   animationType = "fade",
   sheetStyle,
   contentStyle,
+  keyboardAware = false,
+  keyboardAvoidBehavior,
+  keyboardVerticalOffset = 0,
 }: AppPickerSheetProps) {
   return (
     <AppBottomSheet
@@ -366,6 +377,9 @@ export function AppPickerSheet({
       animationType={animationType}
       sheetStyle={[styles.pickerSheet, sheetStyle]}
       contentStyle={contentStyle}
+      keyboardAware={keyboardAware}
+      keyboardAvoidBehavior={keyboardAvoidBehavior}
+      keyboardVerticalOffset={keyboardVerticalOffset}
     >
       <View style={styles.handle} />
       {children}

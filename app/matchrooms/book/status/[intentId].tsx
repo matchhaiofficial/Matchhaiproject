@@ -14,6 +14,7 @@ import {
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
 import { AppButton, AppCard, StatusPill } from "../../../../src/components/AppPrimitives";
+import BottomActionBar from "../../../../src/components/BottomActionBar";
 import { DetailKeyValueRow, DetailSectionCard } from "../../../../src/components/DetailSurface";
 import Screen from "../../../../src/components/Screen";
 import { BookingIntent } from "../../../../src/services/convex/bookingService";
@@ -38,19 +39,21 @@ export default function BookingStatusScreen() {
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
+    const [refreshingPayment, setRefreshingPayment] = useState(false);
 
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
         intentId ? { intentId: intentId as Id<"bookingIntents"> } : "skip"
     );
-    const checkoutStatus = useQuery(
-        api.easypaisa.getCheckoutStatus,
-        user?._id && orderRefNum
-            ? { userId: user._id as Id<"users">, orderRefNum }
-            : "skip"
-    );
     const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
     const intent = intentData as BookingIntent | null | undefined;
+    const activeOrderRefNum = orderRefNum || intent?.activePaymentOrderRefNum;
+    const checkoutStatus = useQuery(
+        api.easypaisa.getCheckoutStatus,
+        user?._id && activeOrderRefNum
+            ? { userId: user._id as Id<"users">, orderRefNum: activeOrderRefNum }
+            : "skip"
+    );
     const roomData = useQuery(
         api.matchrooms.getById,
         intent?.matchroomId ? { matchroomId: String(intent.matchroomId) } : "skip"
@@ -80,7 +83,7 @@ export default function BookingStatusScreen() {
     }, [intent?.expiresAt]);
 
     useEffect(() => {
-        if (!user?._id || !orderRefNum || !checkoutStatus) {
+        if (!user?._id || !activeOrderRefNum || !checkoutStatus) {
             return;
         }
         if (!["created", "redirected", "token_received", "pending"].includes(String(checkoutStatus.status || ""))) {
@@ -88,13 +91,13 @@ export default function BookingStatusScreen() {
         }
 
         const timer = setInterval(() => {
-            syncCheckoutStatus({ orderRefNum, userId: user._id as Id<"users"> }).catch((error) => {
+            syncCheckoutStatus({ orderRefNum: activeOrderRefNum, userId: user._id as Id<"users"> }).catch((error) => {
                 Logger.error("BookingStatus", "Failed to sync Easypaisa status", error);
             });
         }, 5000);
 
         return () => clearInterval(timer);
-    }, [checkoutStatus, orderRefNum, syncCheckoutStatus, user?._id]);
+    }, [activeOrderRefNum, checkoutStatus, syncCheckoutStatus, user?._id]);
 
     // Expiry timer
     useEffect(() => {
@@ -145,6 +148,32 @@ export default function BookingStatusScreen() {
         ]);
     };
 
+    const handleRefreshPaymentStatus = async () => {
+        if (!activeOrderRefNum || !user?._id || refreshingPayment) return;
+
+        setRefreshingPayment(true);
+        try {
+            await syncCheckoutStatus({
+                orderRefNum: activeOrderRefNum,
+                userId: user._id as Id<"users">,
+            });
+            showToast({
+                type: "info",
+                title: "Refreshing",
+                message: "Asked MatchHai to sync the latest Easypaisa status.",
+            });
+        } catch (error) {
+            Logger.error("BookingStatus", "Failed to refresh Easypaisa status", error);
+            showToast({
+                type: "error",
+                title: "Refresh failed",
+                message: "Could not sync the Easypaisa payment status.",
+            });
+        } finally {
+            setRefreshingPayment(false);
+        }
+    };
+
     const loading = intent === undefined;
 
     if (loading && !cancelling) {
@@ -161,33 +190,57 @@ export default function BookingStatusScreen() {
     const isApproved = intent.status === 'approved_pending_payment';
     const isCompleted = intent.status === 'confirmed';
     const isRejected = intent.status === 'rejected';
-    const isGatewayPending = gateway === "easypaisa"
+    const isExpired = intent.status === 'expired';
+    const isCancelled = intent.status === 'cancelled';
+    const checkoutState = String(checkoutStatus?.status || "");
+    const hasEasypaisaAttempt = Boolean(activeOrderRefNum);
+    const isCheckoutPending = ["created", "redirected", "token_received", "pending"].includes(checkoutState);
+    const isLoadingActivePayment = Boolean(intent.activePaymentOrderRefNum && checkoutStatus === undefined);
+    const isGatewayPending = hasEasypaisaAttempt
         && !isCompleted
         && (
-            paymentStatusParam === "pending"
-            || checkoutStatus?.status === "created"
-            || checkoutStatus?.status === "redirected"
-            || checkoutStatus?.status === "token_received"
-            || checkoutStatus?.status === "pending"
+            isCheckoutPending
+            || isLoadingActivePayment
+            || (gateway === "easypaisa" && paymentStatusParam === "pending" && !checkoutState)
         );
+    const isGatewayFailed = hasEasypaisaAttempt
+        && !isCompleted
+        && ["failed", "expired", "cancelled"].includes(checkoutState);
+    const isPaidAwaitingBooking = !isCompleted
+        && (intent.paymentStatus === "paid" || checkoutState === "paid");
     const isZoneMatchroom = Boolean(roomData?.zoneId) || roomData?.locationMode === "zone";
     const isZoneApproved = !isZoneMatchroom || roomData?.zoneAdminApproved === true;
     const isFullyConfirmed = isCompleted && isZoneApproved;
     const statusTitle = isFullyConfirmed ? "Seat Reserved!" :
         isCompleted && isZoneMatchroom && !isZoneApproved ? "Seat Reserved" :
+            isCancelled ? "Booking Cancelled" :
+                isExpired ? "Booking Expired" :
             isRejected ? "Booking Rejected" :
-                isGatewayPending ? "Payment Processing" :
+                isGatewayFailed ? "Payment Not Completed" :
+                    isPaidAwaitingBooking ? "Payment Received" :
+                        isGatewayPending ? "Payment Processing" :
                     isApproved ? "Ready for Payment" : "Waiting for Approval";
     const statusLabel = isFullyConfirmed ? "Confirmed" :
         isCompleted && isZoneMatchroom && !isZoneApproved ? "Venue Pending" :
+            isCancelled ? "Cancelled" :
+                isExpired ? "Expired" :
             isRejected ? "Rejected" :
-                isGatewayPending ? "Processing" :
+                isGatewayFailed ? "Retry Payment" :
+                    isPaidAwaitingBooking ? "Confirming Seat" :
+                        isGatewayPending ? "Processing" :
                     isApproved ? "Payment Ready" : "Pending Approval";
     const statusTone = isFullyConfirmed ? "success" :
         isCompleted && isZoneMatchroom && !isZoneApproved ? "warning" :
-            isRejected ? "danger" :
-                isGatewayPending ? "warning" :
+            isRejected || isExpired || isCancelled || isGatewayFailed ? "danger" :
+                isGatewayPending || isPaidAwaitingBooking ? "warning" :
                     isApproved ? "info" : "neutral";
+    const showRefreshPaymentAction = Boolean(
+        activeOrderRefNum
+        && user?._id
+        && (isGatewayPending || isPaidAwaitingBooking)
+    );
+    const showPayAction = isApproved && !isGatewayPending && !isPaidAwaitingBooking;
+    const showDashboardAction = !showRefreshPaymentAction && !showPayAction && !isCompleted;
     return (
         <Screen
             style={styles.container}
@@ -211,7 +264,7 @@ export default function BookingStatusScreen() {
                     <View style={styles.statusIconBg}>
                         {isFullyConfirmed || isCompleted ? (
                             <AppIcon name="check-circle" size={60} color={COLORS.success} />
-                        ) : isRejected ? (
+                        ) : isRejected || isExpired || isCancelled || isGatewayFailed ? (
                             <AppIcon name="error" size={60} color={COLORS.error} />
                         ) : isGatewayPending ? (
                             <AppIcon name="hourglass-top" size={60} color={COLORS.warning} />
@@ -322,14 +375,24 @@ export default function BookingStatusScreen() {
                         valueStyle={styles.totalAmount}
                     />
 
-                    {isApproved && (
+                    {isApproved && !isGatewayPending && !isGatewayFailed && !isPaidAwaitingBooking ? (
                         <Text style={styles.expiredHint}>
                             Pay within the timer to reserve your seats.
                         </Text>
-                    )}
+                    ) : null}
                     {isGatewayPending ? (
                         <Text style={[styles.expiredHint, { color: COLORS.warning }]}>
                             Easypaisa payment is pending. Once confirmed, your seat is reserved and funds are kept in your MatchHai Wallet until capture.
+                        </Text>
+                    ) : null}
+                    {isGatewayFailed ? (
+                        <Text style={[styles.expiredHint, { color: COLORS.warning }]}>
+                            Easypaisa did not complete this payment. Retry from Pay & Review if you still want this seat.
+                        </Text>
+                    ) : null}
+                    {isPaidAwaitingBooking ? (
+                        <Text style={[styles.expiredHint, { color: COLORS.warning }]}>
+                            MatchHai received a payment update. Refresh once to complete the latest booking check.
                         </Text>
                     ) : null}
                     {isCompleted ? (
@@ -337,17 +400,21 @@ export default function BookingStatusScreen() {
                             Your seat is reserved. Funds are captured when the match starts or is confirmed. If the match is cancelled before capture, funds return to your MatchHai Wallet.
                         </Text>
                     ) : null}
-                    {orderRefNum ? (
-                        <Text style={styles.expiredHint}>
-                            Easypaisa Order: {orderRefNum}
-                        </Text>
+                    {activeOrderRefNum ? (
+                        <DetailKeyValueRow
+                            label="Order"
+                            value={activeOrderRefNum}
+                            style={styles.orderRow}
+                            labelStyle={styles.orderLabel}
+                            valueStyle={styles.orderValue}
+                        />
                     ) : null}
-                    {checkoutStatus?.providerDescription ? (
+                    {checkoutStatus?.lastError && !isCompleted ? (
                         <Text style={styles.expiredHint}>
                             Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                         </Text>
                     ) : null}
-                    {checkoutStatus?.actionRequired ? (
+                    {isGatewayPending && checkoutStatus?.actionRequired ? (
                         <Text style={styles.expiredHint}>
                             Next step: {checkoutStatus.actionRequired === "pay_with_token"
                                 ? `Pay with OTC token ${checkoutStatus.paymentToken || ""}`.trim()
@@ -382,27 +449,25 @@ export default function BookingStatusScreen() {
                         />
                     </DetailSectionCard>
                 ) : null}
-                <View style={styles.footerBlock}>
-                    <View style={styles.footer}>
-                    {isGatewayPending ? (
+            </ScrollView>
+            </View>
+            <BottomActionBar contentStyle={styles.bottomActionContent}>
+                <View style={styles.footer}>
+                    {showRefreshPaymentAction ? (
                         <AppButton
                             size="lg"
-                            onPress={async () => {
-                                try {
-                                    await syncCheckoutStatus({ orderRefNum, userId: user?._id as Id<"users"> });
-                                    showToast({ type: "info", title: "Refreshing", message: "Asked MatchHai to sync the latest Easypaisa status." });
-                                } catch (error) {
-                                    Logger.error("BookingStatus", "Failed to refresh Easypaisa status", error);
-                                    showToast({ type: "error", title: "Refresh failed", message: "Could not sync the Easypaisa payment status." });
-                                }
-                            }}
+                            onPress={() => void handleRefreshPaymentStatus()}
+                            loading={refreshingPayment}
+                            disabled={refreshingPayment}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                            <Text style={styles.primaryBtnText}>Refresh Easypaisa Status</Text>
-                            <AppIcon name="refresh" size={20} color="#FFF" />
+                            <Text style={styles.primaryBtnText}>
+                                {isPaidAwaitingBooking ? "Continue Booking Check" : "Refresh Payment Status"}
+                            </Text>
+                            {!refreshingPayment ? <AppIcon name="refresh" size={20} color="#FFF" /> : null}
                         </AppButton>
                     ) : null}
-                    {isApproved && (
+                    {showPayAction ? (
                         <AppButton
                             size="lg"
                             onPress={() => router.push({
@@ -411,12 +476,13 @@ export default function BookingStatusScreen() {
                             } as any)}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                            <Text style={styles.primaryBtnText}>Proceed to Pay</Text>
+                            <Text style={styles.primaryBtnText}>
+                                {isGatewayFailed ? "Retry Payment" : "Proceed to Pay"}
+                            </Text>
                             <AppIcon name="payment" size={20} color="#FFF" />
                         </AppButton>
-                    )}
-
-                    {isCompleted && (
+                    ) : null}
+                    {isCompleted ? (
                         <AppButton
                             size="lg"
                             onPress={() => router.replace(`/matchrooms/${intent.matchroomId}`)}
@@ -425,37 +491,33 @@ export default function BookingStatusScreen() {
                             <Text style={styles.primaryBtnText}>Return to Lobby</Text>
                             <AppIcon name="group" size={20} color="#FFF" />
                         </AppButton>
-                    )}
-
-                    {!isApproved && !isCompleted && (
+                    ) : null}
+                    {showDashboardAction ? (
                         <View style={styles.footerRow}>
-                            {/* Cancel Button */}
-                            {!isRejected && (
+                            {!isRejected && !isExpired && !isCancelled ? (
                                 <AppButton
                                     variant="danger"
                                     onPress={handleCancel}
+                                    disabled={cancelling}
+                                    loading={cancelling}
                                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                     style={styles.secondaryAction}
                                 >
                                     <Text style={styles.secondaryDangerText} numberOfLines={1}>Cancel</Text>
                                 </AppButton>
-                            )}
-
-                            {/* Dashboard Button */}
+                            ) : null}
                             <AppButton
                                 variant="secondary"
                                 onPress={() => router.replace(buildLegacyMatchroomsHref() as any)}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                                 style={styles.secondaryAction}
                             >
-                            <Text style={styles.secondaryBtnText} numberOfLines={1}>Dashboard</Text>
-                        </AppButton>
-                    </View>
-                    )}
-                    </View>
+                                <Text style={styles.secondaryBtnText} numberOfLines={1}>Dashboard</Text>
+                            </AppButton>
+                        </View>
+                    ) : null}
                 </View>
-            </ScrollView>
-            </View>
+            </BottomActionBar>
         </Screen>
     );
 }

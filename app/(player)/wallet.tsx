@@ -62,6 +62,10 @@ import {
     getCheckoutStatusLabel,
     getPaymentStatusLabel
 } from "../../src/utils/statusLabels";
+import {
+    cleanConvexErrorMessage,
+    getUserFacingErrorMessage,
+} from "../../src/utils/userFacingErrors";
 import styles from "./wallet.styles";
 
 type WalletTab = "overview" | "transactions";
@@ -232,14 +236,8 @@ const isInAmountRange = (item: any, filter: WalletAmountRange) => {
 const getWalletTopupErrorMessage = (error: unknown) => {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
-
-  const cleaned = raw
-    .replace(/\[CONVEX[^\]]*\]\s*/gi, "")
-    .replace(/\[Request ID:[^\]]*\]\s*/gi, "")
-    .replace(/\bServer Error\b/gi, "")
-    .replace(/\bUncaught (ConvexError|Error):\s*/gi, "")
-    .split("Called by client")[0]
-    .trim();
+  const fallback = "Could not start the Easypaisa top-up. Please try again.";
+  const cleaned = cleanConvexErrorMessage(error, fallback);
 
   if (
     lower.includes("taking too long to respond") ||
@@ -260,7 +258,7 @@ const getWalletTopupErrorMessage = (error: unknown) => {
     return "Please sign in to continue.";
   }
 
-  return cleaned || "Could not start the Easypaisa top-up. Please try again.";
+  return getUserFacingErrorMessage(error, fallback);
 };
 
 function WalletFilterRow<T extends string>({

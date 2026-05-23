@@ -46,9 +46,6 @@ export default StyleSheet.create({
         paddingTop: SPACING.lg,
         paddingBottom: SPACING.sm,
     },
-    listScroller: {
-        maxHeight: 300,
-    },
     list: {
         paddingBottom: 0,
     },

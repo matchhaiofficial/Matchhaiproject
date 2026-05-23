@@ -3,6 +3,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { currentUser } from "./authService";
 import Logger from "../../utils/logger";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type MatchroomActionResponse =
   | { ok: true; message?: string; [key: string]: any }
@@ -59,7 +60,7 @@ export async function respondToMatchroomJoinRequestAction(data: {
     return result as MatchroomActionResponse;
   } catch (error: any) {
     Logger.error("matchroomActionService", "respondToMatchroomJoinRequestAction error", error);
-    return { ok: false, message: error.message || "Failed to respond to join request." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to join request.") };
   }
 }
 
@@ -82,7 +83,7 @@ export async function transferMatchroomCaptainAction(data: {
     return result as MatchroomActionResponse;
   } catch (error: any) {
     Logger.error("matchroomActionService", "transferMatchroomCaptainAction error", error);
-    return { ok: false, message: error.message || "Failed to transfer captaincy." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to transfer captaincy.") };
   }
 }
 
@@ -116,7 +117,7 @@ export async function inviteToMatchroomAction(data: {
     Logger.warn("matchroomActionService", "inviteToMatchroomAction rejected", {
       message: error?.message || "Failed to send invitation.",
     });
-    return { ok: false, message: error.message || "Failed to send invitation." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send invitation.") };
   }
 }
 
@@ -137,7 +138,7 @@ export async function respondToMatchroomInviteAction(data: {
     return result as MatchroomActionResponse;
   } catch (error: any) {
     Logger.error("matchroomActionService", "respondToMatchroomInviteAction error", error);
-    return { ok: false, message: error.message || "Failed to respond." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond.") };
   }
 }
 
@@ -158,6 +159,6 @@ export async function kickFromMatchroomAction(data: {
     return result as MatchroomActionResponse;
   } catch (error: any) {
     Logger.error("matchroomActionService", "kickFromMatchroomAction error", error);
-    return { ok: false, message: error.message || "Failed to kick player." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to kick player.") };
   }
 }

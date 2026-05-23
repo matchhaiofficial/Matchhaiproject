@@ -59,7 +59,6 @@ export default function ReportIssueModal({
       visible={visible}
       onClose={onClose}
       dismissDisabled={loading}
-      sheetStyle={styles.content}
       keyboardAware
     >
       <AppModalHeader
@@ -70,7 +69,6 @@ export default function ReportIssueModal({
 
       <AppModalBody
         scroll
-        style={styles.body}
         contentContainerStyle={styles.bodyContent}
       >
         {showTargetSelector ? (
@@ -171,12 +169,6 @@ export default function ReportIssueModal({
 }
 
 const styles = StyleSheet.create({
-  content: {
-    maxHeight: "90%",
-  },
-  body: {
-    maxHeight: 480,
-  },
   bodyContent: {
     paddingHorizontal: SPACING.xl,
     paddingTop: SPACING.lg,

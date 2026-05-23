@@ -5,6 +5,7 @@ import { currentUser, requireKycAccess } from "./authService";
 import { GAME_FORMATS } from "../../constants/gameRules";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes, getTeamTotalRosterCapacity } from "../../constants/teamRosterRules";
 import Logger from "../../utils/logger";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type TeamActionResponse =
   | { ok: true; message?: string; [key: string]: any }
@@ -108,10 +109,10 @@ export async function createTeamAction(data: CreateTeamData): Promise<TeamAction
     return { ok: true, teamId };
   } catch (error: any) {
     if (error.message?.includes("already in a")) {
-      return { ok: false, message: error.message };
+      return { ok: false, message: getUserFacingErrorMessage(error) };
     }
     Logger.error("teamActionService", "createTeamAction error", error);
-    return { ok: false, message: error.message || "Failed to create team." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create team.") };
   }
 }
 
@@ -139,10 +140,10 @@ export async function requestToJoinTeamAction(data: { teamId: string }): Promise
     return { ok: true, message: "Request sent to captain." };
   } catch (error: any) {
     if (error.message?.includes("already in a")) {
-      return { ok: false, message: error.message };
+      return { ok: false, message: getUserFacingErrorMessage(error) };
     }
     Logger.error("teamActionService", "requestToJoinTeamAction error", error);
-    return { ok: false, message: error.message || "Failed to send request." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send request.") };
   }
 }
 
@@ -163,10 +164,10 @@ export async function respondToJoinRequestAction(data: {
     return { ok: true };
   } catch (error: any) {
     if (error.message?.includes("already in a")) {
-      return { ok: false, message: error.message };
+      return { ok: false, message: getUserFacingErrorMessage(error) };
     }
     Logger.error("teamActionService", "respondToJoinRequestAction error", error);
-    return { ok: false, message: error.message || "Failed to respond." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond.") };
   }
 }
 
@@ -193,7 +194,7 @@ export async function transferCaptainAction(data: {
     return { ok: true };
   } catch (error: any) {
     Logger.error("teamActionService", "transferCaptainAction error", error);
-    return { ok: false, message: error.message || "Failed to transfer." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to transfer.") };
   }
 }
 
@@ -220,7 +221,7 @@ export async function removeMemberAction(data: {
     return { ok: true };
   } catch (error: any) {
     Logger.error("teamActionService", "removeMemberAction error", error);
-    return { ok: false, message: error.message || "Failed to remove member." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to remove member.") };
   }
 }
 
@@ -264,7 +265,7 @@ export async function inviteToTeamAction(data: {
     if (error?.message?.includes("User is already a member")) {
       return { ok: false, message: "This player is already on your team." };
     }
-    return { ok: false, message: error.message || "Failed to invite." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to invite.") };
   }
 }
 
@@ -285,10 +286,10 @@ export async function respondToTeamInviteAction(data: {
     return result as TeamActionResponse;
   } catch (error: any) {
     if (error.message?.includes("already in a")) {
-      return { ok: false, message: error.message };
+      return { ok: false, message: getUserFacingErrorMessage(error) };
     }
     Logger.error("teamActionService", "respondToTeamInviteAction error", error);
-    return { ok: false, message: error.message || "Failed to respond to invite." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to invite.") };
   }
 }
 
@@ -305,6 +306,6 @@ export async function leaveTeamAction(data: { teamId: string }): Promise<TeamAct
     return { ok: true, message: "Left team successfully." };
   } catch (error: any) {
     Logger.error("teamActionService", "leaveTeamAction error", error);
-    return { ok: false, message: error.message || "Failed to leave team." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to leave team.") };
   }
 }

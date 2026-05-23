@@ -5,12 +5,20 @@ import {
     ActivityIndicator,
     ScrollView,
     Text,
+    TextInput,
     Pressable,
     View,
 } from "react-native";
 
 import AppHeader from "../../../../src/components/AppHeader";
 import { AppIcon } from "../../../../src/components/AppIcon";
+import BottomActionBar from "../../../../src/components/BottomActionBar";
+import {
+    AppDialog,
+    AppModalBody,
+    AppModalFooter,
+    AppModalHeader,
+} from "../../../../src/components/AppModalPrimitives";
 import { AppButton, AppCard, StatusPill } from "../../../../src/components/AppPrimitives";
 import { DetailKeyValueRow, DetailSectionCard } from "../../../../src/components/DetailSurface";
 import Screen from "../../../../src/components/Screen";
@@ -26,8 +34,22 @@ import {
 } from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
+import {
+    formatPakistaniPhone,
+    isValidPakistaniPhone,
+    normalizePakistaniPhone,
+} from "../../../../src/utils/phoneUtils";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
+import { getUserFacingErrorMessage } from "../../../../src/utils/userFacingErrors";
 import styles from "./pay.styles";
+
+const shouldFallbackToOtc = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return /ACCOUNT DOES N[O']?T? EXIST|ACCOUNT DOES NO EXIST|PAYMENT METHOD NOT ENABLED/i.test(message);
+};
+
+const getEasypaisaStartErrorMessage = (error: unknown) =>
+    getUserFacingErrorMessage(error, "Could not start the Easypaisa payment. Please try again.");
 
 export default function MockPaymentScreen() {
     const { intentId } = useLocalSearchParams() as { intentId: string };
@@ -41,6 +63,8 @@ export default function MockPaymentScreen() {
     const [processing, setProcessing] = useState(false);
     const [walletBalance, setWalletBalance] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<"wallet" | "easypaisa">("wallet");
+    const [easypaisaPhoneVisible, setEasypaisaPhoneVisible] = useState(false);
+    const [easypaisaCheckoutPhone, setEasypaisaCheckoutPhone] = useState("");
     const [nowMs, setNowMs] = useState(Date.now());
 
     useEffect(() => {
@@ -84,6 +108,88 @@ export default function MockPaymentScreen() {
         return () => clearInterval(timer);
     }, [intent?.expiresAt]);
 
+    useEffect(() => {
+        if (!easypaisaPhoneVisible) {
+            setEasypaisaCheckoutPhone(
+                user?.phone ? formatPakistaniPhone(String(user.phone)) : "",
+            );
+        }
+    }, [easypaisaPhoneVisible, user?.phone]);
+
+    const startEasypaisaBookingCheckout = async () => {
+        if (!intentId || !user?._id || processing) return;
+        if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
+            showToast({
+                type: "warning",
+                title: "Slot hold expired",
+                message: "Please request the slot again to continue.",
+            });
+            return;
+        }
+        if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
+            showToast({
+                type: "warning",
+                title: "Invalid number",
+                message: "Enter a valid Pakistani mobile number for Easypaisa.",
+            });
+            return;
+        }
+
+        const normalizedPhone = normalizePakistaniPhone(easypaisaCheckoutPhone);
+        const checkoutArgs = {
+            kind: "booking_intent" as const,
+            bookingIntentId: intentId as Id<"bookingIntents">,
+            userId: user._id as Id<"users">,
+            phone: normalizedPhone.phoneE164 || easypaisaCheckoutPhone,
+            forceNew: true,
+        };
+
+        setProcessing(true);
+        try {
+            let checkout: any;
+            try {
+                checkout = await startCheckout({
+                    ...checkoutArgs,
+                    transactionType: "MA",
+                });
+            } catch (error) {
+                if (!shouldFallbackToOtc(error)) {
+                    throw error;
+                }
+
+                Logger.warn("ReviewPay", "Easypaisa mobile account checkout unavailable, falling back to OTC", {
+                    intentId,
+                });
+                checkout = await startCheckout({
+                    ...checkoutArgs,
+                    transactionType: "OTC",
+                });
+            }
+
+            const message = checkout.transactionType === "OTC"
+                ? `Use the Easypaisa OTC token ${checkout.paymentToken || ""}`.trim()
+                : "Approve the payment in Easypaisa. MatchHai will keep checking the status.";
+            const attemptMessage = String(checkout.attemptMessage || "Starting a new payment attempt.");
+            showToast({ type: "info", title: "Payment started", message: `${attemptMessage} ${message}` });
+            setEasypaisaPhoneVisible(false);
+            router.replace({
+                pathname: "/matchrooms/book/status/[intentId]",
+                params: {
+                    intentId,
+                    gateway: "easypaisa",
+                    paymentStatus: "pending",
+                    orderRefNum: String(checkout.orderRefNum),
+                },
+            } as any);
+        } catch (error) {
+            const message = getEasypaisaStartErrorMessage(error);
+            Logger.warn("ReviewPay", "Easypaisa checkout unavailable", { message });
+            showToast({ type: "error", title: "Payment unavailable", message });
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const handleMockPayment = async () => {
         if (!intentId || !user) return;
         if (intent?.expiresAt && intent.expiresAt <= Date.now()) {
@@ -94,50 +200,14 @@ export default function MockPaymentScreen() {
             });
             return;
         }
+        if (paymentMethod === "easypaisa") {
+            setEasypaisaPhoneVisible(true);
+            return;
+        }
+
         setProcessing(true);
 
         try {
-            if (paymentMethod === "easypaisa") {
-                let checkout: any;
-                try {
-                    checkout = await startCheckout({
-                        kind: "booking_intent",
-                        bookingIntentId: intentId as Id<"bookingIntents">,
-                        userId: user._id as Id<"users">,
-                        transactionType: "MA",
-                        forceNew: true,
-                    });
-                } catch (error: any) {
-                    const message = String(error?.message || error || "");
-                    if (!/ACCOUNT DOES N[O']?T? EXIST/i.test(message) && !/ACCOUNT DOES NO EXIST/i.test(message)) {
-                        throw error;
-                    }
-                    Logger.warn("MockPayment", "Easypaisa MA account unavailable, falling back to OTC", { intentId });
-                    checkout = await startCheckout({
-                        kind: "booking_intent",
-                        bookingIntentId: intentId as Id<"bookingIntents">,
-                        userId: user._id as Id<"users">,
-                        transactionType: "OTC",
-                        forceNew: true,
-                    });
-                }
-                const message = checkout.transactionType === "OTC"
-                    ? `Use the Easypaisa OTC token ${checkout.paymentToken || ""}`.trim()
-                    : "Approve the payment in Easypaisa. MatchHai will keep checking the status.";
-                const attemptMessage = String(checkout.attemptMessage || "Starting a new payment attempt.");
-                showToast({ type: "info", title: "Payment started", message: `${attemptMessage} ${message}` });
-                router.replace({
-                    pathname: "/matchrooms/book/status/[intentId]",
-                    params: {
-                        intentId,
-                        gateway: "easypaisa",
-                        paymentStatus: "pending",
-                        orderRefNum: String(checkout.orderRefNum),
-                    },
-                } as any);
-                return;
-            }
-
             const res = await confirmBookingTransaction(intentId, user._id, paymentMethod);
             if (res.ok) {
                 // Navigate to status screen
@@ -166,9 +236,17 @@ export default function MockPaymentScreen() {
     }
 
     if (!intent) return null;
-    const hasEnoughWallet = walletBalance >= Number(intent.pricing?.totalCost || 0);
+    const currency = (intent.pricing as any)?.currency || "PKR";
+    const seatCount = intent.selectedSlots.length;
+    const pricePerSeat = Number(intent.pricing?.perPlayerCost || 0);
+    const totalCost = Number(intent.pricing?.totalCost || 0);
+    const hasEnoughWallet = walletBalance >= totalCost;
     const isPaymentWindowExpired = Boolean(intent.expiresAt && intent.expiresAt <= nowMs);
     const payDisabled = processing || !intent || isPaymentWindowExpired || (paymentMethod === "wallet" && !hasEnoughWallet);
+    const paymentStateMessage =
+        paymentMethod === "wallet"
+            ? "Wallet funds reserve your seat now and are captured when the match starts or is confirmed."
+            : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed.";
 
     return (
         <Screen
@@ -190,29 +268,28 @@ export default function MockPaymentScreen() {
                 contentContainerStyle={styles.content}
             >
                 <AppCard variant="elevated" style={styles.amountCard}>
-                    <Text style={styles.amountLabel}>TOTAL AMOUNT</Text>
+                    <Text style={styles.amountLabel}>TOTAL DUE</Text>
                     <Text style={styles.amountValue}>
-                        {(intent.pricing as any)?.currency || "PKR"} {intent.pricing?.totalCost}
+                        {currency} {totalCost}
                     </Text>
                     <Text style={styles.seatCount}>
-                        Pay now to reserve {intent.selectedSlots.length} seat{intent.selectedSlots.length === 1 ? "" : "s"}
-                    </Text>
-                </AppCard>
-
-                {/* Secure Payment Info */}
-                <AppCard style={styles.infoBox}>
-                    <AppIcon name="security" size={20} color={COLORS.success} />
-                    <Text style={styles.infoText}>
-                        Your payment reserves your seat first. Funds are captured when the match starts or is confirmed.
+                        Reserve {seatCount} seat{seatCount === 1 ? "" : "s"} after payment confirms
                     </Text>
                 </AppCard>
 
                 {/* Summary */}
-                <DetailSectionCard title="Booking Summary" style={styles.sectionCardSpacing}>
+                <DetailSectionCard title="Amount Breakdown" style={styles.sectionCardSpacing}>
                     <DetailKeyValueRow label="Lobby" value={intent.game} />
+                    <DetailKeyValueRow label="Seats" value={seatCount} />
                     <DetailKeyValueRow
                         label="Price per seat"
-                        value={`${(intent.pricing as any)?.currency || "PKR"}${intent.pricing?.perPlayerCost}`}
+                        value={`${currency} ${pricePerSeat}`}
+                    />
+                    <DetailKeyValueRow
+                        label="Total due"
+                        value={`${currency} ${totalCost}`}
+                        valueTone="accent"
+                        valueStyle={styles.totalAmount}
                         last
                     />
                 </DetailSectionCard>
@@ -235,7 +312,7 @@ export default function MockPaymentScreen() {
                         </View>
                         <View style={styles.methodCopy}>
                             <Text style={styles.methodName}>MatchHai Wallet</Text>
-                            <Text style={styles.methodDetail}>Balance: {(intent.pricing as any)?.currency || "PKR"} {Math.round(walletBalance)}</Text>
+                            <Text style={styles.methodDetail}>Balance: {currency} {Math.round(walletBalance)}</Text>
                         </View>
                         <StatusPill
                             tone={paymentMethod === "wallet" ? "info" : "neutral"}
@@ -262,7 +339,7 @@ export default function MockPaymentScreen() {
                         />
                     </Pressable>
                     {!hasEnoughWallet && paymentMethod === "wallet" ? (
-                        <Text style={[styles.methodDetail, { marginTop: 10, color: COLORS.warning }]}>
+                        <Text style={styles.walletWarning}>
                             Insufficient wallet balance. Please add funds from Wallet.
                         </Text>
                     ) : null}
@@ -271,9 +348,17 @@ export default function MockPaymentScreen() {
                             This slot hold expired. Please request the slot again to continue.
                         </Text>
                     ) : null}
+                    {!isPaymentWindowExpired ? (
+                        <View style={styles.paymentStateRow}>
+                            <AppIcon name="security" size={18} color={COLORS.success} />
+                            <Text style={styles.paymentStateText}>{paymentStateMessage}</Text>
+                        </View>
+                    ) : null}
                 </DetailSectionCard>
-                <View style={styles.footerBlock}>
-                    <View style={styles.footer}>
+            </ScrollView>
+            </View>
+
+            <BottomActionBar contentStyle={styles.bottomActionContent}>
                 <AppButton
                     size="lg"
                     onPress={handleMockPayment}
@@ -300,15 +385,57 @@ export default function MockPaymentScreen() {
                         </>
                     )}
                 </AppButton>
-                <Text style={styles.cancelHint}>
-                    {paymentMethod === "wallet"
-                        ? "Your Wallet funds are reserved now and captured when the match starts or is confirmed."
-                        : "After Easypaisa confirms payment, MatchHai reserves your seat and captures funds when the match starts or is confirmed."}
-                </Text>
+            </BottomActionBar>
+
+            <AppDialog
+                visible={easypaisaPhoneVisible}
+                onClose={() => !processing && setEasypaisaPhoneVisible(false)}
+                dismissDisabled={processing}
+                cardStyle={styles.easypaisaDialogCard}
+                keyboardAware
+            >
+                <AppModalHeader
+                    title="Confirm Easypaisa Number"
+                    subtitle="Use the number you want to pay with for this seat reservation."
+                    onClose={() => !processing && setEasypaisaPhoneVisible(false)}
+                    closeDisabled={processing}
+                />
+                <AppModalBody scroll contentContainerStyle={styles.easypaisaDialogContent}>
+                    <Text style={styles.easypaisaAmountLabel}>
+                        Amount: {currency} {totalCost}
+                    </Text>
+                    <Text style={styles.easypaisaPhoneLabel}>Mobile Account Number</Text>
+                    <TextInput
+                        style={styles.easypaisaPhoneInput}
+                        keyboardType="phone-pad"
+                        value={easypaisaCheckoutPhone}
+                        onChangeText={(value) => setEasypaisaCheckoutPhone(formatPakistaniPhone(value))}
+                        placeholder="03XX XXX XXXX"
+                        placeholderTextColor={COLORS.textSecondary}
+                        editable={!processing}
+                    />
+                </AppModalBody>
+                <AppModalFooter style={styles.easypaisaDialogFooter}>
+                    <View style={styles.easypaisaActions}>
+                        <AppButton
+                            variant="secondary"
+                            style={styles.easypaisaActionButton}
+                            onPress={() => setEasypaisaPhoneVisible(false)}
+                            disabled={processing}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton
+                            style={styles.easypaisaActionButton}
+                            onPress={() => void startEasypaisaBookingCheckout()}
+                            loading={processing}
+                            disabled={processing}
+                        >
+                            Continue to Pay
+                        </AppButton>
                     </View>
-                </View>
-            </ScrollView>
-            </View>
+                </AppModalFooter>
+            </AppDialog>
         </Screen>
     );
 }

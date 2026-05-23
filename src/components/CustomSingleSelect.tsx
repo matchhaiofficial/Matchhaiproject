@@ -1,7 +1,6 @@
 import React, { useState, type ReactNode } from "react";
 import {
     Pressable,
-    ScrollView,
     Text,
     View,
     ViewStyle,
@@ -72,31 +71,29 @@ export const CustomSingleSelect = ({
                     onClose={() => setVisible(false)}
                     compact
                 />
-                <AppModalBody contentContainerStyle={styles.modalBodyContent}>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        {options.map((item) => (
-                            <Pressable
-                                key={item}
-                                onPress={() => {
-                                    onChange(item);
-                                    setVisible(false);
-                                }}
-                                style={styles.optionItem}
+                <AppModalBody scroll contentContainerStyle={styles.modalBodyContent}>
+                    {options.map((item) => (
+                        <Pressable
+                            key={item}
+                            onPress={() => {
+                                onChange(item);
+                                setVisible(false);
+                            }}
+                            style={styles.optionItem}
+                        >
+                            <Text
+                                style={[
+                                    styles.optionText,
+                                    item === value && styles.optionTextSelected,
+                                ]}
                             >
-                                <Text
-                                    style={[
-                                        styles.optionText,
-                                        item === value && styles.optionTextSelected,
-                                    ]}
-                                >
-                                    {item}
-                                </Text>
-                                {item === value && (
-                                    <AppIcon name="check" size="md" tone="accent" />
-                                )}
-                            </Pressable>
-                        ))}
-                    </ScrollView>
+                                {item}
+                            </Text>
+                            {item === value && (
+                                <AppIcon name="check" size="md" tone="accent" />
+                            )}
+                        </Pressable>
+                    ))}
                 </AppModalBody>
             </AppPickerSheet>
         </View>

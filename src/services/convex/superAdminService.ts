@@ -3,6 +3,7 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { authClient } from "../../lib/auth-client";
 import { Zone } from "./zoneService";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type SuperAdminSummary = {
   counts: {
@@ -660,7 +661,7 @@ export async function manuallyVerifyIdentityVerification(
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] manuallyVerifyIdentityVerification error", error);
-    return { ok: false, message: error?.message || "Failed to manually verify identity." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to manually verify identity.") };
   }
 }
 
@@ -880,7 +881,7 @@ export async function addSupportTicketInternalNote(ticketId: string, note: strin
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] addSupportTicketInternalNote error", error);
-    return { ok: false, message: error?.message || "Failed to add internal note." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to add internal note.") };
   }
 }
 
@@ -896,7 +897,7 @@ export async function replyToSupportTicketUser(ticketId: string, message: string
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] replyToSupportTicketUser error", error);
-    return { ok: false, message: error?.message || "Failed to send support reply." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send support reply.") };
   }
 }
 
@@ -911,7 +912,7 @@ export async function assignSupportTicket(ticketId: string): Promise<BasicResult
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] assignSupportTicket error", error);
-    return { ok: false, message: error?.message || "Failed to assign support ticket." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to assign support ticket.") };
   }
 }
 
@@ -927,7 +928,7 @@ export async function resolveSupportTicket(ticketId: string, resolutionSummary: 
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] resolveSupportTicket error", error);
-    return { ok: false, message: error?.message || "Failed to resolve support ticket." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to resolve support ticket.") };
   }
 }
 
@@ -1009,7 +1010,7 @@ export async function approveZoneWithdrawal(withdrawalId: string): Promise<Super
     return result as SuperAdminWithdrawalDecisionResult;
   } catch (error: any) {
     console.error("[superAdminService] approveZoneWithdrawal error", error);
-    return { ok: false, message: error?.message || "Failed to approve withdrawal." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to approve withdrawal.") };
   }
 }
 
@@ -1028,7 +1029,7 @@ export async function rejectZoneWithdrawal(
     return result as SuperAdminWithdrawalDecisionResult;
   } catch (error: any) {
     console.error("[superAdminService] rejectZoneWithdrawal error", error);
-    return { ok: false, message: error?.message || "Failed to reject withdrawal." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reject withdrawal.") };
   }
 }
 
@@ -1106,7 +1107,7 @@ export async function setZoneStatus(
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] setZoneStatus error", error);
-    return { ok: false, message: error?.message || "Failed to update zone status." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to update zone status.") };
   }
 }
 
@@ -1137,7 +1138,7 @@ export async function retryZoneMigration(zoneId: string): Promise<BasicResult> {
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] retryZoneMigration error", error);
-    return { ok: false, message: error?.message || "Failed to retry zone migration." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to retry zone migration.") };
   }
 }
 
@@ -1206,7 +1207,7 @@ export async function setUserSuspension(
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] setUserSuspension error", error);
-    return { ok: false, message: error?.message || "Failed to update user suspension." };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to update user suspension.") };
   }
 }
 

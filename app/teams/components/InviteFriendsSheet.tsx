@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
-    ScrollView,
     Text,
     View
 } from "react-native";
@@ -129,13 +128,11 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
         );
     };
 
-    const hasScrollableList = friends.length > 4;
-
     return (
         <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.content}>
             <AppModalHeader title="Invite Friends" subtitle={`to ${teamName}`} onClose={onClose} />
 
-            <AppModalBody contentContainerStyle={styles.listBody}>
+            <AppModalBody scroll contentContainerStyle={styles.listBody}>
                 {loading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator color={COLORS.accent} />
@@ -148,19 +145,6 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                             Only friends who play {game.toUpperCase()} appear here.
                         </Text>
                     </View>
-                ) : hasScrollableList ? (
-                    <ScrollView
-                        style={styles.listScroller}
-                        contentContainerStyle={styles.list}
-                        keyboardShouldPersistTaps="handled"
-                        showsVerticalScrollIndicator={false}
-                    >
-                        {friends.map((friend) => (
-                            <View key={friend.uid}>
-                                {renderFriendRow(friend)}
-                            </View>
-                        ))}
-                    </ScrollView>
                 ) : (
                     <View style={styles.list}>
                         {friends.map((friend) => (

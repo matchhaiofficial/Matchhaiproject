@@ -7,7 +7,9 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { Matchroom } from "./matchService";
 import { isRoomExpired, isRoomLocked } from "../../utils/matchroomLifecycle";
 import { getUnavailablePaymentMessage } from "../../config/featureReadiness";
+import { SLOT_ALREADY_FILLED_PAYMENT_MESSAGE } from "../../utils/paymentUiCopy";
 import Logger from "../../utils/logger";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export interface BookingIntent {
   id?: string;
@@ -45,6 +47,9 @@ export interface BookingIntent {
     | "rejected"
     | "cancelled";
   paymentStatus: "unpaid" | "paid";
+  activePaymentTransactionId?: string;
+  activePaymentOrderRefNum?: string;
+  activePaymentExpiresAt?: number;
   selectedSlotIds?: string[];
   createdByUsername?: string;
   role?: string;
@@ -197,7 +202,7 @@ export async function createBookingIntent(data: {
     return { ok: true, data: { id: intentId } };
   } catch (error: any) {
     console.error("[bookingService] createBookingIntent error:", error);
-    return { ok: false, message: error?.message || "Failed to create booking intent" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create booking intent") };
   }
 }
 
@@ -273,7 +278,7 @@ export async function confirmBookingTransaction(
     if (/slot is no longer available/i.test(message)) {
       return {
         ok: false,
-        message: "This slot is no longer available.",
+        message: SLOT_ALREADY_FILLED_PAYMENT_MESSAGE,
       };
     }
     if (/insufficient/i.test(message)) {
@@ -298,7 +303,7 @@ export async function cancelBookingIntent(
     return { ok: true };
   } catch (error: any) {
     console.error("[bookingService] cancelBookingIntent error:", error);
-    return { ok: false, message: error?.message || "Failed to cancel booking" };
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to cancel booking") };
   }
 }
 

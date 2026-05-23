@@ -336,6 +336,11 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.input,
         paddingVertical: SPACING.sm,
     },
+    modalPickerBody: {
+        paddingHorizontal: 0,
+        paddingTop: 0,
+        paddingBottom: SPACING.md,
+    },
     modalItem: {
         flexDirection: 'row',
         alignItems: 'center',
