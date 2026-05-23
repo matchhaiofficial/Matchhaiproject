@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "convex/react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     Text,
     View,
@@ -46,17 +46,35 @@ import { useZoneBookingsActions } from "./hooks/useZoneBookingsActions";
 import {
     getRequestMatchroomId,
     toDateString,
+    toScheduleMillis,
     useZoneBookingsViewModel,
 } from "./hooks/useZoneBookingsViewModel";
 import styles from "./bookings.styles";
 
 type Segment = "requests" | "pending" | "matchrooms" | "walkins" | "history";
-type RequestFilter = "all" | "open";
 type MatchroomFilter = "all" | "open" | "locked" | "cancelled";
 type GameFilter = "all" | "cs2" | "cs16" | "valorant" | "fc26" | "tekken8" | "futsal" | "indoor_cricket" | "padel" | "pickleball";
 type TimeOfDayFilter = "all" | "day" | "night";
+type DateRangeFilter = "all" | "today" | "next7";
+type RequestTypeFilter = "all" | "direct" | "broadcast";
+type RequestStatusFilter = "all" | "open" | "pending_payment";
+type PaymentFilter = "all" | "paid" | "unpaid";
+type SourceFilter = "all" | "online" | "walkin" | "admin";
+type FilterOption = { key: string; label: string };
+type BookingFilterGroup = {
+    key: string;
+    label: string;
+    options: readonly FilterOption[];
+    value: string;
+    onSelect: (value: string) => void;
+};
 
-const MATCHROOM_FILTERS: MatchroomFilter[] = ["all", "open", "locked", "cancelled"];
+const MATCHROOM_STATUS_OPTIONS: FilterOption[] = [
+    { key: "all", label: "All" },
+    { key: "open", label: "Open" },
+    { key: "locked", label: "Locked" },
+    { key: "cancelled", label: "Cancelled" },
+];
 const GAME_FILTERS: Array<{ key: GameFilter; label: string }> = [
     { key: "all", label: "All games" },
     { key: "cs2", label: "CS2" },
@@ -71,8 +89,34 @@ const GAME_FILTERS: Array<{ key: GameFilter; label: string }> = [
 ];
 const TIME_OF_DAY_FILTERS: Array<{ key: TimeOfDayFilter; label: string }> = [
     { key: "all", label: "Any time" },
-    { key: "day", label: "Day" },
-    { key: "night", label: "Night" },
+    { key: "day", label: "Day (6am-6pm)" },
+    { key: "night", label: "Night (6pm-6am)" },
+];
+const DATE_RANGE_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any date" },
+    { key: "today", label: "Today" },
+    { key: "next7", label: "Next 7 Days" },
+];
+const REQUEST_TYPE_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any type" },
+    { key: "direct", label: "Direct" },
+    { key: "broadcast", label: "Broadcast" },
+];
+const REQUEST_STATUS_FILTERS: FilterOption[] = [
+    { key: "all", label: "Any status" },
+    { key: "open", label: "Open" },
+    { key: "pending_payment", label: "Pending Payment" },
+];
+const PAYMENT_STATUS_OPTIONS: FilterOption[] = [
+    { key: "all", label: "Any payment" },
+    { key: "paid", label: "Paid" },
+    { key: "unpaid", label: "Unpaid" },
+];
+const BOOKING_SOURCE_OPTIONS: FilterOption[] = [
+    { key: "all", label: "Any source" },
+    { key: "online", label: "Online" },
+    { key: "walkin", label: "Walk-in" },
+    { key: "admin", label: "Admin" },
 ];
 
 const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
@@ -441,10 +485,17 @@ export default function ZoneBookingsModule() {
 
     const [segment, setSegment] = useState<Segment>("requests");
     const [showFilters, setShowFilters] = useState(false);
-    const [requestFilter, setRequestFilter] = useState<RequestFilter>("all");
     const [matchroomFilter, setMatchroomFilter] = useState<MatchroomFilter>("all");
     const [gameFilter, setGameFilter] = useState<GameFilter>("all");
     const [timeOfDayFilter, setTimeOfDayFilter] = useState<TimeOfDayFilter>("all");
+    const [requestDateRange, setRequestDateRange] = useState<DateRangeFilter>("all");
+    const [requestBranch, setRequestBranch] = useState<string>("all");
+    const [requestType, setRequestType] = useState<RequestTypeFilter>("all");
+    const [requestStatus, setRequestStatus] = useState<RequestStatusFilter>("all");
+    const [matchroomDateRange, setMatchroomDateRange] = useState<DateRangeFilter>("all");
+    const [matchroomBranch, setMatchroomBranch] = useState<string>("all");
+    const [matchroomPayment, setMatchroomPayment] = useState<PaymentFilter>("all");
+    const [matchroomSource, setMatchroomSource] = useState<SourceFilter>("all");
     const [requestSearchQuery, setRequestSearchQuery] = useState("");
     const [matchroomSearchQuery, setMatchroomSearchQuery] = useState("");
     const [showCounterModal, setShowCounterModal] = useState(false);
@@ -465,7 +516,7 @@ export default function ZoneBookingsModule() {
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
     useRouteLogger("ZoneBookingsModule", {
         segment,
-        requestFilter,
+        requestStatus,
         gameFilter,
         timeOfDayFilter,
         zoneId: zone?.id,
@@ -518,18 +569,78 @@ export default function ZoneBookingsModule() {
         zone,
         queue,
         matchrooms,
-        requestFilter,
         gameFilter,
         timeOfDayFilter,
+        dateRangeFilter: requestDateRange,
+        branchFilter: requestBranch,
+        requestTypeFilter: requestType,
+        requestStatusFilter: requestStatus,
         searchQuery: requestSearchQuery,
         selectedRequestId,
         monthCursor,
     });
 
     const activeRequestFilterCount = useMemo(
-        () => (gameFilter !== "all" ? 1 : 0) + (timeOfDayFilter !== "all" ? 1 : 0),
-        [gameFilter, timeOfDayFilter],
+        () =>
+            (gameFilter !== "all" ? 1 : 0) +
+            (timeOfDayFilter !== "all" ? 1 : 0) +
+            (requestDateRange !== "all" ? 1 : 0) +
+            (requestBranch !== "all" ? 1 : 0) +
+            (requestType !== "all" ? 1 : 0) +
+            (requestStatus !== "all" ? 1 : 0),
+        [gameFilter, timeOfDayFilter, requestDateRange, requestBranch, requestType, requestStatus],
     );
+
+    const branchOptions = useMemo<FilterOption[]>(() => {
+        const branches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
+        return [
+            { key: "all", label: "Any branch" },
+            ...branches.map((branch: any) => ({
+                key: String(branch?.id),
+                label: branch?.branchDisplayName || branch?.areaLabel || "Branch",
+            })),
+        ];
+    }, [(zone as any)?.branches]);
+
+    const requestFilterGroups = useMemo<BookingFilterGroup[]>(
+        () => [
+            { key: "game", label: "Game", options: GAME_FILTERS, value: gameFilter, onSelect: (value) => setGameFilter(value as GameFilter) },
+            { key: "time", label: "Time of day", options: TIME_OF_DAY_FILTERS, value: timeOfDayFilter, onSelect: (value) => setTimeOfDayFilter(value as TimeOfDayFilter) },
+            { key: "date", label: "Date range", options: DATE_RANGE_FILTERS, value: requestDateRange, onSelect: (value) => setRequestDateRange(value as DateRangeFilter) },
+            { key: "branch", label: "Branch", options: branchOptions, value: requestBranch, onSelect: (value) => setRequestBranch(value) },
+            { key: "type", label: "Request type", options: REQUEST_TYPE_FILTERS, value: requestType, onSelect: (value) => setRequestType(value as RequestTypeFilter) },
+            { key: "status", label: "Request status", options: REQUEST_STATUS_FILTERS, value: requestStatus, onSelect: (value) => setRequestStatus(value as RequestStatusFilter) },
+        ],
+        [gameFilter, timeOfDayFilter, requestDateRange, requestBranch, requestType, requestStatus, branchOptions],
+    );
+
+    const matchroomFilterGroups = useMemo<BookingFilterGroup[]>(
+        () => [
+            { key: "status", label: "Matchroom status", options: MATCHROOM_STATUS_OPTIONS, value: matchroomFilter, onSelect: (value) => setMatchroomFilter(value as MatchroomFilter) },
+            { key: "date", label: "Date range", options: DATE_RANGE_FILTERS, value: matchroomDateRange, onSelect: (value) => setMatchroomDateRange(value as DateRangeFilter) },
+            { key: "branch", label: "Branch", options: branchOptions, value: matchroomBranch, onSelect: (value) => setMatchroomBranch(value) },
+            { key: "payment", label: "Payment status", options: PAYMENT_STATUS_OPTIONS, value: matchroomPayment, onSelect: (value) => setMatchroomPayment(value as PaymentFilter) },
+            { key: "source", label: "Booking source", options: BOOKING_SOURCE_OPTIONS, value: matchroomSource, onSelect: (value) => setMatchroomSource(value as SourceFilter) },
+        ],
+        [matchroomFilter, matchroomDateRange, matchroomBranch, matchroomPayment, matchroomSource, branchOptions],
+    );
+
+    const resetRequestFilters = useCallback(() => {
+        setGameFilter("all");
+        setTimeOfDayFilter("all");
+        setRequestDateRange("all");
+        setRequestBranch("all");
+        setRequestType("all");
+        setRequestStatus("all");
+    }, []);
+
+    const resetMatchroomFilters = useCallback(() => {
+        setMatchroomFilter("all");
+        setMatchroomDateRange("all");
+        setMatchroomBranch("all");
+        setMatchroomPayment("all");
+        setMatchroomSource("all");
+    }, []);
 
     const originalStartMinutes = useMemo(
         () => toClockMinutes(selectedRequest?.preferredTime) ?? toClockMinutes(counterOptions[0]?.time) ?? 12 * 60,
@@ -584,10 +695,65 @@ export default function ZoneBookingsModule() {
 
     const filteredMatchrooms = useMemo(() => {
         const normalizedSearch = matchroomSearchQuery.trim().toLowerCase();
+        const branches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
+        const todayStart = (() => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            return date.getTime();
+        })();
         return matchrooms.filter((item) => {
             const statusOk =
                 matchroomFilter === "all" ||
                 String(item.status || "").toLowerCase() === matchroomFilter;
+
+            let dateOk = true;
+            if (matchroomDateRange !== "all") {
+                const millis = toScheduleMillis(item.scheduledDate);
+                dateOk = millis
+                    ? matchroomDateRange === "today"
+                        ? millis >= todayStart && millis < todayStart + 24 * 60 * 60 * 1000
+                        : millis >= todayStart && millis < todayStart + 7 * 24 * 60 * 60 * 1000
+                    : false;
+            }
+
+            // Branch matching prefers branchId; falls back to location substring; unknown passes.
+            let branchOk = true;
+            if (matchroomBranch !== "all") {
+                const branchId = String(item.branchId || "").trim();
+                if (branchId) {
+                    branchOk = branchId === matchroomBranch;
+                } else {
+                    const targetBranch = branches.find((branch: any) => String(branch?.id) === matchroomBranch);
+                    const location = String(item.location || "").trim().toLowerCase();
+                    if (targetBranch && location) {
+                        const area = String(targetBranch.areaLabel || "").toLowerCase();
+                        const name = String(targetBranch.branchDisplayName || "").toLowerCase();
+                        branchOk = (!!area && location.includes(area)) || (!!name && location.includes(name));
+                    } else {
+                        branchOk = true;
+                    }
+                }
+            }
+
+            let paymentOk = true;
+            if (matchroomPayment !== "all") {
+                const paid = String(item.paymentStatus || "").toLowerCase() === "paid";
+                paymentOk = matchroomPayment === "paid" ? paid : !paid;
+            }
+
+            let sourceOk = true;
+            if (matchroomSource !== "all") {
+                const source = String(item.bookingSource || "").toLowerCase();
+                const isWalkin = source.includes("walk");
+                const isAdmin = source.includes("admin");
+                sourceOk =
+                    matchroomSource === "walkin"
+                        ? isWalkin
+                        : matchroomSource === "admin"
+                            ? isAdmin
+                            : !isWalkin && !isAdmin;
+            }
+
             const searchOk =
                 normalizedSearch.length === 0 ||
                 [
@@ -601,9 +767,28 @@ export default function ZoneBookingsModule() {
                     .join(" ")
                     .toLowerCase()
                     .includes(normalizedSearch);
-            return statusOk && searchOk;
+            return statusOk && dateOk && branchOk && paymentOk && sourceOk && searchOk;
         });
-    }, [matchroomFilter, matchroomSearchQuery, matchrooms]);
+    }, [
+        matchroomFilter,
+        matchroomDateRange,
+        matchroomBranch,
+        matchroomPayment,
+        matchroomSource,
+        matchroomSearchQuery,
+        matchrooms,
+        (zone as any)?.branches,
+    ]);
+
+    const activeMatchroomFilterCount = useMemo(
+        () =>
+            (matchroomFilter !== "all" ? 1 : 0) +
+            (matchroomDateRange !== "all" ? 1 : 0) +
+            (matchroomBranch !== "all" ? 1 : 0) +
+            (matchroomPayment !== "all" ? 1 : 0) +
+            (matchroomSource !== "all" ? 1 : 0),
+        [matchroomFilter, matchroomDateRange, matchroomBranch, matchroomPayment, matchroomSource],
+    );
 
     const updateCounterOption = (index: number, patch: Partial<{ date: string; time: string; endTime?: string }>) => {
         setCounterOptions((prev) =>
@@ -1006,15 +1191,11 @@ export default function ZoneBookingsModule() {
                     loadingQueue={loadingQueue}
                     showFilters={showFilters}
                     onToggleFilters={() => setShowFilters((prev) => !prev)}
-                    gameFilters={GAME_FILTERS}
-                    timeFilters={TIME_OF_DAY_FILTERS}
-                    gameFilter={gameFilter}
-                    timeFilter={timeOfDayFilter}
+                    filterGroups={requestFilterGroups}
                     searchQuery={requestSearchQuery}
                     activeFilterCount={activeRequestFilterCount}
                     onSearchQueryChange={setRequestSearchQuery}
-                    onSelectGameFilter={(filter) => setGameFilter(filter as GameFilter)}
-                    onSelectTimeFilter={(filter) => setTimeOfDayFilter(filter as TimeOfDayFilter)}
+                    onResetFilters={resetRequestFilters}
                     filteredQueue={visibleRequestsQueue}
                     selectedRequestId={selectedRequestId}
                     processingAction={processingAction}
@@ -1032,15 +1213,11 @@ export default function ZoneBookingsModule() {
                     loadingQueue={zoneOffers === undefined}
                     showFilters={false}
                     onToggleFilters={() => undefined}
-                    gameFilters={GAME_FILTERS}
-                    timeFilters={TIME_OF_DAY_FILTERS}
-                    gameFilter={gameFilter}
-                    timeFilter={timeOfDayFilter}
+                    filterGroups={requestFilterGroups}
                     searchQuery={requestSearchQuery}
                     activeFilterCount={activeRequestFilterCount}
                     onSearchQueryChange={setRequestSearchQuery}
-                    onSelectGameFilter={(filter) => setGameFilter(filter as GameFilter)}
-                    onSelectTimeFilter={(filter) => setTimeOfDayFilter(filter as TimeOfDayFilter)}
+                    onResetFilters={resetRequestFilters}
                     filteredQueue={combinedQueue.filter((item) => pendingRequestIds.has(String(item.id)))}
                     pendingOffers={pendingOffers}
                     selectedRequestId={selectedRequestId}
@@ -1059,12 +1236,11 @@ export default function ZoneBookingsModule() {
                     matchrooms={filteredMatchrooms}
                     showFilters={showFilters}
                     onToggleFilters={() => setShowFilters((prev) => !prev)}
-                    statusFilters={MATCHROOM_FILTERS}
-                    statusFilter={matchroomFilter}
+                    filterGroups={matchroomFilterGroups}
                     searchQuery={matchroomSearchQuery}
-                    activeFilterCount={matchroomFilter === "all" ? 0 : 1}
+                    activeFilterCount={activeMatchroomFilterCount}
                     onSearchQueryChange={setMatchroomSearchQuery}
-                    onSelectStatusFilter={(filter) => setMatchroomFilter(filter as MatchroomFilter)}
+                    onResetFilters={resetMatchroomFilters}
                     focusedMatchroomId={focusedMatchroomId}
                     buildMatchroomCardData={(item) =>
                         toMatchroomCardData(

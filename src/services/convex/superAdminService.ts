@@ -65,6 +65,15 @@ export type SuperAdminUser = {
   accountType: "player" | "zone";
   role?: string;
   accountStatus?: "active" | "suspended";
+  kycVerificationStatus?:
+    | "not_started"
+    | "pending"
+    | "in_progress"
+    | "in_review"
+    | "verified"
+    | "rejected"
+    | "expired";
+  kycVerifiedAt?: number | null;
   suspendedAt?: number | null;
   suspendedUntil?: number | null;
   suspensionReason?: string | null;

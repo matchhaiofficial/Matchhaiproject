@@ -54,6 +54,59 @@ function formatDateTime(room: SuperAdminMatchroom) {
   return [room.scheduledDate, room.scheduledTime].filter(Boolean).join(" ") || "Date/time TBD";
 }
 
+const ALL = "All";
+
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+const BOOKING_TYPE_ORDER = ["Direct / Zone", "Broadcast", "Walk-in", "Other"] as const;
+type BookingType = (typeof BOOKING_TYPE_ORDER)[number];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
+function getRoomTimestamp(room: SuperAdminMatchroom): number | null {
+  if (typeof room.scheduledStartAt === "number" && Number.isFinite(room.scheduledStartAt)) {
+    return room.scheduledStartAt;
+  }
+  if (room.scheduledDate) {
+    const parsed = Date.parse(room.scheduledDate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+// Booking Type is heuristic: SuperAdminMatchroom has no explicit locationMode/bookingSource,
+// so we derive conservatively from the fields that ARE present. Anything we can't classify
+// falls into "Other" so it is never hidden.
+function getBookingType(room: SuperAdminMatchroom): BookingType {
+  const loc = (room.location || "").toLowerCase();
+  if (room.broadcastRequestStatus) return "Broadcast";
+  if (loc.includes("walk-in") || loc.includes("walk in") || loc.includes("walkin")) return "Walk-in";
+  if (room.zoneName) return "Direct / Zone";
+  return "Other";
+}
+
+function formatLabel(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export default function SuperAdminMatchroomsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
@@ -63,6 +116,12 @@ export default function SuperAdminMatchroomsScreen() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<MatchroomFilter>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [gameFilter, setGameFilter] = useState<string>(ALL);
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
+  const [bookingTypeFilter, setBookingTypeFilter] = useState<string>(ALL);
+  const [paymentFilter, setPaymentFilter] = useState<string>(ALL);
+  const [zoneFilter, setZoneFilter] = useState<string>(ALL);
+  const [resultFilter, setResultFilter] = useState<string>(ALL);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
@@ -78,10 +137,42 @@ export default function SuperAdminMatchroomsScreen() {
     void load("initial");
   }, [load]));
 
+  const gameOptions = useMemo(() => {
+    const present = Array.from(new Set(rooms.map((r) => r.game).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((g) => ({ key: g, label: g.toUpperCase() }))];
+  }, [rooms]);
+
+  const paymentOptions = useMemo(() => {
+    const present = Array.from(new Set(rooms.map((r) => r.paymentStatus).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((p) => ({ key: p, label: formatLabel(p) }))];
+  }, [rooms]);
+
+  const zoneOptions = useMemo(() => {
+    const present = Array.from(new Set(rooms.map((r) => r.zoneName).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((z) => ({ key: z, label: z }))];
+  }, [rooms]);
+
+  const resultOptions = useMemo(() => {
+    const present = Array.from(new Set(rooms.map((r) => r.resultVerificationStatus).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((s) => ({ key: s, label: formatLabel(s) }))];
+  }, [rooms]);
+
+  const bookingTypeOptions = useMemo(() => {
+    const present = new Set(rooms.map((r) => getBookingType(r)));
+    const ordered = BOOKING_TYPE_ORDER.filter((t) => present.has(t));
+    return [{ key: ALL, label: "All" }, ...ordered.map((t) => ({ key: t, label: t }))];
+  }, [rooms]);
+
   const visibleRooms = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return rooms.filter((room) => {
       if (filter !== "Any" && room.lifecycleStatus !== filter) return false;
+      if (gameFilter !== ALL && room.game !== gameFilter) return false;
+      if (paymentFilter !== ALL && room.paymentStatus !== paymentFilter) return false;
+      if (zoneFilter !== ALL && room.zoneName !== zoneFilter) return false;
+      if (resultFilter !== ALL && room.resultVerificationStatus !== resultFilter) return false;
+      if (bookingTypeFilter !== ALL && getBookingType(room) !== bookingTypeFilter) return false;
+      if (!matchesDateRange(getRoomTimestamp(room), dateFilter)) return false;
       if (!needle) return true;
       return [
         room.title,
@@ -93,9 +184,26 @@ export default function SuperAdminMatchroomsScreen() {
         lifecycleLabel(room.lifecycleStatus),
       ].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [filter, query, rooms]);
+  }, [filter, query, rooms, gameFilter, paymentFilter, zoneFilter, resultFilter, bookingTypeFilter, dateFilter]);
 
-  const activeCount = filter === "Any" ? 0 : 1;
+  const activeCount =
+    Number(filter !== "Any") +
+    Number(gameFilter !== ALL) +
+    Number(dateFilter !== "Any") +
+    Number(bookingTypeFilter !== ALL) +
+    Number(paymentFilter !== ALL) +
+    Number(zoneFilter !== ALL) +
+    Number(resultFilter !== ALL);
+
+  const resetFilters = useCallback(() => {
+    setFilter("Any");
+    setGameFilter(ALL);
+    setDateFilter("Any");
+    setBookingTypeFilter(ALL);
+    setPaymentFilter(ALL);
+    setZoneFilter(ALL);
+    setResultFilter(ALL);
+  }, []);
 
   return (
     <Screen style={styles.screen} scroll={false}>
@@ -133,11 +241,19 @@ export default function SuperAdminMatchroomsScreen() {
             </AdminListCard>
           ))}
           {visibleRooms.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No matchrooms found"
-              description="Try a different search or status filter."
-              icon="matchroom"
-            />
+            rooms.length === 0 ? (
+              <AdminEmptyStateCard
+                title="No matchrooms found"
+                description="Matchrooms will appear here once created."
+                icon="matchroom"
+              />
+            ) : (
+              <AdminEmptyStateCard
+                title="No matchrooms match these filters."
+                description="Reset filters to view all matchrooms."
+                icon="matchroom"
+              />
+            )
           ) : null}
         </ScrollView>
       )}
@@ -147,12 +263,12 @@ export default function SuperAdminMatchroomsScreen() {
         title="Filters"
         activeFilterCount={activeCount}
         onClose={() => setDrawerOpen(false)}
-        onReset={() => setFilter("Any")}
+        onReset={resetFilters}
         onDone={() => setDrawerOpen(false)}
         resetDisabled={!activeCount}
       >
         <DiscoverFilterRow
-          label="Matchroom status"
+          label="Status"
           options={FILTER_OPTIONS.map(lifecycleLabel)}
           selected={lifecycleLabel(filter)}
           onSelect={(label) => {
@@ -160,6 +276,12 @@ export default function SuperAdminMatchroomsScreen() {
             setFilter(next);
           }}
         />
+        <DiscoverFilterRow label="Game" options={gameOptions} selected={gameFilter} onSelect={setGameFilter} />
+        <DiscoverFilterRow label="Date Range" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
+        <DiscoverFilterRow label="Booking Type" options={bookingTypeOptions} selected={bookingTypeFilter} onSelect={setBookingTypeFilter} />
+        <DiscoverFilterRow label="Payment Status" options={paymentOptions} selected={paymentFilter} onSelect={setPaymentFilter} />
+        <DiscoverFilterRow label="Zone" options={zoneOptions} selected={zoneFilter} onSelect={setZoneFilter} />
+        <DiscoverFilterRow label="Result Status" options={resultOptions} selected={resultFilter} onSelect={setResultFilter} />
       </AdminFilterDrawer>
     </Screen>
   );

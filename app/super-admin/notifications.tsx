@@ -2,9 +2,10 @@ import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { AdminEmptyStateCard, AdminListCard, AdminPageHeader } from "../../src/components/AdminSurface";
+import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
+import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
@@ -23,6 +24,51 @@ function formatDate(value?: number) {
 
 function labelForType(type?: string) {
   return String(type || "notification").replace(/[._-]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+const ALL = "All";
+
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
+const CATEGORY_ORDER = ["matchrooms", "teams", "payments", "support", "reports", "system"] as const;
+const CATEGORY_LABELS: Record<string, string> = {
+  matchrooms: "Matchrooms",
+  teams: "Teams",
+  payments: "Payments",
+  support: "Support",
+  reports: "Reports",
+  system: "System",
+};
+
+// Conservative type bucketing mirroring the Player Inbox (Phase 2C). Unknown -> "system".
+function getNotificationCategory(item: SuperAdminNotification): string {
+  const type = String(item.type || "").toLowerCase();
+  if (type.startsWith("support.") || type.startsWith("support_")) return "support";
+  if (type.startsWith("moderation.") || type.includes("report")) return "reports";
+  if (type.startsWith("wallet.") || type.startsWith("wallet_") || type.includes("payment")) return "payments";
+  if (type.startsWith("team.") || type.startsWith("team_")) return "teams";
+  if (type.startsWith("match.") || type.startsWith("match_") || type.startsWith("booking.") || type.startsWith("booking_")) return "matchrooms";
+  return "system";
 }
 
 function NotificationCard({
@@ -76,6 +122,10 @@ export default function SuperAdminNotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>(ALL);
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
@@ -95,6 +145,30 @@ export default function SuperAdminNotificationsScreen() {
   }, [load]));
 
   const unreadCount = useMemo(() => items.filter((item) => !item.isRead).length, [items]);
+
+  const typeOptions = useMemo(() => {
+    const present = new Set(items.map(getNotificationCategory));
+    const ordered = CATEGORY_ORDER.filter((c) => present.has(c));
+    return [{ key: ALL, label: "All" }, ...ordered.map((c) => ({ key: c, label: CATEGORY_LABELS[c] }))];
+  }, [items]);
+
+  const visibleItems = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return items.filter((item) => {
+      if (typeFilter !== ALL && getNotificationCategory(item) !== typeFilter) return false;
+      if (!matchesDateRange(item.createdAt, dateFilter)) return false;
+      if (!needle) return true;
+      return [item.title, item.body, labelForType(item.type), item.route]
+        .filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [items, search, typeFilter, dateFilter]);
+
+  const activeFilterCount = Number(typeFilter !== ALL) + Number(dateFilter !== "Any");
+
+  const resetFilters = useCallback(() => {
+    setTypeFilter(ALL);
+    setDateFilter("Any");
+  }, []);
 
   const markRead = useCallback(async (item: SuperAdminNotification) => {
     if (item.isRead || busyId) return;
@@ -130,6 +204,14 @@ export default function SuperAdminNotificationsScreen() {
   return (
     <Screen style={styles.screen} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Notifications" subtitle="Super Admin inbox" onBack={() => router.back()} inlineTitle />
+      <AdminSearchFilterBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search notifications"
+        onFilterPress={() => setDrawerOpen(true)}
+        activeFilterCount={activeFilterCount}
+        style={styles.searchBar}
+      />
       <SegmentedTabs
         items={[
           { key: "unread", label: "Unread", badge: tab === "unread" && unreadCount ? unreadCount : undefined },
@@ -149,14 +231,22 @@ export default function SuperAdminNotificationsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
-          {items.length === 0 ? (
-            <AdminEmptyStateCard
-              title={tab === "unread" ? "No unread notifications" : "No read notifications"}
-              description="Super Admin operational alerts will appear here."
-              icon="notifications"
-            />
+          {visibleItems.length === 0 ? (
+            items.length === 0 ? (
+              <AdminEmptyStateCard
+                title={tab === "unread" ? "No unread notifications" : "No read notifications"}
+                description="Super Admin operational alerts will appear here."
+                icon="notifications"
+              />
+            ) : (
+              <AdminEmptyStateCard
+                title="No notifications match these filters."
+                description="Reset filters to view all notifications."
+                icon="notifications"
+              />
+            )
           ) : (
-            items.map((item) => (
+            visibleItems.map((item) => (
               <NotificationCard
                 key={item.id}
                 item={item}
@@ -168,6 +258,19 @@ export default function SuperAdminNotificationsScreen() {
           )}
         </ScrollView>
       )}
+
+      <AdminFilterDrawer
+        visible={drawerOpen}
+        title="Filters"
+        activeFilterCount={activeFilterCount}
+        onClose={() => setDrawerOpen(false)}
+        onReset={resetFilters}
+        onDone={() => setDrawerOpen(false)}
+        resetDisabled={!activeFilterCount}
+      >
+        <DiscoverFilterRow label="Type" options={typeOptions} selected={typeFilter} onSelect={setTypeFilter} />
+        <DiscoverFilterRow label="Date Range" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
+      </AdminFilterDrawer>
     </Screen>
   );
 }
@@ -175,6 +278,9 @@ export default function SuperAdminNotificationsScreen() {
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: COLORS.backgroundDark,
+  },
+  searchBar: {
+    marginBottom: SPACING.md,
   },
   tabs: {
     marginBottom: SPACING.md,

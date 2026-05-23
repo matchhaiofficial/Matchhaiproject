@@ -21,20 +21,48 @@ import styles from "../bookings.styles";
 type ProcessingAction = "accept" | "reject" | "counter" | null;
 const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
+type FilterOption = { key: string; label: string };
+type FilterGroup = {
+  key: string;
+  label: string;
+  options: readonly FilterOption[];
+  value: string;
+  onSelect: (value: string) => void;
+};
+
+function FilterChipGroup({ label, options, value, onSelect }: FilterGroup) {
+  return (
+    <>
+      <Text style={styles.filterSectionLabel}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        {options.map((option) => (
+          <Pressable
+            key={option.key}
+            onPress={() => onSelect(option.key)}
+            style={[styles.filterChip, value === option.key && styles.filterChipActive]}
+          >
+            <Text
+              style={[styles.filterChipText, value === option.key && styles.filterChipTextActive]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
 type Props = {
   mode?: "requests" | "pending";
   loadingQueue: boolean;
   showFilters: boolean;
   onToggleFilters: () => void;
-  gameFilters: readonly { key: string; label: string }[];
-  timeFilters: readonly { key: string; label: string }[];
-  gameFilter: string;
-  timeFilter: string;
+  filterGroups: FilterGroup[];
   searchQuery: string;
   activeFilterCount: number;
   onSearchQueryChange: (query: string) => void;
-  onSelectGameFilter: (filter: string) => void;
-  onSelectTimeFilter: (filter: string) => void;
+  onResetFilters: () => void;
   filteredQueue: ZoneBookingQueueItem[];
   pendingOffers?: any[];
   selectedRequestId: string | null;
@@ -51,15 +79,11 @@ export function ZoneBookingsRequestsSection({
   loadingQueue,
   showFilters,
   onToggleFilters,
-  gameFilters,
-  timeFilters,
-  gameFilter,
-  timeFilter,
+  filterGroups,
   searchQuery,
   activeFilterCount,
   onSearchQueryChange,
-  onSelectGameFilter,
-  onSelectTimeFilter,
+  onResetFilters,
   filteredQueue,
   pendingOffers = [],
   selectedRequestId,
@@ -117,50 +141,15 @@ export function ZoneBookingsRequestsSection({
           <AppModalHeader title="Filters" subtitle="Requests" onClose={onToggleFilters} compact />
           <AppModalBody scroll contentContainerStyle={styles.filtersDrawerBody}>
             <View style={styles.filtersWrap}>
-              <Text style={styles.filterSectionLabel}>Game</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {gameFilters.map((filter) => (
-                  <Pressable
-                    key={filter.key}
-                    onPress={() => onSelectGameFilter(filter.key)}
-                  style={[
-                      styles.filterChip,
-                      gameFilter === filter.key && styles.filterChipActive,
-                  ]}
-                  >
-                    <Text
-                  style={[
-                    styles.filterChipText,
-                        gameFilter === filter.key && styles.filterChipTextActive,
-                  ]}
-                >
-                  {filter.label}
-                </Text>
-              </Pressable>
-            ))}
-              </ScrollView>
-              <Text style={styles.filterSectionLabel}>Time of day</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {timeFilters.map((filter) => (
-                  <Pressable
-                    key={filter.key}
-                    onPress={() => onSelectTimeFilter(filter.key)}
-                    style={[
-                      styles.filterChip,
-                      timeFilter === filter.key && styles.filterChipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterChipText,
-                        timeFilter === filter.key && styles.filterChipTextActive,
-                      ]}
-                    >
-                      {filter.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+              {filterGroups.map((group) => (
+                <FilterChipGroup
+                  key={group.key}
+                  label={group.label}
+                  options={group.options}
+                  value={group.value}
+                  onSelect={group.onSelect}
+                />
+              ))}
             </View>
           </AppModalBody>
           <AppModalFooter style={styles.filterDrawerFooter}>
@@ -169,10 +158,7 @@ export function ZoneBookingsRequestsSection({
                 variant="ghost"
                 disabled={activeFilterCount === 0}
                 style={{ flex: 1 }}
-                onPress={() => {
-                  onSelectGameFilter("all");
-                  onSelectTimeFilter("all");
-                }}
+                onPress={onResetFilters}
               >
                 Reset
               </AppButton>

@@ -50,9 +50,17 @@ const RULE_TYPES: PricingRuleType[] = ["percentage_discount", "fixed_override"];
 const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 type RuleEnabledFilter = "all" | "enabled" | "disabled";
 const ENABLED_FILTERS: Array<{ key: RuleEnabledFilter; label: string }> = [
-    { key: "all", label: "All states" },
+    { key: "all", label: "All statuses" },
     { key: "enabled", label: "Enabled" },
     { key: "disabled", label: "Disabled" },
+];
+type RuleDateFilter = "any" | "active_today" | "starts_today" | "next_7_days" | "expired";
+const DATE_FILTERS: Array<{ key: RuleDateFilter; label: string }> = [
+    { key: "any", label: "Any" },
+    { key: "active_today", label: "Active Today" },
+    { key: "starts_today", label: "Starts Today" },
+    { key: "next_7_days", label: "Next 7 Days" },
+    { key: "expired", label: "Expired" },
 ];
 const TIER_OPTIONS_BY_ASSET: Partial<Record<PricingRuleAssetType, Array<{ key: string; label: string }>>> = {
     pc: [
@@ -106,6 +114,33 @@ const toDateValue = (date: Date) =>
 
 const toDateDisplay = (date: Date) =>
     `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+
+// Frontend-only Date Range matcher over a rule's validity window.
+// validFrom/validTo are ISO date-only strings (YYYY-MM-DD) or null (open-ended);
+// todayKey/weekAheadKey must be the same ISO format for string comparison to be valid.
+const matchesRuleDateFilter = (
+    rule: PricingRule,
+    filter: RuleDateFilter,
+    todayKey: string,
+    weekAheadKey: string,
+) => {
+    if (filter === "any") return true;
+    const from = rule.validFrom || null;
+    const to = rule.validTo || null;
+    if (filter === "active_today") {
+        return (!from || from <= todayKey) && (!to || to >= todayKey);
+    }
+    if (filter === "starts_today") {
+        return Boolean(from) && from === todayKey;
+    }
+    if (filter === "next_7_days") {
+        return Boolean(from) && from! >= todayKey && from! <= weekAheadKey;
+    }
+    if (filter === "expired") {
+        return Boolean(to) && to! < todayKey;
+    }
+    return true;
+};
 
 const toTimeDisplay = (date: Date) =>
     date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
@@ -216,6 +251,7 @@ export default function ZonePricingModule() {
     const [ruleTypeFilter, setRuleTypeFilter] = useState<PricingRuleType | "all">("all");
     const [ruleEnabledFilter, setRuleEnabledFilter] = useState<RuleEnabledFilter>("all");
     const [ruleBranchFilter, setRuleBranchFilter] = useState("all");
+    const [ruleDateFilter, setRuleDateFilter] = useState<RuleDateFilter>("any");
     const [priority, setPriority] = useState("0");
     const [viewMode, setViewMode] = useState<"create" | "rules">("create");
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -379,12 +415,23 @@ export default function ZonePricingModule() {
     }, [rules]);
     const filteredRules = useMemo(() => {
         const normalizedSearch = ruleSearchQuery.trim().toLowerCase();
+        const now = new Date();
+        const todayKey = toDateValue(now);
+        const weekAhead = new Date(now);
+        weekAhead.setDate(weekAhead.getDate() + 7);
+        const weekAheadKey = toDateValue(weekAhead);
         return rules.filter((rule) => {
             if (ruleAssetFilter !== "all" && rule.assetType !== ruleAssetFilter) return false;
             if (ruleTypeFilter !== "all" && rule.ruleType !== ruleTypeFilter) return false;
             if (ruleEnabledFilter === "enabled" && !rule.isEnabled) return false;
             if (ruleEnabledFilter === "disabled" && rule.isEnabled) return false;
-            if (ruleBranchFilter !== "all" && String(rule.branchId || "all") !== ruleBranchFilter) return false;
+            if (ruleBranchFilter !== "all") {
+                // A specific branch shows its own rules plus global (all-branches) rules,
+                // since global rules apply to every branch.
+                const ruleBranchId = rule.branchId ? String(rule.branchId) : null;
+                if (ruleBranchId !== null && ruleBranchId !== ruleBranchFilter) return false;
+            }
+            if (!matchesRuleDateFilter(rule, ruleDateFilter, todayKey, weekAheadKey)) return false;
             if (!normalizedSearch) return true;
             return [
                 rule.name,
@@ -403,14 +450,15 @@ export default function ZonePricingModule() {
                 .toLowerCase()
                 .includes(normalizedSearch);
         });
-    }, [ruleAssetFilter, ruleBranchFilter, ruleEnabledFilter, ruleSearchQuery, ruleTypeFilter, rules]);
+    }, [ruleAssetFilter, ruleBranchFilter, ruleDateFilter, ruleEnabledFilter, ruleSearchQuery, ruleTypeFilter, rules]);
     const activeRuleFilterCount = useMemo(
         () =>
             (ruleAssetFilter !== "all" ? 1 : 0) +
             (ruleTypeFilter !== "all" ? 1 : 0) +
             (ruleEnabledFilter !== "all" ? 1 : 0) +
-            (ruleBranchFilter !== "all" ? 1 : 0),
-        [ruleAssetFilter, ruleBranchFilter, ruleEnabledFilter, ruleTypeFilter],
+            (ruleBranchFilter !== "all" ? 1 : 0) +
+            (ruleDateFilter !== "any" ? 1 : 0),
+        [ruleAssetFilter, ruleBranchFilter, ruleDateFilter, ruleEnabledFilter, ruleTypeFilter],
     );
     const pricingMetrics = useMemo(
         () => [
@@ -564,7 +612,7 @@ export default function ZonePricingModule() {
                                 <AppModalHeader title="Filters" subtitle="Pricing rules" onClose={() => setShowRuleFilters(false)} compact />
                                 <AppModalBody scroll contentContainerStyle={styles.filtersDrawerBody}>
                                     <View style={styles.filtersWrap}>
-                                        <Text style={styles.filterSectionLabel}>State</Text>
+                                        <Text style={styles.filterSectionLabel}>Status</Text>
                                         <View style={styles.filterChipWrap}>
                                             {ENABLED_FILTERS.map((filter) => (
                                                 <Pressable
@@ -576,7 +624,7 @@ export default function ZonePricingModule() {
                                                 </Pressable>
                                             ))}
                                         </View>
-                                        <Text style={styles.filterSectionLabel}>Asset type</Text>
+                                        <Text style={styles.filterSectionLabel}>Resource Type</Text>
                                         <View style={styles.filterChipWrap}>
                                             {(["all", ...ASSET_TYPES] as Array<PricingRuleAssetType | "all">).map((item) => (
                                                 <Pressable
@@ -588,7 +636,7 @@ export default function ZonePricingModule() {
                                         </Pressable>
                                     ))}
                                 </View>
-                                        <Text style={styles.filterSectionLabel}>Rule type</Text>
+                                        <Text style={styles.filterSectionLabel}>Rule Type</Text>
                                         <View style={styles.filterChipWrap}>
                                             {(["all", ...RULE_TYPES] as Array<PricingRuleType | "all">).map((item) => (
                                                 <Pressable
@@ -618,16 +666,30 @@ export default function ZonePricingModule() {
                                                 </Pressable>
                                             ))}
                                         </View>
+                                        <Text style={styles.filterSectionLabel}>Date Range</Text>
+                                        <View style={styles.filterChipWrap}>
+                                            {DATE_FILTERS.map((filter) => (
+                                                <Pressable
+                                                    key={filter.key}
+                                                    onPress={() => setRuleDateFilter(filter.key)}
+                                                    style={[styles.chip, ruleDateFilter === filter.key && styles.chipActive]}
+                                                >
+                                                    <Text style={[styles.chipText, ruleDateFilter === filter.key && styles.chipTextActive]}>{filter.label}</Text>
+                                                </Pressable>
+                                            ))}
+                                        </View>
                                     </View>
                                 </AppModalBody>
                                 <AppModalFooter style={styles.filterDrawerFooter}>
                                     <AppButton
                                         variant="ghost"
+                                        disabled={activeRuleFilterCount === 0}
                                         onPress={() => {
                                             setRuleAssetFilter("all");
                                             setRuleTypeFilter("all");
                                             setRuleEnabledFilter("all");
                                             setRuleBranchFilter("all");
+                                            setRuleDateFilter("any");
                                         }}
                                     >
                                         Reset
@@ -652,7 +714,7 @@ export default function ZonePricingModule() {
                             placeholderTextColor={COLORS.muted}
                         />
 
-                        <Text style={styles.fieldLabel}>Resource</Text>
+                        <Text style={styles.fieldLabel}>Resource Type</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
                             {ASSET_TYPES.map((item) => (
                                 <Pressable

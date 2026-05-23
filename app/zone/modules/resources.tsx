@@ -980,7 +980,7 @@ export default function ZoneResourcesModule() {
                                         ))}
                                     </View>
 
-                                    <Text style={styles.filterSectionLabel}>Date</Text>
+                                    <Text style={styles.filterSectionLabel}>Date Range</Text>
                                     <View style={styles.filterChipWrap}>
                                         {ALLOCATION_DATE_FILTERS.map((filter) => (
                                             <Pressable
@@ -997,7 +997,7 @@ export default function ZoneResourcesModule() {
                                 </>
                             ) : null}
 
-                            <Text style={styles.filterSectionLabel}>Resource category</Text>
+                            <Text style={styles.filterSectionLabel}>Resource Type</Text>
                             <View style={styles.filterChipWrap}>
                                 {availableAssetFilters.map((filter) => (
                                     <Pressable
@@ -1031,6 +1031,7 @@ export default function ZoneResourcesModule() {
                     <AppModalFooter style={styles.filterDrawerFooter}>
                         <AppButton
                             variant="ghost"
+                            disabled={activeFilterCount === 0}
                             onPress={() => {
                                 setAssetFilter("all");
                                 setStatusFilter("all");

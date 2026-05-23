@@ -9,16 +9,21 @@ import React, {
 } from "react";
 import {
     ActivityIndicator,
+    Dimensions,
+    Pressable,
     ScrollView,
     Text,
     TextInput,
     View
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import AppHeader from "../../src/components/AppHeader";
+import { AppIcon } from "../../src/components/AppIcon";
 import {
+    AppDrawer,
     AppDialog,
     AppModalBody,
     AppModalFooter,
@@ -60,6 +65,71 @@ import {
 import styles from "./wallet.styles";
 
 type WalletTab = "overview" | "transactions";
+type WalletFilterType =
+  | "all"
+  | "topup"
+  | "booking_payment"
+  | "hold"
+  | "refund"
+  | "release_capture"
+  | "withdrawal"
+  | "other";
+type WalletFilterStatus =
+  | "all"
+  | "successful"
+  | "pending"
+  | "failed"
+  | "expired"
+  | "cancelled"
+  | "refunded";
+type WalletDateRange = "all" | "today" | "last_7_days" | "last_30_days";
+type WalletAmountRange = "all" | "under_500" | "500_2000" | "2000_5000" | "above_5000";
+type WalletFilters = {
+  type: WalletFilterType;
+  status: WalletFilterStatus;
+  dateRange: WalletDateRange;
+  amountRange: WalletAmountRange;
+};
+
+const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
+const DEFAULT_WALLET_FILTERS: WalletFilters = {
+  type: "all",
+  status: "all",
+  dateRange: "all",
+  amountRange: "all",
+};
+const TYPE_FILTERS: { key: WalletFilterType; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "topup", label: "Wallet Top-up" },
+  { key: "booking_payment", label: "Booking Payment" },
+  { key: "hold", label: "Reserved / Hold" },
+  { key: "refund", label: "Refund" },
+  { key: "release_capture", label: "Release / Capture" },
+  { key: "withdrawal", label: "Withdrawal" },
+  { key: "other", label: "Other" },
+];
+const STATUS_FILTERS: { key: WalletFilterStatus; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "successful", label: "Successful" },
+  { key: "pending", label: "Pending" },
+  { key: "failed", label: "Failed" },
+  { key: "expired", label: "Expired" },
+  { key: "cancelled", label: "Cancelled" },
+  { key: "refunded", label: "Refunded" },
+];
+const DATE_FILTERS: { key: WalletDateRange; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "last_7_days", label: "Last 7 Days" },
+  { key: "last_30_days", label: "Last 30 Days" },
+];
+const AMOUNT_FILTERS: { key: WalletAmountRange; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "under_500", label: "Under Rs 500" },
+  { key: "500_2000", label: "Rs 500 - Rs 2,000" },
+  { key: "2000_5000", label: "Rs 2,000 - Rs 5,000" },
+  { key: "above_5000", label: "Above Rs 5,000" },
+];
 
 const getMillis = (value: any) => {
   if (!value) return 0;
@@ -92,6 +162,71 @@ const getPhoneSourceLabel = (source?: string | null) => {
   if (source === "checkout_override") return "entered here";
   if (source === "profile") return "profile";
   return null;
+};
+
+const normalizeValue = (value: unknown) =>
+  String(value || "").trim().toLowerCase();
+
+const getWalletTransactionType = (item: any): WalletFilterType => {
+  const source = normalizeValue(item.source);
+  const kind = normalizeValue(item.kind || item.type);
+  const reference = normalizeValue(item.reference);
+  const title = normalizeValue(item.title);
+
+  if (kind === "booking_payment") return "booking_payment";
+  if (kind === "hold") return "hold";
+  if (kind === "refund" || reference.includes("refund") || title.includes("refund")) return "refund";
+  if (kind === "hold_release" || kind === "hold_capture") return "release_capture";
+  if (kind === "withdrawal") return "withdrawal";
+  if (source === "payment" || kind.includes("topup") || kind.includes("top_up") || title.includes("top up")) {
+    return "topup";
+  }
+  return "other";
+};
+
+const getWalletTransactionStatus = (item: any): WalletFilterStatus => {
+  const status = normalizeValue(item.status);
+  const kind = normalizeValue(item.kind || item.type);
+
+  if (status.includes("refund") || kind === "refund") return "refunded";
+  if (status === "paid" || status === "completed" || status === "success" || status === "succeeded" || status === "captured") {
+    return "successful";
+  }
+  if (status === "pending" || status === "created" || status === "redirected" || status === "token_received" || status === "approved_pending_payment") {
+    return "pending";
+  }
+  if (status === "failed" || status === "rejected" || status === "error") return "failed";
+  if (status === "expired") return "expired";
+  if (status === "cancelled" || status === "canceled") return "cancelled";
+  return "all";
+};
+
+const isInDateRange = (item: any, filter: WalletDateRange) => {
+  if (filter === "all") return true;
+  const createdAt = getMillis(item.createdAt);
+  if (!createdAt) return false;
+  const now = new Date();
+  const created = new Date(createdAt);
+
+  if (filter === "today") {
+    return (
+      created.getFullYear() === now.getFullYear() &&
+      created.getMonth() === now.getMonth() &&
+      created.getDate() === now.getDate()
+    );
+  }
+
+  const windowMs = filter === "last_7_days" ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+  return createdAt >= now.getTime() - windowMs && createdAt <= now.getTime();
+};
+
+const isInAmountRange = (item: any, filter: WalletAmountRange) => {
+  if (filter === "all") return true;
+  const amount = Math.abs(Number(item.amount || 0));
+  if (filter === "under_500") return amount < 500;
+  if (filter === "500_2000") return amount >= 500 && amount <= 2000;
+  if (filter === "2000_5000") return amount > 2000 && amount <= 5000;
+  return amount > 5000;
 };
 
 const getWalletTopupErrorMessage = (error: unknown) => {
@@ -128,8 +263,48 @@ const getWalletTopupErrorMessage = (error: unknown) => {
   return cleaned || "Could not start the Easypaisa top-up. Please try again.";
 };
 
+function WalletFilterRow<T extends string>({
+  label,
+  options,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  options: { key: T; label: string }[];
+  selected: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <View style={styles.filterSection}>
+      <Text style={styles.filterSectionLabel}>{label}</Text>
+      <View style={styles.filterChipWrap}>
+        {options.map((option) => (
+          <Pressable
+            key={option.key}
+            onPress={() => onSelect(option.key)}
+            style={[
+              styles.filterChip,
+              selected === option.key && styles.filterChipActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                selected === option.key && styles.filterChipTextActive,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export default function WalletScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     gateway?: string;
     paymentStatus?: string;
@@ -142,6 +317,8 @@ export default function WalletScreen() {
   const [addAmount, setAddAmount] = useState("");
   const [addingFunds, setAddingFunds] = useState(false);
   const [phoneModalVisible, setPhoneModalVisible] = useState(false);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [transactionFilters, setTransactionFilters] = useState<WalletFilters>(DEFAULT_WALLET_FILTERS);
   const [checkoutPhone, setCheckoutPhone] = useState("");
   const [serviceLoading, setServiceLoading] = useState(true);
   const [activeOrderRef, setActiveOrderRef] = useState<string | null>(null);
@@ -331,6 +508,23 @@ export default function WalletScreen() {
     (Boolean(userId) && walletSummary === undefined) ||
     (Boolean(userId) && bookingIntents === undefined);
   const quickAmounts = [500, 1000, 2000, 5000];
+  const activeTransactionFilterCount =
+    Number(transactionFilters.type !== DEFAULT_WALLET_FILTERS.type) +
+    Number(transactionFilters.status !== DEFAULT_WALLET_FILTERS.status) +
+    Number(transactionFilters.dateRange !== DEFAULT_WALLET_FILTERS.dateRange) +
+    Number(transactionFilters.amountRange !== DEFAULT_WALLET_FILTERS.amountRange);
+  const walletTransactions = walletHistory || [];
+  const filteredWalletHistory = useMemo(
+    () =>
+      walletTransactions.filter((item: any) => {
+        if (transactionFilters.type !== "all" && getWalletTransactionType(item) !== transactionFilters.type) return false;
+        if (transactionFilters.status !== "all" && getWalletTransactionStatus(item) !== transactionFilters.status) return false;
+        if (!isInDateRange(item, transactionFilters.dateRange)) return false;
+        if (!isInAmountRange(item, transactionFilters.amountRange)) return false;
+        return true;
+      }),
+    [transactionFilters, walletTransactions],
+  );
   const hasActiveCheckout = ACTIVE_CHECKOUT_STATUSES.has(
     String(checkoutStatus?.status || ""),
   );
@@ -750,8 +944,32 @@ export default function WalletScreen() {
             </>
           ) : (
             <>
-              {walletHistory && walletHistory.length > 0 ? (
-                walletHistory.map((item: any) => {
+              {walletTransactions.length > 0 ? (
+                <>
+                  <View style={styles.transactionFilterBar}>
+                    <Text style={styles.transactionFilterSummary}>
+                      {filteredWalletHistory.length} of {walletTransactions.length} transaction
+                      {walletTransactions.length === 1 ? "" : "s"}
+                    </Text>
+                    <Pressable
+                      onPress={() => setFilterDrawerOpen(true)}
+                      style={({ pressed }) => [
+                        styles.transactionFilterButton,
+                        pressed && styles.transactionFilterButtonPressed,
+                      ]}
+                    >
+                      <AppIcon name="filters" size={20} color={COLORS.text} />
+                      {activeTransactionFilterCount > 0 ? (
+                        <View style={styles.filterBadge}>
+                          <Text style={styles.filterBadgeText}>
+                            {activeTransactionFilterCount}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  </View>
+                  {filteredWalletHistory.length > 0 ? (
+                    filteredWalletHistory.map((item: any) => {
                   const tone =
                     item.status === "paid" || item.status === "completed"
                       ? "success"
@@ -835,7 +1053,16 @@ export default function WalletScreen() {
                       />
                     </AppCard>
                   );
-                })
+                    })
+                  ) : (
+                    <AppCard variant="empty" style={styles.emptyCard}>
+                      <Text style={styles.emptyTitle}>No transactions match these filters.</Text>
+                      <Text style={styles.emptyText}>
+                        Reset filters to view your full transaction history.
+                      </Text>
+                    </AppCard>
+                  )}
+                </>
               ) : (
                 <AppCard variant="empty" style={styles.emptyCard}>
                   <Text style={styles.emptyTitle}>No transactions yet</Text>
@@ -849,6 +1076,65 @@ export default function WalletScreen() {
           )}
         </ScrollView>
       )}
+
+      <AppDrawer
+        visible={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        drawerStyle={[styles.filterDrawer, { width: DRAWER_WIDTH }]}
+      >
+        <View style={[styles.filterDrawerContent, { paddingTop: Math.max(insets.top, 16) }]}>
+          <AppModalHeader
+            title="Filters"
+            subtitle={`${activeTransactionFilterCount} active transaction filters`}
+            onClose={() => setFilterDrawerOpen(false)}
+            compact
+          />
+          <AppModalBody scroll contentContainerStyle={styles.filterDrawerBody}>
+            <WalletFilterRow
+              label="Type"
+              options={TYPE_FILTERS}
+              selected={transactionFilters.type}
+              onSelect={(type) => setTransactionFilters((current) => ({ ...current, type }))}
+            />
+            <WalletFilterRow
+              label="Status"
+              options={STATUS_FILTERS}
+              selected={transactionFilters.status}
+              onSelect={(status) => setTransactionFilters((current) => ({ ...current, status }))}
+            />
+            <WalletFilterRow
+              label="Date Range"
+              options={DATE_FILTERS}
+              selected={transactionFilters.dateRange}
+              onSelect={(dateRange) => setTransactionFilters((current) => ({ ...current, dateRange }))}
+            />
+            <WalletFilterRow
+              label="Amount Range"
+              options={AMOUNT_FILTERS}
+              selected={transactionFilters.amountRange}
+              onSelect={(amountRange) => setTransactionFilters((current) => ({ ...current, amountRange }))}
+            />
+          </AppModalBody>
+          <AppModalFooter style={styles.filterDrawerFooter}>
+            <View style={styles.filterDrawerFooterRow}>
+              <AppButton
+                variant="ghost"
+                disabled={activeTransactionFilterCount === 0}
+                style={styles.filterDrawerFooterButton}
+                onPress={() => setTransactionFilters(DEFAULT_WALLET_FILTERS)}
+              >
+                Reset
+              </AppButton>
+              <AppButton
+                style={styles.filterDrawerFooterButton}
+                onPress={() => setFilterDrawerOpen(false)}
+              >
+                Done
+              </AppButton>
+            </View>
+          </AppModalFooter>
+        </View>
+      </AppDrawer>
 
       <AppDialog
         visible={phoneModalVisible}

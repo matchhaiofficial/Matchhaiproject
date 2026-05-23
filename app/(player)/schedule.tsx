@@ -30,15 +30,11 @@ import styles from "./schedule.styles";
 
 type ScheduleTab = "upcoming" | "actions" | "history";
 type ScheduleDateFilter = "Any" | "Today" | "Tomorrow" | "This Week";
-type ScheduleStatusFilter =
-  | "Any"
-  | "Confirmed"
-  | "Pending Payment"
-  | "Pending Approval"
-  | "Waiting Lobby"
-  | "Waiting Venue"
-  | "Completed"
-  | "Cancelled";
+// Coarse, display-only status buckets. The internal per-room statuses produced
+// by getRoomScheduleState are unchanged; these only collapse them for filtering.
+type ScheduleStatusFilter = "Any" | "Upcoming" | "Needs Action" | "Completed" | "Cancelled";
+// Stored values stay "Zone" / "Broadcast" (the filter logic depends on them);
+// only the visible label is "Booking Type" / "Zone Booking".
 type ScheduleVenueFilter = "Any" | "Zone" | "Broadcast";
 type SchedulePaymentFilter = "Any" | "Paid" | "Unpaid";
 
@@ -207,6 +203,22 @@ const matchesDateFilter = (room: Matchroom, filter: ScheduleDateFilter) => {
   return start >= now && start <= weekEnd;
 };
 
+// Display-only grouping over the exact statuses getRoomScheduleState produces.
+// This does not change how a room's status is computed or which tab it lands in;
+// it only maps each status onto a coarse filter bucket. Unknown statuses fall
+// through unchanged so they never silently match a group.
+const STATUS_FILTER_GROUPS: Record<string, ScheduleStatusFilter> = {
+  Confirmed: "Upcoming",
+  "Pending Payment": "Needs Action",
+  "Pending Approval": "Needs Action",
+  "Waiting Lobby": "Needs Action",
+  "Waiting Venue": "Needs Action",
+  Completed: "Completed",
+  Cancelled: "Cancelled",
+};
+
+const getStatusFilterGroup = (status: string): string => STATUS_FILTER_GROUPS[status] ?? status;
+
 const getActiveFilterCount = (filters: ScheduleFilters) =>
   Number(filters.game !== DEFAULT_FILTERS.game) +
   Number(filters.date !== DEFAULT_FILTERS.date) +
@@ -371,7 +383,7 @@ export default function ScheduleScreen() {
         if (query && !haystack.includes(query)) return false;
         if (filters.game !== "all" && String(room.game || "").toLowerCase() !== filters.game) return false;
         if (!matchesDateFilter(room, filters.date)) return false;
-        if (filters.status !== "Any" && item.status !== filters.status) return false;
+        if (filters.status !== "Any" && getStatusFilterGroup(item.status) !== filters.status) return false;
         if (filters.venue !== "Any" && (isZoneRoom(room) ? "Zone" : "Broadcast") !== filters.venue) return false;
         if (filters.payment !== "Any") {
           const paymentStatus = item.intent?.paymentStatus || room.paymentStatus || "unpaid";
@@ -398,6 +410,17 @@ export default function ScheduleScreen() {
       [item.title, item.subtitle, item.status].join(" ").toLowerCase().includes(query),
     );
   }, [searchQuery, visibleActions]);
+
+  // Raw vs filtered counts let us tell "this tab has no items at all" apart from
+  // "this tab has items but the current filters/search hide them all".
+  const rawTabRoomCount =
+    activeTab === "upcoming"
+      ? categorizedRooms.upcoming.length
+      : activeTab === "actions"
+        ? categorizedRooms.pending.length
+        : categorizedRooms.previous.length;
+  const rawTabCount = rawTabRoomCount + visibleActions.length;
+  const visibleTabCount = visibleRooms.length + filteredActions.length;
 
   return (
     <Screen style={styles.screen} scroll={false}>
@@ -446,73 +469,80 @@ export default function ScheduleScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {visibleRooms.length > 0 ? (
-            visibleRooms.map((item) => (
-              <Pressable key={item.key} onPress={() => router.push(`/matchrooms/${getRoomId(item.room)}` as any)}>
-                <AppCard style={styles.timelineCard}>
-                  <View style={styles.timelineTopRow}>
-                    <Text style={styles.timelineTitle}>{item.room.title}</Text>
-                    <StatusPill tone={item.tone} label={item.status} />
-                  </View>
-                  <Text style={styles.timelineSubtitle}>
-                    {formatGameLabel(item.room.game)} • {item.reason}
-                  </Text>
-                  <Text style={styles.timelineMeta}>
-                    {item.room.scheduledDate || "Date TBA"} {item.room.scheduledTime || ""} • {isZoneRoom(item.room) ? "Zone" : "Broadcast"}
-                  </Text>
-                  <View style={styles.cardActions}>
-                    <Text style={styles.timelineCta}>Open lobby</Text>
-                    {getIntentId(item.intent) ? (
-                      <Pressable
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          router.push(`/matchrooms/book/status/${getIntentId(item.intent)}` as any);
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Text style={styles.timelineCta}>Booking status</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </AppCard>
-              </Pressable>
-            ))
-          ) : activeTab === "upcoming" ? (
-            <AppCard variant="empty" style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No upcoming confirmed matches</Text>
-              <Text style={styles.emptyText}>
-                Confirmed, full, venue-approved matchrooms appear here.
-              </Text>
-            </AppCard>
-          ) : null}
+          {visibleRooms.map((item) => (
+            <Pressable key={item.key} onPress={() => router.push(`/matchrooms/${getRoomId(item.room)}` as any)}>
+              <AppCard style={styles.timelineCard}>
+                <View style={styles.timelineTopRow}>
+                  <Text style={styles.timelineTitle}>{item.room.title}</Text>
+                  <StatusPill tone={item.tone} label={item.status} />
+                </View>
+                <Text style={styles.timelineSubtitle}>
+                  {formatGameLabel(item.room.game)} • {item.reason}
+                </Text>
+                <Text style={styles.timelineMeta}>
+                  {item.room.scheduledDate || "Date TBA"} {item.room.scheduledTime || ""} • {isZoneRoom(item.room) ? "Zone" : "Broadcast"}
+                </Text>
+                <View style={styles.cardActions}>
+                  <Text style={styles.timelineCta}>Open lobby</Text>
+                  {getIntentId(item.intent) ? (
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        router.push(`/matchrooms/book/status/${getIntentId(item.intent)}` as any);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.timelineCta}>Booking status</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </AppCard>
+            </Pressable>
+          ))}
 
-          {filteredActions.length > 0 ? (
-            filteredActions.map((item) => (
-              <Pressable key={item.key} onPress={item.onPress}>
-                <AppCard style={styles.timelineCard}>
-                  <View style={styles.timelineTopRow}>
-                    <Text style={styles.timelineTitle}>{item.title}</Text>
-                    <StatusPill tone={getTimelineTone(item.status)} label={item.status} />
-                  </View>
-                  <Text style={styles.timelineSubtitle}>{item.subtitle}</Text>
-                  <Text style={styles.timelineCta}>{item.cta}</Text>
+          {filteredActions.map((item) => (
+            <Pressable key={item.key} onPress={item.onPress}>
+              <AppCard style={styles.timelineCard}>
+                <View style={styles.timelineTopRow}>
+                  <Text style={styles.timelineTitle}>{item.title}</Text>
+                  <StatusPill tone={getTimelineTone(item.status)} label={item.status} />
+                </View>
+                <Text style={styles.timelineSubtitle}>{item.subtitle}</Text>
+                <Text style={styles.timelineCta}>{item.cta}</Text>
+              </AppCard>
+            </Pressable>
+          ))}
+
+          {visibleTabCount === 0 ? (
+            rawTabCount === 0 ? (
+              activeTab === "upcoming" ? (
+                <AppCard variant="empty" style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>No upcoming confirmed matches</Text>
+                  <Text style={styles.emptyText}>
+                    Confirmed, full, venue-approved matchrooms appear here.
+                  </Text>
                 </AppCard>
-              </Pressable>
-            ))
-          ) : activeTab === "actions" && visibleRooms.length === 0 ? (
-            <AppCard variant="empty" style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Nothing is pending</Text>
-              <Text style={styles.emptyText}>
-                Unpaid seats, lobby-fill waits, captain approvals, and venue approvals will surface here.
-              </Text>
-            </AppCard>
-          ) : activeTab === "history" && visibleRooms.length === 0 ? (
-            <AppCard variant="empty" style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No history yet</Text>
-              <Text style={styles.emptyText}>
-                Completed, cancelled, incomplete, and past matchrooms will build your timeline history.
-              </Text>
-            </AppCard>
+              ) : activeTab === "actions" ? (
+                <AppCard variant="empty" style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Nothing is pending</Text>
+                  <Text style={styles.emptyText}>
+                    Unpaid seats, lobby-fill waits, captain approvals, and venue approvals will surface here.
+                  </Text>
+                </AppCard>
+              ) : (
+                <AppCard variant="empty" style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>No history yet</Text>
+                  <Text style={styles.emptyText}>
+                    Completed, cancelled, incomplete, and past matchrooms will build your timeline history.
+                  </Text>
+                </AppCard>
+              )
+            ) : (
+              <AppCard variant="empty" style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No schedule items match these filters.</Text>
+                <Text style={styles.emptyText}>Reset filters to view all schedule items.</Text>
+              </AppCard>
+            )
           ) : null}
         </ScrollView>
       )}
@@ -559,25 +589,25 @@ function ScheduleFilterDrawer({
             onSelect={(value) => onChange({ game: value })}
           />
           <DiscoverFilterRow
-            label="Date"
+            label="Date Range"
             options={["Any", "Today", "Tomorrow", "This Week"]}
             selected={filters.date}
             onSelect={(value) => onChange({ date: value as ScheduleDateFilter })}
           />
           <DiscoverFilterRow
             label="Status"
-            options={["Any", "Confirmed", "Pending Payment", "Pending Approval", "Waiting Lobby", "Waiting Venue", "Completed", "Cancelled"]}
+            options={["Any", "Upcoming", "Needs Action", "Completed", "Cancelled"]}
             selected={filters.status}
             onSelect={(value) => onChange({ status: value as ScheduleStatusFilter })}
           />
           <DiscoverFilterRow
-            label="Venue"
-            options={["Any", "Zone", "Broadcast"]}
+            label="Booking Type"
+            options={["Any", { key: "Zone", label: "Zone Booking" }, "Broadcast"]}
             selected={filters.venue}
             onSelect={(value) => onChange({ venue: value as ScheduleVenueFilter })}
           />
           <DiscoverFilterRow
-            label="Payment"
+            label="Payment Status"
             options={["Any", "Paid", "Unpaid"]}
             selected={filters.payment}
             onSelect={(value) => onChange({ payment: value as SchedulePaymentFilter })}

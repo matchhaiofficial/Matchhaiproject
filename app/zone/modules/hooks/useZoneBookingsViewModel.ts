@@ -5,17 +5,22 @@ import {
   type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
 
-type RequestFilter = "all" | "open" | "accepted";
 type GameFilter = "all" | string;
 type TimeOfDayFilter = "all" | "day" | "night";
+type DateRangeFilter = "all" | "today" | "next7";
+type RequestTypeFilter = "all" | "direct" | "broadcast";
+type RequestStatusFilter = "all" | "open" | "pending_payment";
 
 type Params = {
   zone: any;
   queue: ZoneBookingQueueItem[];
   matchrooms: ZoneMatchroomListItem[];
-  requestFilter: RequestFilter;
   gameFilter: GameFilter;
   timeOfDayFilter: TimeOfDayFilter;
+  dateRangeFilter: DateRangeFilter;
+  branchFilter: string;
+  requestTypeFilter: RequestTypeFilter;
+  requestStatusFilter: RequestStatusFilter;
   searchQuery: string;
   selectedRequestId: string | null;
   monthCursor: Date;
@@ -28,6 +33,88 @@ const toMillis = (value: any) => {
   if (value instanceof Date) return value.getTime();
   if (typeof value === "number") return value;
   return 0;
+};
+
+export const toScheduleMillis = (value: any) => {
+  if (!value) return 0;
+  const direct = toMillis(value);
+  if (direct) return direct;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (dateOnly) {
+      return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])).getTime();
+    }
+    const parsed = Date.parse(trimmed);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const matchesScheduleRange = (millis: number, range: DateRangeFilter) => {
+  if (range === "all") return true;
+  if (!millis) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const startMs = start.getTime();
+  if (range === "today") return millis >= startMs && millis < startMs + 24 * 60 * 60 * 1000;
+  return millis >= startMs && millis < startMs + 7 * 24 * 60 * 60 * 1000;
+};
+
+const normalizeBranchToken = (value?: string | null) =>
+  String(value || "").trim().toLowerCase();
+
+const getRequestBranchId = (item: ZoneBookingQueueItem) => {
+  const raw = item.raw || {};
+  return String(
+    item.allocatedBranchId ||
+      raw.branchId ||
+      raw.selectedBranchId ||
+      raw.targetBranchId ||
+      raw.confirmedBranchId ||
+      "",
+  ).trim();
+};
+
+// Branch matching for requests is heuristic: open/broadcast requests usually have no confirmed
+// branch, only an area. We match by allocatedBranchId first, then fall back to area; unknown or
+// unmatchable requests are NOT hidden (they pass) so admins never lose sight of them.
+const matchesRequestBranch = (
+  item: ZoneBookingQueueItem,
+  branchFilter: string,
+  branches: any[],
+) => {
+  if (branchFilter === "all") return true;
+  const allocated = getRequestBranchId(item);
+  if (allocated) return allocated === branchFilter;
+  const targetBranch = branches.find((branch) => String(branch?.id) === branchFilter);
+  const branchArea = normalizeBranchToken(targetBranch?.areaLabel);
+  if (!branchArea) return true;
+  const raw = item.raw || {};
+  const requestAreas = [
+    item.targetAreaLabel,
+    raw.targetAreaLabel,
+    raw.branchAreaLabel,
+    raw.areaLabel,
+    ...(item.preferredAreas || []),
+  ]
+    .filter(Boolean)
+    .map(normalizeBranchToken);
+  if (requestAreas.length === 0) return true;
+  return requestAreas.includes(branchArea);
+};
+
+const matchesRequestType = (item: ZoneBookingQueueItem, typeFilter: RequestTypeFilter) => {
+  if (typeFilter === "all") return true;
+  const kind = normalizeBranchToken(item.requestKind);
+  const mode = normalizeBranchToken(item.locationMode);
+  const isBroadcast = kind.includes("broadcast") || mode === "broadcast";
+  return typeFilter === "broadcast" ? isBroadcast : !isBroadcast;
+};
+
+const matchesRequestStatus = (item: ZoneBookingQueueItem, statusFilter: RequestStatusFilter) => {
+  if (statusFilter === "all") return true;
+  return normalizeBranchToken(item.status) === statusFilter;
 };
 
 export const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {
@@ -65,9 +152,12 @@ export function useZoneBookingsViewModel({
   zone,
   queue,
   matchrooms,
-  requestFilter,
   gameFilter,
   timeOfDayFilter,
+  dateRangeFilter,
+  branchFilter,
+  requestTypeFilter,
+  requestStatusFilter,
   searchQuery,
   selectedRequestId,
   monthCursor,
@@ -106,6 +196,7 @@ export function useZoneBookingsViewModel({
 
   const filteredQueue = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
+    const branches = Array.isArray(zone?.branches) ? zone.branches : [];
     const toClockHour = (value?: string | null) => {
       const raw = String(value || "").trim();
       const twelveHour = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -122,13 +213,16 @@ export function useZoneBookingsViewModel({
     };
 
     return combinedQueue.filter((item) => {
-      const requestOk = requestFilter === "all" ? true : item.status === requestFilter;
       const gameOk = gameFilter === "all" ? true : item.gameKey === gameFilter;
       const hour = toClockHour(item.preferredTime);
       const timeOk =
         timeOfDayFilter === "all" ||
         hour === null ||
         (timeOfDayFilter === "day" ? hour >= 6 && hour < 18 : hour < 6 || hour >= 18);
+      const dateOk = matchesScheduleRange(toScheduleMillis(item.preferredDate), dateRangeFilter);
+      const branchOk = matchesRequestBranch(item, branchFilter, branches);
+      const typeOk = matchesRequestType(item, requestTypeFilter);
+      const statusOk = matchesRequestStatus(item, requestStatusFilter);
       const searchOk =
         normalizedSearch.length === 0 ||
         [
@@ -141,9 +235,19 @@ export function useZoneBookingsViewModel({
           .join(" ")
           .toLowerCase()
           .includes(normalizedSearch);
-      return requestOk && gameOk && timeOk && searchOk;
+      return gameOk && timeOk && dateOk && branchOk && typeOk && statusOk && searchOk;
     });
-  }, [combinedQueue, gameFilter, requestFilter, searchQuery, timeOfDayFilter]);
+  }, [
+    combinedQueue,
+    gameFilter,
+    timeOfDayFilter,
+    dateRangeFilter,
+    branchFilter,
+    requestTypeFilter,
+    requestStatusFilter,
+    searchQuery,
+    zone?.branches,
+  ]);
 
   const selectedRequest = useMemo(
     () => combinedQueue.find((item) => item.id === selectedRequestId) || null,

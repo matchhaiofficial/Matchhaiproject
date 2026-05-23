@@ -4,6 +4,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 
 
 import {
   AdminEmptyStateCard,
+  AdminFilterDrawer,
   AdminInfoLine,
   AdminListCard,
   AdminPageHeader,
@@ -12,6 +13,7 @@ import {
 import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
+import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
@@ -32,6 +34,46 @@ function statusTone(status?: string | null) {
   return status === "suspended" ? "danger" as const : "success" as const;
 }
 
+function formatLabel(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+const ALL = "All";
+
+// Canonical KYC lifecycle order (matches users.kycVerificationStatus enum).
+// Missing kycVerificationStatus is treated as "not_started".
+const KYC_STATUS_ORDER = [
+  "not_started",
+  "pending",
+  "in_progress",
+  "in_review",
+  "verified",
+  "rejected",
+  "expired",
+] as const;
+
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
 export default function SuperAdminUsersScreen() {
   const router = useRouter();
   const { showToast } = useToast();
@@ -42,6 +84,11 @@ export default function SuperAdminUsersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>(ALL);
+  const [roleFilter, setRoleFilter] = useState<string>(ALL);
+  const [kycFilter, setKycFilter] = useState<string>(ALL);
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
@@ -60,18 +107,53 @@ export default function SuperAdminUsersScreen() {
     void load("initial");
   }, [load]));
 
+  const statusOptions = useMemo(() => {
+    const present = Array.from(new Set(users.map((u) => u.accountStatus || "active"))).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((s) => ({ key: s, label: formatLabel(s) }))];
+  }, [users]);
+
+  const roleOptions = useMemo(() => {
+    const present = Array.from(new Set(users.map((u) => u.role).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((r) => ({ key: r, label: formatLabel(r) }))];
+  }, [users]);
+
+  const kycOptions = useMemo(() => {
+    const present = new Set(users.map((u) => u.kycVerificationStatus || "not_started"));
+    const ordered = KYC_STATUS_ORDER.filter((s) => present.has(s));
+    return [{ key: ALL, label: "All" }, ...ordered.map((s) => ({ key: s, label: formatLabel(s) }))];
+  }, [users]);
+
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return users;
-    return users.filter((user) => [
-      user.fullName,
-      user.username,
-      user.email,
-      user.accountType,
-      user.role,
-      user.accountStatus || "active",
-    ].filter(Boolean).join(" ").toLowerCase().includes(needle));
-  }, [search, users]);
+    return users.filter((user) => {
+      if (statusFilter !== ALL && (user.accountStatus || "active") !== statusFilter) return false;
+      if (roleFilter !== ALL && user.role !== roleFilter) return false;
+      if (kycFilter !== ALL && (user.kycVerificationStatus || "not_started") !== kycFilter) return false;
+      if (!matchesDateRange(user.createdAt, dateFilter)) return false;
+      if (!needle) return true;
+      return [
+        user.fullName,
+        user.username,
+        user.email,
+        user.accountType,
+        user.role,
+        user.accountStatus || "active",
+      ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [search, users, statusFilter, roleFilter, kycFilter, dateFilter]);
+
+  const activeFilterCount =
+    Number(statusFilter !== ALL) +
+    Number(roleFilter !== ALL) +
+    Number(kycFilter !== ALL) +
+    Number(dateFilter !== "Any");
+
+  const resetFilters = useCallback(() => {
+    setStatusFilter(ALL);
+    setRoleFilter(ALL);
+    setKycFilter(ALL);
+    setDateFilter("Any");
+  }, []);
 
   const handleSuspension = async (user: SuperAdminUser, status: "active" | "suspended") => {
     setBusyUserId(user.id);
@@ -100,6 +182,8 @@ export default function SuperAdminUsersScreen() {
         value={search}
         onChangeText={setSearch}
         placeholder="Search users"
+        onFilterPress={() => setDrawerOpen(true)}
+        activeFilterCount={activeFilterCount}
         style={styles.searchBar}
       />
       <SegmentedTabs
@@ -153,10 +237,29 @@ export default function SuperAdminUsersScreen() {
             );
           })}
           {visible.length === 0 ? (
-            <AdminEmptyStateCard title="No users found" description="Try another tab or search term." icon="players" />
+            users.length === 0 ? (
+              <AdminEmptyStateCard title="No users found" description="Try another tab or search term." icon="players" />
+            ) : (
+              <AdminEmptyStateCard title="No users match these filters." description="Reset filters to view all users." icon="players" />
+            )
           ) : null}
         </ScrollView>
       )}
+
+      <AdminFilterDrawer
+        visible={drawerOpen}
+        title="Filters"
+        activeFilterCount={activeFilterCount}
+        onClose={() => setDrawerOpen(false)}
+        onReset={resetFilters}
+        onDone={() => setDrawerOpen(false)}
+        resetDisabled={!activeFilterCount}
+      >
+        <DiscoverFilterRow label="Account Status" options={statusOptions} selected={statusFilter} onSelect={setStatusFilter} />
+        <DiscoverFilterRow label="Role" options={roleOptions} selected={roleFilter} onSelect={setRoleFilter} />
+        <DiscoverFilterRow label="KYC Status" options={kycOptions} selected={kycFilter} onSelect={setKycFilter} />
+        <DiscoverFilterRow label="Created Date" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
+      </AdminFilterDrawer>
     </Screen>
   );
 }

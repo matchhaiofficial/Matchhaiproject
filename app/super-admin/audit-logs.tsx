@@ -65,6 +65,27 @@ function statusTone(status: SuperAdminAuditLog["status"]) {
   return "danger" as const;
 }
 
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+// Audit Date Range maps to the EXISTING backend `from` arg (no new arg, no new index).
+// Audit logs are never future-dated, so only a lower bound is required.
+function dateRangeToFrom(range: DateRangeKey): number | undefined {
+  if (range === "Any") return undefined;
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
+
 function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
   const metadataEntries = item.metadataSafe && typeof item.metadataSafe === "object"
     ? Object.entries(item.metadataSafe).slice(0, 6)
@@ -119,6 +140,7 @@ export default function SuperAdminAuditLogsScreen() {
   const [moduleFilter, setModuleFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
   const [adminFilter, setAdminFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -134,6 +156,7 @@ export default function SuperAdminAuditLogsScreen() {
       action: actionFilter === "all" ? undefined : actionFilter,
       superAdminEmail: adminFilter === "all" ? undefined : adminFilter,
       targetId: search.trim() || undefined,
+      from: dateRangeToFrom(dateFilter),
     });
 
     if (result.ok) setRows(result.data);
@@ -141,7 +164,7 @@ export default function SuperAdminAuditLogsScreen() {
 
     if (mode === "initial") setLoading(false);
     else setRefreshing(false);
-  }, [actionFilter, adminFilter, moduleFilter, search, showToast, statusFilter]);
+  }, [actionFilter, adminFilter, dateFilter, moduleFilter, search, showToast, statusFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -153,7 +176,8 @@ export default function SuperAdminAuditLogsScreen() {
   const activeFilterCount = Number(statusFilter !== "all")
     + Number(moduleFilter !== "all")
     + Number(actionFilter !== "all")
-    + Number(adminFilter !== "all");
+    + Number(adminFilter !== "all")
+    + Number(dateFilter !== "Any");
 
   const adminOptions = useMemo(
     () => [
@@ -191,7 +215,7 @@ export default function SuperAdminAuditLogsScreen() {
       <AdminSearchFilterBar
         value={search}
         onChangeText={setSearch}
-        placeholder="Search target/action/reference"
+        placeholder="Search target ID / action / admin"
         onFilterPress={() => setDrawerOpen(true)}
         activeFilterCount={activeFilterCount}
         style={styles.searchBar}
@@ -226,6 +250,7 @@ export default function SuperAdminAuditLogsScreen() {
           setStatusFilter("all");
           setActionFilter("all");
           setModuleFilter("all");
+          setDateFilter("Any");
         }}
         onDone={() => setDrawerOpen(false)}
         resetDisabled={!activeFilterCount}
@@ -235,6 +260,12 @@ export default function SuperAdminAuditLogsScreen() {
           options={adminOptions}
           selected={adminFilter}
           onSelect={setAdminFilter}
+        />
+        <DiscoverFilterRow
+          label="Date Range"
+          options={DATE_RANGE_OPTIONS}
+          selected={dateFilter}
+          onSelect={(value) => setDateFilter(value as DateRangeKey)}
         />
         <DiscoverFilterRow
           label="Status"

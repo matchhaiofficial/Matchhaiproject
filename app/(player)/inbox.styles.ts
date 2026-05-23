@@ -33,6 +33,53 @@ export default StyleSheet.create({
     contentWrap: {
         flex: 1,
     },
+    filterBar: {
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    filterSummary: {
+        flex: 1,
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 12,
+    },
+    filterButton: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterButtonPressed: {
+        opacity: 0.88,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: COLORS.accent,
+        borderWidth: 2,
+        borderColor: COLORS.backgroundDark,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: '#FFF',
+        fontFamily: FONTS.heading,
+        fontSize: 10,
+        fontWeight: '700',
+    },
 
     // Notification List
     listContent: {
@@ -319,6 +366,67 @@ export default StyleSheet.create({
         fontFamily: FONTS.bold,
         fontSize: 13,
         fontWeight: '600',
+    },
+    filterDrawer: {
+        flex: 1,
+    },
+    filterDrawerContent: {
+        flex: 1,
+    },
+    filterDrawerBody: {
+        paddingTop: SPACING.sm,
+        gap: SPACING.md,
+    },
+    filterDrawerFooter: {
+        backgroundColor: COLORS.cardDark,
+    },
+    filterDrawerFooterRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    filterDrawerFooterButton: {
+        flex: 1,
+    },
+    filterSection: {
+        gap: SPACING.xs,
+    },
+    filterSectionLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 12,
+        textTransform: 'uppercase',
+    },
+    filterChipWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SPACING.sm,
+    },
+    filterChip: {
+        minHeight: 38,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent + '16',
+    },
+    filterChipPressed: {
+        opacity: 0.88,
+    },
+    filterChipText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    filterChipTextActive: {
+        color: COLORS.accent,
     },
 });
 

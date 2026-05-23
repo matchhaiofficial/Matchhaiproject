@@ -12,7 +12,6 @@ import {
 import { AppButton } from "../../../../src/components/AppPrimitives";
 import { Matchroom } from "../../../../src/services/convex/matchService";
 import { COLORS } from "../../../../src/theme";
-import { formatEnumLabel } from "../../../../src/utils/statusLabels";
 import {
   type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
@@ -21,17 +20,48 @@ import styles from "../bookings.styles";
 
 const DRAWER_WIDTH = Math.min(420, Math.round(Dimensions.get("window").width * 0.94));
 
+type FilterOption = { key: string; label: string };
+type FilterGroup = {
+  key: string;
+  label: string;
+  options: readonly FilterOption[];
+  value: string;
+  onSelect: (value: string) => void;
+};
+
+function FilterChipGroup({ label, options, value, onSelect }: FilterGroup) {
+  return (
+    <>
+      <Text style={styles.filterSectionLabel}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        {options.map((option) => (
+          <Pressable
+            key={option.key}
+            onPress={() => onSelect(option.key)}
+            style={[styles.filterChip, value === option.key && styles.filterChipActive]}
+          >
+            <Text
+              style={[styles.filterChipText, value === option.key && styles.filterChipTextActive]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </>
+  );
+}
+
 type Props = {
   loadingMatchrooms: boolean;
   matchrooms: ZoneMatchroomListItem[];
   showFilters: boolean;
   onToggleFilters: () => void;
-  statusFilters: readonly string[];
-  statusFilter: string;
+  filterGroups: FilterGroup[];
   searchQuery: string;
   activeFilterCount: number;
   onSearchQueryChange: (query: string) => void;
-  onSelectStatusFilter: (filter: string) => void;
+  onResetFilters: () => void;
   focusedMatchroomId: string | null;
   buildMatchroomCardData: (item: ZoneMatchroomListItem) => Matchroom;
 };
@@ -41,12 +71,11 @@ export function ZoneBookingsMatchroomsSection({
   matchrooms,
   showFilters,
   onToggleFilters,
-  statusFilters,
-  statusFilter,
+  filterGroups,
   searchQuery,
   activeFilterCount,
   onSearchQueryChange,
-  onSelectStatusFilter,
+  onResetFilters,
   focusedMatchroomId,
   buildMatchroomCardData,
 }: Props) {
@@ -93,28 +122,17 @@ export function ZoneBookingsMatchroomsSection({
         <View style={[styles.filterDrawerContent, { paddingTop: Math.max(insets.top, 16) }]}>
           <AppModalHeader title="Filters" subtitle="Matchrooms" onClose={onToggleFilters} compact />
           <AppModalBody scroll contentContainerStyle={styles.filtersDrawerBody}>
-            <Text style={styles.filterSectionLabel}>Matchroom status</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {statusFilters.map((filter) => (
-                <Pressable
-                  key={filter}
-                  onPress={() => onSelectStatusFilter(filter)}
-                  style={[
-                    styles.filterChip,
-                    statusFilter === filter && styles.filterChipActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      statusFilter === filter && styles.filterChipTextActive,
-                    ]}
-                  >
-                    {formatEnumLabel(filter)}
-                  </Text>
-                </Pressable>
+            <View style={styles.filtersWrap}>
+              {filterGroups.map((group) => (
+                <FilterChipGroup
+                  key={group.key}
+                  label={group.label}
+                  options={group.options}
+                  value={group.value}
+                  onSelect={group.onSelect}
+                />
               ))}
-            </ScrollView>
+            </View>
           </AppModalBody>
           <AppModalFooter style={styles.filterDrawerFooter}>
             <View style={{ flexDirection: "row", gap: 12 }}>
@@ -122,7 +140,7 @@ export function ZoneBookingsMatchroomsSection({
                 variant="ghost"
                 disabled={activeFilterCount === 0}
                 style={{ flex: 1 }}
-                onPress={() => onSelectStatusFilter("all")}
+                onPress={onResetFilters}
               >
                 Reset
               </AppButton>

@@ -54,6 +54,65 @@ export default StyleSheet.create({
     activeTabText: {
         color: '#FFF',
     },
+    filterBar: {
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        marginBottom: SPACING.md,
+    },
+    searchBar: {
+        flex: 1,
+        height: 48,
+        backgroundColor: COLORS.inputBackground,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.inputBorder,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.md,
+    },
+    searchInput: {
+        flex: 1,
+        color: COLORS.text,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.input,
+        paddingVertical: 0,
+        paddingHorizontal: SPACING.sm,
+    },
+    filterButton: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterButtonPressed: {
+        opacity: 0.88,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: COLORS.accent,
+        borderWidth: 2,
+        borderColor: COLORS.backgroundDark,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    filterBadgeText: {
+        color: '#FFF',
+        fontFamily: FONTS.heading,
+        fontSize: 10,
+        fontWeight: '700',
+    },
     listContent: {
         paddingBottom: 100,
     },
@@ -187,5 +246,62 @@ export default StyleSheet.create({
         justifyContent: "center",
         backgroundColor: COLORS.backgroundDark,
     },
+    filterDrawer: {
+        flex: 1,
+    },
+    filterDrawerContent: {
+        flex: 1,
+    },
+    filterDrawerBody: {
+        paddingTop: SPACING.sm,
+        gap: SPACING.md,
+    },
+    filterDrawerFooter: {
+        backgroundColor: COLORS.cardDark,
+    },
+    filterDrawerFooterRow: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+    },
+    filterDrawerFooterButton: {
+        flex: 1,
+    },
+    filterSection: {
+        gap: SPACING.xs,
+    },
+    filterSectionLabel: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.interSemiBold,
+        fontSize: 12,
+        textTransform: 'uppercase',
+    },
+    filterChipWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SPACING.sm,
+    },
+    filterChip: {
+        minHeight: 38,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: RADII.pill,
+        borderWidth: 1,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: COLORS.overlayLight,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent + '16',
+    },
+    filterChipText: {
+        color: COLORS.textSecondary,
+        fontFamily: FONTS.body,
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    filterChipTextActive: {
+        color: COLORS.accent,
+    },
 });
-

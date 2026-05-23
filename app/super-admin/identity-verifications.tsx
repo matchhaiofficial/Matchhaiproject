@@ -46,6 +46,32 @@ function formatLabel(value?: string | null) {
   return String(value || "Not available").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
+function getVerificationTimestamp(row: SuperAdminIdentityVerification): number | null {
+  return row.submittedAt ?? row.verifiedAt ?? row.rejectedAt ?? null;
+}
+
 function statusTone(status: string) {
   if (status === "verified") return "success" as const;
   if (status === "rejected" || status === "expired") return "danger" as const;
@@ -149,6 +175,7 @@ export default function SuperAdminIdentityVerificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [manualReasons, setManualReasons] = useState<Record<string, string>>({});
   const [manualVerifyingId, setManualVerifyingId] = useState<string | null>(null);
@@ -193,25 +220,26 @@ export default function SuperAdminIdentityVerificationsScreen() {
     await load("refresh");
   }, [load, manualReasons, showToast]);
 
-  const activeFilterCount = Number(statusFilter !== "all") + Number(roleFilter !== "all");
+  const activeFilterCount = Number(statusFilter !== "all") + Number(roleFilter !== "all") + Number(dateFilter !== "Any");
 
   const visibleRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const statusFilteredRows = statusFilter === "pending"
       ? rows.filter((row) => ["not_started", "pending", "in_progress", "in_review"].includes(row.status))
       : rows;
-    if (!needle) return statusFilteredRows;
-    return statusFilteredRows.filter((row) =>
-      [
+    return statusFilteredRows.filter((row) => {
+      if (!matchesDateRange(getVerificationTimestamp(row), dateFilter)) return false;
+      if (!needle) return true;
+      return [
         row.userName,
         row.userEmail,
         row.role,
         row.status,
         row.workflowId,
         row.rejectionReason,
-      ].filter(Boolean).join(" ").toLowerCase().includes(needle),
-    );
-  }, [rows, search, statusFilter]);
+      ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [rows, search, statusFilter, dateFilter]);
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
@@ -250,11 +278,19 @@ export default function SuperAdminIdentityVerificationsScreen() {
             />
           ))}
           {visibleRows.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No verifications found"
-              description="Didit KYC sessions will appear here after users start verification."
-              icon="verified-user"
-            />
+            rows.length === 0 ? (
+              <AdminEmptyStateCard
+                title="No verifications found"
+                description="Didit KYC sessions will appear here after users start verification."
+                icon="verified-user"
+              />
+            ) : (
+              <AdminEmptyStateCard
+                title="No verifications match these filters."
+                description="Reset filters to view all verifications."
+                icon="verified-user"
+              />
+            )
           ) : null}
         </ScrollView>
       )}
@@ -267,6 +303,7 @@ export default function SuperAdminIdentityVerificationsScreen() {
         onReset={() => {
           setStatusFilter("all");
           setRoleFilter("all");
+          setDateFilter("Any");
         }}
         onDone={() => setDrawerOpen(false)}
         resetDisabled={!activeFilterCount}
@@ -282,6 +319,12 @@ export default function SuperAdminIdentityVerificationsScreen() {
           options={ROLE_FILTERS.map((item) => ({ key: item.key, label: item.label }))}
           selected={roleFilter}
           onSelect={(value) => setRoleFilter(value as typeof roleFilter)}
+        />
+        <DiscoverFilterRow
+          label="Date Range"
+          options={DATE_RANGE_OPTIONS}
+          selected={dateFilter}
+          onSelect={(value) => setDateFilter(value as DateRangeKey)}
         />
       </AdminFilterDrawer>
     </Screen>

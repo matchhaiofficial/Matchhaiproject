@@ -33,6 +33,30 @@ function formatType(value?: string | null) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const ALL = "All";
+
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
 export default function SuperAdminReportsTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
@@ -42,6 +66,8 @@ export default function SuperAdminReportsTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("Any");
+  const [gameFilter, setGameFilter] = useState<string>(ALL);
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
@@ -58,10 +84,17 @@ export default function SuperAdminReportsTab() {
     void load("initial");
   }, [load]));
 
+  const gameOptions = useMemo(() => {
+    const present = Array.from(new Set(reports.map((r) => r.game).filter(Boolean) as string[])).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((g) => ({ key: g, label: g.toUpperCase() }))];
+  }, [reports]);
+
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return reports.filter((report) => {
       if (typeFilter !== "Any" && report.type !== typeFilter) return false;
+      if (gameFilter !== ALL && report.game !== gameFilter) return false;
+      if (!matchesDateRange(report.createdAt, dateFilter)) return false;
       if (!needle) return true;
       return [
         report.reason,
@@ -75,9 +108,18 @@ export default function SuperAdminReportsTab() {
         report.type,
       ].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [reports, search, typeFilter]);
+  }, [reports, search, typeFilter, gameFilter, dateFilter]);
 
-  const activeCount = Number(typeFilter !== "Any");
+  const activeCount =
+    Number(typeFilter !== "Any") +
+    Number(gameFilter !== ALL) +
+    Number(dateFilter !== "Any");
+
+  const resetFilters = useCallback(() => {
+    setTypeFilter("Any");
+    setGameFilter(ALL);
+    setDateFilter("Any");
+  }, []);
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
@@ -142,11 +184,19 @@ export default function SuperAdminReportsTab() {
             </AdminListCard>
           ))}
           {visible.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No reports here"
-              description="Try another tab, search, or filter."
-              icon="reports"
-            />
+            reports.length === 0 ? (
+              <AdminEmptyStateCard
+                title="No reports here"
+                description="Reports in this state will appear here."
+                icon="reports"
+              />
+            ) : (
+              <AdminEmptyStateCard
+                title="No reports match these filters."
+                description="Reset filters to view all reports."
+                icon="reports"
+              />
+            )
           ) : null}
         </ScrollView>
       )}
@@ -156,16 +206,18 @@ export default function SuperAdminReportsTab() {
         title="Filters"
         activeFilterCount={activeCount}
         onClose={() => setDrawerOpen(false)}
-        onReset={() => setTypeFilter("Any")}
+        onReset={resetFilters}
         onDone={() => setDrawerOpen(false)}
         resetDisabled={!activeCount}
       >
         <DiscoverFilterRow
-          label="Report type"
+          label="Target Type"
           options={["Any", "Player report", "Matchroom report", "Zone / venue report"]}
           selected={typeFilter === "user_report" ? "Player report" : typeFilter === "matchroom_complaint" ? "Matchroom report" : typeFilter === "zone_complaint" ? "Zone / venue report" : "Any"}
           onSelect={(value) => setTypeFilter(value === "Player report" ? "user_report" : value === "Matchroom report" ? "matchroom_complaint" : value === "Zone / venue report" ? "zone_complaint" : "Any")}
         />
+        <DiscoverFilterRow label="Game" options={gameOptions} selected={gameFilter} onSelect={setGameFilter} />
+        <DiscoverFilterRow label="Date Range" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
       </AdminFilterDrawer>
     </Screen>
   );

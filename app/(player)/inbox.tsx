@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
   FlatList,
   Pressable,
   StatusBar,
@@ -9,9 +10,17 @@ import {
   View,
 } from "react-native";
 import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
+import {
+  AppDrawer,
+  AppModalBody,
+  AppModalFooter,
+  AppModalHeader,
+} from "../../src/components/AppModalPrimitives";
+import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
@@ -26,10 +35,72 @@ import { InboxEmptyState } from "./components/InboxEmptyState";
 import { InboxNotificationCard } from "./components/InboxNotificationCard";
 import { InboxSwipeableRow } from "./components/InboxSwipeableRow";
 import { useInboxActions } from "./hooks/useInboxActions";
-import { useInboxViewModel } from "./hooks/useInboxViewModel";
+import { useInboxViewModel, type InboxTypeFilter } from "./hooks/useInboxViewModel";
 import styles from "./inbox.styles";
 
 const HIT_SLOP_8 = { top: 8, bottom: 8, left: 8, right: 8 } as const;
+const DRAWER_WIDTH = Math.min(380, Dimensions.get("window").width * 0.9);
+
+const TYPE_FILTER_OPTIONS: { key: InboxTypeFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "matchrooms", label: "Matchrooms" },
+  { key: "teams", label: "Teams" },
+  { key: "payments", label: "Payments" },
+  { key: "support", label: "Support" },
+  { key: "reports", label: "Reports" },
+  { key: "system", label: "System" },
+];
+
+function InboxTypeFilterRow({
+  selected,
+  onSelect,
+}: {
+  selected: InboxTypeFilter;
+  onSelect: (value: InboxTypeFilter) => void;
+}) {
+  return (
+    <View style={styles.filterSection}>
+      <Text style={styles.filterSectionLabel}>Type</Text>
+      <View style={styles.filterChipWrap}>
+        {TYPE_FILTER_OPTIONS.map((option) => {
+          const isSelected = selected === option.key;
+          return (
+            <Pressable
+              key={option.key}
+              onPress={() => onSelect(option.key)}
+              style={({ pressed }) => [
+                styles.filterChip,
+                isSelected && styles.filterChipActive,
+                pressed && styles.filterChipPressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  isSelected && styles.filterChipTextActive,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function FilteredInboxEmptyState() {
+  return (
+    <View style={styles.emptyContent}>
+      <View style={styles.emptyIconContainer}>
+        <AppIcon name="filters" size={40} tone="muted" />
+      </View>
+      <Text style={styles.emptyTitle}>No notifications match these filters.</Text>
+      <Text style={styles.emptySubtitle}>Reset filters to view all notifications.</Text>
+    </View>
+  );
+}
 
 const InboxListItem = React.memo(function InboxListItem({
   item,
@@ -113,6 +184,7 @@ const InboxListItem = React.memo(function InboxListItem({
 export default function Inbox() {
   useRouteLogger("InboxScreen");
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
@@ -123,6 +195,8 @@ export default function Inbox() {
     usePressScale({ activeScale: 0.99 });
 
   const [activeTab, setActiveTab] = useState<"pending" | "resolved">("pending");
+  const [typeFilter, setTypeFilter] = useState<InboxTypeFilter>("all");
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const autoMarkedReadForUserRef = useRef<string | null>(null);
@@ -157,11 +231,21 @@ export default function Inbox() {
     router.push(`/teams/challenge?id=${challengeId}` as any);
   }, [router]);
 
-  const { hasUnread, pendingCount, filteredNotifications, resolvedCount } =
+  const {
+    hasUnread,
+    pendingCount,
+    tabNotifications,
+    filteredNotifications,
+    resolvedCount,
+  } =
     useInboxViewModel({
       notifications,
       activeTab,
+      typeFilter,
     });
+
+  const activeFilterCount = typeFilter === "all" ? 0 : 1;
+  const hasTabNotifications = tabNotifications.length > 0;
 
   const {
     handleFriendResponse,
@@ -284,6 +368,28 @@ export default function Inbox() {
           style={styles.segmentTabs}
         />
 
+        <View style={styles.filterBar}>
+          <Text style={styles.filterSummary}>
+            {filteredNotifications.length} of {tabNotifications.length} notification
+            {tabNotifications.length === 1 ? "" : "s"}
+          </Text>
+          <Pressable
+            onPress={() => setFilterDrawerOpen(true)}
+            style={({ pressed }) => [
+              styles.filterButton,
+              pressed && styles.filterButtonPressed,
+            ]}
+            hitSlop={HIT_SLOP_8}
+          >
+            <AppIcon name="filters" size={20} color={COLORS.text} />
+            {activeFilterCount > 0 ? (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
+
       {activeTab === "resolved" && resolvedCount > 0 && (
         <Pressable
           onPress={handleClearAllHistory}
@@ -326,10 +432,52 @@ export default function Inbox() {
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={7}
-          ListEmptyComponent={<InboxEmptyState activeTab={activeTab} />}
+          ListEmptyComponent={
+            hasTabNotifications ? (
+              <FilteredInboxEmptyState />
+            ) : (
+              <InboxEmptyState activeTab={activeTab} />
+            )
+          }
         />
       )}
       </Animated.View>
+
+      <AppDrawer
+        visible={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        drawerStyle={[styles.filterDrawer, { width: DRAWER_WIDTH }]}
+      >
+        <View style={[styles.filterDrawerContent, { paddingTop: Math.max(insets.top, 16) }]}>
+          <AppModalHeader
+            title="Filters"
+            subtitle={`${activeFilterCount} active inbox filters`}
+            onClose={() => setFilterDrawerOpen(false)}
+            compact
+          />
+          <AppModalBody scroll contentContainerStyle={styles.filterDrawerBody}>
+            <InboxTypeFilterRow selected={typeFilter} onSelect={setTypeFilter} />
+          </AppModalBody>
+          <AppModalFooter style={styles.filterDrawerFooter}>
+            <View style={styles.filterDrawerFooterRow}>
+              <AppButton
+                variant="ghost"
+                disabled={activeFilterCount === 0}
+                style={styles.filterDrawerFooterButton}
+                onPress={() => setTypeFilter("all")}
+              >
+                Reset
+              </AppButton>
+              <AppButton
+                style={styles.filterDrawerFooterButton}
+                onPress={() => setFilterDrawerOpen(false)}
+              >
+                Done
+              </AppButton>
+            </View>
+          </AppModalFooter>
+        </View>
+      </AppDrawer>
     </Screen>
   );
 }
