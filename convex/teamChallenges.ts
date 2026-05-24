@@ -23,7 +23,7 @@ const challengeStatuses = new Set([
   "expired",
 ]);
 
-const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 3;
+const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 2;
 const TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS = 2;
 const TEAM_CHALLENGE_MIN_SCHEDULE_MS = TEAM_CHALLENGE_MIN_SCHEDULE_DAYS * 24 * 60 * 60 * 1000;
 
@@ -43,7 +43,7 @@ function validateTeamChallengeScheduledAt(scheduledAt: unknown, nowMs = Date.now
   const maxAt = addMonths(now, TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS).getTime();
 
   if (scheduledAt < minAt) {
-    throw new Error("Team challenges must be scheduled at least 3 days in advance.");
+    throw new Error("Team challenges must be scheduled at least 2 days in advance.");
   }
   if (scheduledAt > maxAt) {
     throw new Error("Team challenges cannot be scheduled more than 2 months in advance.");

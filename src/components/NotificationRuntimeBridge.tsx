@@ -10,7 +10,7 @@ import {
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
-import { ensureLocalNotificationsConfigured, requestLocalNotificationPermissions, clearAllMatchroomReminders } from "../services/localNotifications";
+import { ensureLocalNotificationsConfigured, requestLocalNotificationPermissions, clearAllMatchroomReminders, runOneTimeReminderCleanupIfNeeded } from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
 
 const LAST_HANDLED_RESPONSE_KEY = "notifications.lastHandledResponse.v1";
@@ -55,6 +55,7 @@ export default function NotificationRuntimeBridge() {
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const [appStateTick, setAppStateTick] = useState(0);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [cleanupReady, setCleanupReady] = useState(false);
   const userId = user?._id as Id<"users"> | undefined;
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
@@ -67,6 +68,11 @@ export default function NotificationRuntimeBridge() {
     ensureLocalNotificationsConfigured()
       .then(() => requestLocalNotificationPermissions())
       .catch(() => null);
+
+    // One-time flush of legacy/bad reminders before reconciliation recreates
+    // valid future ones. Gate reconciliation until this resolves so we don't
+    // immediately wipe freshly scheduled reminders.
+    void runOneTimeReminderCleanupIfNeeded().finally(() => setCleanupReady(true));
 
     const responseSub = addNotificationResponseReceivedListener((response) => {
       void handleNotificationResponse(response, (href) => setPendingHref(href));
@@ -104,6 +110,7 @@ export default function NotificationRuntimeBridge() {
   }, [convexAuthLoading, isAuthenticated, pendingHref, user?._id]);
 
   useEffect(() => {
+    if (!cleanupReady) return;
     if (!user?._id) {
       void clearAllMatchroomReminders();
       return;
@@ -114,7 +121,7 @@ export default function NotificationRuntimeBridge() {
       upcomingRooms,
       minutesBefore: 15,
     }).catch(() => null);
-  }, [appStateTick, upcomingRooms, user?._id]);
+  }, [appStateTick, upcomingRooms, user?._id, cleanupReady]);
 
   return null;
 }

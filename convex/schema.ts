@@ -494,7 +494,9 @@ export default defineSchema({
     .index("by_orderRefNum", ["orderRefNum"])
     .index("by_checkoutToken", ["checkoutToken"])
     .index("by_bookingIntentId", ["bookingIntentId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_status_and_createdAt", ["status", "createdAt"]),
 
   // ============================================
   // MATCHROOMS

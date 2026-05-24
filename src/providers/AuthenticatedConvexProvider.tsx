@@ -4,7 +4,7 @@ import { ConvexProviderWithAuth } from "convex/react";
 
 import { authClient } from "../lib/auth-client";
 import { loadCachedAuthSession, saveCachedAuthSession } from "../lib/authSessionCache";
-import { createConvexClient } from "../lib/convex";
+import { createConvexClient, setActiveConvexClient } from "../lib/convex";
 import Logger from "../utils/logger";
 import type { AuthSession } from "../lib/auth-client";
 
@@ -173,6 +173,15 @@ export default function AuthenticatedConvexProvider({ children }: { children: Re
   const { data: session } = authClient.useSession();
   const sessionKey = session?.session?.id || "anonymous";
   const convex = useMemo(() => createConvexClient(), [sessionKey]);
+
+  // Register the per-session, auth-bridged client as the active client so that
+  // direct service calls made outside the React tree (e.g. zone admin booking
+  // actions) share the same authenticated session as React hooks. Without this,
+  // those calls would use the unauthenticated default client and fail with
+  // "Unauthenticated" once a Convex function requires an identity.
+  useEffect(() => {
+    setActiveConvexClient(convex);
+  }, [convex]);
 
   return (
     <ConvexProviderWithAuth key={sessionKey} client={convex} useAuth={useBetterAuthConvexAuth}>

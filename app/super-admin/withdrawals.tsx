@@ -12,10 +12,12 @@ import {
 } from "react-native";
 
 import { AppIcon } from "../../src/components/AppIcon";
-import { AdminEmptyStateCard, AdminInfoLine, AdminListCard, AdminPageHeader } from "../../src/components/AdminSurface";
+import { AdminEmptyStateCard, AdminFilterDrawer, AdminInfoLine, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
 import { AppDialog, AppDrawer, AppModalBody, AppModalFooter, AppModalHeader } from "../../src/components/AppModalPrimitives";
 import { AppButton, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
+import SegmentedTabs from "../../src/components/SegmentedTabs";
+import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
@@ -44,6 +46,78 @@ function statusTone(status?: string | null) {
   return "neutral" as const;
 }
 
+const ALL = "All";
+
+// Status view. Backend only knows pending/completed/failed; "rejected" is derived
+// (failed + adminDecision === "rejected") and "failed" is the system-failure remainder
+// (failed + adminDecision !== "rejected"). "all" fetches every status via the "any" arg.
+type StatusTabKey = "all" | "pending" | "completed" | "rejected" | "failed";
+const STATUS_TABS: { key: StatusTabKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "pending", label: "Pending" },
+  { key: "completed", label: "Completed" },
+  { key: "rejected", label: "Rejected" },
+  { key: "failed", label: "Failed" },
+];
+
+// Map the UI status tab to the existing backend `status` arg (no new backend args).
+function tabToBackendStatus(tab: StatusTabKey): "any" | "pending" | "completed" | "failed" {
+  if (tab === "all") return "any";
+  if (tab === "rejected" || tab === "failed") return "failed";
+  return tab;
+}
+
+// Tab-scoped post-filter that splits the backend "failed" set into Rejected vs Failed.
+function matchesStatusTab(item: SuperAdminWithdrawalRequest, tab: StatusTabKey): boolean {
+  if (tab === "rejected") return item.status === "failed" && item.adminDecision === "rejected";
+  if (tab === "failed") return item.status === "failed" && item.adminDecision !== "rejected";
+  return true;
+}
+
+function statusTabTitle(tab: StatusTabKey): string {
+  return STATUS_TABS.find((t) => t.key === tab)?.label.toLowerCase() ?? "";
+}
+
+type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
+const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Today", label: "Today" },
+  { key: "Last 7 Days", label: "Last 7 Days" },
+  { key: "Last 30 Days", label: "Last 30 Days" },
+];
+
+function matchesDateRange(timestamp: number | null | undefined, range: DateRangeKey) {
+  if (range === "Any") return true;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+  const now = Date.now();
+  if (range === "Today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startOfToday = start.getTime();
+    return timestamp >= startOfToday && timestamp < startOfToday + 24 * 60 * 60 * 1000;
+  }
+  const days = range === "Last 7 Days" ? 7 : 30;
+  return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
+}
+
+type AmountRangeKey = "Any" | "Under 500" | "500-2000" | "2000-5000" | "Above 5000";
+const AMOUNT_RANGE_OPTIONS: { key: AmountRangeKey; label: string }[] = [
+  { key: "Any", label: "Any" },
+  { key: "Under 500", label: "Under Rs 500" },
+  { key: "500-2000", label: "Rs 500 - Rs 2,000" },
+  { key: "2000-5000", label: "Rs 2,000 - Rs 5,000" },
+  { key: "Above 5000", label: "Above Rs 5,000" },
+];
+
+function matchesAmountRange(amount: number, range: AmountRangeKey) {
+  if (range === "Any") return true;
+  const value = Number(amount || 0);
+  if (range === "Under 500") return value < 500;
+  if (range === "500-2000") return value >= 500 && value <= 2000;
+  if (range === "2000-5000") return value > 2000 && value <= 5000;
+  return value > 5000;
+}
+
 export default function SuperAdminWithdrawalsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
@@ -54,6 +128,12 @@ export default function SuperAdminWithdrawalsScreen() {
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
   const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null);
+  const [statusTab, setStatusTab] = useState<StatusTabKey>("pending");
+  const [search, setSearch] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
+  const [amountFilter, setAmountFilter] = useState<AmountRangeKey>("Any");
+  const [branchFilter, setBranchFilter] = useState<string>(ALL);
 
   const selected = useMemo(
     () => withdrawals.find((item) => item.id === selectedId) || null,
@@ -63,16 +143,59 @@ export default function SuperAdminWithdrawalsScreen() {
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
     else setRefreshing(true);
-    const result = await getZoneWithdrawalRequests({ status: "pending", limit: 50 });
+    const result = await getZoneWithdrawalRequests({ status: tabToBackendStatus(statusTab), limit: 100 });
     if (result.ok) setWithdrawals(result.data);
     else showToast({ type: "error", title: "Withdrawals failed", message: result.message });
     if (mode === "initial") setLoading(false);
     else setRefreshing(false);
-  }, [showToast]);
+  }, [showToast, statusTab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
   }, [load]));
+
+  // Tab-scoped set (splits backend "failed" into Rejected vs Failed) before drawer/search filters.
+  const tabFiltered = useMemo(
+    () => withdrawals.filter((item) => matchesStatusTab(item, statusTab)),
+    [withdrawals, statusTab],
+  );
+
+  const branchOptions = useMemo(() => {
+    const present = Array.from(
+      new Set(tabFiltered.map((w) => w.branchName || w.venueName).filter(Boolean) as string[]),
+    ).sort();
+    return [{ key: ALL, label: "All" }, ...present.map((b) => ({ key: b, label: b }))];
+  }, [tabFiltered]);
+
+  const visible = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return tabFiltered.filter((item) => {
+      if (branchFilter !== ALL && (item.branchName || item.venueName) !== branchFilter) return false;
+      if (!matchesDateRange(item.createdAt, dateFilter)) return false;
+      if (!matchesAmountRange(item.amount, amountFilter)) return false;
+      if (!needle) return true;
+      return [
+        item.ownerName,
+        item.venueName,
+        item.branchName,
+        item.bankName,
+        item.reference,
+        item.accountNumberMasked,
+        String(item.amount),
+      ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [tabFiltered, search, branchFilter, dateFilter, amountFilter]);
+
+  const activeFilterCount =
+    Number(branchFilter !== ALL) +
+    Number(dateFilter !== "Any") +
+    Number(amountFilter !== "Any");
+
+  const resetFilters = useCallback(() => {
+    setBranchFilter(ALL);
+    setDateFilter("Any");
+    setAmountFilter("Any");
+  }, []);
 
   const closeDrawer = useCallback(() => {
     setSelectedId(null);
@@ -142,7 +265,25 @@ export default function SuperAdminWithdrawalsScreen() {
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
-      <AdminPageHeader title="Withdrawals" subtitle="Pending zone withdrawal requests" onBack={() => router.back()} inlineTitle />
+      <AdminPageHeader title="Withdrawals" subtitle="Zone withdrawal requests across all statuses" onBack={() => router.back()} inlineTitle />
+
+      <AdminSearchFilterBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search owner, branch, bank, reference"
+        onFilterPress={() => setDrawerOpen(true)}
+        activeFilterCount={activeFilterCount}
+        style={styles.searchBar}
+      />
+
+      <SegmentedTabs
+        items={STATUS_TABS}
+        value={statusTab}
+        onChange={(value) => setStatusTab(value)}
+        style={styles.tabs}
+        itemTextStyle={styles.tabText}
+      />
+
       {loading ? (
         <View style={styles.loaderWrap}>
           <ActivityIndicator color={COLORS.accent} />
@@ -153,12 +294,12 @@ export default function SuperAdminWithdrawalsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
         >
-          {withdrawals.map((item) => (
+          {visible.map((item) => (
             <AdminListCard
               key={item.id}
               title={formatAmount(item.amount)}
               subtitle={`${item.venueName || item.branchName || "Zone withdrawal"} - ${formatDateTime(item.createdAt)}`}
-              statusLabel={item.status}
+              statusLabel={item.adminDecision === "rejected" ? "rejected" : item.status}
               statusTone={statusTone(item.status)}
               onPress={() => {
                 setSelectedId(item.id);
@@ -173,12 +314,20 @@ export default function SuperAdminWithdrawalsScreen() {
               </View>
             </AdminListCard>
           ))}
-          {withdrawals.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No pending withdrawals"
-              description="Approved or rejected requests are hidden from this review queue."
-              icon="wallet"
-            />
+          {visible.length === 0 ? (
+            tabFiltered.length === 0 ? (
+              <AdminEmptyStateCard
+                title={statusTab === "all" ? "No withdrawals" : `No ${statusTabTitle(statusTab)} withdrawals`}
+                description="Withdrawal requests in this status will appear here."
+                icon="wallet"
+              />
+            ) : (
+              <AdminEmptyStateCard
+                title="No withdrawals match these filters."
+                description="Reset filters to view all withdrawals."
+                icon="wallet"
+              />
+            )
           ) : null}
         </ScrollView>
       )}
@@ -211,46 +360,56 @@ export default function SuperAdminWithdrawalsScreen() {
                   <AdminInfoLine label="Bank" value={selected.bankName || "N/A"} />
                   <AdminInfoLine label="Masked account" value={selected.accountNumberMasked || "N/A"} />
                   <AdminInfoLine label="Reference" value={selected.reference || selected.id} />
+                  {selected.status !== "pending" ? (
+                    <>
+                      <AdminInfoLine label="Decision" value={selected.adminDecision || "N/A"} />
+                      <AdminInfoLine label="Decided" value={formatDateTime(selected.decidedAt)} />
+                    </>
+                  ) : null}
                 </View>
-                <View style={styles.reasonBlock}>
-                  <Text style={styles.reasonLabel}>Reject reason</Text>
-                  <TextInput
-                    value={rejectReason}
-                    onChangeText={setRejectReason}
-                    placeholder="Required for rejection"
-                    placeholderTextColor={COLORS.textSecondary}
-                    style={styles.reasonInput}
-                    multiline
-                    maxLength={300}
-                    editable={!submitting}
-                  />
-                  <Text style={styles.reasonCounter}>{rejectReason.trim().length}/300</Text>
-                </View>
+                {selected.status === "pending" ? (
+                  <View style={styles.reasonBlock}>
+                    <Text style={styles.reasonLabel}>Reject reason</Text>
+                    <TextInput
+                      value={rejectReason}
+                      onChangeText={setRejectReason}
+                      placeholder="Required for rejection"
+                      placeholderTextColor={COLORS.textSecondary}
+                      style={styles.reasonInput}
+                      multiline
+                      maxLength={300}
+                      editable={!submitting}
+                    />
+                    <Text style={styles.reasonCounter}>{rejectReason.trim().length}/300</Text>
+                  </View>
+                ) : null}
               </>
             ) : null}
           </AppModalBody>
-          <AppModalFooter>
-            <View style={styles.footerRow}>
-              <AppButton
-                variant="danger"
-                style={styles.footerButton}
-                onPress={handleReject}
-                disabled={!selected || Boolean(submitting)}
-                loading={submitting === "reject"}
-              >
-                Reject
-              </AppButton>
-              <AppButton
-                variant="success"
-                style={styles.footerButton}
-                onPress={handleApprove}
-                disabled={!selected || Boolean(submitting)}
-                loading={submitting === "approve"}
-              >
-                Approve
-              </AppButton>
-            </View>
-          </AppModalFooter>
+          {selected && selected.status === "pending" ? (
+            <AppModalFooter>
+              <View style={styles.footerRow}>
+                <AppButton
+                  variant="danger"
+                  style={styles.footerButton}
+                  onPress={handleReject}
+                  disabled={!selected || Boolean(submitting)}
+                  loading={submitting === "reject"}
+                >
+                  Reject
+                </AppButton>
+                <AppButton
+                  variant="success"
+                  style={styles.footerButton}
+                  onPress={handleApprove}
+                  disabled={!selected || Boolean(submitting)}
+                  loading={submitting === "approve"}
+                >
+                  Approve
+                </AppButton>
+              </View>
+            </AppModalFooter>
+          ) : null}
         </View>
       </AppDrawer>
 
@@ -305,6 +464,20 @@ export default function SuperAdminWithdrawalsScreen() {
           </View>
         </AppModalFooter>
       </AppDialog>
+
+      <AdminFilterDrawer
+        visible={drawerOpen}
+        title="Filters"
+        activeFilterCount={activeFilterCount}
+        onClose={() => setDrawerOpen(false)}
+        onReset={resetFilters}
+        onDone={() => setDrawerOpen(false)}
+        resetDisabled={!activeFilterCount}
+      >
+        <DiscoverFilterRow label="Branch / Venue" options={branchOptions} selected={branchFilter} onSelect={setBranchFilter} />
+        <DiscoverFilterRow label="Amount Range" options={AMOUNT_RANGE_OPTIONS} selected={amountFilter} onSelect={(value) => setAmountFilter(value as AmountRangeKey)} />
+        <DiscoverFilterRow label="Date Range" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
+      </AdminFilterDrawer>
     </Screen>
   );
 }
@@ -312,6 +485,9 @@ export default function SuperAdminWithdrawalsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { paddingTop: 0 },
+  searchBar: { marginBottom: SPACING.md },
+  tabs: { marginBottom: SPACING.md },
+  tabText: { fontSize: 11 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm, marginTop: SPACING.sm },

@@ -216,6 +216,64 @@ export type EasypaisaAdminTransaction = {
   };
 };
 
+export type AdminPaymentReconciliation = {
+  paidNoWalletTx: boolean;
+  walletTxWithoutPaid: boolean;
+  bookingIntentUnpaidButPaymentPaid: boolean;
+  pendingPastExpiry: boolean;
+  failedButWalletTxExists: boolean;
+};
+
+export type AdminPaymentStatus =
+  | "created"
+  | "redirected"
+  | "token_received"
+  | "pending"
+  | "paid"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export type AdminPaymentListItem = {
+  id: string;
+  _id: string;
+  paymentTransactionId: string;
+  orderRefNum: string;
+  kind: "booking_intent" | "wallet_topup";
+  status: AdminPaymentStatus | string;
+  amount: number;
+  currency: string;
+  createdAt: number;
+  updatedAt: number;
+  processedAt?: number | null;
+  expiresAt?: number | null;
+  providerStatus?: string | null;
+  providerReference?: string | null;
+  providerDescription?: string | null;
+  accountOwnerName?: string;
+  bookingIntentId?: string | null;
+  lastError?: string | null;
+  callbackCount: number;
+  providerPayload: {
+    lastProviderStatus?: string | null;
+    lastSyncAt?: number | null;
+    flow?: string | null;
+  };
+  reconciliation?: AdminPaymentReconciliation | null;
+};
+
+export type AdminPaymentsQueryInput = {
+  status?: AdminPaymentStatus;
+  kind?: "booking_intent" | "wallet_topup";
+  dateFrom?: number;
+  dateTo?: number;
+  amountMin?: number;
+  amountMax?: number;
+  search?: string;
+  includeReconciliation?: boolean;
+  limit?: number;
+};
+
 export type SuperAdminPaymentDetail = {
   paymentTransaction: {
     _id: string;
@@ -951,6 +1009,43 @@ export async function getEasypaisaTransactions(
   } catch (error: any) {
     console.error("[superAdminService] getEasypaisaTransactions error", error);
     return { ok: false, message: "Failed to load Easypaisa transactions." };
+  }
+}
+
+// Backend-supported payments listing (Phase 5E). Read-only. Server applies status/kind/date/
+// amount; reconciliation flags are page-scoped and opt-in. The older getEasypaisaTransactions
+// is kept intact for compatibility.
+export async function getAdminPayments(
+  input?: AdminPaymentsQueryInput,
+): Promise<Result<AdminPaymentListItem[]>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const transactions = await convex.query(api.admin.listPaymentsV2, {
+      sessionToken,
+      status: input?.status,
+      kind: input?.kind,
+      dateFrom: input?.dateFrom,
+      dateTo: input?.dateTo,
+      amountMin: input?.amountMin,
+      amountMax: input?.amountMax,
+      search: input?.search,
+      includeReconciliation: input?.includeReconciliation,
+      limit: input?.limit ?? 50,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_payment_transaction",
+      module: "payments",
+      metadataSafe: {
+        status: input?.status || "any",
+        kind: input?.kind || "any",
+        reconciliation: input?.includeReconciliation ? "on" : "off",
+        count: transactions.length,
+      },
+    });
+    return { ok: true, data: transactions as AdminPaymentListItem[] };
+  } catch (error: any) {
+    console.error("[superAdminService] getAdminPayments error", error);
+    return { ok: false, message: "Failed to load payments." };
   }
 }
 

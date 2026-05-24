@@ -18,7 +18,7 @@ import type { Team } from "../../../../src/services/convex/teamService";
 import type { UserProfile } from "../../../../src/services/userService";
 import { getUserProfile } from "../../../../src/services/userService";
 import { FEATURE_READINESS } from "../../../../src/config/featureReadiness";
-import { validateMatchroomScheduleWindow } from "../../../../src/constants/timing";
+import { validateMatchroomScheduleWindow, validateWalkInScheduleWindow } from "../../../../src/constants/timing";
 import { useToast } from "../../../../src/hooks/useToast";
 import Logger from "../../../../src/utils/logger";
 import {
@@ -544,7 +544,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           selectedAdminBranch ||
           (adminBranches.length === 1 ? adminBranches[0] : null);
         const scheduledStartAt = new Date(`${formData.date}T${formData.time}`).getTime();
-        const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, Date.now());
+        const scheduleValidation = validateWalkInScheduleWindow(scheduledStartAt, Date.now());
         if (!scheduleValidation.ok) {
           showToast({
             message: scheduleValidation.message,

@@ -30,6 +30,7 @@ import { rejectZoneBookingRequest } from "../../../src/services/convex/zoneAdmin
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
+import { getNotificationCategoryIcon, getNotificationCategoryLabel } from "../../../src/utils/notificationCategories";
 import styles from "./notifications.styles";
 
 type AdminNotification = {
@@ -67,11 +68,6 @@ const getTimeAgo = (timestamp: any): string => {
     if (diffDays < 7) return `${diffDays}d ago`;
     return then.toLocaleDateString();
 };
-
-const getTypeLabel = (value?: string) =>
-    String(value || "notification")
-        .replace(/[_.]/g, " ")
-        .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 const ZONE_DECISION_TYPES = new Set([
     "match.join_request",
@@ -121,12 +117,12 @@ const NotificationRow = memo(function NotificationRow({
         <Pressable style={styles.notificationCard} onPress={() => onOpen(item)}>
             <View style={styles.cardHeader}>
                 <View style={styles.iconContainer}>
-                    <AppIcon name={isMatchRequest ? "matchroom" : "notifications"} size={20} color={COLORS.accent} />
+                    <AppIcon name={(isMatchRequest ? "matchroom" : getNotificationCategoryIcon(item.type)) as any} size={20} color={COLORS.accent} />
                 </View>
                 {item.isRead === false ? <View style={styles.unreadDot} /> : null}
                 <View style={styles.headerInfo}>
                     <Text style={styles.typeText}>{title}</Text>
-                    <Text style={styles.timeText}>{getTypeLabel(item.type)} • {getTimeAgo(item.createdAt)}</Text>
+                    <Text style={styles.timeText}>{getNotificationCategoryLabel(item.type)} • {getTimeAgo(item.createdAt)}</Text>
                 </View>
                 {status !== "pending" ? (
                     <View style={styles.statusBadge}>
@@ -299,6 +295,13 @@ export default function ZoneNotificationsModule() {
         }
         if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
             router.push(`/matchrooms/${meta.matchroomId || item.matchroomId}` as any);
+            return;
+        }
+        // Non-booking/non-match notifications (withdrawal, zone, broadcast, etc.)
+        // carry their own route — honor it instead of defaulting to bookings.
+        const explicitRoute = String((item as any).route || meta.href || meta.route || "").trim();
+        if (explicitRoute) {
+            router.push(explicitRoute as any);
             return;
         }
         openBookings({

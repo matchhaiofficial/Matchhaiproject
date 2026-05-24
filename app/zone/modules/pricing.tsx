@@ -931,7 +931,11 @@ export default function ZonePricingModule() {
                         {loadingRules ? (
                             <ActivityIndicator size="small" color={COLORS.accent} />
                         ) : filteredRules.length === 0 ? (
-                            <Text style={styles.emptyText}>No pricing rules yet.</Text>
+                            <Text style={styles.emptyText}>
+                                {rules.length === 0
+                                    ? "No pricing rules yet."
+                                    : "No pricing rules match these filters."}
+                            </Text>
                         ) : (
                             filteredRules.map((rule) => (
                                 <PricingRuleRow
