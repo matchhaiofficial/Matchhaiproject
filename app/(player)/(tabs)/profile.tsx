@@ -1,6 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import React, { useCallback, useRef, useState, useEffect } from "react";
@@ -266,44 +266,6 @@ export default function Profile() {
         setRefreshing(true);
         void maybeRefreshExternalStats(true);
         fetchTeams(true);
-    };
-
-    const requestAccountDeletion = useMutation((api as any).support.requestAccountDeletion);
-    const [deletionRequesting, setDeletionRequesting] = useState(false);
-
-    const handleRequestAccountDeletion = () => {
-        Alert.alert(
-            "Delete Account",
-            "This sends an account deletion request to MatchHai and schedules your profile for deletion. For legal and financial reasons, some records (payments, wallet, KYC, and audit history) may be retained where required by law. Do you want to continue?",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Request Deletion",
-                    style: "destructive",
-                    onPress: async () => {
-                        setDeletionRequesting(true);
-                        try {
-                            const res: any = await requestAccountDeletion({});
-                            showToast({
-                                type: "success",
-                                title: res?.alreadyRequested ? "Request already pending" : "Deletion requested",
-                                message: res?.reference
-                                    ? `Reference: ${res.reference}. Our team will process your request.`
-                                    : "Our team will process your request.",
-                            });
-                        } catch (error: any) {
-                            showToast({
-                                type: "error",
-                                title: "Request failed",
-                                message: error?.message || "Could not submit your deletion request. Please try again.",
-                            });
-                        } finally {
-                            setDeletionRequesting(false);
-                        }
-                    },
-                },
-            ]
-        );
     };
 
     const handleLogout = async () => {
@@ -779,17 +741,6 @@ export default function Profile() {
                 <AppButton variant="danger" style={styles.logoutButton} onPress={handleLogout}>
                     <AppIcon name="logout" size={20} color={COLORS.error} />
                     <Text style={styles.logoutButtonText}>Logout</Text>
-                </AppButton>
-
-                {/* Account deletion (store compliance) */}
-                <AppButton
-                    variant="secondary"
-                    style={styles.logoutButton}
-                    onPress={handleRequestAccountDeletion}
-                    disabled={deletionRequesting}
-                    loading={deletionRequesting}
-                >
-                    <Text style={styles.logoutButtonText}>Delete Account</Text>
                 </AppButton>
                 </ScrollView>
             </Animated.View>

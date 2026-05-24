@@ -103,3 +103,55 @@
 - **Attribution hints:** zone mutations still accept client `adminUid`/`zoneOwnerUid` args for non-security display fields (e.g., `zoneOwnerUid` on offers/matchrooms); these are now fully protected by the ownership guard. Optional low-risk follow-up: also swap those stored fields to `actor._id`.
 - **Account deletion is request-based** (admin-reviewed) rather than immediate hard-delete — required because of financial/KYC/audit retention. Confirm this satisfies your store reviewer; if Apple requires it, add an explicit "deletion will be completed within N days" statement in the dialog/store notes. Zone-admin/super-admin in-app deletion entry point not yet added (player covered; backend mutation works for any authenticated user) — deferred follow-up.
 - These remediations cover the 6 release blockers only; High/Medium audit items (indexes/pagination H-02/H-03/H-05, server-authoritative counter time H-10, etc.) remain per the roadmap in the audit doc.
+
+---
+
+# Remediation Batch 2 — Delete Account relocation + critical-issue verification
+> **Date:** 2026-05-24 · **Branch:** `product-ready` · **Mode:** UI relocation + verification pass.
+> **Result:** `tsc --noEmit` PASS (exit 0). `git diff --check` clean (exit 0). 3 source files changed. No money/payout/IPN/lifecycle/KYC-provider logic touched. No Convex codegen run (not required — no API/schema/generated-type change).
+
+## Batch 2 scope
+1. Move the Delete Account action out of the main player Profile screen and into **Profile Settings** (the gear-icon → Edit Profile screen).
+2. Final verification of remaining release-critical issues (CR-01..CR-06, S-04, S-10). No code change was required for the verification items — the prior remediation already satisfied them; this pass confirmed each at the source level.
+
+## Task 1 — Delete Account moved to Profile Settings ✅
+**Where it lives now:** `app/(player)/profile/edit.tsx` (the screen the Profile gear icon already routes to via `handleSettings → /profile/edit`). There is no separate "Settings" route in the player area; Edit Profile is the canonical account-settings surface (it already hosts email/password/phone/privacy), so Delete Account belongs there. No new settings system was created (kept minimal per scope).
+
+**Changes:**
+- `app/(player)/(tabs)/profile.tsx`: removed the top-level "Delete Account" `AppButton`, the `requestAccountDeletion` mutation hook, the `deletionRequesting` state, and the `handleRequestAccountDeletion` handler. Removed the now-unused `useMutation` import. The main Profile screen now ends with only the **Logout** button — clean, no prominent destructive action.
+- `app/(player)/profile/edit.tsx`: added `Alert` + `useMutation` imports; added the same `requestAccountDeletion` mutation hook, `deletionRequesting` state, and `handleRequestAccountDeletion` handler (verbatim behavior); added a **"Danger Zone"** section at the bottom of the form with consequence copy and a destructive **Delete Account** button (red border/tint, trash icon, loading state).
+- `app/(player)/profile/edit.styles.ts`: added `dangerSectionTitle`, `dangerZone`, `dangerTitle`, `dangerSubtext`, `deleteAccountButton`, `deleteAccountButtonDisabled`, `deleteAccountButtonText`.
+
+**Preserved (unchanged behavior):** the confirmation `Alert` dialog, the destructive style, the consequences copy (legal/financial retention notice), the backend `requestAccountDeletion` mutation, the idempotent "already pending" handling, and the `(api as any).support.requestAccountDeletion` call pattern (so app `tsc` passes pre-codegen). No backend logic touched.
+
+## Task 2 — Remaining critical issues: verification results (no code change needed)
+- **A. CR-06 Payment status honesty — VERIFIED.** `pay/[intentId].tsx`, `status/[intentId].tsx`, `useMatchroomCreateSubmitFlow.ts`, and `create/index.tsx` all keep pending/unverified states distinct from confirmed (`Payment Processing` / `Payment Not Completed` / `Payment Received`(=Confirming Seat) vs `Seat Reserved!`). "Payment confirmed" copy only fires on backend `checkoutStatus.status === "paid"`. Failed/pending/unknown states surface the **order ref**, the safe `PAYMENT_VERIFICATION_SAFE_MESSAGE` / `PAYMENT_SUPPORT_WITH_ORDER_HINT`, and a **Contact Support** button. Refresh/Continue calls `syncTransactionStatus` (not dead). "Dashboard"/back exits without clearing payment state. Raw provider text (`lastError`/`providerDescription`) is never rendered — only safe copy. No money logic touched.
+- **B. CR-03/CR-05 Super Admin — VERIFIED.** `convex/admin.ts` server gate `getAuthenticatedAdmin` derives identity from the verified session and requires `isAuthorizedSuperAdmin` (env-allowlist email OR role ∈ {`super_admin`,`super-admin`}); no hardcoded default ⇒ unset env ⇒ fails closed. `setUserRole` canonicalizes to `super_admin`; `bootstrapInitialSuperAdmin` throws on unset `SUPER_ADMIN_EMAIL`. `src/utils/accountRouting.ts` + `app/super-admin/_layout.tsx` are cosmetic routing only (redirect non-admins to login); the real boundary is the server gate. Canonical `super_admin` routes to Super Admin; legacy `super-admin` accepted as compatibility.
+- **C. CR-01/S-04 Zone Admin — VERIFIED.** `convex/zoneAdminBooking.ts`: every zone-acting mutation (`acceptBookingRequest`, `rejectBookingRequest`, `sendCounterOffer`, `createWalkInMatchroom`) calls `requireAuthenticatedZoneOwner`; `respondToCounterOffer` derives the responder via `requireAuthenticatedActor` + recipient-membership check. All read queries (`listBookingQueueForZone`, `listBookingHistoryForZone`, `listMatchroomsForZone`) are ownership-guarded. Client-passed `adminUid`/`responderUid`/`zoneOwnerUid` are non-authoritative hints; audit `actorUid` uses the server-derived id. Safe/generic error messages. Service/hook (`zoneAdminBookingService.ts`, `useZoneBookingsActions.ts`) untouched (arg shapes unchanged).
+- **D. CR-02 iOS picker/store config — VERIFIED.** `app.json` has `NSPhotoLibraryUsageDescription`, `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`; `expo-image-picker` (with `photosPermission`/`cameraPermission`) and `expo-document-picker` registered in `plugins`; no duplicate/bad copy. All five picker screens use `expo-image-picker` and are covered app-wide: profile edit, team logo (`teams/[id].tsx`), team-challenge chat, matchroom chat, friend chat. (Note: `expo-document-picker` is configured but currently unused anywhere — harmless; left as-is.)
+- **E. CR-04 Production env safety — VERIFIED.** `eas.json` `production.env` uses obvious `REPLACE_WITH_PRODUCTION_DEPLOYMENT` placeholders; `preview` (staging `quick-panda-920`) is separate. `src/lib/convex.ts` `assertConvexUrl()` **throws** if the URL is missing or still a `REPLACE_WITH_` placeholder ⇒ a prod build with unreplaced config fails loudly. Super-admin email is intentionally absent from `production.env` (backend owns it). (Note: `preview.env` still carries the legacy `EXPO_PUBLIC_SUPER_ADMIN_EMAIL` for staging convenience — an email allowlist hint, not a secret, and not present in production.)
+- **F. S-10 Account deletion — VERIFIED + relocated.** `convex/support.ts` `requestAccountDeletion`: authenticated-only (`getAuthenticatedProfile`), idempotent (reuses any open `account_deletion` ticket → `alreadyRequested`), creates a high-priority `supportTickets` row + admin notification, performs **no** hard-deletion of payments/wallet/KYC/audit records (legal/financial retention; admin-reviewed). Now reachable in-app from Profile Settings with clear consequence copy.
+
+## Batch 2 — commands run
+| Command | Result |
+|---|---|
+| `npx tsc -p tsconfig.json --noEmit` | **PASS (exit 0)** |
+| `git diff --check` | **Clean (exit 0)** |
+| `git diff --stat` | 3 source files changed (see below) |
+
+**Files changed (3 source):** `app/(player)/(tabs)/profile.tsx`, `app/(player)/profile/edit.tsx`, `app/(player)/profile/edit.styles.ts`. (Plus this tracking doc.)
+
+## Batch 2 — codegen / deploy
+- **No Convex codegen run** and **none required** for this batch: no Convex API/schema/generated-type change was made. The relocated Delete Account UI reuses the existing `(api as any).support.requestAccountDeletion` pattern.
+- Still outstanding from Batch 1 (unchanged): the `requestAccountDeletion` mutation + super-admin env require a **Convex deploy** (confirm target — likely staging `quick-panda-920`) to be live at runtime. Account deletion cannot be end-to-end tested in-app until that deploy lands.
+
+## Batch 2 — known risks
+- `requestAccountDeletion` still needs a Convex deploy to function at runtime (the in-app button will error until deployed). Documented; not run per scope.
+- `expo-document-picker` configured but unused — cosmetic only.
+- `bootstrapInitialSuperAdmin` queries existing admins via the legacy `by_role == "super-admin"` value; benign because the email-based idempotency branch still catches a canonical admin with the configured email. Low-risk follow-up, not a blocker.
+
+## Batch 2 — manual QA remaining
+- [ ] Profile main screen shows no Delete Account (only Logout); gear icon → Edit Profile shows the Danger Zone → Delete Account.
+- [ ] Delete Account confirmation dialog + idempotent "already pending" still behave (verify **after Convex deploy**).
+- [ ] Account deletion request appears for super-admin/support and creates the admin notification.
+- [ ] (Re-confirm Batch 1 checklist items on-device: payment honesty, zone owner vs non-owner, super-admin routing, iOS picker prompts, prod placeholder fail-loud.)
