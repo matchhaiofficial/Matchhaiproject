@@ -164,7 +164,7 @@ function useKeyboardAwareRequestClose({
 function getKeyboardAvoidBehavior(
   keyboardAvoidBehavior?: BaseProps["keyboardAvoidBehavior"],
 ) {
-  return keyboardAvoidBehavior ?? (Platform.OS === "ios" ? "padding" : "height");
+  return keyboardAvoidBehavior ?? "padding";
 }
 
 function MaybeKeyboardAvoidingView({
