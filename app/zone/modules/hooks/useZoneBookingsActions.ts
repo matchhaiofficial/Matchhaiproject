@@ -7,6 +7,13 @@ import {
   type ZoneBookingQueueItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
 import Logger from "../../../../src/utils/logger";
+import {
+  clockMinutesFromString,
+  combineLocalDateTime,
+  minutesToTime24,
+  toLocalDateString,
+  toLocalTime24,
+} from "../../../../src/utils/scheduleTime";
 
 type CounterOption = {
   date: string;
@@ -144,13 +151,24 @@ export function useZoneBookingsActions({
       adminUid: user._id,
     });
 
+    // Build each option from a real local-time instant so a time that crosses
+    // midnight rolls the day correctly and there is no UTC shift. The proposed
+    // date/time strings are derived from that instant (24h) and sent alongside
+    // the epoch ms (startAt), which is the source of truth used downstream.
     const normalizedOptions = counterOptions
-      .map((option) => ({
-        date: String(option.date || "").trim(),
-        time: String(option.time || "").trim(),
-        endTime: String(option.endTime || "").trim() || undefined,
-      }))
-      .filter((option) => option.date && option.time)
+      .map((option) => {
+        const startAt = combineLocalDateTime(option.date, option.time);
+        if (startAt === null) return null;
+        const startDate = new Date(startAt);
+        const endMinutes = clockMinutesFromString(option.endTime);
+        return {
+          date: toLocalDateString(startDate),
+          time: toLocalTime24(startDate),
+          endTime: minutesToTime24(endMinutes),
+          startAt,
+        };
+      })
+      .filter((option): option is NonNullable<typeof option> => option !== null)
       .slice(0, 1);
 
     if (!normalizedOptions.length) {
@@ -160,13 +178,22 @@ export function useZoneBookingsActions({
 
     // Proposed times must be in the future. The ±2h-of-original bound is enforced
     // server-side in sendCounterOffer using these client-computed (local) values.
-    const proposedStartAts = normalizedOptions.map((option) =>
-      new Date(`${option.date}T${option.time}`).getTime(),
-    );
+    const proposedStartAts = normalizedOptions.map((option) => option.startAt);
     if (proposedStartAts.some((ms) => !Number.isFinite(ms) || ms <= Date.now())) {
       showToast({ type: "warning", title: "Invalid time", message: "Alternative time cannot be in the past." });
       return;
     }
+
+    // Original requested instant, used server-side to bound the alternative to
+    // ±2h. Computed from the request's preferred date/time as a real local
+    // timestamp so the comparison isn't skewed by string parsing.
+    const originalPreferredDate = Number((selectedRequest as any).preferredDate) || 0;
+    const originalStartAt = originalPreferredDate
+      ? combineLocalDateTime(
+          toLocalDateString(new Date(originalPreferredDate)),
+          (selectedRequest as any).preferredTime,
+        ) ?? undefined
+      : undefined;
 
     setProcessingAction("counter");
     try {
@@ -184,6 +211,7 @@ export function useZoneBookingsActions({
         currency: selectedRequest.currency || "PKR",
         location: zone.primaryBranch?.areaLabel || "",
         expiresInMinutes: 120,
+        originalStartAt,
         proposedStartAts,
       });
 

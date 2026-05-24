@@ -534,17 +534,27 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
 async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
   request: any;
   offer: any;
-  option: { date: string; time: string };
+  option: { date: string; time: string; startAt?: number };
 }) {
   const now = Date.now();
   const request = input.request;
   const offer = input.offer;
   const locationLabel = offer.branchName || offer.zoneName || "Zone Venue";
 
+  // The accepted instant is the client-computed local epoch (startAt). Falling
+  // back to parsing the date/time strings keeps older offers working. This is the
+  // single source of truth the lobby/lifecycle read, so it must be updated too —
+  // otherwise the lobby keeps showing the original (pre-counter-offer) time.
+  const acceptedStartAt =
+    typeof input.option.startAt === "number" && Number.isFinite(input.option.startAt)
+      ? input.option.startAt
+      : parseLocalDateTimeMillis(input.option.date, input.option.time);
+
   if (request.matchroomId) {
     await ctx.db.patch(request.matchroomId, {
       scheduledDate: input.option.date,
       scheduledTime: input.option.time,
+      ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
       location: locationLabel,
       updatedAt: now,
     });
@@ -581,6 +591,7 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     zoneOwnerUid: offer.zoneOwnerUid || undefined,
     scheduledDate: input.option.date,
     scheduledTime: input.option.time,
+    ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
     durationMinutes: getDurationMinutesFromRequest(request),
     pricing: {
       perPlayer: Number(request.budgetPerPlayer || offer.proposedPrice || 0),
@@ -1434,6 +1445,7 @@ export const sendCounterOffer = mutation({
       date: v.string(),
       time: v.string(),
       endTime: v.optional(v.string()),
+      startAt: v.optional(v.number()),
     })),
     pricePerPlayer: v.number(),
     currency: v.optional(v.string()),
@@ -1490,10 +1502,19 @@ export const sendCounterOffer = mutation({
     }
 
     const scheduleOptions = args.scheduleOptions
-      .map((option) => ({
+      .map((option, index) => ({
         date: String(option.date || "").trim(),
         time: String(option.time || "").trim(),
         endTime: option.endTime ? String(option.endTime).trim() : undefined,
+        // Prefer the client-computed local instant; fall back to the matching
+        // proposedStartAts entry so older callers still persist a timestamp.
+        startAt:
+          typeof option.startAt === "number" && Number.isFinite(option.startAt)
+            ? option.startAt
+            : typeof proposedStartAts[index] === "number" &&
+                Number.isFinite(proposedStartAts[index])
+              ? proposedStartAts[index]
+              : undefined,
       }))
       .filter((option) => option.date && option.time)
       .slice(0, 3);
@@ -1537,6 +1558,7 @@ export const sendCounterOffer = mutation({
       proposedPrice: args.pricePerPlayer,
       proposedDate: new Date(`${primaryOption.date}T00:00:00`).getTime(),
       proposedTime: primaryOption.time,
+      proposedStartAt: primaryOption.startAt,
       scheduleOptions,
       recipientUids: recipients.map((recipient) => recipient.uid),
       responses: [],
@@ -1783,6 +1805,21 @@ export const respondToCounterOffer = mutation({
           preferredTime: chosenOption?.time || request.preferredTime,
           updatedAt: now,
         });
+        // Apply the accepted slot to the broadcast matchroom so the lobby shows
+        // the agreed time. scheduledStartAt is the source of truth the lobby/
+        // lifecycle read, so it must move with the accepted counter-offer.
+        if (chosenOption && matchroomId) {
+          const acceptedStartAt =
+            typeof chosenOption.startAt === "number" && Number.isFinite(chosenOption.startAt)
+              ? chosenOption.startAt
+              : parseLocalDateTimeMillis(chosenOption.date, chosenOption.time);
+          await ctx.db.patch(matchroomId, {
+            scheduledDate: chosenOption.date,
+            scheduledTime: chosenOption.time,
+            ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
+            updatedAt: now,
+          });
+        }
         await notifyZoneOfferOutcome(ctx, {
           offer,
           request,

@@ -656,6 +656,7 @@ export async function sendZoneCounterOffer(input: {
         date: string;
         time: string;
         endTime?: string;
+        startAt?: number;
     }>;
     pricePerPlayer: number;
     currency?: string;

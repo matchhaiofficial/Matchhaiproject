@@ -4,6 +4,7 @@ import {
   type ZoneBookingQueueItem,
   type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
+import { toLocalDateString } from "../../../../src/utils/scheduleTime";
 
 type GameFilter = "all" | string;
 type TimeOfDayFilter = "all" | "day" | "night";
@@ -138,7 +139,9 @@ export const toDateString = (value: any) => {
   }
   const millis = toMillis(value);
   if (!millis) return undefined;
-  return new Date(millis).toISOString().slice(0, 10);
+  // Use the local calendar day, not the UTC day, so a stored midnight instant
+  // doesn't roll back a day in positive-offset timezones (e.g. PKT, UTC+5).
+  return toLocalDateString(new Date(millis));
 };
 
 export const isSameDay = (left?: Date | null, right?: Date | null) =>

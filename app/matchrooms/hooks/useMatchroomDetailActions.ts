@@ -411,7 +411,7 @@ export function useMatchroomDetailActions({
         zoneName: room.location || "Zone",
         zoneOwnerUid: user._id,
         adminUid: user._id,
-        scheduleOptions: [{ date: counterDate, time: counterTime }],
+        scheduleOptions: [{ date: counterDate, time: counterTime, startAt: proposedStartAtMs }],
         pricePerPlayer: parsedPrice,
         currency: room.pricing?.currency || "PKR",
         location: room.location || "",

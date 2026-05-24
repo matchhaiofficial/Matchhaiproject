@@ -5,6 +5,7 @@ import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
 import { Notification } from "../../../src/hooks/useNotifications";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { clockMinutesFromString } from "../../../src/utils/scheduleTime";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
 import { getNotificationCategoryIcon, getNotificationTypeLabel } from "../../../src/utils/notificationCategories";
 import styles from "../inbox.styles";
@@ -96,6 +97,16 @@ const getCounterOfferOptions = (item: Notification) =>
     ? item.meta.scheduleOptions.filter((option) => option?.date && option?.time)
     : [];
 
+const formatScheduleOptionTime = (time: string) => {
+  const minutes = clockMinutesFromString(time);
+  if (minutes === null) return time;
+  const hour24 = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+};
+
 const formatScheduleOptionLabel = (option: { date: string; time: string }) => {
   const parsed = new Date(`${option.date}T00:00:00`);
   const dateLabel = Number.isNaN(parsed.getTime())
@@ -105,7 +116,7 @@ const formatScheduleOptionLabel = (option: { date: string; time: string }) => {
         month: "short",
         year: "numeric",
       });
-  return `${dateLabel} • ${option.time}`;
+  return `${dateLabel} • ${formatScheduleOptionTime(option.time)}`;
 };
 
 const toTitleCase = (value: string) =>

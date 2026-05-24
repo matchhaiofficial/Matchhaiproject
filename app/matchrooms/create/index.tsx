@@ -47,6 +47,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS, FONTS } from "../../../src/theme";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../../src/utils/verificationGate";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
+import { normalizeValorantRole } from "../../../constants/profileOptions";
 
 import Logger from "../../../src/utils/logger";
 import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../src/utils/paymentUiCopy";
@@ -924,7 +925,7 @@ export default function CreateMatchroom() {
       const skillTier = userProfile?.skillScores?.valorant?.tier || "Any";
       setHostSkillTier(skillTier as SkillTier);
       setHostSkillScore(userProfile?.skillScores?.valorant?.rating ?? null);
-      setHostRole((userProfile as any)?.valorantRole || null);
+      setHostRole(normalizeValorantRole((userProfile as any)?.valorantRole));
     } else if (gameKey === "fc26") {
       // FC26 Defaults
       setFormData((prev) => ({
@@ -1375,7 +1376,7 @@ export default function CreateMatchroom() {
               onChange={handleFieldChange}
               selectedGame={selectedGame || undefined}
               minimumDate={minAllowedDate}
-              dateHelperText="Select start date and time for walk-in matchroom."
+              dateHelperText="Walk-in matchrooms must be scheduled at least 1 day in advance."
             />
 
             {/* Game-Specific Dynamic Fields (Global options like Format) */}
@@ -1665,7 +1666,7 @@ export default function CreateMatchroom() {
             onChange={handleFieldChange}
             selectedGame={selectedGame || undefined}
             minimumDate={minAllowedDate}
-            dateHelperText={`Earliest allowed time is ${minAllowedDateLabel}.`}
+            dateHelperText="Matchrooms must be scheduled at least 3 days in advance."
           />
 
           <TeamBookingSection

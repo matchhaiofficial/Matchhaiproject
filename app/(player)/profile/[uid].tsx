@@ -21,6 +21,7 @@ import { submitUserReport } from "../../../src/services/convex/reportService";
 import { getPublicUserProfile, isProfileGameEnabled, refreshUserStats, UserProfile } from "../../../src/services/userService";
 import { formatChatPresenceLabel, isChatUserOnline, useRelativeNow } from "../../../src/features/chat/utils";
 import { Id } from "../../../convex/_generated/dataModel";
+import { normalizeValorantRole } from "../../../constants/profileOptions";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import styles from "./profile.styles";
@@ -787,9 +788,22 @@ export default function PlayerProfile() {
                     </View>
                 )}
 
+                {selectedGame === 'valorant' && (
+                    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.divider }}>
+                        <StatRow icon="person" label="Role" value={normalizeValorantRole((profile as any).valorantRole) || 'N/A'} />
+                        <StatRow icon="emoji-events" label="Agent" value={(profile as any).valorantAgent || 'N/A'} />
+                    </View>
+                )}
+
                 {selectedGame === 'tekken8' && (
                     <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.divider }}>
                         <StatRow icon="groups" label="Favorites" value={profile.tekkenFavorites?.slice(0, 3).join(', ') || 'N/A'} />
+                        {typeof (profile as any).psnStats?.tekken8?.progress === 'number' && (
+                            <StatRow icon="emoji-events" label="PSN Trophies" value={`${(profile as any).psnStats.tekken8.progress}%`} />
+                        )}
+                        {(profile as any).steamTekken8Hours && (
+                            <StatRow icon="schedule" label="Playtime" value={`${Math.round((profile as any).steamTekken8Hours)}h`} />
+                        )}
                     </View>
                 )}
 
@@ -797,6 +811,9 @@ export default function PlayerProfile() {
                     <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.divider }}>
                         <StatRow icon="shield" label="Team" value={profile.fcTeam || 'N/A'} />
                         <StatRow icon="grid-view" label="Formation" value={profile.fcFormation || 'N/A'} />
+                        {typeof (profile as any).psnStats?.fc?.progress === 'number' && (
+                            <StatRow icon="emoji-events" label="PSN Trophies" value={`${(profile as any).psnStats.fc.progress}%`} />
+                        )}
                         {(profile as any).steamFc26Hours && (
                             <StatRow icon="schedule" label="Playtime" value={`${(profile as any).steamFc26Hours.toLocaleString()}h`} />
                         )}
