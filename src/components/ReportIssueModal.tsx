@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -60,6 +61,7 @@ export default function ReportIssueModal({
       onClose={onClose}
       dismissDisabled={loading}
       keyboardAware
+      keyboardAvoidBehavior={Platform.OS === "android" ? "padding" : undefined}
     >
       <AppModalHeader
         title={title}

@@ -7,9 +7,10 @@ import { AndroidImportance } from "expo-notifications/build/NotificationChannelM
 import scheduleNotificationAsync from "expo-notifications/build/scheduleNotificationAsync";
 import cancelScheduledNotificationAsync from "expo-notifications/build/cancelScheduledNotificationAsync";
 import getAllScheduledNotificationsAsync from "expo-notifications/build/getAllScheduledNotificationsAsync";
+import { SchedulableTriggerInputTypes } from "expo-notifications";
 
 const ANDROID_CHANNEL_ID = "default";
-const STORAGE_KEY = "local_notifications.matchroom_reminders.v2";
+const STORAGE_KEY = "local_notifications.matchroom_reminders.v3";
 
 export type ReminderPlan = {
   reminderKey: string;
@@ -139,10 +140,18 @@ async function schedulePlan(plan: ReminderPlan): Promise<StoredReminderRecord | 
         reminderKey: plan.reminderKey,
       },
     },
-    trigger: {
-      date: new Date(plan.triggerAtMs),
-      channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
-    } as any,
+    // Expo requires `type` on object triggers; without it Android can treat the
+    // trigger as "immediate", causing reminders to fire right after scheduling.
+    trigger: (Platform.OS === "android"
+      ? {
+          type: SchedulableTriggerInputTypes.DATE,
+          date: new Date(plan.triggerAtMs),
+          channelId: ANDROID_CHANNEL_ID,
+        }
+      : {
+          type: SchedulableTriggerInputTypes.DATE,
+          date: new Date(plan.triggerAtMs),
+        }) as any,
   });
 
   return {
