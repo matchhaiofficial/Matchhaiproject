@@ -14,7 +14,7 @@ import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { getZoneStatusTone } from "../../src/utils/statusLabels";
 import { getZoneLifecycleLabel, getZoneMigrationLabel } from "../../src/utils/zoneLifecycle";
 
-type ZoneReviewStatus = "pending-review" | "approved_pending_migration";
+type ZoneReviewStatus = "pending-review" | "approved_pending_migration" | "active";
 
 function formatDate(value?: number) {
   if (!value) return "N/A";
@@ -22,10 +22,19 @@ function formatDate(value?: number) {
 }
 
 function statusTitle(status: ZoneReviewStatus) {
+  if (status === "active") return "Active";
   return status === "approved_pending_migration" ? "Approved Pending Migration" : "Pending Review";
 }
 
 const ALL = "All";
+
+type PilotStatusKey = "all" | "active" | "ended" | "none";
+const PILOT_STATUS_OPTIONS: { key: PilotStatusKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active Pilot" },
+  { key: "ended", label: "Pilot Ended" },
+  { key: "none", label: "No Pilot" },
+];
 
 type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
 const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
@@ -111,6 +120,7 @@ export default function SuperAdminZonesScreen() {
   const [cityFilter, setCityFilter] = useState<string>(ALL);
   const [areaFilter, setAreaFilter] = useState<string>(ALL);
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
+  const [pilotFilter, setPilotFilter] = useState<PilotStatusKey>("all");
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
@@ -147,6 +157,7 @@ export default function SuperAdminZonesScreen() {
       const legacy = zone as Zone & { name?: string; ownerUsername?: string };
       if (cityFilter !== ALL && getZoneCity(zone) !== cityFilter) return false;
       if (areaFilter !== ALL && getZoneArea(zone) !== areaFilter) return false;
+      if (tab === "active" && pilotFilter !== "all" && (zone.pilotStatus || "none") !== pilotFilter) return false;
       if (!matchesDateRange(getZoneTimestamp(zone.createdAt), dateFilter)) return false;
       if (!needle) return true;
       return [
@@ -159,17 +170,19 @@ export default function SuperAdminZonesScreen() {
         legacy.ownerUsername,
       ].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
-  }, [zones, search, cityFilter, areaFilter, dateFilter]);
+  }, [zones, search, cityFilter, areaFilter, dateFilter, pilotFilter, tab]);
 
   const activeFilterCount =
     Number(cityFilter !== ALL) +
     Number(areaFilter !== ALL) +
-    Number(dateFilter !== "Any");
+    Number(dateFilter !== "Any") +
+    Number(tab === "active" && pilotFilter !== "all");
 
   const resetFilters = useCallback(() => {
     setCityFilter(ALL);
     setAreaFilter(ALL);
     setDateFilter("Any");
+    setPilotFilter("all");
   }, []);
 
   return (
@@ -189,6 +202,7 @@ export default function SuperAdminZonesScreen() {
         items={[
           { key: "pending-review", label: "Pending" },
           { key: "approved_pending_migration", label: "Migration" },
+          { key: "active", label: "Active" },
         ]}
         value={tab}
         onChange={(value) => setTab(value as ZoneReviewStatus)}
@@ -228,6 +242,9 @@ export default function SuperAdminZonesScreen() {
       >
         <DiscoverFilterRow label="City" options={cityOptions} selected={cityFilter} onSelect={setCityFilter} />
         <DiscoverFilterRow label="Area" options={areaOptions} selected={areaFilter} onSelect={setAreaFilter} />
+        {tab === "active" ? (
+          <DiscoverFilterRow label="Pilot Status" options={PILOT_STATUS_OPTIONS} selected={pilotFilter} onSelect={(value) => setPilotFilter(value as PilotStatusKey)} />
+        ) : null}
         <DiscoverFilterRow label="Created Date" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />
       </AdminFilterDrawer>
     </Screen>

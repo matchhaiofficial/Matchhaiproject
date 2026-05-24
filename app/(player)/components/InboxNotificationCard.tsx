@@ -6,6 +6,7 @@ import { Notification } from "../../../src/hooks/useNotifications";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
+import { getNotificationCategoryIcon, getNotificationTypeLabel } from "../../../src/utils/notificationCategories";
 import styles from "../inbox.styles";
 
 const HIT_SLOP_8 = { top: 8, bottom: 8, left: 8, right: 8 } as const;
@@ -237,6 +238,9 @@ export function InboxNotificationCard({
     isBookingNotification ||
     isMatchCancelledAdmin ||
     isPaymentResult;
+  // Server-generated info notifications (reminders, result updates, withdrawal,
+  // etc.) have no interactive sender — render them as a clean title/body card.
+  const isGenericInfo = !hasKnownMessage;
   const typeLabel = isRequest
     ? "Friend Request"
     : isJoinRequest
@@ -267,7 +271,7 @@ export function InboxNotificationCard({
                         ? "Wallet Update"
                         : isMatchPaymentResult
                           ? "Payment Update"
-                          : "Team Update";
+                          : getNotificationTypeLabel(item.type);
 
   const isInfoType =
     isJoinRequest ||
@@ -295,7 +299,7 @@ export function InboxNotificationCard({
               ? "receipt-long"
           : isTeamChallenge || isTeamChallengeUpdate
             ? "sports-esports"
-            : "info";
+            : (getNotificationCategoryIcon(item.type) as AppIconName);
   const matchroomId = getNotificationMatchroomId(item);
   const teamId = getNotificationTeamId(item);
   const intentId = getNotificationIntentId(item);
@@ -447,7 +451,7 @@ export function InboxNotificationCard({
       <View style={[styles.cardBody, isUnread && styles.cardBodyUnread]}>
         <View style={styles.messageWrap}>
           <Text style={styles.messageText}>
-            {!isPaymentRequired && !isPaymentResult && (
+            {!isPaymentRequired && !isPaymentResult && !isGenericInfo && (
               <Text
                 style={styles.highlightText}
                 onPress={item.fromUid ? () => openProfile(item.fromUid) : undefined}
@@ -586,7 +590,13 @@ export function InboxNotificationCard({
                 {item.message || "Review this payment update."}
               </>
             )}
-            {!hasKnownMessage && fallbackMessage}
+            {isGenericInfo && (
+              <>
+                {!!item.title && <Text style={styles.highlightText}>{item.title}</Text>}
+                {item.title && (item.message || item.body) ? ": " : ""}
+                {item.message || item.body || fallbackMessage}
+              </>
+            )}
           </Text>
         </View>
 

@@ -56,21 +56,39 @@ export async function requireKycVerified(
   ctx: ActionCtx | MutationCtx,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,
 ) {
+  // getAuthUser throws ConvexError("Unauthenticated") when there is no valid
+  // identity/session, so reaching this point means the request is authenticated.
   const authUser = await authComponent.getAuthUser(ctx);
-  if (!authUser?.userId) {
+
+  // Better Auth's user document carries both the auth record id (`_id`) and an
+  // optional linked app user id (`userId`). `userId` is null for accounts that
+  // were never explicitly linked, so resolve the profile by trying both — the
+  // same strategy proven in chatAuth.getStrictAuthenticatedUserId. Our `users`
+  // table stores the auth record id in `authId` (see auth.linkAuthToUser).
+  const candidateAuthIds = [authUser?.userId, authUser?._id]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
+
+  if (!candidateAuthIds.length) {
     throw new Error("Please sign in to continue.");
   }
-  const authId = authUser.userId;
 
-  const profile =
-    "db" in ctx
-      ? await ctx.db
-          .query("users")
-          .withIndex("by_authId", (q) => q.eq("authId", authId))
-          .unique()
-      : await ctx.runQuery(api.users.getByAuthId, { authId });
+  let profile: Awaited<ReturnType<typeof getProfileByAuthId>> = null;
+  for (const authId of candidateAuthIds) {
+    profile = await getProfileByAuthId(ctx, authId);
+    if (profile) break;
+  }
 
   assertKycAccessAllowed(profile, message);
 
   return { authUser, profile };
+}
+
+async function getProfileByAuthId(ctx: ActionCtx | MutationCtx, authId: string) {
+  return "db" in ctx
+    ? await ctx.db
+        .query("users")
+        .withIndex("by_authId", (q) => q.eq("authId", authId))
+        .unique()
+    : await ctx.runQuery(api.users.getByAuthId, { authId });
 }

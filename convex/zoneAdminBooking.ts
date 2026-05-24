@@ -9,7 +9,7 @@ import {
   notifyBroadcastOfferReceived,
 } from "./matchroomBroadcast";
 import { requireKycVerified } from "./kycGate";
-import { getMatchroomLockAt, validateMatchroomScheduleWindow } from "./timing";
+import { getMatchroomLockAt, validateMatchroomScheduleWindow, validateWalkInScheduleWindow, COUNTER_OFFER_TIME_WINDOW_MS } from "./timing";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -1418,6 +1418,11 @@ export const sendCounterOffer = mutation({
     location: v.optional(v.string()),
     message: v.optional(v.string()),
     expiresInMinutes: v.optional(v.number()),
+    // Client-computed (local-time) epoch ms used to bound the alternative time.
+    // originalStartAt = the originally requested start; proposedStartAts = one
+    // entry per scheduleOption. Both are validated server-side below.
+    originalStartAt: v.optional(v.number()),
+    proposedStartAts: v.optional(v.array(v.number())),
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
@@ -1426,6 +1431,37 @@ export const sendCounterOffer = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request) {
       throw new Error("Booking request not found.");
+    }
+
+    // Alternative-time rules: the proposed time(s) must be in the future and
+    // within ±2 hours of the originally requested time. Comparisons use
+    // client-computed epoch ms (same local frame) to avoid server-TZ skew.
+    let originalStartMs =
+      typeof args.originalStartAt === "number" && Number.isFinite(args.originalStartAt)
+        ? args.originalStartAt
+        : null;
+    if (originalStartMs == null && request.matchroomId) {
+      const linkedRoom = await ctx.db.get(request.matchroomId as any);
+      if (linkedRoom && typeof (linkedRoom as any).scheduledStartAt === "number") {
+        originalStartMs = (linkedRoom as any).scheduledStartAt;
+      }
+    }
+    if (originalStartMs == null && typeof (request as any).preferredDate === "number") {
+      originalStartMs = parseLocalDateTimeMillis(
+        new Date((request as any).preferredDate).toISOString().slice(0, 10),
+        (request as any).preferredTime || "00:00",
+      );
+    }
+
+    const proposedStartAts = Array.isArray(args.proposedStartAts) ? args.proposedStartAts : [];
+    for (const proposedMs of proposedStartAts) {
+      if (typeof proposedMs !== "number" || !Number.isFinite(proposedMs)) continue;
+      if (proposedMs <= now) {
+        throw new Error("Alternative time cannot be in the past.");
+      }
+      if (originalStartMs != null && Math.abs(proposedMs - originalStartMs) > COUNTER_OFFER_TIME_WINDOW_MS) {
+        throw new Error("Alternative time must be within 2 hours of the original requested time.");
+      }
     }
 
     const scheduleOptions = args.scheduleOptions
@@ -1883,7 +1919,7 @@ export const createWalkInMatchroom = mutation({
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
     const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
-    const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, now);
+    const scheduleValidation = validateWalkInScheduleWindow(scheduledStartAt, now);
     if (!scheduleValidation.ok) {
       throw new Error(scheduleValidation.message);
     }

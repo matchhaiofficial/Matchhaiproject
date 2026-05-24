@@ -97,6 +97,12 @@ export interface Zone {
   updatedAt: any;
   onboardingStep?: number;
 
+  // Pilot lifecycle (returned by admin.listZones via `...zone`; read-only here)
+  pilotStatus?: "none" | "active" | "ended";
+  pilotStartedAt?: number;
+  pilotEndsAt?: number;
+  pilotEndedAt?: number;
+
   // Computed fields (for UI)
   effectiveRate?: number | null;
   effectiveRateLabel?: string | null;

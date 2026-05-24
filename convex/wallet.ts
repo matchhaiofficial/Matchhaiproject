@@ -2,7 +2,7 @@ import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
-import { notifySuperAdminsWithdrawalReviewNeeded } from "./withdrawalNotifications";
+import { notifySuperAdminsWithdrawalReviewNeeded, notifyZoneAdminWithdrawalRequested } from "./withdrawalNotifications";
 
 async function getWalletUserRecord(
   ctx: any,
@@ -231,6 +231,7 @@ export const createZoneWithdrawalTransaction = mutation({
     });
 
     await notifySuperAdminsWithdrawalReviewNeeded(ctx, { withdrawalId });
+    await notifyZoneAdminWithdrawalRequested(ctx, { withdrawalId, zoneAdminUserId: user._id });
 
     return { reference, createdAt: now, walletBalance };
   },

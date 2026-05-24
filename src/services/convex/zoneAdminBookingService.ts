@@ -15,7 +15,21 @@ import {
     SharedPollingState,
 } from "./sharedPollingRegistry";
 import { getMatchroomLockAtMs } from "../../constants/timing";
-import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
+import { getUserFacingErrorMessage, isAuthSessionError } from "../../utils/userFacingErrors";
+
+/**
+ * Log a failed booking action. Expected auth/session failures (e.g. an expired
+ * session) are logged at WARN so they don't spam the red LogBox as console
+ * errors; genuine failures keep full ERROR detail. The user always gets a clean
+ * message via getUserFacingErrorMessage at the call site.
+ */
+function logBookingActionError(message: string, error: unknown) {
+    if (isAuthSessionError(error)) {
+        Logger.warn("zoneAdminBooking", message, error);
+        return;
+    }
+    Logger.error("zoneAdminBooking", message, error);
+}
 
 export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
 export type ZoneBookingQueueStatus =
@@ -597,7 +611,7 @@ export async function acceptZoneBookingRequest(input: {
             matchroomId: updatedRequest?.matchroomId ? String(updatedRequest.matchroomId) : undefined,
         };
     } catch (error: any) {
-        Logger.error("zoneAdminBooking", "Failed to accept request", error);
+        logBookingActionError("Failed to accept request", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to accept request.") };
     }
 }
@@ -624,7 +638,7 @@ export async function rejectZoneBookingRequest(input: {
 
         return { ok: true };
     } catch (error: any) {
-        Logger.error("zoneAdminBooking", "Failed to reject request", error);
+        logBookingActionError("Failed to reject request", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reject request.") };
     }
 }
@@ -648,6 +662,8 @@ export async function sendZoneCounterOffer(input: {
     location?: string;
     message?: string;
     expiresInMinutes?: number;
+    originalStartAt?: number;
+    proposedStartAts?: number[];
 }): Promise<{ ok: true; id: string; message?: string } | { ok: false; message: string }> {
     try {
         const offerId = await convex.mutation(api.zoneAdminBooking.sendCounterOffer, {
@@ -665,11 +681,13 @@ export async function sendZoneCounterOffer(input: {
             location: input.location,
             message: input.message,
             expiresInMinutes: input.expiresInMinutes,
+            originalStartAt: input.originalStartAt,
+            proposedStartAts: input.proposedStartAts,
         });
 
         return { ok: true, id: offerId };
     } catch (error: any) {
-        Logger.error("zoneAdminBooking", "Failed to send counter offer", error);
+        logBookingActionError("Failed to send counter offer", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to send counter-offer.") };
     }
 }
@@ -694,7 +712,7 @@ export async function respondToZoneCounterOffer(input: {
             locked: result?.locked === true,
         };
     } catch (error: any) {
-        Logger.error("zoneAdminBooking", "Failed to respond to counter offer", error);
+        logBookingActionError("Failed to respond to counter offer", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to time options.") };
     }
 }
@@ -900,7 +918,7 @@ export async function createZoneWalkInMatchroom(input: {
 
         return { ok: true, id: matchroomId };
     } catch (error: any) {
-        Logger.error("zoneAdminBooking", "Failed to create walk-in matchroom", error);
+        logBookingActionError("Failed to create walk-in matchroom", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create walk-in booking.") };
     }
 }

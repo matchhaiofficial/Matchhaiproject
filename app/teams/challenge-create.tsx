@@ -969,10 +969,10 @@ export default function TeamChallengeCreateScreen() {
                         minimumDate={(() => {
                             const d = new Date();
                             d.setHours(0, 0, 0, 0);
-                            d.setDate(d.getDate() + 3);
+                            d.setDate(d.getDate() + 2);
                             return d;
                         })()}
-                        dateHelperText="Challenge matches must be at least 3 days from now and within 2 months."
+                        dateHelperText="Challenge matches must be at least 2 days from now and within 2 months."
                     />
 
                     <View style={styles.section}>

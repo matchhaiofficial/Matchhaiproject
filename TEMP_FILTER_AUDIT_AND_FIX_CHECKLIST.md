@@ -191,16 +191,16 @@ Payments + Withdrawals deferred to Phase 5 (page-capped / pending-only data).
 - [x] Matchrooms Game/Date/Payment/Result filters. **(Phase 4A — also Booking Type, Zone.)**
 
 ## Phase 5 — Backend / Index Improvements
-Status: **Plan approved. Phase 5A implemented (May 23, 2026). Remaining sub-phases (5B–5F) NOT implemented. Do not mark all of Phase 5 complete.** Phase 4A–4D implemented (frontend-only except the approved Audit `from` value). See "Phase 5 Plan" subsection and the Phase 5A handoff entry below.
+Status: **Plan approved. Phases 5A–5E implemented (May 23, 2026). 5D DEFERRED after data-quality review (kept unchecked). 5F remains a plan only.** Phase 4A–4D implemented (frontend-only except the approved Audit `from` value). See "Phase 5 Plan" subsection and the Phase 5A–5E handoff entries below.
 - [x] Phase 5A — Users KYC Status filter (frontend-only). **(Implemented May 23, 2026.)**
-- [ ] Phase 5B — Zones Active tab + Pilot Status filter.
-- [ ] Phase 5C — Withdrawals all-status via existing arg + FE date/amount/branch.
-- [ ] Phase 5D — Users Last Active (conditional on data-quality check of `lastActiveAt`).
-- [ ] Phase 5E — Payments `listPaymentsV2` + indexes + page-scoped reconciliation.
-- [ ] Phase 5F — Pagination follow-ups (Matchrooms/Users/Zones).
-- [ ] Review heavy frontend filtering. *(Reviewed in plan — see Performance/index table.)*
-- [ ] Identify where backend filters are needed. *(Identified — only Payments truly needs new indexes/query; Withdrawals/Users-KYC/Zones-Pilot are frontend-only or use existing args.)*
-- [ ] Add indexes only after approval. *(Recommended Payments indexes documented; NOT added.)*
+- [x] Phase 5B — Zones Active tab + Pilot Status filter. **(Implemented May 23, 2026 — frontend + additive `Zone` type field; no backend change.)**
+- [x] Phase 5C — Withdrawals all-status via existing arg + FE date/amount/branch. **(Implemented May 23, 2026 — reuses existing backend `status` arg; "Rejected" derived from `adminDecision`.)**
+- [ ] Phase 5D — Users Last Active (conditional on data-quality check of `lastActiveAt`). **(DATA-REVIEWED May 23, 2026 — DEFERRED; `lastActiveAt` is not reliably populated. See 5D handoff.)**
+- [x] Phase 5E — Payments `listPaymentsV2` + indexes + page-scoped reconciliation. **(Implemented May 23, 2026 — additive read-only query + 2 indexes; codegen run.)**
+- [ ] Phase 5F — Pagination follow-ups (Payments/Withdrawals/Users/Zones/Matchrooms/Support). **(Planned — see 5F section.)**
+- [x] Review heavy frontend filtering. *(Reviewed in plan — see Performance/index table and 5F.)*
+- [x] Identify where backend filters are needed. *(Identified — only Payments needed a new index/query; Withdrawals/Users-KYC/Zones-Pilot are frontend-only or use existing args.)*
+- [x] Add indexes only after approval. *(Approved Payments indexes `by_createdAt` + `by_status_and_createdAt` added in 5E.)*
 
 ### Phase 5 Plan (prepared May 23, 2026 — planning only, awaiting approval)
 Key verified findings that change earlier deferral assumptions:
@@ -218,15 +218,16 @@ Recommended sub-phase order (front-loads safe frontend-only wins, isolates the i
 Must not change: money movement, payment status mutation, wallet math, withdrawal approve/reject, zone approval/pilot payout, user auth/suspension. All new queries read-only.
 
 ## Phase 6 — QA
-- [ ] Small phone.
-- [ ] Samsung A32.
-- [ ] Large Android.
-- [ ] iPhone with home indicator.
-- [ ] Filter drawer scrolling.
-- [ ] Chip wrapping.
-- [ ] Reset / Done buttons.
-- [ ] Active filter count.
-- [ ] Empty states.
+Status: **Code-review + TypeScript regression pass COMPLETE (May 23, 2026). Passed with 2 minor fixes.** See the Phase 6 handoff entry at the end of this file. Device/simulator items below remain for manual QA.
+- [x] Reset / Done buttons. *(Code review — all 10 Super Admin + Zone Admin + Player drawers verified.)*
+- [x] Active filter count. *(Code review — search excluded everywhere; per-tab counts verified.)*
+- [x] Empty states. *(Code review — raw vs filtered-empty verified; fixed Withdrawals "No all withdrawals" + Pricing missing filtered-empty.)*
+- [ ] Small phone. *(Manual device QA — not run.)*
+- [ ] Samsung A32. *(Manual device QA — not run.)*
+- [ ] Large Android. *(Manual device QA — not run.)*
+- [ ] iPhone with home indicator. *(Manual device QA — not run.)*
+- [ ] Filter drawer scrolling. *(Manual device QA — not run.)*
+- [ ] Chip wrapping. *(Manual device QA — not run.)*
 
 ## Phase Handoff Summary
 For every phase, record:
@@ -802,3 +803,177 @@ For every phase, record:
 - Next starting point:
   - Phase 5B — Zones Active tab + Pilot Status filter (frontend-only; `getZones("active")` already supported, `pilotStatus` already returned).
 - Phase 5D pre-check reminder: before implementing Last Active, inspect whether `users.lastActiveAt` is reliably populated (it is presence/chat-driven). If sparse, defer; if broadly populated, ship frontend-only.
+
+### Phase 5B (May 23, 2026)
+- Status: Implemented (Super Admin **Zones** — Active tab + Pilot Status filter). Frontend + one additive TypeScript type field; no backend/Convex/query/schema change.
+- Files changed:
+  - `app/super-admin/zones.tsx`
+  - `src/services/convex/zoneService.ts` (TYPE ONLY — added `pilotStatus` + `pilotStartedAt` / `pilotEndsAt` / `pilotEndedAt` to the `Zone` interface; no logic/query change)
+  - `TEMP_FILTER_AUDIT_AND_FIX_CHECKLIST.md`
+  - (Zones styles not changed — reused existing tab/drawer/empty-state structure from Phase 4B.)
+- Active tab added:
+  - New `Active` tab alongside the existing `Pending` / `Migration` tabs (`ZoneReviewStatus` union extended with `"active"`). The tab value is passed straight to the existing `getZones(tab, …)` call — `status="active"` was already supported end-to-end (`superAdminService.getZones` type union, `api.admin.listZones` validator, and the `zones.by_status_updatedAt` index). No new fetch/arg.
+- Pilot Status filter added (Active tab only):
+  - Options: `All` / `Active Pilot` (`active`) / `Pilot Ended` (`ended`) / `No Pilot` (`none` or missing).
+  - Rendered as a `DiscoverFilterRow` inside the existing filter drawer, shown **only when `tab === "active"`**; not shown on Pending/Migration (not meaningful there).
+  - Mapping: `zone.pilotStatus || "none"`. The field is returned by `admin.listZones` via `...zone` and exists on the `zones` schema (`v.union("none","active","ended")`).
+- Fields used: `pilotStatus` (filter); existing `venueBrandName` / `ownerFullName` / `contactEmail` / city / area / `createdAt` (search + City/Area/Created Date from Phase 4B, unchanged).
+- Active count / Reset behavior:
+  - `activeFilterCount` now also counts Pilot Status, but **only on the Active tab** (`Number(tab === "active" && pilotFilter !== "all")`), so switching away from Active never shows a phantom count or hides rows.
+  - Reset clears Pilot Status along with City / Area / Created Date; search is NOT cleared; Reset disabled at 0; Done closes the drawer.
+- Empty state:
+  - Reused the existing raw-empty vs filtered-empty branch. Active tab raw-empty shows `No active zones` (via `statusTitle("active")`); filtered-empty shows `No zones match these filters.` / `Reset filters to view all zones.`
+- Frontend-only / backend-unchanged confirmation:
+  - Pilot Status filtering is in-memory over the already-loaded active-tab zones. No Convex/backend/service-logic change. `getZones` call is byte-for-byte the same (only a new `tab` value flows through the pre-existing union). No zone approval, pilot start/end automation, or pilot payout logic touched (those fields are read-only here).
+- Tests run:
+  - `npx tsc -p tsconfig.json --noEmit` (pass, exit 0).
+- Known risks:
+  - Active zones list is page-capped by `admin.listZones` `limit` (default 100); Pilot Status filters only the loaded window — flagged for Phase 5F.
+  - `pilotStatus` is optional in the schema; legacy active zones without the field bucket into `No Pilot` (intended).
+- Next starting point:
+  - Phase 5C — Withdrawals all-status filters.
+
+### Phase 5C (May 23, 2026)
+- Status: Implemented (Super Admin **Withdrawals** — all-status view + Date/Amount/Branch filters). Frontend-only; reuses the existing backend `status` arg. No backend/Convex/mutation change.
+- Files changed:
+  - `app/super-admin/withdrawals.tsx`
+  - `TEMP_FILTER_AUDIT_AND_FIX_CHECKLIST.md`
+  - (No styles file — added `searchBar` / `tabs` / `tabText` entries to the in-file `StyleSheet`.)
+- Status mapping (the screen previously hardcoded `status: "pending"` at the call site — now a status view):
+  - UI tabs: `All` / `Pending` / `Completed` / `Rejected` / `Failed` (`SegmentedTabs`).
+  - Backend `status` arg mapping (`tabToBackendStatus`): `all → any`, `pending → pending`, `completed → completed`, `rejected → failed`, `failed → failed`. Switching tabs re-runs `load` (added to its deps), using the **existing** `api.admin.listZoneWithdrawalRequests` arg (`any|pending|completed|failed`). No new backend arg.
+  - **Rejected derivation:** backend has no `rejected` status. Rejected = `status === "failed" && adminDecision === "rejected"`; Failed = `status === "failed" && adminDecision !== "rejected"`. Both tabs fetch backend `"failed"` and split client-side via `matchesStatusTab`. `adminDecision` is serialized top-level by `serializeAdminZoneWithdrawal` (from `metadata.adminDecision`) and reliably reaches the client, so the split is safe.
+- Filters added (drawer):
+  - Branch / Venue: dynamic from loaded `branchName` (falls back to `venueName`); `All` default.
+  - Amount Range: `Any` / Under Rs 500 / Rs 500–2,000 / Rs 2,000–5,000 / Above Rs 5,000 (over `amount`).
+  - Date Range: `Any` / Today / Last 7 Days / Last 30 Days (over `createdAt`).
+  - Search (new): owner / branch / venue / bank / reference / masked account / amount.
+- Payout Method: **DEFERRED** — only `bankName` exists (no distinct payout-method/provider field). `bankName` is shown in the card/detail; not surfaced as a filter (would be mislabeled). Documented per scope.
+- Detail drawer guard (UI-only, no logic change): now that non-pending withdrawals are viewable, the Reject/Approve footer + reject-reason input render **only when `selected.status === "pending"`**. For non-pending items the detail shows read-only `Decision` + `Decided` lines. The approve/reject mutations and their handlers are unchanged; this only prevents showing re-decision controls on already-decided requests.
+- Active count / Reset behavior:
+  - Active count = Branch + Amount + Date (status is on tabs, not counted — matches zones/users); search excluded.
+  - Reset clears Branch / Amount / Date; search and status tab are NOT cleared; Reset disabled at 0; Done closes the drawer.
+- Empty state:
+  - Raw-empty (tab-scoped set empty) shows `No {status} withdrawals`; filtered-empty (tab has items but drawer/search hide them all) shows `No withdrawals match these filters.` / `Reset filters to view all withdrawals.`
+- Backend / mutation unchanged confirmation:
+  - No Convex/backend/service-logic files changed. `getZoneWithdrawalRequests` is called with the existing `{ status, limit }` shape (limit raised to 100, the backend cap). No wallet math, payout processing, or approve/reject logic changed.
+- Tests run:
+  - `npx tsc -p tsconfig.json --noEmit` (pass, exit 0).
+- Known risks:
+  - Backend scans `min(limit*10, 200)` withdrawal rows then slices; on the `All` tab a busy period could exceed the window — flagged for Phase 5F (scan-cap).
+  - Amount/Date exclude rows with no parseable value from non-Any ranges (consistent with prior phases).
+- Next starting point:
+  - Phase 5D — Users Last Active data check.
+
+### Phase 5D (May 23, 2026)
+- Status: **DATA-REVIEWED — DEFERRED. No code changed.** Last Active filter NOT added.
+- Scope of this pass: data-quality investigation of `users.lastActiveAt` only (no edits to any source file; only this checklist updated).
+- Files reviewed (not changed):
+  - `convex/schema.ts` (users `lastActiveAt`), `convex/users.ts` (`touchPresence`), `convex/admin.ts` (`listUsers`, `getDashboardSummary`), `src/services/convex/superAdminService.ts` (`SuperAdminUser` type), `src/hooks/usePresenceHeartbeat.ts`, `src/features/chat/utils.ts`.
+- Data-check result (why DEFERRED):
+  - `lastActiveAt` (`v.optional(v.number())`) has **exactly one writer**: `users.touchPresence` (`convex/users.ts`), which patches `lastActiveAt` + `isOnline`.
+  - Its only intended driver, `usePresenceHeartbeat` (foreground + 60s heartbeat), is **defined but not imported/used anywhere** in the app — so there is no broad, always-on activity path populating the field in production.
+  - `getDashboardSummary` already encodes distrust: it computes `active30d` from `lastActiveAt` but falls back to `totalUsersFallback` and exposes an `activeSource` flag.
+  - `lastActiveAt` is consumed only by chat "last seen" labels (`src/features/chat/utils.ts`); the `SuperAdminUser` type doesn't even include it.
+  - Conclusion: field is **sparse / unreliable**; a Last Active filter would silently hide most users under any non-Any bucket. Deferred per the "if data not good enough" path.
+- Backend unchanged confirmation: yes — no files changed.
+- Future requirement before implementing: (1) wire `usePresenceHeartbeat` into the app shell so `lastActiveAt` updates on every foreground/heartbeat; (2) confirm in dev/prod that a meaningful share of users have a recent `lastActiveAt`; (3) then add the filter frontend-only (`Any` / Today / Last 7 / Last 30 / Never-Unknown) over `lastActiveAt`, combining with search + account-type tab + Account Status + Created Date + KYC Status, and add `lastActiveAt` to the `SuperAdminUser` type.
+- Next starting point:
+  - Phase 5E — Payments backend-supported filters.
+
+### Phase 5E (May 23, 2026)
+- Status: Implemented (Super Admin **Payments** — backend-supported listing + filters + page-scoped reconciliation). Additive, read-only. The old `listEasypaisaTransactions` query + `getEasypaisaTransactions` wrapper are kept intact.
+- Files changed:
+  - `convex/schema.ts` (added 2 additive indexes to `paymentTransactions`)
+  - `convex/admin.ts` (added new read-only query `listPaymentsV2`)
+  - `src/services/convex/superAdminService.ts` (added types `AdminPaymentListItem` / `AdminPaymentReconciliation` / `AdminPaymentStatus` / `AdminPaymentsQueryInput` + wrapper `getAdminPayments`)
+  - `app/super-admin/(tabs)/payments.tsx` (migrated to `getAdminPayments`; added Date/Amount/Provider Status/Reconciliation Issue filters)
+  - generated Convex files (`convex/_generated/*` via codegen)
+  - `TEMP_FILTER_AUDIT_AND_FIX_CHECKLIST.md`
+- New query — `admin.listPaymentsV2` (read-only):
+  - Args: `sessionToken`, `status?`, `kind?`, `dateFrom?`, `dateTo?`, `amountMin?`, `amountMax?`, `search?`, `includeReconciliation?`, `limit?`. Auth via the existing `getAuthenticatedAdmin`.
+  - Replaces the old per-status take + dedupe of ~20 rows with **createdAt-ordered** fetching: status + date bounds pushed into the index (`by_status_and_createdAt` when a status is given, else `by_createdAt`), `.order("desc").take(scanLimit)` where `scanLimit = min(max(limit*5, limit), 500)`; then in-memory `provider==="easypaisa"` + kind + amount + search; then `.slice(0, limit)` (limit default 50, cap 100).
+  - Returns list-safe fields only: `paymentTransactionId`/`_id`/`id`, `orderRefNum`, `kind`, `status`, `amount`, `currency`, `createdAt`, `updatedAt`, `processedAt`, `expiresAt`, `providerStatus`, `providerReference`, `providerDescription` (truncated via `truncateAdminProviderText`), `accountOwnerName` (joined), `bookingIntentId`, `lastError`, `callbackCount`, and a safe `providerPayload` subset (`flow`/`lastSyncAt`/`lastProviderStatus`). **Excluded:** raw `providerPayload` (ipn/hosted raw bodies), phone/CNIC/account, secrets/tokens.
+- Indexes added (additive, do not conflict with existing):
+  - `paymentTransactions.by_createdAt` = `["createdAt"]`
+  - `paymentTransactions.by_status_and_createdAt` = `["status", "createdAt"]`
+- Reconciliation strategy (page-scoped + opt-in):
+  - Flags computed **only** when `includeReconciliation === true`, and **only over the returned page** (≤ limit rows) — never the full table, no writes, no denormalization.
+  - Flags returned per row: `paidNoWalletTx`, `walletTxWithoutPaid`, `bookingIntentUnpaidButPaymentPaid`, `pendingPastExpiry`, `failedButWalletTxExists`. Derivations mirror `getPaymentDetailByOrderRefNum` exactly (wallet lookup via `walletTransactions.by_reference` = `easypaisa:{orderRefNum}`; bookingIntent `get`). `pendingPastExpiry` is the cheap, join-free flag (status + `expiresAt`).
+  - UI requests reconciliation only when the user picks a Reconciliation Issue other than `All` (so the default load and 45s auto-refresh do not run the joins).
+- Payments UI filters:
+  - Payment Type (server `kind`): All / Wallet Top-up / Booking Payment. (No Team Challenge — `kind` only has `booking_intent` / `wallet_topup`.)
+  - Payment Status (server `status`): All / Created / Redirected / Token Received / Pending / Paid / Failed / Expired / Cancelled.
+  - Date Range (server `dateFrom`): Any / Today / Last 7 Days / Last 30 Days (lower bound only; payments aren't future-dated).
+  - Amount Range (server `amountMin`/`amountMax`): Any / Under Rs 500 / Rs 500–2,000 / Rs 2,000–5,000 / Above Rs 5,000 (whole-rupee inclusive bounds).
+  - Provider Status (client, dynamic from loaded page): All + present values.
+  - Reconciliation Issue (client over the page, triggers `includeReconciliation`): All / the 5 flags above. Active flags also render as red `StatusPill`s on each card.
+  - Search remains client-side over the loaded page (owner/orderRef/providerRef/status/kind/amount). (`listPaymentsV2` also accepts a server `search` arg for orderRef/providerRef, currently unused by the UI.)
+- Active count / Reset / Empty state:
+  - Active count = Type + Status + Date + Amount + Provider Status + Reconciliation; search excluded. Reset clears all six; search not cleared; Reset disabled at 0; Done closes the drawer.
+  - Empty: `anyFilterActive` (any non-default filter or search) → `No payments match these filters.` / `Reset filters to view all payments.`; otherwise `No payments found`.
+- Sensitive fields excluded: confirmed (see returned-fields list above).
+- Codegen result: `npx convex codegen` ran successfully (server code + TypeScript bindings regenerated). NOTE: the two new indexes become active on the next `convex dev`/`deploy` (codegen/deploy backfills them); `listPaymentsV2` requires them at runtime.
+- TypeScript result: `npx tsc -p tsconfig.json --noEmit` (pass, exit 0).
+- No-change confirmations: no payment status mutation, no reconciliation/wallet WRITES, no Easypaisa callback/IPN/finalize changes, no refund/capture/settlement changes. `listPaymentsV2` is a pure read.
+- Known risks:
+  - The list is a most-recent window (`scanLimit` ≤ 500; page `limit` ≤ 100). Date/Amount are honest within that window but full-history pagination is **not** implemented — see Phase 5F. This is intentional and avoids faking full-history filtering.
+  - Page-scoped reconciliation does up to `limit` × (1 wallet query + 1 bookingIntent get); kept opt-in to bound cost.
+  - Provider Status options reflect only the loaded page.
+- Manual/code-review notes:
+  - Not run on device this pass; verified by code review + TypeScript + codegen.
+  - Confirmed the detail screen (`/super-admin/payment/[orderRefNum]`) still uses the unchanged `getPaymentDetailByOrderRefNum` (full reconciliation there is untouched).
+- Next starting point:
+  - Phase 5F — pagination follow-ups.
+
+### Phase 5F — Performance / Pagination Follow-ups (May 23, 2026 — PLAN ONLY, not implemented)
+No implementation this pass. Recorded risks and the recommended approach for a later track:
+- **Payments:** `listPaymentsV2` loads a most-recent window (`scanLimit` ≤ 500, page `limit` ≤ 50/cap 100). Date/Amount filtering is honest within the window but not across full history. Follow-up: add cursor pagination (the codebase currently uses no Convex `.paginate()` anywhere — adopting it here would be the first instance; alternatively a `createdAt`-cursor "load more" using `by_createdAt`/`by_status_and_createdAt`).
+- **Withdrawals:** backend scans `min(limit*10, 200)` `walletTransactions` rows (by type) then filters/slices; the `All` tab in a busy period can exceed the window. Follow-up: dedicated index/pagination for withdrawal requests, or a cursor.
+- **Users:** Super Admin Users loads ~150 most-recent-by-`updatedAt`; all frontend filters (Account Status / Role / Created Date / KYC) act only on that window. Follow-up: server-side filtering or pagination if user volume grows.
+- **Zones:** `admin.listZones` is `limit`-capped (default 100) per status; the new Active tab + Pilot Status filter act on the loaded window. Follow-up: pagination for large active-zone counts.
+- **Matchrooms / Support:** server lists are `take(N)`-capped; future pagination risk if volume grows (no change needed now).
+General: no Convex pagination pattern exists in the codebase today; introducing one (`paginationOptsValidator` + `usePaginatedQuery`, or explicit cursors) should be a single, reviewed track applied consistently.
+
+### Phase 6 — Filter QA + Regression Pass (May 23, 2026)
+- Status: **PASSED WITH MINOR FIXES.** Full code-review + TypeScript regression across Player, Zone Admin, and Super Admin filter work (Phases 1–5). No new filters, no UI redesign, no backend logic change. 2 small in-scope bugs fixed.
+- Files changed this phase:
+  - `app/super-admin/withdrawals.tsx` (label fix only — see Bug 1)
+  - `app/zone/modules/pricing.tsx` (filtered-empty state — see Bug 2)
+  - `TEMP_FILTER_AUDIT_AND_FIX_CHECKLIST.md`
+- Bugs fixed:
+  1. **Withdrawals raw-empty grammar.** On the new `All` status tab, the raw-empty title rendered `statusTabTitle("all")` → `"all"`, producing "No all withdrawals". Fixed to show "No withdrawals" on the `All` tab while keeping per-status titles ("No pending withdrawals", etc.). Display-only; no logic touched.
+  2. **Pricing missing filtered-empty state.** The Rules list showed "No pricing rules yet." even when existing rules were hidden by filters/search (flagged as a Phase 3C follow-up). Added the raw-vs-filtered distinction: raw-empty keeps "No pricing rules yet."; filtered-empty now shows "No pricing rules match these filters." Uses existing `rules` (raw) vs `filteredRules` (post-filter); no pricing/query/mutation logic changed.
+- Screens verified by code review (no change needed — confirmed correct):
+  - Player: Wallet Transactions, My Matchrooms, Inbox, Schedule. (Discover confirmed planning-only/deferred per Phase 2E — no implementation changes.)
+  - Zone Admin: Bookings (Requests + Matchrooms tabs), Resources, Pricing.
+  - Super Admin: Users (+KYC), Zones (+Pilot/Active tab), Withdrawals, Payments, Reports, Identity Verifications, Audit Logs, Notifications, Matchrooms, Support Tickets.
+- Cross-cutting checks confirmed by code review:
+  - All 10 Super Admin filter drawers use the `resetDisabled={!activeFilterCount}` (or `=== 0`) standard; Reset clears drawer filters only and never clears search; Done closes the drawer. Same standard verified on Zone Admin Bookings (Requests + Matchrooms) and Resources drawers.
+  - Active filter count excludes search on every screen; tab-scoped/conditional counts verified (e.g. Zones Pilot Status only counts on the Active tab via `Number(tab === "active" && pilotFilter !== "all")`).
+  - Filtered-empty vs raw-empty state present on all 13 Player + Super Admin filter screens, plus Zone Admin Bookings Requests and Resources, and now Pricing.
+- Screens verified on device/simulator: **NONE** this pass — code review + TypeScript only. Device matrix (small phone / Samsung A32 / large Android / iPhone home-indicator / drawer scrolling / chip wrapping) remains open.
+- Backend / Convex safety confirmation (from `git diff` review of the uncommitted Phase 5 changes):
+  - `convex/admin.ts`: only ADDED `listPaymentsV2` (read-only `query`). No existing mutation/action changed.
+  - `convex/schema.ts`: only ADDED two additive indexes to `paymentTransactions` (`by_createdAt`, `by_status_and_createdAt`). No field/validator changes.
+  - No mutation behavior changed for payments / wallet / withdrawals / zones / users / support / reports / matchrooms. Withdrawals approve/reject handlers and mutations are byte-for-byte unchanged (the only withdrawals change gates the re-decision UI to `status === "pending"` and splits the backend `failed` set into Rejected/Failed for display).
+  - `listPaymentsV2` sensitive-data safety verified: returns only a safe `providerPayload` subset (`flow` / `lastSyncAt` / `lastProviderStatus`) and `providerDescription` is truncated. It does NOT return raw `providerPayload` (IPN/hosted bodies), phone, CNIC, account details, or tokens/secrets.
+  - Service layer (`superAdminService.ts`, `zoneService.ts`) changes are additive TypeScript types + one read-only `getAdminPayments` wrapper; no query-arg or logic changes to existing functions.
+- Convex deployment / configuration note:
+  - Configured deployment (`.env.local`): `CONVEX_DEPLOYMENT=dev:ardent-lynx-28` — a **dev** deployment in the **matchhai-staging** project (team shakir-yasin). `EXPO_PUBLIC_CONVEX_URL=https://ardent-lynx-28.convex.cloud`. There is no `convex.json`. This is a dev/staging deployment, **not production**.
+  - Phase 5E ran `npx convex codegen`, which regenerates the local `convex/_generated/*` bindings; codegen alone does not push functions or backfill indexes. The new indexes (`by_createdAt`, `by_status_and_createdAt`) become active only on the next `convex dev`/`convex deploy`, which `listPaymentsV2` requires at runtime. Any deployed backend change is limited to the additive read-only query + 2 indexes.
+  - Phase 6 did **not** change any `convex/` or generated files, so no codegen was re-run and no deploy was performed.
+- Commands run:
+  - `npx tsc -p tsconfig.json --noEmit` → exit 0 (clean), re-run after both fixes → exit 0 (clean).
+  - `git diff --check` → no whitespace/conflict errors (only benign LF→CRLF advisory warnings).
+  - `npx convex codegen` → NOT run (no backend/generated change in Phase 6).
+- Known risks / remaining items:
+  - All Super Admin filtering acts on a most-recent loaded window (Payments ≤ 500 scan / ≤ 100 page; Withdrawals scan-capped; Users ~150; Zones ~100). Date/Amount/etc. are honest within that window only — full-history pagination is the Phase 5F track.
+  - Reconciliation flags (Payments) render only when a Reconciliation Issue filter is selected (opt-in/page-scoped by design) — there is no "any issue" aggregate option.
+  - Heuristic buckets remain (Bookings Branch leniency, Booking Type/Source classification, Notification Type → System fallback): unknowns are bucketed, never hidden. Documented in their phase entries.
+  - Zone Admin Bookings **Matchrooms** tab still shows a single "No matchrooms found for this zone." (no raw-vs-filtered split) because the child section receives the already-filtered list; adding the distinction needs prop plumbing — left as a low-priority follow-up, not a regression.
+  - Indexes must be live on the target deployment before `listPaymentsV2` is exercised in any environment (see deployment note).
+- Recommended next step after Phase 6:
+  - Run the manual device QA matrix (drawer scrolling, chip wrapping, Reset/Done, active counts, empty states) on the listed devices.
+  - Deploy the additive Phase 5E backend (read-only query + 2 indexes) to the intended environment via `convex deploy` (currently only present locally / on the dev deployment) so the indexes are backfilled before Payments V2 is used.
+  - Then schedule the Phase 5F pagination track as a single reviewed change.

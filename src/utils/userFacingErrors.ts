@@ -3,6 +3,19 @@ import { SLOT_ALREADY_FILLED_PAYMENT_MESSAGE } from "./paymentUiCopy";
 export const DEFAULT_USER_FACING_ERROR =
   "Something went wrong. Please try again.";
 
+export const SESSION_EXPIRED_MESSAGE =
+  "Your session has expired. Please log in again.";
+
+// Matches the auth/session failures Convex surfaces when a function requires an
+// identity but the request had no (valid) token: better-auth's "Unauthenticated"
+// ConvexError plus the "please sign in" guards used across our Convex handlers.
+const AUTH_SESSION_ERROR_MARKER =
+  /\bunauthenticated\b|not authenticated|please sign in|please log ?in|sign in to continue|session (?:has )?expired|auth(?:entication)? (?:required|expired)/i;
+
+export function isAuthSessionError(error: unknown): boolean {
+  return AUTH_SESSION_ERROR_MARKER.test(getRawErrorMessage(error));
+}
+
 const TECHNICAL_ERROR_MARKER =
   /\[CONVEX|\[Request ID:|Called by client|Server Error|Uncaught (?:ConvexError|Error)|at handler\b/i;
 
@@ -50,6 +63,10 @@ export function getUserFacingErrorMessage(
   fallback = DEFAULT_USER_FACING_ERROR,
 ): string {
   const raw = getRawErrorMessage(error);
+
+  if (AUTH_SESSION_ERROR_MARKER.test(raw)) {
+    return SESSION_EXPIRED_MESSAGE;
+  }
 
   if (/slot is no longer available|selected slot is no longer available/i.test(raw)) {
     return SLOT_ALREADY_FILLED_PAYMENT_MESSAGE;

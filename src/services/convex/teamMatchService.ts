@@ -107,7 +107,7 @@ const toPositiveNumber = (value: unknown) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
-const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 3;
+const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 2;
 const TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS = 2;
 const TEAM_CHALLENGE_MIN_SCHEDULE_MS = TEAM_CHALLENGE_MIN_SCHEDULE_DAYS * 24 * 60 * 60 * 1000;
 
@@ -123,7 +123,7 @@ const validateTeamChallengeScheduledAt = (scheduledAtMs: number, nowMs = Date.no
     const maxAt = addMonths(now, TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS).getTime();
 
     if (scheduledAtMs < minAt) {
-        return "Team challenges must be scheduled at least 3 days in advance.";
+        return "Team challenges must be scheduled at least 2 days in advance.";
     }
     if (scheduledAtMs > maxAt) {
         return "Team challenges cannot be scheduled more than 2 months in advance.";

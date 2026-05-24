@@ -50,21 +50,29 @@ function matchesDateRange(timestamp: number | null | undefined, range: DateRange
   return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
 }
 
-const CATEGORY_ORDER = ["matchrooms", "teams", "payments", "support", "reports", "system"] as const;
+const CATEGORY_ORDER = ["matchrooms", "teams", "payments", "withdrawals", "support", "reports", "kyc", "zones", "broadcasts", "system"] as const;
 const CATEGORY_LABELS: Record<string, string> = {
   matchrooms: "Matchrooms",
   teams: "Teams",
   payments: "Payments",
+  withdrawals: "Withdrawals",
   support: "Support",
   reports: "Reports",
+  kyc: "KYC",
+  zones: "Zones",
+  broadcasts: "Broadcasts",
   system: "System",
 };
 
 // Conservative type bucketing mirroring the Player Inbox (Phase 2C). Unknown -> "system".
 function getNotificationCategory(item: SuperAdminNotification): string {
   const type = String(item.type || "").toLowerCase();
+  if (type.startsWith("withdrawal.") || type.startsWith("withdrawal_")) return "withdrawals";
   if (type.startsWith("support.") || type.startsWith("support_")) return "support";
   if (type.startsWith("moderation.") || type.includes("report")) return "reports";
+  if (type.startsWith("kyc.") || type.startsWith("kyc_")) return "kyc";
+  if (type.startsWith("zone.") || type.startsWith("zone_") || type.startsWith("resource.")) return "zones";
+  if (type.startsWith("broadcast.") || type.startsWith("broadcast_")) return "broadcasts";
   if (type.startsWith("wallet.") || type.startsWith("wallet_") || type.includes("payment")) return "payments";
   if (type.startsWith("team.") || type.startsWith("team_")) return "teams";
   if (type.startsWith("match.") || type.startsWith("match_") || type.startsWith("booking.") || type.startsWith("booking_")) return "matchrooms";

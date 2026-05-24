@@ -158,6 +158,16 @@ export function useZoneBookingsActions({
       return;
     }
 
+    // Proposed times must be in the future. The ±2h-of-original bound is enforced
+    // server-side in sendCounterOffer using these client-computed (local) values.
+    const proposedStartAts = normalizedOptions.map((option) =>
+      new Date(`${option.date}T${option.time}`).getTime(),
+    );
+    if (proposedStartAts.some((ms) => !Number.isFinite(ms) || ms <= Date.now())) {
+      showToast({ type: "warning", title: "Invalid time", message: "Alternative time cannot be in the past." });
+      return;
+    }
+
     setProcessingAction("counter");
     try {
       const result = await sendZoneCounterOffer({
@@ -174,6 +184,7 @@ export function useZoneBookingsActions({
         currency: selectedRequest.currency || "PKR",
         location: zone.primaryBranch?.areaLabel || "",
         expiresInMinutes: 120,
+        proposedStartAts,
       });
 
       if (!result.ok) {

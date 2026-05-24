@@ -197,6 +197,14 @@ async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "tea
     recipients.set(String(superAdmin._id), { id: superAdmin._id, role: "super_admin" });
   }
 
+  // Also notify the match participants (players/captains) of the final result.
+  for (const participantUid of getMatchroomPlayerUids(room).slice(0, 20)) {
+    const participant = await resolveUserByAnyId(ctx, participantUid);
+    if (participant?._id && !recipients.has(String(participant._id))) {
+      recipients.set(String(participant._id), { id: participant._id });
+    }
+  }
+
   for (const [uid, meta] of recipients.entries()) {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       type: "match.result_finalized",
@@ -216,6 +224,113 @@ async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "tea
         finalizedAt: now,
         href: meta.role === "super_admin" ? "/super-admin" : `/matchrooms/${String(matchroomId)}`,
       },
+    });
+  }
+}
+
+// Returns true if ANY notification (active, read or archived) already exists for
+// this dedupe key. Used to make cron-driven notifications fire exactly once even
+// after the recipient reads/archives them.
+async function notificationExistsByDedupeKey(ctx: any, dedupeKey: string) {
+  const existing = await ctx.db
+    .query("notifications")
+    .withIndex("by_dedupeKey", (q: any) => q.eq("dedupeKey", dedupeKey))
+    .first();
+  return Boolean(existing);
+}
+
+// Ordered smallest-first so the current bucket is the first window whose
+// threshold the remaining time has crossed (prevents firing all three at once).
+const MATCH_REMINDER_WINDOWS = [
+  { key: "30m", ms: 30 * 60 * 1000, title: "Match in 30 minutes", body: "Your match starts in 30 minutes. Make sure your team is ready." },
+  { key: "2h", ms: 2 * 60 * 60 * 1000, title: "Match in 2 hours", body: "Your match starts soon. Open MatchHai to review the details." },
+  { key: "24h", ms: 24 * 60 * 60 * 1000, title: "Match tomorrow", body: "Your match is scheduled in about 24 hours." },
+];
+
+// Server-backed pre-match reminders. Idempotent (per uid, per window) via a
+// fixed dedupe key checked before creation. Only fires for valid, future rooms.
+async function maybeSendMatchroomReminders(ctx: any, room: any, now: number) {
+  if (!room) return;
+  const status = String(room.status || "");
+  if (status === "cancelled" || status === "expired" || status === "completed" || status === "in-progress") return;
+  const startAt = getRoomStartMs(room);
+  if (!startAt || !Number.isFinite(startAt) || startAt <= now) return;
+  const remaining = startAt - now;
+  const windowToFire = MATCH_REMINDER_WINDOWS.find((w) => remaining <= w.ms);
+  if (!windowToFire) return; // more than 24h away — nothing to send yet
+
+  for (const participantUid of getMatchroomPlayerUids(room).slice(0, 20)) {
+    const participant = await resolveUserByAnyId(ctx, participantUid);
+    if (!participant?._id) continue;
+    const dedupeKey = `match.reminder_${windowToFire.key}:${String(room._id)}:${String(participant._id)}`;
+    if (await notificationExistsByDedupeKey(ctx, dedupeKey)) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: `match.reminder_${windowToFire.key}`,
+      toUid: participant._id,
+      recipientRole: "player",
+      status: "pending",
+      dedupeKey,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId: room._id,
+      route: `/matchrooms/${String(room._id)}`,
+      title: windowToFire.title,
+      body: windowToFire.body,
+      data: {
+        matchroomId: room._id,
+        reminderWindow: windowToFire.key,
+        scheduledStartAt: startAt,
+        href: `/matchrooms/${String(room._id)}`,
+      },
+    });
+  }
+}
+
+// Tells captains they need to submit/confirm the result once a match completes.
+// Fired idempotently from the lifecycle sweep while verification is still open.
+async function maybeSendResultVerificationRequired(ctx: any, room: any) {
+  const { team1Captain, team2Captain } = resolveResultCaptains(room, room?.resultVerification || {});
+  const captainUids = Array.from(new Set([team1Captain, team2Captain].filter(Boolean)));
+  for (const captainUid of captainUids) {
+    const captain = await resolveUserByAnyId(ctx, captainUid);
+    if (!captain?._id) continue;
+    const dedupeKey = `match.result_verification_required:${String(room._id)}:${String(captain._id)}`;
+    if (await notificationExistsByDedupeKey(ctx, dedupeKey)) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.result_verification_required",
+      toUid: captain._id,
+      recipientRole: "player",
+      status: "pending",
+      dedupeKey,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId: room._id,
+      route: `/matchrooms/${String(room._id)}`,
+      title: "Confirm your match result",
+      body: "Your match has finished. Submit the result to finalize it.",
+      data: { matchroomId: room._id, href: `/matchrooms/${String(room._id)}` },
+    });
+  }
+}
+
+// Notifies all participants when captains disagree and the result goes to a vote.
+async function notifyResultDisputed(ctx: any, room: any, matchroomId: Id<"matchrooms">) {
+  for (const participantUid of getMatchroomPlayerUids(room).slice(0, 20)) {
+    const participant = await resolveUserByAnyId(ctx, participantUid);
+    if (!participant?._id) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.result_disputed",
+      toUid: participant._id,
+      recipientRole: "player",
+      status: "pending",
+      dedupeKey: `match.result_disputed:${String(matchroomId)}:${String(participant._id)}`,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId,
+      route: `/matchrooms/${String(matchroomId)}`,
+      title: "Result needs your vote",
+      body: "Captains disagreed on the result. Cast your vote to help resolve it.",
+      data: { matchroomId, href: `/matchrooms/${String(matchroomId)}` },
     });
   }
 }
@@ -880,6 +995,31 @@ async function markInvalidResultVerificationForAdminReview(
     },
     updatedAt: now,
   });
+
+  // Alert super admins that this result needs manual review.
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .collect();
+  for (const superAdmin of superAdmins) {
+    const dedupeKey = `match.result_admin_review:${String(matchroomId)}:${String(superAdmin._id)}`;
+    if (await notificationExistsByDedupeKey(ctx, dedupeKey)) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.result_admin_review",
+      toUid: superAdmin._id,
+      recipientRole: "super_admin",
+      status: "pending",
+      dedupeKey,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId,
+      route: "/super-admin",
+      title: "Match needs admin review",
+      body: "A match result could not be verified automatically and needs review.",
+      data: { matchroomId, reason, href: "/super-admin" },
+    });
+  }
+
   return { ok: false, status: "admin_review", reason };
 }
 
@@ -2256,6 +2396,10 @@ export const submitCaptainReport = mutation({
       resultVerification: nextRv,
       updatedAt: Date.now(),
     });
+
+    if (nextRv.status === "participant_vote") {
+      await notifyResultDisputed(ctx, room, args.matchroomId);
+    }
 
     return { ok: true, status: nextRv.status };
   },
@@ -3733,6 +3877,10 @@ export const runLifecycleSweep = internalMutation({
           }
         }
 
+        if (room.status === "open" || room.status === "locked") {
+          await maybeSendMatchroomReminders(ctx, room, now);
+        }
+
         if (room.status === "in-progress") {
           if (shouldExpireInProgressRoom(room, now)) {
             const result = await expireMatchroomForInvalidLifecycle(
@@ -3771,6 +3919,9 @@ export const runLifecycleSweep = internalMutation({
               validation.reason,
             );
             changedRooms += 1;
+          } else if (validation.ok && (!rv.status || rv.status === "pending")) {
+            // Result verification is open and valid — remind captains to report.
+            await maybeSendResultVerificationRequired(ctx, room);
           }
         }
       }

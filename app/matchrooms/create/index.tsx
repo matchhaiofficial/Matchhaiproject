@@ -532,11 +532,14 @@ export default function CreateMatchroom() {
   const minAllowedDate = useMemo(() => {
     const d = new Date();
     if (isZoneWalkInAdmin) {
+      // Walk-in: at least 1 day ahead (no same-day) — earliest selectable day is tomorrow.
       d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 1);
       return d;
     }
+    // Solo player matchroom: at least 3 days in advance.
     d.setMinutes(0, 0, 0);
-    d.setHours(d.getHours() + 1);
+    d.setDate(d.getDate() + 3);
     return d;
   }, [isZoneWalkInAdmin]);
   const minAllowedDateLabel = useMemo(
