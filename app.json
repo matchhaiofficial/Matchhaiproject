@@ -16,7 +16,9 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "MatchHai uses your microphone to record voice messages in chat.",
+        "NSPhotoLibraryUsageDescription": "MatchHai uses your photo library so you can upload profile pictures, team images, and chat attachments.",
+        "NSCameraUsageDescription": "MatchHai uses your camera so you can take profile pictures, team images, and chat attachments.",
+        "NSMicrophoneUsageDescription": "MatchHai uses your microphone so you can send voice messages and communicate during gameplay coordination.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.ovaisto.matchhai"
@@ -50,7 +52,15 @@
       "expo-secure-store",
       "expo-audio",
       "expo-notifications",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "MatchHai uses your photo library so you can upload profile pictures, team images, and chat attachments.",
+          "cameraPermission": "MatchHai uses your camera so you can take profile pictures, team images, and chat attachments."
+        }
+      ],
+      "expo-document-picker"
     ],
     "experiments": {
       "typedRoutes": true

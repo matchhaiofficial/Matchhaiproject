@@ -9,7 +9,22 @@ import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 import { notifyKycStatusUpdated } from "./kycNotifications";
 import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
 
-const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").trim().toLowerCase();
+// Backend authorization email source. Prefer a SERVER-ONLY env var
+// (SUPER_ADMIN_EMAIL) so the super-admin identity is not shipped in the public
+// client bundle. Falls back to the legacy EXPO_PUBLIC_ var for backwards compat.
+// IMPORTANT: there is NO hardcoded default — if neither env is configured the
+// allowlist is empty and super-admin access fails closed (CR-03).
+const SUPER_ADMIN_EMAIL = (
+  process.env.SUPER_ADMIN_EMAIL ||
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL ||
+  ""
+).trim().toLowerCase();
+
+// Canonical super-admin role string. The rest of the app uses "super_admin"
+// (underscore); legacy data may contain "super-admin" (hyphen) which we still
+// accept on read so existing admins are never locked out (CR-05).
+const SUPER_ADMIN_ROLE = "super_admin";
+const LEGACY_SUPER_ADMIN_ROLE = "super-admin";
 const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const SUPER_ADMIN_ALLOWLIST_NAMES = ["Junaid", "Ehteshan", "Zeerak", "Mubeen", "Saad", "Ovais"] as const;
 const SUPER_ADMIN_ALLOWLIST_ENV_KEYS: Record<(typeof SUPER_ADMIN_ALLOWLIST_NAMES)[number], string> = {
@@ -105,7 +120,9 @@ function findSuperAdminAllowlistEntry(email?: string | null) {
 }
 
 function isAuthorizedSuperAdmin(profile: any, email: string) {
-  return Boolean(findSuperAdminAllowlistEntry(email) || profile?.role === "super-admin");
+  const role = profile?.role;
+  const hasAdminRole = role === SUPER_ADMIN_ROLE || role === LEGACY_SUPER_ADMIN_ROLE;
+  return Boolean(findSuperAdminAllowlistEntry(email) || hasAdminRole);
 }
 
 function resolveSuperAdminAuditIdentity(authUser: any, profile: any) {
@@ -2531,8 +2548,19 @@ export const setUserRole = mutation({
       throw new Error("You cannot remove your own super admin access.");
     }
 
+    // Canonicalize any admin role to the single source-of-truth value (CR-05).
+    // Empty/undefined removes the elevated role; non-admin roles pass through.
+    const normalizedRole = (() => {
+      const raw = String(args.role || "").trim().toLowerCase();
+      if (!raw) return undefined;
+      if (raw === SUPER_ADMIN_ROLE || raw === LEGACY_SUPER_ADMIN_ROLE || raw === "superadmin") {
+        return SUPER_ADMIN_ROLE;
+      }
+      return args.role;
+    })();
+
     await ctx.db.patch(args.userId, {
-      role: args.role,
+      role: normalizedRole,
       updatedAt: Date.now(),
     });
 
@@ -2654,6 +2682,12 @@ export const bootstrapInitialSuperAdmin = mutation({
     phone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Fail closed: never bootstrap an admin against an empty/default email (CR-03).
+    if (!SUPER_ADMIN_EMAIL) {
+      throw new Error(
+        "SUPER_ADMIN_EMAIL is not configured. Set it in the Convex deployment environment before bootstrapping.",
+      );
+    }
     const [existingSuperAdmins, existingEmail] = await Promise.all([
       ctx.db
         .query("users")
@@ -2678,7 +2712,7 @@ export const bootstrapInitialSuperAdmin = mutation({
 
     if (existingEmail) {
       await ctx.db.patch(existingEmail._id, {
-        role: "super-admin",
+        role: SUPER_ADMIN_ROLE,
         updatedAt: Date.now(),
       });
       return {
@@ -2752,7 +2786,7 @@ export const bootstrapInitialSuperAdmin = mutation({
       isOnline: false,
       onboardingCompleted: true,
       onboardingStep: 4,
-      role: "super-admin",
+      role: SUPER_ADMIN_ROLE,
       phoneValidated: false,
       createdAt: now,
       updatedAt: now,

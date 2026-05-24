@@ -209,9 +209,12 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
-async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
+// Resolve the authenticated caller's `users` row from the verified Convex/Better
+// Auth identity. Never trusts a client-passed uid — the actor is derived purely
+// from the session. Throws a clean, generic message when unauthenticated.
+async function requireAuthenticatedActor(ctx: any) {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Please sign in to view booking history.");
+  if (!identity) throw new Error("Please sign in to continue.");
 
   const candidates = [identity.tokenIdentifier, identity.subject]
     .map((value) => String(value || "").trim())
@@ -223,6 +226,14 @@ async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
     if (actor) break;
   }
   if (!actor) throw new Error("Signed-in user profile not found.");
+  return actor;
+}
+
+// Authorize a zone-owner action: caller must be authenticated AND own `zoneId`.
+// Returns the resolved actor + zone so callers can attribute writes to the
+// server-derived identity instead of any client-supplied uid.
+async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
+  const actor = await requireAuthenticatedActor(ctx);
 
   let zone: any = null;
   try {
@@ -232,7 +243,7 @@ async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
   }
   if (!zone) throw new Error("Zone not found.");
   if (String(zone.ownerUid || "") !== String(actor._id)) {
-    throw new Error("You are not authorized to view this zone's booking history.");
+    throw new Error("You are not authorized to manage this zone.");
   }
 
   return { actor, zone };
@@ -653,6 +664,8 @@ export const listBookingQueueForZone = query({
     branchAreas: v.array(v.string()),
   },
   handler: async (ctx, args) => {
+    // Authz: only the zone owner may read this zone's booking queue (S-04).
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const activeStatuses = new Set(["open", "pending_payment", "accepted"]);
 
     // Get requests directed to this zone
@@ -903,6 +916,8 @@ export const listMatchroomsForZone = query({
     locationHints: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    // Authz: only the zone owner may read this zone's matchrooms (S-04).
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const merged = new Map<string, any>();
     const includeInAdminList = (matchroom: any) =>
       String(matchroom.zoneId || "") === args.zoneId &&
@@ -1019,6 +1034,10 @@ export const acceptBookingRequest = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01). Actor is derived from the
+    // session; client-passed adminUid is treated only as a non-authoritative hint.
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const bookingRequest = await ctx.db.get(args.requestId);
     if (!bookingRequest) {
@@ -1261,7 +1280,7 @@ export const acceptBookingRequest = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "accept_request",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Accepted booking request and created matchroom ${String(matchroomId)}.`,
@@ -1300,6 +1319,9 @@ export const rejectBookingRequest = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const request = await ctx.db.get(args.requestId);
 
@@ -1378,7 +1400,7 @@ export const rejectBookingRequest = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "reject_request",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Rejected booking request for ${normalizeGameKey(request?.gameKey)}.`,
@@ -1426,6 +1448,9 @@ export const sendCounterOffer = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, String(args.zoneId));
+    const actorUid = String(actor._id);
     const now = Date.now();
     const currency = args.currency || "PKR";
     const request = await ctx.db.get(args.requestId);
@@ -1581,7 +1606,7 @@ export const sendCounterOffer = mutation({
       zoneId: String(args.zoneId),
       module: "bookings",
       action: "send_counter_offer",
-      actorUid: args.adminUid || args.zoneOwnerUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Sent counter-offer with ${scheduleOptions.length} time option${scheduleOptions.length === 1 ? "" : "s"}.`,
@@ -1627,8 +1652,10 @@ export const respondToCounterOffer = mutation({
     const request = await ctx.db.get(offer.requestId);
     if (!request) throw new Error("Booking request not found.");
 
-    const responder = await resolveUserByAnyId(ctx, args.responderUid);
-    if (!responder) throw new Error("Responder not found.");
+    // Authz: derive the responder from the authenticated session, never from the
+    // client-passed responderUid (CR-01 / IDOR). The recipient check below then
+    // confirms this signed-in user is actually an invited recipient.
+    const responder = await requireAuthenticatedActor(ctx);
 
     const recipientUids = Array.isArray(offer.recipientUids)
       ? offer.recipientUids.map((uid: string) => String(uid))
@@ -1916,6 +1943,9 @@ export const createWalkInMatchroom = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
     const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
@@ -1963,7 +1993,7 @@ export const createWalkInMatchroom = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "create_walk_in_matchroom",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "matchroom",
       targetId: String(matchroomId),
       summary: `Created walk-in matchroom "${args.title.trim() || "Walk-in Matchroom"}".`,

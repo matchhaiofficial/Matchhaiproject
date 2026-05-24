@@ -2,12 +2,21 @@ import { ConvexReactClient } from "convex/react";
 
 const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
 
-if (!CONVEX_URL) {
-  console.warn("[convex] EXPO_PUBLIC_CONVEX_URL is not set");
+// Fail clearly instead of silently constructing a client against an empty or
+// placeholder backend URL (CR-04). A build/QA run with missing or unreplaced
+// production config should be obvious, not a silent no-backend app.
+function assertConvexUrl(url: string | undefined): asserts url is string {
+  if (!url || url.includes("REPLACE_WITH_")) {
+    throw new Error(
+      "[convex] EXPO_PUBLIC_CONVEX_URL is not configured for this build profile. " +
+        "Set the correct Convex deployment URL (see eas.json env per profile).",
+    );
+  }
 }
 
 export function createConvexClient() {
-  return new ConvexReactClient(CONVEX_URL || "", {
+  assertConvexUrl(CONVEX_URL);
+  return new ConvexReactClient(CONVEX_URL, {
     unsavedChangesWarning: false,
   });
 }

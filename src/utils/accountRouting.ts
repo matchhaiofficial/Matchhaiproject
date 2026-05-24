@@ -1,8 +1,10 @@
 import type { UserProfile } from "../context/AuthContext";
 import { APP_ROUTES } from "../navigation/routes";
 
-const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").toLowerCase();
-const LEGACY_SUPER_ADMIN_ID = process.env.EXPO_PUBLIC_SUPER_ADMIN_ID || "jM2JZrPNNNahPb844rHmr0MQKYo1";
+// No hardcoded super-admin email or id fallback (CR-03). These are routing hints
+// only; the actual authorization boundary is the server-side gate in convex/admin.ts.
+const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "").toLowerCase();
+const LEGACY_SUPER_ADMIN_ID = String(process.env.EXPO_PUBLIC_SUPER_ADMIN_ID || "").trim();
 const SUPER_ADMIN_EMAILS = [
   SUPER_ADMIN_EMAIL,
   process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL_JUNAID,
@@ -18,9 +20,12 @@ const SUPER_ADMIN_EMAILS = [
 
 export function isSuperAdminProfile(user: Pick<UserProfile, "_id" | "email" | "role"> | null | undefined) {
   if (!user) return false;
-  return user.role === "super-admin"
+  // Accept canonical "super_admin" and legacy "super-admin" (CR-05).
+  const role = String(user.role || "");
+  const hasAdminRole = role === "super_admin" || role === "super-admin";
+  return hasAdminRole
     || SUPER_ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())
-    || String(user._id || "") === LEGACY_SUPER_ADMIN_ID;
+    || (Boolean(LEGACY_SUPER_ADMIN_ID) && String(user._id || "") === LEGACY_SUPER_ADMIN_ID);
 }
 
 export function isZoneAccount(user: Pick<UserProfile, "accountType"> | null | undefined) {
