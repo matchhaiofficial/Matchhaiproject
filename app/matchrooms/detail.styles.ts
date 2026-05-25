@@ -126,6 +126,9 @@ export default StyleSheet.create({
     lockedBanner: {
         backgroundColor: COLORS.warning,
     },
+    fullBanner: {
+        backgroundColor: COLORS.accent,
+    },
     qrCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: 16,
@@ -181,6 +184,22 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.label,
         fontFamily: FONTS.heading,
         fontWeight: '500',
+    },
+    bannerTextWrap: {
+        flex: 1,
+        gap: 2,
+    },
+    bannerTitle: {
+        color: '#FFF',
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.heading,
+        fontWeight: '500',
+    },
+    bannerSubText: {
+        color: '#FFF',
+        opacity: 0.9,
+        fontSize: 12,
+        fontFamily: FONTS.body,
     },
 
     // Section Headers

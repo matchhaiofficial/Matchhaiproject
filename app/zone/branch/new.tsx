@@ -285,7 +285,7 @@ export default function AddBranch() {
             >
                 <AppHeader title="Add New Branch" onBack={() => router.back()} inlineTitle />
 
-                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]}>
+                <ScrollView contentContainerStyle={[styles.content, styles.contentInsideScreen]} keyboardShouldPersistTaps="handled">
                     <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Branch Name</Text>
                         <TextInput

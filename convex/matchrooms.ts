@@ -12,6 +12,7 @@ import {
   INVITE_TTL_MS,
   JOIN_REQUEST_TTL_MS,
   PAYMENT_INTENT_TTL_MS,
+  URGENT_REPLACEMENT_WINDOW_MS,
   capExpiryAtLockTime,
   getMatchroomLockAt,
   validateMatchroomScheduleWindow,
@@ -2152,6 +2153,80 @@ export const join = mutation({
   },
 });
 
+// Urgent replacement notifications: when a player makes a PERMITTED leave (i.e.
+// before lock) within URGENT_REPLACEMENT_WINDOW_MS of the lock time and the roster
+// was full, alert the captains/host (invite a friend) and the zone admin
+// (accommodate a walk-in). Lock stays authoritative — this never fires for a leave
+// that was blocked. See the 24h-lock vs "1 hour before match" note in the tracker.
+async function notifyUrgentReplacementOnLeave(
+  ctx: any,
+  room: any,
+  matchroomId: Id<"matchrooms">,
+  leavingUid: string,
+) {
+  const now = Date.now();
+  const lockAt = getRoomLockAtMs(room);
+  const withinUrgentWindow =
+    typeof lockAt === "number" &&
+    lockAt > now &&
+    lockAt - now <= URGENT_REPLACEMENT_WINDOW_MS;
+  // Only meaningful when a previously-full roster just opened a seat.
+  if (!withinUrgentWindow || !isRosterFull(room)) return;
+
+  const mIdStr = String(matchroomId);
+  const route = `/matchrooms/${mIdStr}`;
+  const leaving = String(leavingUid);
+
+  // 1) Captains / host — invite a replacement from friends.
+  const captainAuthIds = Array.from(
+    new Set(
+      [room.hostUid, room.captainUidA, room.captainUidB]
+        .filter(Boolean)
+        .map((value: any) => String(value))
+        .filter((value: string) => value !== leaving),
+    ),
+  );
+  for (const authId of captainAuthIds) {
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q: any) => q.eq("authId", authId))
+      .take(1);
+    if (users.length === 0) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.replacement_needed",
+      toUid: users[0]._id,
+      status: "pending",
+      dedupeKey: `match.replacement_needed:${mIdStr}:${leaving}:${String(users[0]._id)}`,
+      dedupePolicy: "upsert_active",
+      matchroomId,
+      route,
+      title: "Replacement needed",
+      body: "A player left close to the match time. Invite a replacement from your friends as soon as possible.",
+      data: { matchroomId: mIdStr, leavingUid: leaving, href: route },
+    });
+  }
+
+  // 2) Zone admin — accommodate one walk-in (only for zone-linked matchrooms).
+  if (room.zoneOwnerUid) {
+    const owner = await resolveUserByAnyId(ctx, String(room.zoneOwnerUid));
+    if (owner?._id && String(owner._id) !== leaving) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "match.walkin_replacement_needed",
+        toUid: owner._id,
+        status: "pending",
+        recipientRole: "zone_admin",
+        dedupeKey: `match.walkin_replacement_needed:${mIdStr}:${leaving}:${String(owner._id)}`,
+        dedupePolicy: "upsert_active",
+        matchroomId,
+        route,
+        title: "Walk-in replacement needed",
+        body: "A player left close to match time. Please try to accommodate one walk-in player for this matchroom.",
+        data: { matchroomId: mIdStr, leavingUid: leaving, href: route },
+      });
+    }
+  }
+}
+
 // Leave matchroom
 export const leave = mutation({
   args: {
@@ -2196,6 +2271,11 @@ export const leave = mutation({
       totalSkillSum: skillStats.totalSkillSum,
       ratedPlayerCount: skillStats.ratedPlayerCount,
     });
+
+    // Only when a player actually left (a seat opened), consider urgent replacement.
+    if (updatedPlayers.length < room.players.length) {
+      await notifyUrgentReplacementOnLeave(ctx, room, args.matchroomId, args.uid);
+    }
 
     return { ok: true };
   },

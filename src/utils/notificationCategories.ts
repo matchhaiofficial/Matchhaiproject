@@ -93,6 +93,8 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   "match.result_disputed": "Result Disputed",
   "match.result_admin_review": "Result Review",
   "match.result_finalized": "Match Result",
+  "match.replacement_needed": "Replacement Needed",
+  "match.walkin_replacement_needed": "Walk-in Needed",
   "withdrawal.requested": "Withdrawal Update",
   "withdrawal.approved": "Withdrawal Update",
   "withdrawal.rejected": "Withdrawal Update",

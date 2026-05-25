@@ -17,6 +17,7 @@ export default StyleSheet.create({
     },
     searchBar: {
         flex: 1,
+        minWidth: 0,
         minHeight: 50,
         borderWidth: 1,
         borderColor: COLORS.cardBorder,
@@ -29,6 +30,7 @@ export default StyleSheet.create({
     },
     searchInput: {
         flex: 1,
+        minWidth: 0,
         color: COLORS.text,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.body,

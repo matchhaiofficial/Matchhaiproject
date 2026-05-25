@@ -493,6 +493,7 @@ export default function ZoneProfile() {
                 onClose={closeWithdrawModal}
                 dismissDisabled={withdrawSubmitting}
                 cardStyle={styles.withdrawDialog}
+                keyboardAware
             >
                 <AppModalHeader
                     title="Withdraw request"

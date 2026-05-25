@@ -166,7 +166,9 @@ export default function Profile() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [myTeams, setMyTeams] = useState<Team[]>([]);
-    const [loadingTeams, setLoadingTeams] = useState(false);
+    // Spinner shows only until the first teams fetch resolves. Background/focus
+    // refreshes update `myTeams` in place and must NOT blank the section.
+    const [initialTeamsLoad, setInitialTeamsLoad] = useState(true);
     const refreshExternalStats = useAction(api.users.refreshExternalStats);
     const externalSyncInFlight = useRef(false);
 
@@ -239,7 +241,6 @@ export default function Profile() {
 
         try {
             isFetching.current = true;
-            setLoadingTeams(true);
             const teamsRes = await getUserTeams(user._id);
             if (teamsRes.ok && teamsRes.data) {
                 setMyTeams(teamsRes.data.filter((team) => !isPhysicalGameDisabled(team.game)));
@@ -251,23 +252,31 @@ export default function Profile() {
             if (isRefresh) showToast({ type: 'error', title: 'Error', message: 'Could not refresh profile' });
         } finally {
             setRefreshing(false);
-            setLoadingTeams(false);
+            setInitialTeamsLoad(false);
             isFetching.current = false;
         }
     }, [user?._id]);
 
-    // Focus Effect: Re-fetch teams on focus
+    // Call external-stats refresh through a ref so its identity changing after each
+    // sync (it depends on `profile`) does NOT re-run the focus effect. Previously
+    // that re-ran the effect, which refetched teams + triggered another sync in a
+    // loop, flickering the My Teams section.
+    const maybeRefreshExternalStatsRef = useRef(maybeRefreshExternalStats);
+    maybeRefreshExternalStatsRef.current = maybeRefreshExternalStats;
+
+    // Focus Effect: Re-fetch teams on focus. Only `fetchTeams` (which changes solely
+    // when the user id changes) is a dependency, so the effect runs once per focus.
     useFocusEffect(
         useCallback(() => {
             fetchTeams();
-            void maybeRefreshExternalStats(false);
+            void maybeRefreshExternalStatsRef.current(false);
 
             const interval = setInterval(() => {
-                void maybeRefreshExternalStats(false);
+                void maybeRefreshExternalStatsRef.current(false);
             }, EXTERNAL_STATS_REFRESH_MS);
 
             return () => clearInterval(interval);
-        }, [fetchTeams, maybeRefreshExternalStats])
+        }, [fetchTeams])
     );
 
     const onRefresh = () => {
@@ -691,7 +700,7 @@ export default function Profile() {
                         onPress={() => router.push(buildLegacyTeamsHref("my") as any)}
                     />
                     <View style={styles.sectionPadding}>
-                        {loadingTeams ? (
+                        {initialTeamsLoad ? (
                             <AppCard variant="empty" style={styles.emptyState}>
                                 <ActivityIndicator size="small" color={COLORS.accent} />
                             </AppCard>

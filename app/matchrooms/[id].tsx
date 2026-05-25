@@ -233,6 +233,7 @@ export default function MatchroomDetails() {
     isHost,
     isExpired,
     isLocked,
+    isLeaveLocked: isTimeLocked,
     canJoin,
     captainUidAResolved,
     captainUidBResolved,
@@ -566,13 +567,36 @@ export default function MatchroomDetails() {
               </View>
             )}
 
-            {/* Locked Banner */}
-            {isLocked && !isExpired && (
-              <View style={[styles.banner, styles.lockedBanner]}>
-                <AppIcon name="lock" size={20} color="#FFF" />
-                <Text style={styles.bannerText}>
-                  Matchroom is full and locked
-                </Text>
+            {/* Full / Locked Banner — "full" and "locked" are separate states.
+                Full = all slots filled. Locked = within 24h of start (or zone-confirmed).
+                A full room is NOT locked until the 24h window. */}
+            {!isExpired && (isTimeLocked || isFull) && (
+              <View
+                style={[
+                  styles.banner,
+                  isTimeLocked ? styles.lockedBanner : styles.fullBanner,
+                ]}
+              >
+                <AppIcon
+                  name={isTimeLocked ? "lock" : "people"}
+                  size={20}
+                  color="#FFF"
+                />
+                <View style={styles.bannerTextWrap}>
+                  <Text style={styles.bannerTitle}>
+                    {isTimeLocked && isFull
+                      ? "Matchroom is full and locked"
+                      : isTimeLocked
+                        ? "Matchroom is locked"
+                        : "Matchroom is full"}
+                  </Text>
+                  {isTimeLocked ? (
+                    <Text style={styles.bannerSubText}>
+                      Players can no longer leave because the match starts within
+                      24 hours.
+                    </Text>
+                  ) : null}
+                </View>
               </View>
             )}
 

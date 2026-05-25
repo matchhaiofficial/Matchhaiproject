@@ -735,7 +735,7 @@ export default function WalletScreen() {
   };
 
   return (
-    <Screen style={styles.screen} scroll={false} routeKey="/(player)/wallet">
+    <Screen style={styles.screen} scroll={false} keyboardAvoiding routeKey="/(player)/wallet">
       <AppHeader title="Wallet" onBack={() => router.back()} inlineTitle />
 
       <SegmentedTabs
@@ -759,6 +759,7 @@ export default function WalletScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {activeTab === "overview" ? (
             <>

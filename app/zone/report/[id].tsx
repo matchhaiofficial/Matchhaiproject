@@ -98,7 +98,7 @@ export default function ZoneReportDetailScreen() {
   };
 
   return (
-    <Screen style={styles.screen} scroll={false}>
+    <Screen style={styles.screen} scroll={false} keyboardAvoiding>
       <AppHeader title="Report Detail" onBack={() => router.back()} inlineTitle />
 
       {loading ? (
@@ -110,7 +110,7 @@ export default function ZoneReportDetailScreen() {
           <Text style={styles.emptyTitle}>{error || "Report not found."}</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <Text style={styles.reason}>{report.reason}</Text>
