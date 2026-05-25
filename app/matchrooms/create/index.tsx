@@ -830,6 +830,7 @@ export default function CreateMatchroom() {
       ...prev,
       // Reset game-specific fields to defaults
       format: "",
+      maxPlayers: 10,
       selectedMaps: [],
       skillLevel: "Any",
       playstyle: "",
@@ -919,6 +920,17 @@ export default function CreateMatchroom() {
       setHostRole((userProfile as any)?.cs16Role || null);
     } else if (gameKey === "valorant") {
       const skillTier = userProfile?.skillScores?.valorant?.tier || "Any";
+      setFormData((prev) => ({
+        ...prev,
+        title: "5v5 Competitive",
+        format: "5v5",
+        maxPlayers: 10,
+        skillLevel: skillTier,
+      }));
+      setSeriesType("BO1");
+      if (isZoneWalkInAdmin) {
+        resetWalkInRoster();
+      }
       setHostSkillTier(skillTier as SkillTier);
       setHostSkillScore(userProfile?.skillScores?.valorant?.rating ?? null);
       setHostRole((userProfile as any)?.valorantRole || null);
