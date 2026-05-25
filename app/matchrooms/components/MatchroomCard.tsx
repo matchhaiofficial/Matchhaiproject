@@ -6,7 +6,7 @@ import { AppIcon } from "../../../src/components/AppIcon";
 import { useMinuteTicker } from "../../../src/hooks/useMinuteTicker";
 import { Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
-import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isRoomLocked } from "../../../src/utils/matchroomLifecycle";
+import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
 import { getPrimaryLocationLabel, isBroadcastVenuePending } from "../utils/matchroomLocationDisplay";
 import styles from "../matchrooms.styles";
 
@@ -92,8 +92,9 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const router = useRouter();
     const isWalkInRoom = String((room as any).bookingSource || "").toLowerCase() === "walkin";
 
-    // Check if room is locked/full
-    const isLocked = isRoomLocked(room);
+    // "Locked" is time-based (within 24h of start, or zone-confirmed) and is
+    // independent of "full". A full room is not locked until the 24h window.
+    const isLocked = isLeaveLocked(room);
     const isFull = isRoomFull(room);
     const isExpired = isRoomExpired(room);
     const nowMs = useMinuteTicker();
@@ -239,12 +240,10 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     ) : null}
                 </View>
                 <View style={localStyles.badgeRow}>
-                    {isLocked && (
+                    {isFull && (
                         <View style={styles.lockBadge}>
-                            <AppIcon name="lock" size={10} color="#FFF" />
-                            <Text style={styles.lockBadgeText}>
-                                {isFull ? 'FULL' : 'LOCKED'}
-                            </Text>
+                            <AppIcon name="people" size={10} color="#FFF" />
+                            <Text style={styles.lockBadgeText}>FULL</Text>
                         </View>
                     )}
                     {!!expiryLabel && (

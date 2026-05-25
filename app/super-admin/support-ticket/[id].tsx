@@ -163,7 +163,7 @@ export default function SuperAdminSupportTicketDetail() {
   }, [ticket]);
 
   return (
-    <Screen style={styles.screen} scroll={false}>
+    <Screen style={styles.screen} scroll={false} keyboardAvoiding>
       <AppHeader title="Support Ticket" onBack={() => router.back()} inlineTitle />
 
       {loading ? (
@@ -173,7 +173,7 @@ export default function SuperAdminSupportTicketDetail() {
           <Text style={styles.emptyTitle}>{error || "Support ticket not found."}</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <View style={styles.titleWrap}>

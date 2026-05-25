@@ -1053,6 +1053,7 @@ export default function TeamDetails() {
                 onClose={() => setShowRenameModal(false)}
                 dismissDisabled={submitting}
                 cardStyle={styles.renameDialogCard}
+                keyboardAware
             >
                 <AppModalHeader title="Rename Team" onClose={() => setShowRenameModal(false)} />
                 <AppModalBody contentContainerStyle={styles.renameDialogContent}>

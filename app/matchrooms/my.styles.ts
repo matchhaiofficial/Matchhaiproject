@@ -63,6 +63,7 @@ export default StyleSheet.create({
     },
     searchBar: {
         flex: 1,
+        minWidth: 0,
         height: 48,
         backgroundColor: COLORS.inputBackground,
         borderRadius: RADII.md,
@@ -74,6 +75,7 @@ export default StyleSheet.create({
     },
     searchInput: {
         flex: 1,
+        minWidth: 0,
         color: COLORS.text,
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.input,

@@ -210,10 +210,10 @@ export default function RequestDetail() {
   const inventory = inventorySummary(request);
 
   return (
-    <Screen style={styles.screen} scroll={false}>
+    <Screen style={styles.screen} scroll={false} keyboardAvoiding>
       <AppHeader title="Venue Detail" onBack={() => router.back()} inlineTitle />
 
-      <ScrollView style={entranceStyle} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={entranceStyle} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <AppCard variant="elevated" style={styles.heroCard}>
           <View style={styles.heroRow}>
             <View style={styles.heroIconWrap}>

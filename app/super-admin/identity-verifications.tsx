@@ -242,7 +242,7 @@ export default function SuperAdminIdentityVerificationsScreen() {
   }, [rows, search, statusFilter, dateFilter]);
 
   return (
-    <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
+    <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]} keyboardAvoiding>
       <AdminPageHeader
         title="Identity Verifications"
         subtitle="Safe Didit KYC status overview."
@@ -266,6 +266,7 @@ export default function SuperAdminIdentityVerificationsScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {visibleRows.map((item) => (
             <VerificationCard

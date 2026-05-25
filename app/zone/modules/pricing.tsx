@@ -516,7 +516,7 @@ export default function ZonePricingModule() {
         a.getDate() === b.getDate();
 
     return (
-        <Screen style={styles.screen} scroll={false}>
+        <Screen style={styles.screen} scroll={false} keyboardAvoiding>
             <AppHeader
                 title="Pricing & Promotions"
                 subtitle="Rule documents + live player-side resolver"
@@ -545,7 +545,7 @@ export default function ZonePricingModule() {
                 </View>
             ) : null}
 
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <View style={styles.summaryGrid}>
                     {pricingMetrics.map((metric, index) => (
                         <View

@@ -7,6 +7,9 @@ export const WALKIN_MIN_LEAD_MS = DAY_MS;
 export const MATCHROOM_MAX_ADVANCE_MS = 62 * DAY_MS;
 export const COUNTER_OFFER_TIME_WINDOW_MS = 2 * HOUR_MS;
 export const MATCHROOM_LOCK_BEFORE_START_MS = DAY_MS;
+// When a permitted leave (i.e. before lock) happens within this window of the
+// lock time, alert captains/host + the zone admin to find an urgent replacement.
+export const URGENT_REPLACEMENT_WINDOW_MS = HOUR_MS;
 export const PAYMENT_INTENT_TTL_MS = 15 * MINUTE_MS;
 export const EASYPAY_CHECKOUT_TTL_MS = 15 * MINUTE_MS;
 export const JOIN_REQUEST_TTL_MS = DAY_MS;
