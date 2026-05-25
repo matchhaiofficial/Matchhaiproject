@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Pressable,
@@ -8,6 +9,7 @@ import {
   StyleProp,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
   ViewStyle,
@@ -25,6 +27,8 @@ import { SPACING } from "../theme";
 import { toastConfig } from "../ui/toastConfig";
 import { AppIcon } from "./AppIcon";
 import styles from "./AppModalPrimitives.styles";
+
+const KEYBOARD_DISMISS_CLOSE_GRACE_MS = 350;
 
 type BaseProps = {
   visible: boolean;
@@ -84,10 +88,83 @@ function closeIfAllowed(onClose: () => void, dismissDisabled?: boolean) {
   if (!dismissDisabled) onClose();
 }
 
+function dismissFocusedTextInput() {
+  const focusedInput = TextInput.State?.currentlyFocusedInput?.();
+  if (!focusedInput) return false;
+
+  (focusedInput as { blur?: () => void }).blur?.();
+  Keyboard.dismiss();
+  return true;
+}
+
+function useKeyboardAwareRequestClose({
+  visible,
+  onClose,
+  dismissDisabled,
+  keyboardAware,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  dismissDisabled?: boolean;
+  keyboardAware?: boolean;
+}) {
+  const keyboardVisibleRef = React.useRef(false);
+  const keyboardHiddenAtRef = React.useRef(0);
+
+  React.useEffect(() => {
+    if (!visible) {
+      keyboardVisibleRef.current = false;
+      keyboardHiddenAtRef.current = 0;
+    }
+  }, [visible]);
+
+  React.useEffect(() => {
+    if (!visible || !keyboardAware || Platform.OS !== "android") return undefined;
+
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () => {
+      keyboardVisibleRef.current = true;
+      keyboardHiddenAtRef.current = 0;
+    });
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      keyboardVisibleRef.current = false;
+      keyboardHiddenAtRef.current = Date.now();
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [keyboardAware, visible]);
+
+  return React.useCallback(() => {
+    if (dismissDisabled) return;
+
+    if (keyboardAware && Platform.OS === "android") {
+      if (dismissFocusedTextInput()) {
+        keyboardHiddenAtRef.current = Date.now();
+        keyboardVisibleRef.current = false;
+        return;
+      }
+
+      if (keyboardVisibleRef.current) {
+        Keyboard.dismiss();
+        return;
+      }
+
+      if (Date.now() - keyboardHiddenAtRef.current <= KEYBOARD_DISMISS_CLOSE_GRACE_MS) {
+        keyboardHiddenAtRef.current = 0;
+        return;
+      }
+    }
+
+    onClose();
+  }, [dismissDisabled, keyboardAware, onClose]);
+}
+
 function getKeyboardAvoidBehavior(
   keyboardAvoidBehavior?: BaseProps["keyboardAvoidBehavior"],
 ) {
-  return keyboardAvoidBehavior ?? (Platform.OS === "ios" ? "padding" : "height");
+  return keyboardAvoidBehavior ?? "padding";
 }
 
 function MaybeKeyboardAvoidingView({
@@ -311,6 +388,12 @@ export function AppBottomSheet({
     axis: "y",
     distance: 22,
   });
+  const handleRequestClose = useKeyboardAwareRequestClose({
+    visible,
+    onClose,
+    dismissDisabled,
+    keyboardAware,
+  });
 
   return (
     <Modal
@@ -319,12 +402,12 @@ export function AppBottomSheet({
       animationType={animationType}
       statusBarTranslucent={Platform.OS === "android"}
       navigationBarTranslucent={false}
-      onRequestClose={() => closeIfAllowed(onClose, dismissDisabled)}
+      onRequestClose={handleRequestClose}
     >
       <View style={[StyleSheet.absoluteFillObject, styles.overlayBase, styles.sheetOverlay]}>
         <Pressable
           style={styles.backdrop}
-          onPress={() => closeIfAllowed(onClose, dismissDisabled)}
+          onPress={handleRequestClose}
         />
         <MaybeKeyboardAvoidingView
           enabled={keyboardAware}
