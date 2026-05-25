@@ -553,6 +553,9 @@ export default function Register() {
           </View>
           <View style={[styles.focusBar, { opacity: focused === "fullName" ? 1 : 0 }]} />
         </View>
+        <Text style={[styles.helperText, { color: COLORS.muted, marginTop: 6 }]}>
+          Use your full name as per CNIC so KYC can be verified.
+        </Text>
       </View>
 
       <View style={styles.twoColumnRow}>

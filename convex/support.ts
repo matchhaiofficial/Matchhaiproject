@@ -1518,6 +1518,79 @@ export const createSupportTicket = mutation({
   },
 });
 
+// Account deletion request (store compliance — Apple/Google require in-app
+// initiation). Backed by the existing supportTickets table so it works without a
+// schema migration. We intentionally do NOT hard-delete here: payments, wallet,
+// KYC, and audit records must be retained per legal/financial requirements, so
+// deletion is processed via admin review. Authenticated + idempotent.
+export const requestAccountDeletion = mutation({
+  args: {
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedProfile(ctx);
+    const now = Date.now();
+
+    // Idempotency: reuse any existing open/in-review account-deletion request.
+    const existingTickets = await ctx.db
+      .query("supportTickets")
+      .withIndex("by_userId", (q: any) => q.eq("userId", user._id))
+      .collect();
+    const openDeletion = existingTickets.find(
+      (ticket: any) =>
+        ticket.category === "account_deletion" &&
+        !["resolved", "closed"].includes(String(ticket.status || "")),
+    );
+    if (openDeletion) {
+      return {
+        ticketId: openDeletion._id,
+        reference: openDeletion.reference,
+        status: openDeletion.status,
+        alreadyRequested: true,
+      };
+    }
+
+    const userRole = supportRoleForUser(user);
+    const reference = `MH-DEL-${now.toString(36).toUpperCase().slice(-6)}`;
+    const reasonText = redactTicketText(String(args.reason || "")).slice(0, 500);
+
+    const ticketId = await ctx.db.insert("supportTickets", {
+      reference,
+      userId: user._id,
+      userRole,
+      category: "account_deletion",
+      intent: "account_deletion",
+      priority: "high",
+      issueSummary:
+        "Account deletion requested by the user from in-app settings." +
+        (reasonText ? ` Reason: ${reasonText}` : ""),
+      conversationExcerpt: [],
+      // `source` is a strict schema union; mark the deletion intent via metadata.
+      source: "help_support_chat",
+      metadata: { kind: "account_deletion_request", accountType: user.accountType || null },
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await notifySupportTicketCreated(ctx, {
+      ticketId,
+      ticketReference: reference,
+      userId: user._id,
+      userRole,
+      category: "account_deletion",
+      priority: "high",
+    });
+
+    return {
+      ticketId,
+      reference,
+      status: "open" as const,
+      alreadyRequested: false,
+    };
+  },
+});
+
 export const getSupportTicketEmailPayload = query({
   args: {
     ticketId: v.id("supportTickets"),

@@ -22,7 +22,13 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://REPLACE_WITH_PRODUCTION_DEPLOYMENT.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://REPLACE_WITH_PRODUCTION_DEPLOYMENT.convex.site",
+        "EXPO_PUBLIC_APP_SCHEME": "matchhai",
+        "EXPO_PUBLIC_TOUCH_DEBUG": "0"
+      }
     }
   },
   "submit": {

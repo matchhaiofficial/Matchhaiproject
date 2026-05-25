@@ -7,10 +7,13 @@ import { AndroidImportance } from "expo-notifications/build/NotificationChannelM
 import scheduleNotificationAsync from "expo-notifications/build/scheduleNotificationAsync";
 import cancelScheduledNotificationAsync from "expo-notifications/build/cancelScheduledNotificationAsync";
 import getAllScheduledNotificationsAsync from "expo-notifications/build/getAllScheduledNotificationsAsync";
-import { SchedulableTriggerInputTypes } from "expo-notifications";
+import { SchedulableTriggerInputTypes } from "expo-notifications/build/Notifications.types";
 
 const ANDROID_CHANNEL_ID = "default";
-const STORAGE_KEY = "local_notifications.matchroom_reminders.v3";
+const STORAGE_KEY = "local_notifications.matchroom_reminders.v2";
+// One-time cleanup flag: clears any reminders scheduled by the pre-fix (malformed
+// trigger) builds exactly once, then lets corrected logic recreate valid reminders.
+const ONE_TIME_CLEANUP_FLAG_KEY = "local_notifications.matchroom_reminders.cleanup.v2";
 
 export type ReminderPlan = {
   reminderKey: string;
@@ -203,6 +206,22 @@ export async function clearAllMatchroomReminders() {
   await Promise.all(Object.values(map).map((entry) => cancelScheduledNotification(entry.notificationId)));
   await writeReminderMap({});
   await cancelUnknownScheduledReminderDuplicates({ desiredKeys: new Set() });
+}
+
+// Runs once per install: cancels every locally-scheduled matchroom reminder so
+// reminders queued by older builds (which used a malformed trigger and could fire
+// immediately) are flushed. After this, normal reconciliation recreates only the
+// valid future reminders. Subsequent launches no-op via the persisted flag.
+export async function runOneTimeReminderCleanupIfNeeded() {
+  try {
+    const done = await AsyncStorage.getItem(ONE_TIME_CLEANUP_FLAG_KEY);
+    if (done === "done") return false;
+    await clearAllMatchroomReminders();
+    await AsyncStorage.setItem(ONE_TIME_CLEANUP_FLAG_KEY, "done");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function cancelMatchroomReminder(roomId: string) {

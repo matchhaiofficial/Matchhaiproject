@@ -25,6 +25,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { choose, confirm } from "../../../src/ui/confirm";
 import Logger from "../../../src/utils/logger";
 import { isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
+import { COUNTER_OFFER_TIME_WINDOW_MS } from "../../../src/constants/timing";
 import { getUserProfile } from "../../../src/services/userService";
 import { useCallback, useEffect, useRef } from "react";
 
@@ -364,11 +365,36 @@ export function useMatchroomDetailActions({
       return;
     }
 
-    const counterDate = counterDateValue.toISOString().slice(0, 10);
-    const counterTime = counterDateValue.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Build stable local date (YYYY-MM-DD) and 24h time (HH:mm). Avoid
+    // toISOString()/toLocaleTimeString() which can shift the day to UTC or emit
+    // a 12h "hh:mm AM/PM" string the backend cannot parse.
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const counterDate = `${counterDateValue.getFullYear()}-${pad(counterDateValue.getMonth() + 1)}-${pad(counterDateValue.getDate())}`;
+    const counterTime = `${pad(counterDateValue.getHours())}:${pad(counterDateValue.getMinutes())}`;
+
+    // Alternative time must be in the future and within ±2h of the original.
+    const proposedStartAtMs = counterDateValue.getTime();
+    const originalStartAtMs =
+      typeof room.scheduledStartAt === "number" ? room.scheduledStartAt : null;
+    if (proposedStartAtMs <= Date.now()) {
+      showToast({
+        message: "Alternative time cannot be in the past.",
+        title: "Invalid time",
+        type: "warning",
+      });
+      return;
+    }
+    if (
+      originalStartAtMs != null &&
+      Math.abs(proposedStartAtMs - originalStartAtMs) > COUNTER_OFFER_TIME_WINDOW_MS
+    ) {
+      showToast({
+        message: "Alternative time must be within 2 hours of the original requested time.",
+        title: "Out of range",
+        type: "warning",
+      });
+      return;
+    }
 
     setAdminProcessing("counter");
     try {
@@ -385,12 +411,14 @@ export function useMatchroomDetailActions({
         zoneName: room.location || "Zone",
         zoneOwnerUid: user._id,
         adminUid: user._id,
-        scheduleOptions: [{ date: counterDate, time: counterTime }],
+        scheduleOptions: [{ date: counterDate, time: counterTime, startAt: proposedStartAtMs }],
         pricePerPlayer: parsedPrice,
         currency: room.pricing?.currency || "PKR",
         location: room.location || "",
         message: counterMessage.trim(),
         expiresInMinutes: Number.isFinite(parsedExpiry) ? parsedExpiry : 10,
+        originalStartAt: originalStartAtMs ?? undefined,
+        proposedStartAts: [proposedStartAtMs],
       });
 
       if (!result.ok) {

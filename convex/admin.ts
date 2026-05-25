@@ -9,7 +9,22 @@ import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 import { notifyKycStatusUpdated } from "./kycNotifications";
 import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
 
-const SUPER_ADMIN_EMAIL = (process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL || "superadmin@matchhai.com").trim().toLowerCase();
+// Backend authorization email source. Prefer a SERVER-ONLY env var
+// (SUPER_ADMIN_EMAIL) so the super-admin identity is not shipped in the public
+// client bundle. Falls back to the legacy EXPO_PUBLIC_ var for backwards compat.
+// IMPORTANT: there is NO hardcoded default — if neither env is configured the
+// allowlist is empty and super-admin access fails closed (CR-03).
+const SUPER_ADMIN_EMAIL = (
+  process.env.SUPER_ADMIN_EMAIL ||
+  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL ||
+  ""
+).trim().toLowerCase();
+
+// Canonical super-admin role string. The rest of the app uses "super_admin"
+// (underscore); legacy data may contain "super-admin" (hyphen) which we still
+// accept on read so existing admins are never locked out (CR-05).
+const SUPER_ADMIN_ROLE = "super_admin";
+const LEGACY_SUPER_ADMIN_ROLE = "super-admin";
 const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const SUPER_ADMIN_ALLOWLIST_NAMES = ["Junaid", "Ehteshan", "Zeerak", "Mubeen", "Saad", "Ovais"] as const;
 const SUPER_ADMIN_ALLOWLIST_ENV_KEYS: Record<(typeof SUPER_ADMIN_ALLOWLIST_NAMES)[number], string> = {
@@ -105,7 +120,9 @@ function findSuperAdminAllowlistEntry(email?: string | null) {
 }
 
 function isAuthorizedSuperAdmin(profile: any, email: string) {
-  return Boolean(findSuperAdminAllowlistEntry(email) || profile?.role === "super-admin");
+  const role = profile?.role;
+  const hasAdminRole = role === SUPER_ADMIN_ROLE || role === LEGACY_SUPER_ADMIN_ROLE;
+  return Boolean(findSuperAdminAllowlistEntry(email) || hasAdminRole);
 }
 
 function resolveSuperAdminAuditIdentity(authUser: any, profile: any) {
@@ -1287,6 +1304,153 @@ export const getPaymentDetailByOrderRefNum = query({
   },
 });
 
+// Read-only, additive payments list. Unlike listEasypaisaTransactions (per-status take +
+// dedupe of ~20 rows), this orders by createdAt via index and supports server-side status,
+// kind, date and amount filtering so the admin UI filters are honest. No payment/wallet/
+// reconciliation WRITES occur here. Reconciliation flags are page-scoped and opt-in
+// (includeReconciliation), computed only over the returned rows — never the full table.
+export const listPaymentsV2 = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(
+        v.literal("created"),
+        v.literal("redirected"),
+        v.literal("token_received"),
+        v.literal("pending"),
+        v.literal("paid"),
+        v.literal("failed"),
+        v.literal("expired"),
+        v.literal("cancelled"),
+      ),
+    ),
+    kind: v.optional(v.union(v.literal("booking_intent"), v.literal("wallet_topup"))),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    amountMin: v.optional(v.number()),
+    amountMax: v.optional(v.number()),
+    search: v.optional(v.string()),
+    includeReconciliation: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    // Scan a wider window than `limit` because kind/amount/search are applied in memory.
+    const scanLimit = Math.min(Math.max(limit * 5, limit), 500);
+    const searchNeedle = String(args.search || "").trim().toLowerCase();
+
+    // Push status + date bounds into the index range; createdAt ordering comes from the index.
+    const rows = args.status
+      ? await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_status_and_createdAt", (q: any) => {
+            let r = q.eq("status", args.status);
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_createdAt", (q: any) => {
+            let r = q;
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit);
+
+    const filtered = rows
+      .filter((row) => {
+        if (row.provider !== "easypaisa") return false;
+        if (args.kind && row.kind !== args.kind) return false;
+        const amount = Number(row.amount || 0);
+        if (args.amountMin !== undefined && amount < args.amountMin) return false;
+        if (args.amountMax !== undefined && amount > args.amountMax) return false;
+        if (searchNeedle) {
+          const haystack = `${row.orderRefNum || ""} ${row.providerReference || ""}`.toLowerCase();
+          if (!haystack.includes(searchNeedle)) return false;
+        }
+        return true;
+      })
+      .slice(0, limit);
+
+    return await Promise.all(
+      filtered.map(async (row) => {
+        const owner: any = await ctx.db.get(row.userId);
+        const providerDescription = truncateAdminProviderText(row.providerDescription || null);
+
+        let reconciliation: {
+          paidNoWalletTx: boolean;
+          walletTxWithoutPaid: boolean;
+          bookingIntentUnpaidButPaymentPaid: boolean;
+          pendingPastExpiry: boolean;
+          failedButWalletTxExists: boolean;
+        } | null = null;
+
+        if (args.includeReconciliation) {
+          // Page-scoped joins only (same lookups as getPaymentDetailByOrderRefNum). Read-only.
+          const pendingPastExpiry =
+            ["created", "redirected", "token_received", "pending"].includes(row.status) &&
+            Boolean(row.expiresAt) &&
+            Number(row.expiresAt) < Date.now();
+
+          const walletRows = await ctx.db
+            .query("walletTransactions")
+            .withIndex("by_reference", (q) => q.eq("reference", `easypaisa:${row.orderRefNum}`))
+            .collect();
+          const walletTxExists = walletRows.length > 0;
+
+          const bookingIntent = row.bookingIntentId
+            ? await ctx.db.get(row.bookingIntentId as Id<"bookingIntents">)
+            : null;
+          const paymentIsPaid = row.status === "paid";
+
+          reconciliation = {
+            paidNoWalletTx: paymentIsPaid && !walletTxExists,
+            walletTxWithoutPaid: walletTxExists && !paymentIsPaid,
+            bookingIntentUnpaidButPaymentPaid: paymentIsPaid && bookingIntent?.paymentStatus === "unpaid",
+            pendingPastExpiry,
+            failedButWalletTxExists: row.status === "failed" && walletTxExists,
+          };
+        }
+
+        return {
+          id: row._id,
+          _id: row._id,
+          paymentTransactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          kind: row.kind,
+          status: row.status,
+          amount: row.amount,
+          currency: row.currency,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          processedAt: row.processedAt || null,
+          expiresAt: row.expiresAt || null,
+          providerStatus: row.providerStatus || null,
+          providerReference: row.providerReference || null,
+          providerDescription: providerDescription.text,
+          accountOwnerName: owner?.fullName || owner?.username || "Unknown user",
+          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
+          lastError: row.lastError || null,
+          callbackCount: row.callbackCount || 0,
+          providerPayload: {
+            lastProviderStatus: row.providerPayload?.lastProviderStatus || null,
+            lastSyncAt: row.providerPayload?.lastSyncAt || null,
+            flow: row.providerPayload?.flow || null,
+          },
+          reconciliation,
+        };
+      }),
+    );
+  },
+});
+
 export const listZones = query({
   args: {
     sessionToken: v.string(),
@@ -2384,8 +2548,19 @@ export const setUserRole = mutation({
       throw new Error("You cannot remove your own super admin access.");
     }
 
+    // Canonicalize any admin role to the single source-of-truth value (CR-05).
+    // Empty/undefined removes the elevated role; non-admin roles pass through.
+    const normalizedRole = (() => {
+      const raw = String(args.role || "").trim().toLowerCase();
+      if (!raw) return undefined;
+      if (raw === SUPER_ADMIN_ROLE || raw === LEGACY_SUPER_ADMIN_ROLE || raw === "superadmin") {
+        return SUPER_ADMIN_ROLE;
+      }
+      return args.role;
+    })();
+
     await ctx.db.patch(args.userId, {
-      role: args.role,
+      role: normalizedRole,
       updatedAt: Date.now(),
     });
 
@@ -2507,6 +2682,12 @@ export const bootstrapInitialSuperAdmin = mutation({
     phone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Fail closed: never bootstrap an admin against an empty/default email (CR-03).
+    if (!SUPER_ADMIN_EMAIL) {
+      throw new Error(
+        "SUPER_ADMIN_EMAIL is not configured. Set it in the Convex deployment environment before bootstrapping.",
+      );
+    }
     const [existingSuperAdmins, existingEmail] = await Promise.all([
       ctx.db
         .query("users")
@@ -2531,7 +2712,7 @@ export const bootstrapInitialSuperAdmin = mutation({
 
     if (existingEmail) {
       await ctx.db.patch(existingEmail._id, {
-        role: "super-admin",
+        role: SUPER_ADMIN_ROLE,
         updatedAt: Date.now(),
       });
       return {
@@ -2605,7 +2786,7 @@ export const bootstrapInitialSuperAdmin = mutation({
       isOnline: false,
       onboardingCompleted: true,
       onboardingStep: 4,
-      role: "super-admin",
+      role: SUPER_ADMIN_ROLE,
       phoneValidated: false,
       createdAt: now,
       updatedAt: now,

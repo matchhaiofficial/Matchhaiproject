@@ -33,6 +33,7 @@ import {
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { toLocalDateString } from "../../../src/utils/scheduleTime";
 import {
     ZoneBookingsAllocationSheet,
     type ZoneBookingAllocationResourceOption,
@@ -359,7 +360,8 @@ const getAllocationValidationMessage = (
 };
 
 const formatDateTime = (value: Date) => ({
-    date: value.toISOString().slice(0, 10),
+    // Local calendar date (NOT UTC) so late-night times keep the correct day.
+    date: toLocalDateString(value),
     time: value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
 });
 

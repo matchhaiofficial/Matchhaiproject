@@ -165,7 +165,10 @@ export const getPlayerHomeSummary = query({
     const upcomingRooms = myRoomDocs
       .filter((room: any) => {
         const startAt = getRoomStartAt(room);
-        return startAt != null && startAt >= now - 15 * 60 * 1000 && room.status !== "completed";
+        // Future-only: a room that has already started is no longer "upcoming"
+        // and must not feed the client reminder scheduler (avoids firing a
+        // "starts in 15 minutes" reminder for past/just-started rooms).
+        return startAt != null && startAt >= now && room.status !== "completed";
       })
       .sort((a: any, b: any) => (getRoomStartAt(a) || 0) - (getRoomStartAt(b) || 0))
       .slice(0, 3)

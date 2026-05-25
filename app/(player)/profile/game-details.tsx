@@ -12,7 +12,10 @@ import {
 import {
     FC_FORMATIONS,
     FC_LEAGUES,
-    TEKKEN_CHARACTERS
+    getValorantAgentsForRole,
+    normalizeValorantRole,
+    TEKKEN_CHARACTERS,
+    VALORANT_ROLE_GROUPS
 } from "../../../constants/profileOptions";
 import AppHeader from "../../../src/components/AppHeader";
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
@@ -110,6 +113,7 @@ export default function GameDetails() {
     // -- Game Specific State --
     // We use a generic approach where possible but keep specific vars for complexity
     const [role, setRole] = useState<string | null>(null); // Shared for CS2, Indoor Cricket, etc.
+    const [valorantAgent, setValorantAgent] = useState<string | null>(null); // Valorant agent under selected tactical role
     const [multiRoles, setMultiRoles] = useState<string[]>([]); // For Tekken Favorites, Futsal Positions
 
     // FC25 (FC 26) Specifics
@@ -148,7 +152,8 @@ export default function GameDetails() {
                 break;
             case 'valorant':
                 setActive(!!data.playsValorant);
-                setRole(data.valorantRole || null);
+                setRole(normalizeValorantRole(data.valorantRole));
+                setValorantAgent(data.valorantAgent || null);
                 break;
             case 'fc26': {
                 setActive(!!data.playsFc);
@@ -213,8 +218,17 @@ export default function GameDetails() {
     };
 
     const linkedPlatforms = getLinkedPlatformsForGame(gameId, profileData);
+    const hasSteamOrFaceit = Boolean(
+        profileData?.steamId ||
+        profileData?.steamProfileUrl ||
+        profileData?.faceitId ||
+        profileData?.faceitProfileUrl ||
+        profileData?.faceitNickname,
+    );
+    const hasPsn = Boolean(profileData?.psnStats?.psnOnlineId || profileData?.psnOnlineId);
     const canRefreshExternalStats =
-        gameId === "cs2" && Boolean(profileData?.steamId || profileData?.steamProfileUrl || profileData?.faceitId || profileData?.faceitProfileUrl);
+        (gameId === "cs2" && hasSteamOrFaceit) ||
+        ((gameId === "tekken8" || gameId === "fc26") && (hasPsn || hasSteamOrFaceit));
     const shouldShowVerificationHint =
         Boolean(gameRule?.requiresOneOf?.length) &&
         active &&
@@ -240,6 +254,7 @@ export default function GameDetails() {
                 case 'valorant':
                     updates.playsValorant = active;
                     updates.valorantRole = active ? role : null;
+                    updates.valorantAgent = active ? valorantAgent : null;
                     break;
                 case 'fc26':
                     updates.playsFc = active;
@@ -362,7 +377,7 @@ export default function GameDetails() {
         showToast({
             type: "success",
             title: "Stats refreshed",
-            message: "Steam and FACEIT stats are up to date.",
+            message: "Your linked Steam, FACEIT and PSN stats are up to date.",
         });
         setRefreshingStats(false);
     };
@@ -428,6 +443,7 @@ export default function GameDetails() {
         if (gameId === 'fc26') return renderFcInputs();
         if (gameId === 'tekken8') return renderTekkenInputs(); // Tekken multiselect
         if (gameId === 'futsal') return renderFutsalInputs(); // Futsal multiselect
+        if (gameId === 'valorant') return renderValorantInputs(); // Tactical role + agent
 
         // Generic Role Renderer
         if (gameRule.roles) {
@@ -509,6 +525,46 @@ export default function GameDetails() {
             </View>
         </View>
     );
+
+    // Valorant Specific (tactical role -> agent)
+    const renderValorantInputs = () => {
+        const agents = getValorantAgentsForRole(role);
+        return (
+            <>
+                <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>Role</Text>
+                    <View style={styles.chipRow}>
+                        {VALORANT_ROLE_GROUPS.map((group) =>
+                            renderChip(group.label, role === group.label, () => {
+                                setRole(group.label);
+                                // Clear agent if it no longer belongs to the new role
+                                setValorantAgent((prev) =>
+                                    prev && getValorantAgentsForRole(group.label).some((a) => a.label === prev)
+                                        ? prev
+                                        : null,
+                                );
+                            }),
+                        )}
+                    </View>
+                </View>
+
+                {role && agents.length > 0 && (
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.label}>Agent</Text>
+                        <View style={styles.chipRow}>
+                            {agents.map((agent) =>
+                                renderChip(agent.label, valorantAgent === agent.label, () =>
+                                    setValorantAgent((prev) =>
+                                        prev === agent.label ? null : agent.label,
+                                    ),
+                                ),
+                            )}
+                        </View>
+                    </View>
+                )}
+            </>
+        );
+    };
 
     // Futsal Specific (Multi-select)
     const renderFutsalInputs = () => (
@@ -763,7 +819,10 @@ const RenderExternalStats = (props: any) => {
     if (gameId === 'tekken8' && (psnStats?.tekken8 || steamTekken8Hours)) {
         return (
             <View style={styles.statsCard}>
-                <Text style={[styles.statsLabel, { marginBottom: 8 }]}>Progress</Text>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Progress</Text>
+                    {refreshButton}
+                </View>
                 <View style={styles.statsRow}>
                     {psnStats?.tekken8?.progress !== undefined && (
                         <View style={styles.statItem}>
@@ -782,10 +841,27 @@ const RenderExternalStats = (props: any) => {
         );
     }
 
+    if (gameId === 'tekken8' && canRefreshExternalStats) {
+        return (
+            <View style={styles.statsCard}>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Linked Stats</Text>
+                    {refreshButton}
+                </View>
+                <Text style={styles.helpText}>
+                    Refresh PSN or Steam to update profile display stats.
+                </Text>
+            </View>
+        );
+    }
+
     if (gameId === 'fc26' && (psnStats?.fc || steamFc26Hours)) {
         return (
             <View style={styles.statsCard}>
-                <Text style={[styles.statsLabel, { marginBottom: 8 }]}>Progress</Text>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Progress</Text>
+                    {refreshButton}
+                </View>
                 <View style={styles.statsRow}>
                     {psnStats?.fc?.progress !== undefined && (
                         <View style={styles.statItem}>
@@ -800,6 +876,20 @@ const RenderExternalStats = (props: any) => {
                         </View>
                     )}
                 </View>
+            </View>
+        );
+    }
+
+    if (gameId === 'fc26' && canRefreshExternalStats) {
+        return (
+            <View style={styles.statsCard}>
+                <View style={styles.statsHeader}>
+                    <Text style={styles.statsLabel}>Linked Stats</Text>
+                    {refreshButton}
+                </View>
+                <Text style={styles.helpText}>
+                    Refresh PSN or Steam to update profile display stats.
+                </Text>
             </View>
         );
     }

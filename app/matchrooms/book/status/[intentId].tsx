@@ -23,7 +23,7 @@ import { useToast } from "../../../../src/hooks/useToast";
 import { cancelBookingIntent } from "../../../../src/services/convex/bookingService";
 import { COLORS } from "../../../../src/theme";
 import Logger from "../../../../src/utils/logger";
-import { PAYMENT_VERIFICATION_SAFE_MESSAGE } from "../../../../src/utils/paymentUiCopy";
+import { PAYMENT_VERIFICATION_SAFE_MESSAGE, PAYMENT_SUPPORT_WITH_ORDER_HINT } from "../../../../src/utils/paymentUiCopy";
 import { buildLegacyMatchroomsHref } from "../../../../src/navigation/routes";
 import styles from "./status.styles";
 
@@ -414,6 +414,11 @@ export default function BookingStatusScreen() {
                             Status: {PAYMENT_VERIFICATION_SAFE_MESSAGE}
                         </Text>
                     ) : null}
+                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending || checkoutStatus?.lastError) ? (
+                        <Text style={styles.expiredHint}>
+                            {PAYMENT_SUPPORT_WITH_ORDER_HINT}
+                        </Text>
+                    ) : null}
                     {isGatewayPending && checkoutStatus?.actionRequired ? (
                         <Text style={styles.expiredHint}>
                             Next step: {checkoutStatus.actionRequired === "pay_with_token"
@@ -490,6 +495,15 @@ export default function BookingStatusScreen() {
                         >
                             <Text style={styles.primaryBtnText}>Return to Lobby</Text>
                             <AppIcon name="group" size={20} color="#FFF" />
+                        </AppButton>
+                    ) : null}
+                    {activeOrderRefNum && !isCompleted && (isGatewayFailed || isGatewayPending) ? (
+                        <AppButton
+                            variant="secondary"
+                            onPress={() => router.push("/(player)/support" as any)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Text style={styles.secondaryBtnText} numberOfLines={1}>Contact Support</Text>
                         </AppButton>
                     ) : null}
                     {showDashboardAction ? (

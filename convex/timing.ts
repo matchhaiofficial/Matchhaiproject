@@ -3,7 +3,9 @@ export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
 
 export const MATCHROOM_MIN_LEAD_MS = 3 * DAY_MS;
+export const WALKIN_MIN_LEAD_MS = DAY_MS;
 export const MATCHROOM_MAX_ADVANCE_MS = 62 * DAY_MS;
+export const COUNTER_OFFER_TIME_WINDOW_MS = 2 * HOUR_MS;
 export const MATCHROOM_LOCK_BEFORE_START_MS = DAY_MS;
 export const PAYMENT_INTENT_TTL_MS = 15 * MINUTE_MS;
 export const EASYPAY_CHECKOUT_TTL_MS = 15 * MINUTE_MS;
@@ -53,6 +55,38 @@ export function validateMatchroomScheduleWindow(
       ok: false as const,
       code: "too_far",
       message: "Matchrooms can be scheduled up to 2 months in advance.",
+    };
+  }
+  return { ok: true as const, code: "valid", message: "Valid schedule." };
+}
+
+// Walk-in matchrooms (zone-admin, in-person) allow shorter notice than player
+// matchrooms but must not be same-day: the scheduled calendar day has to be at
+// least the next day. Upper bound matches the standard 2-month window.
+export function validateWalkInScheduleWindow(
+  scheduledStartAt?: number | null,
+  nowMs = Date.now(),
+) {
+  const startAt = Number(scheduledStartAt || 0);
+  if (!Number.isFinite(startAt) || startAt <= 0) {
+    return { ok: false as const, code: "missing_start_time", message: "Scheduled date/time is required." };
+  }
+  const startDay = new Date(startAt);
+  startDay.setHours(0, 0, 0, 0);
+  const today = new Date(nowMs);
+  today.setHours(0, 0, 0, 0);
+  if (startDay.getTime() - today.getTime() < DAY_MS) {
+    return {
+      ok: false as const,
+      code: "too_soon",
+      message: "Walk-in matchrooms must be scheduled at least 1 day in advance.",
+    };
+  }
+  if (startAt - nowMs > MATCHROOM_MAX_ADVANCE_MS) {
+    return {
+      ok: false as const,
+      code: "too_far",
+      message: "Walk-in matchrooms can be scheduled up to 2 months in advance.",
     };
   }
   return { ok: true as const, code: "valid", message: "Valid schedule." };

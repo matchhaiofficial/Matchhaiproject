@@ -4,6 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     KeyboardAvoidingView,
     LayoutChangeEvent,
     Platform,
@@ -14,7 +15,7 @@ import {
     TextInput,
     View
 } from "react-native";
-import { useConvex } from "convex/react";
+import { useConvex, useMutation } from "convex/react";
 
 import {
     AGE_RANGES,
@@ -844,6 +845,44 @@ export default function EditProfile() {
         }
     };
 
+    const requestAccountDeletion = useMutation((api as any).support.requestAccountDeletion);
+    const [deletionRequesting, setDeletionRequesting] = useState(false);
+
+    const handleRequestAccountDeletion = () => {
+        Alert.alert(
+            "Delete Account",
+            "This sends an account deletion request to MatchHai and schedules your profile for deletion. For legal and financial reasons, some records (payments, wallet, KYC, and audit history) may be retained where required by law. Do you want to continue?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Request Deletion",
+                    style: "destructive",
+                    onPress: async () => {
+                        setDeletionRequesting(true);
+                        try {
+                            const res: any = await requestAccountDeletion({});
+                            showToast({
+                                type: "success",
+                                title: res?.alreadyRequested ? "Request already pending" : "Deletion requested",
+                                message: res?.reference
+                                    ? `Reference: ${res.reference}. Our team will process your request.`
+                                    : "Our team will process your request.",
+                            });
+                        } catch (error: any) {
+                            showToast({
+                                type: "error",
+                                title: "Request failed",
+                                message: error?.message || "Could not submit your deletion request. Please try again.",
+                            });
+                        } finally {
+                            setDeletionRequesting(false);
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
     const isSteamVerified = !!steamProfile;
     const isFaceitVerified = !!faceitProfile;
     const isPsnVerified = !!psnStats;
@@ -1560,6 +1599,35 @@ export default function EditProfile() {
                         {psnStatus === "taken" && (
                             <Text style={[styles.helperText, styles.helperError]}>This link is already in use.</Text>
                         )}
+                    </View>
+
+                    {/* Danger Zone — Account deletion (store compliance) */}
+                    <Text style={[styles.sectionTitle, styles.dangerSectionTitle]}>Danger Zone</Text>
+                    <View style={styles.dangerZone}>
+                        <Text style={styles.dangerTitle}>Delete Account</Text>
+                        <Text style={styles.dangerSubtext}>
+                            Sends an account deletion request to MatchHai and schedules your profile for deletion. For legal and financial reasons, some records (payments, wallet, KYC, and audit history) may be retained where required by law.
+                        </Text>
+                        <Pressable
+                            onPress={handleRequestAccountDeletion}
+                            disabled={deletionRequesting}
+                            style={({ pressed }) => [
+                                styles.deleteAccountButton,
+                                deletionRequesting && styles.deleteAccountButtonDisabled,
+                                pressed && !deletionRequesting && { opacity: 0.85 },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Request account deletion"
+                        >
+                            {deletionRequesting ? (
+                                <ActivityIndicator color={COLORS.error} size="small" />
+                            ) : (
+                                <>
+                                    <AppIcon name="delete" size={18} color={COLORS.error} />
+                                    <Text style={styles.deleteAccountButtonText}>Delete Account</Text>
+                                </>
+                            )}
+                        </Pressable>
                     </View>
 
                     <View style={{ height: 40 }} />
