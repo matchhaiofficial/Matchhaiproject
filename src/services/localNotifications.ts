@@ -143,14 +143,18 @@ async function schedulePlan(plan: ReminderPlan): Promise<StoredReminderRecord | 
         reminderKey: plan.reminderKey,
       },
     },
-    trigger: {
-      // Must include `type: DATE`. Without it, expo-notifications treats the
-      // object as an unrecognized trigger and delivers the notification
-      // immediately instead of at the scheduled date.
-      type: SchedulableTriggerInputTypes.DATE,
-      date: plan.triggerAtMs,
-      channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
-    } as any,
+    // Expo requires `type` on object triggers; without it Android can treat the
+    // trigger as "immediate", causing reminders to fire right after scheduling.
+    trigger: (Platform.OS === "android"
+      ? {
+          type: SchedulableTriggerInputTypes.DATE,
+          date: new Date(plan.triggerAtMs),
+          channelId: ANDROID_CHANNEL_ID,
+        }
+      : {
+          type: SchedulableTriggerInputTypes.DATE,
+          date: new Date(plan.triggerAtMs),
+        }) as any,
   });
 
   return {

@@ -6,6 +6,7 @@ import {
     InteractionManager,
     Keyboard,
     KeyboardAvoidingView,
+    type KeyboardEvent,
     Linking,
     Modal,
     Platform,
@@ -82,6 +83,8 @@ type RenderableChatMessage = ChatThreadMessage & {
     dayLabel: string;
     showDayLabel: boolean;
 };
+
+const ANDROID_KEYBOARD_OVERLAY_THRESHOLD = 24;
 
 function formatFileSize(bytes?: number) {
     if (!bytes || bytes <= 0) return "";
@@ -551,12 +554,16 @@ export default function ChatThread({
     const didInitialLayoutScrollRef = useRef(false);
     const initialScrollScheduledRef = useRef(false);
     const initialScrollSettledRef = useRef(false);
+    const keyboardShellRef = useRef<View | null>(null);
+    const keyboardFrameTopRef = useRef<number | null>(null);
+    const keyboardMeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nowMs = useRelativeNow(60_000);
 
     const [emojiOpen, setEmojiOpen] = useState(false);
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
     const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
     const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
+    const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
     const keyboardScrollTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
     const handleEmojiSelected = useCallback(
@@ -572,6 +579,60 @@ export default function ChatThread({
     const toggleReactionPicker = useCallback((messageId: string) => {
         setActiveReactionMessageId((current) => current === messageId ? null : messageId);
     }, []);
+    const clearKeyboardMeasureTimer = useCallback(() => {
+        if (keyboardMeasureTimerRef.current) {
+            clearTimeout(keyboardMeasureTimerRef.current);
+            keyboardMeasureTimerRef.current = null;
+        }
+    }, []);
+    const measureAndroidKeyboardOverlap = useCallback((keyboardTop: number | null) => {
+        if (Platform.OS !== "android" || !Number.isFinite(keyboardTop)) return;
+
+        keyboardShellRef.current?.measureInWindow((_x, y, _width, height) => {
+            const shellBottom = y + height;
+            const overlap = Math.max(0, Math.ceil(shellBottom - Number(keyboardTop)));
+            setAndroidKeyboardInset(
+                overlap > ANDROID_KEYBOARD_OVERLAY_THRESHOLD ? overlap : 0
+            );
+        });
+    }, []);
+    const scheduleAndroidKeyboardMeasure = useCallback((event?: KeyboardEvent) => {
+        if (Platform.OS !== "android") return;
+        const nextKeyboardTop = Number(event?.endCoordinates?.screenY ?? keyboardFrameTopRef.current);
+        if (!Number.isFinite(nextKeyboardTop) || nextKeyboardTop <= 0) return;
+
+        keyboardFrameTopRef.current = nextKeyboardTop;
+        clearKeyboardMeasureTimer();
+
+        requestAnimationFrame(() => measureAndroidKeyboardOverlap(nextKeyboardTop));
+        keyboardMeasureTimerRef.current = setTimeout(() => {
+            measureAndroidKeyboardOverlap(nextKeyboardTop);
+        }, 80);
+    }, [clearKeyboardMeasureTimer, measureAndroidKeyboardOverlap]);
+    const handleKeyboardShellLayout = useCallback(() => {
+        if (keyboardFrameTopRef.current != null) {
+            scheduleAndroidKeyboardMeasure();
+        }
+    }, [scheduleAndroidKeyboardMeasure]);
+
+    useEffect(() => {
+        if (Platform.OS !== "android") return undefined;
+
+        const showSubscription = Keyboard.addListener("keyboardDidShow", scheduleAndroidKeyboardMeasure);
+        const frameSubscription = Keyboard.addListener("keyboardDidChangeFrame", scheduleAndroidKeyboardMeasure);
+        const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+            keyboardFrameTopRef.current = null;
+            clearKeyboardMeasureTimer();
+            setAndroidKeyboardInset(0);
+        });
+
+        return () => {
+            showSubscription.remove();
+            frameSubscription.remove();
+            hideSubscription.remove();
+            clearKeyboardMeasureTimer();
+        };
+    }, [clearKeyboardMeasureTimer, scheduleAndroidKeyboardMeasure]);
 
     const groupedMessages = useMemo<RenderableChatMessage[]>(() => {
         return messages.map((message, index) => {
@@ -778,6 +839,13 @@ export default function ChatThread({
     // Bottom padding for the composer: respect gesture-nav inset, but don't add
     // artificial extra space on phones with hardware buttons (insets.bottom === 0).
     const composerBottomPadding = Math.max(insets.bottom, Platform.OS === "ios" ? 4 : 0) + 8;
+    const keyboardContentStyle = useMemo(
+        () => [
+            styles.keyboardContent,
+            androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset },
+        ],
+        [androidKeyboardInset]
+    );
 
     return (
         <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
@@ -817,6 +885,11 @@ export default function ChatThread({
                             behavior={Platform.OS === "ios" ? "padding" : undefined}
                             keyboardVerticalOffset={Platform.OS === "ios" ? 84 : undefined}
                         >
+                            <View
+                                ref={keyboardShellRef}
+                                onLayout={handleKeyboardShellLayout}
+                                style={keyboardContentStyle}
+                            >
                             <View style={styles.threadContent}>
                                 {pinnedMessages.length > 0 ? (
                                     <ChatPinnedBanner
@@ -1000,9 +1073,10 @@ export default function ChatThread({
                                                     )}
                                                 </Pressable>
                                             </View>
-                                        </View>
+                                            </View>
                                     </View>
                             ) : null}
+                            </View>
                         </KeyboardAvoidingView>
                     </View>
                 </View>

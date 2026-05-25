@@ -146,6 +146,9 @@ export default StyleSheet.create({
     keyboardShell: {
         flex: 1,
     },
+    keyboardContent: {
+        flex: 1,
+    },
     threadContent: {
         flex: 1,
         minHeight: 0,
