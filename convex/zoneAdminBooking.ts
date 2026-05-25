@@ -9,7 +9,7 @@ import {
   notifyBroadcastOfferReceived,
 } from "./matchroomBroadcast";
 import { requireKycVerified } from "./kycGate";
-import { getMatchroomLockAt, validateMatchroomScheduleWindow } from "./timing";
+import { getMatchroomLockAt, validateMatchroomScheduleWindow, validateWalkInScheduleWindow, COUNTER_OFFER_TIME_WINDOW_MS } from "./timing";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -209,9 +209,12 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
-async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
+// Resolve the authenticated caller's `users` row from the verified Convex/Better
+// Auth identity. Never trusts a client-passed uid — the actor is derived purely
+// from the session. Throws a clean, generic message when unauthenticated.
+async function requireAuthenticatedActor(ctx: any) {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Please sign in to view booking history.");
+  if (!identity) throw new Error("Please sign in to continue.");
 
   const candidates = [identity.tokenIdentifier, identity.subject]
     .map((value) => String(value || "").trim())
@@ -223,6 +226,14 @@ async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
     if (actor) break;
   }
   if (!actor) throw new Error("Signed-in user profile not found.");
+  return actor;
+}
+
+// Authorize a zone-owner action: caller must be authenticated AND own `zoneId`.
+// Returns the resolved actor + zone so callers can attribute writes to the
+// server-derived identity instead of any client-supplied uid.
+async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
+  const actor = await requireAuthenticatedActor(ctx);
 
   let zone: any = null;
   try {
@@ -232,7 +243,7 @@ async function requireAuthenticatedZoneOwner(ctx: any, zoneId: string) {
   }
   if (!zone) throw new Error("Zone not found.");
   if (String(zone.ownerUid || "") !== String(actor._id)) {
-    throw new Error("You are not authorized to view this zone's booking history.");
+    throw new Error("You are not authorized to manage this zone.");
   }
 
   return { actor, zone };
@@ -523,17 +534,27 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
 async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
   request: any;
   offer: any;
-  option: { date: string; time: string };
+  option: { date: string; time: string; startAt?: number };
 }) {
   const now = Date.now();
   const request = input.request;
   const offer = input.offer;
   const locationLabel = offer.branchName || offer.zoneName || "Zone Venue";
 
+  // The accepted instant is the client-computed local epoch (startAt). Falling
+  // back to parsing the date/time strings keeps older offers working. This is the
+  // single source of truth the lobby/lifecycle read, so it must be updated too —
+  // otherwise the lobby keeps showing the original (pre-counter-offer) time.
+  const acceptedStartAt =
+    typeof input.option.startAt === "number" && Number.isFinite(input.option.startAt)
+      ? input.option.startAt
+      : parseLocalDateTimeMillis(input.option.date, input.option.time);
+
   if (request.matchroomId) {
     await ctx.db.patch(request.matchroomId, {
       scheduledDate: input.option.date,
       scheduledTime: input.option.time,
+      ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
       location: locationLabel,
       updatedAt: now,
     });
@@ -570,6 +591,7 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     zoneOwnerUid: offer.zoneOwnerUid || undefined,
     scheduledDate: input.option.date,
     scheduledTime: input.option.time,
+    ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
     durationMinutes: getDurationMinutesFromRequest(request),
     pricing: {
       perPlayer: Number(request.budgetPerPlayer || offer.proposedPrice || 0),
@@ -653,6 +675,8 @@ export const listBookingQueueForZone = query({
     branchAreas: v.array(v.string()),
   },
   handler: async (ctx, args) => {
+    // Authz: only the zone owner may read this zone's booking queue (S-04).
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const activeStatuses = new Set(["open", "pending_payment", "accepted"]);
 
     // Get requests directed to this zone
@@ -903,6 +927,8 @@ export const listMatchroomsForZone = query({
     locationHints: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    // Authz: only the zone owner may read this zone's matchrooms (S-04).
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const merged = new Map<string, any>();
     const includeInAdminList = (matchroom: any) =>
       String(matchroom.zoneId || "") === args.zoneId &&
@@ -1019,6 +1045,10 @@ export const acceptBookingRequest = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01). Actor is derived from the
+    // session; client-passed adminUid is treated only as a non-authoritative hint.
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const bookingRequest = await ctx.db.get(args.requestId);
     if (!bookingRequest) {
@@ -1261,7 +1291,7 @@ export const acceptBookingRequest = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "accept_request",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Accepted booking request and created matchroom ${String(matchroomId)}.`,
@@ -1300,6 +1330,9 @@ export const rejectBookingRequest = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const request = await ctx.db.get(args.requestId);
 
@@ -1378,7 +1411,7 @@ export const rejectBookingRequest = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "reject_request",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Rejected booking request for ${normalizeGameKey(request?.gameKey)}.`,
@@ -1412,15 +1445,24 @@ export const sendCounterOffer = mutation({
       date: v.string(),
       time: v.string(),
       endTime: v.optional(v.string()),
+      startAt: v.optional(v.number()),
     })),
     pricePerPlayer: v.number(),
     currency: v.optional(v.string()),
     location: v.optional(v.string()),
     message: v.optional(v.string()),
     expiresInMinutes: v.optional(v.number()),
+    // Client-computed (local-time) epoch ms used to bound the alternative time.
+    // originalStartAt = the originally requested start; proposedStartAts = one
+    // entry per scheduleOption. Both are validated server-side below.
+    originalStartAt: v.optional(v.number()),
+    proposedStartAts: v.optional(v.array(v.number())),
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, String(args.zoneId));
+    const actorUid = String(actor._id);
     const now = Date.now();
     const currency = args.currency || "PKR";
     const request = await ctx.db.get(args.requestId);
@@ -1428,11 +1470,51 @@ export const sendCounterOffer = mutation({
       throw new Error("Booking request not found.");
     }
 
+    // Alternative-time rules: the proposed time(s) must be in the future and
+    // within ±2 hours of the originally requested time. Comparisons use
+    // client-computed epoch ms (same local frame) to avoid server-TZ skew.
+    let originalStartMs =
+      typeof args.originalStartAt === "number" && Number.isFinite(args.originalStartAt)
+        ? args.originalStartAt
+        : null;
+    if (originalStartMs == null && request.matchroomId) {
+      const linkedRoom = await ctx.db.get(request.matchroomId as any);
+      if (linkedRoom && typeof (linkedRoom as any).scheduledStartAt === "number") {
+        originalStartMs = (linkedRoom as any).scheduledStartAt;
+      }
+    }
+    if (originalStartMs == null && typeof (request as any).preferredDate === "number") {
+      originalStartMs = parseLocalDateTimeMillis(
+        new Date((request as any).preferredDate).toISOString().slice(0, 10),
+        (request as any).preferredTime || "00:00",
+      );
+    }
+
+    const proposedStartAts = Array.isArray(args.proposedStartAts) ? args.proposedStartAts : [];
+    for (const proposedMs of proposedStartAts) {
+      if (typeof proposedMs !== "number" || !Number.isFinite(proposedMs)) continue;
+      if (proposedMs <= now) {
+        throw new Error("Alternative time cannot be in the past.");
+      }
+      if (originalStartMs != null && Math.abs(proposedMs - originalStartMs) > COUNTER_OFFER_TIME_WINDOW_MS) {
+        throw new Error("Alternative time must be within 2 hours of the original requested time.");
+      }
+    }
+
     const scheduleOptions = args.scheduleOptions
-      .map((option) => ({
+      .map((option, index) => ({
         date: String(option.date || "").trim(),
         time: String(option.time || "").trim(),
         endTime: option.endTime ? String(option.endTime).trim() : undefined,
+        // Prefer the client-computed local instant; fall back to the matching
+        // proposedStartAts entry so older callers still persist a timestamp.
+        startAt:
+          typeof option.startAt === "number" && Number.isFinite(option.startAt)
+            ? option.startAt
+            : typeof proposedStartAts[index] === "number" &&
+                Number.isFinite(proposedStartAts[index])
+              ? proposedStartAts[index]
+              : undefined,
       }))
       .filter((option) => option.date && option.time)
       .slice(0, 3);
@@ -1476,6 +1558,7 @@ export const sendCounterOffer = mutation({
       proposedPrice: args.pricePerPlayer,
       proposedDate: new Date(`${primaryOption.date}T00:00:00`).getTime(),
       proposedTime: primaryOption.time,
+      proposedStartAt: primaryOption.startAt,
       scheduleOptions,
       recipientUids: recipients.map((recipient) => recipient.uid),
       responses: [],
@@ -1545,7 +1628,7 @@ export const sendCounterOffer = mutation({
       zoneId: String(args.zoneId),
       module: "bookings",
       action: "send_counter_offer",
-      actorUid: args.adminUid || args.zoneOwnerUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Sent counter-offer with ${scheduleOptions.length} time option${scheduleOptions.length === 1 ? "" : "s"}.`,
@@ -1591,8 +1674,10 @@ export const respondToCounterOffer = mutation({
     const request = await ctx.db.get(offer.requestId);
     if (!request) throw new Error("Booking request not found.");
 
-    const responder = await resolveUserByAnyId(ctx, args.responderUid);
-    if (!responder) throw new Error("Responder not found.");
+    // Authz: derive the responder from the authenticated session, never from the
+    // client-passed responderUid (CR-01 / IDOR). The recipient check below then
+    // confirms this signed-in user is actually an invited recipient.
+    const responder = await requireAuthenticatedActor(ctx);
 
     const recipientUids = Array.isArray(offer.recipientUids)
       ? offer.recipientUids.map((uid: string) => String(uid))
@@ -1720,6 +1805,21 @@ export const respondToCounterOffer = mutation({
           preferredTime: chosenOption?.time || request.preferredTime,
           updatedAt: now,
         });
+        // Apply the accepted slot to the broadcast matchroom so the lobby shows
+        // the agreed time. scheduledStartAt is the source of truth the lobby/
+        // lifecycle read, so it must move with the accepted counter-offer.
+        if (chosenOption && matchroomId) {
+          const acceptedStartAt =
+            typeof chosenOption.startAt === "number" && Number.isFinite(chosenOption.startAt)
+              ? chosenOption.startAt
+              : parseLocalDateTimeMillis(chosenOption.date, chosenOption.time);
+          await ctx.db.patch(matchroomId, {
+            scheduledDate: chosenOption.date,
+            scheduledTime: chosenOption.time,
+            ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
+            updatedAt: now,
+          });
+        }
         await notifyZoneOfferOutcome(ctx, {
           offer,
           request,
@@ -1880,10 +1980,13 @@ export const createWalkInMatchroom = mutation({
   },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const actorUid = String(actor._id);
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
     const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
-    const scheduleValidation = validateMatchroomScheduleWindow(scheduledStartAt, now);
+    const scheduleValidation = validateWalkInScheduleWindow(scheduledStartAt, now);
     if (!scheduleValidation.ok) {
       throw new Error(scheduleValidation.message);
     }
@@ -1927,7 +2030,7 @@ export const createWalkInMatchroom = mutation({
       zoneId: args.zoneId,
       module: "bookings",
       action: "create_walk_in_matchroom",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "matchroom",
       targetId: String(matchroomId),
       summary: `Created walk-in matchroom "${args.title.trim() || "Walk-in Matchroom"}".`,

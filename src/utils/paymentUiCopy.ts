@@ -1,6 +1,9 @@
 export const PAYMENT_VERIFICATION_SAFE_MESSAGE =
   "We could not verify this payment yet. If money was deducted, please wait a few minutes or contact support with this order number.";
 
+export const PAYMENT_SUPPORT_WITH_ORDER_HINT =
+  "If money was deducted but your seat isn't reserved, contact MatchHai support and share the order number shown above.";
+
 export const WALLET_BALANCE_HELPER_TEXT =
   "Available to pay for bookings and withdraw.";
 

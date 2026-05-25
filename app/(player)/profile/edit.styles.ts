@@ -522,5 +522,50 @@ export default StyleSheet.create({
         fontWeight: '700',
         fontFamily: FONTS.heading,
     },
+
+    // Danger Zone (account deletion)
+    dangerSectionTitle: {
+        color: COLORS.error,
+    },
+    dangerZone: {
+        backgroundColor: COLORS.cardBackground,
+        borderRadius: RADII.lg,
+        padding: SPACING.lg,
+        borderWidth: 1,
+        borderColor: COLORS.error + '40',
+        marginBottom: SPACING.xl,
+    },
+    dangerTitle: {
+        color: COLORS.text,
+        fontSize: TEXT_SIZES.label,
+        fontFamily: FONTS.bold,
+        marginBottom: SPACING.xs,
+    },
+    dangerSubtext: {
+        color: COLORS.muted,
+        fontSize: TEXT_SIZES.caption,
+        fontFamily: FONTS.body,
+        marginBottom: SPACING.md,
+    },
+    deleteAccountButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        borderRadius: RADII.md,
+        borderWidth: 1,
+        borderColor: COLORS.error,
+        backgroundColor: COLORS.error + '14',
+        paddingVertical: 14,
+    },
+    deleteAccountButtonDisabled: {
+        opacity: 0.6,
+    },
+    deleteAccountButtonText: {
+        color: COLORS.error,
+        fontFamily: FONTS.heading,
+        fontSize: TEXT_SIZES.body,
+        fontWeight: '600',
+    },
 });
 

@@ -208,6 +208,7 @@ export default defineSchema({
     cs16Role: v.optional(v.union(v.string(), v.null())),
     playsValorant: v.optional(v.boolean()),
     valorantRole: v.optional(v.union(v.string(), v.null())),
+    valorantAgent: v.optional(v.union(v.string(), v.null())),
     playsFc: v.optional(v.boolean()),
     fcTeam: v.optional(v.union(v.string(), v.null())),
     fcFormation: v.optional(v.union(v.string(), v.null())),
@@ -494,7 +495,9 @@ export default defineSchema({
     .index("by_orderRefNum", ["orderRefNum"])
     .index("by_checkoutToken", ["checkoutToken"])
     .index("by_bookingIntentId", ["bookingIntentId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_status_and_createdAt", ["status", "createdAt"]),
 
   // ============================================
   // MATCHROOMS
@@ -876,10 +879,14 @@ export default defineSchema({
     proposedPrice: v.number(),
     proposedDate: v.optional(v.number()),
     proposedTime: v.optional(v.string()),
+    // Real local-time epoch (ms) of the primary proposed slot. Source of truth
+    // for the accepted start so crossing midnight rolls the day correctly.
+    proposedStartAt: v.optional(v.number()),
     scheduleOptions: v.optional(v.array(v.object({
       date: v.string(),
       time: v.string(),
       endTime: v.optional(v.string()),
+      startAt: v.optional(v.number()),
     }))),
     recipientUids: v.optional(v.array(v.string())),
     responses: v.optional(v.array(v.object({

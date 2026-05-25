@@ -311,6 +311,9 @@ export default function AdminRegisterStep1() {
           </View>
           <View style={[styles.focusBar, { opacity: focused === "owner" ? 1 : 0 }]} />
         </View>
+        <Text style={[styles.helperText, { color: COLORS.muted, marginTop: 6 }]}>
+          Use your full name as per CNIC so KYC can be verified.
+        </Text>
         {showOwnerError ? (
           <Text style={styles.errorText}>Enter at least 3 characters for the owner name.</Text>
         ) : null}

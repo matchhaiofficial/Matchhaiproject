@@ -41,6 +41,7 @@ import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
 import { COLORS, SPACING } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
+import { formatValorantRoleAgent } from "../../../constants/profileOptions";
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
@@ -102,7 +103,7 @@ interface FullUserProfile {
     // Generic Play Flags & Roles
     playsCs2?: boolean; cs2Role?: string;
     playsCs16?: boolean; cs16Role?: string;
-    playsValorant?: boolean; valorantRole?: string;
+    playsValorant?: boolean; valorantRole?: string; valorantAgent?: string;
     playsFc?: boolean; fcTeam?: string; fcFormation?: string;
     playsTekken?: boolean; tekkenFavorites?: string[];
     playsFutsal?: boolean; futsalPositions?: string[];
@@ -191,8 +192,15 @@ export default function Profile() {
     const isFetching = useRef(false);
 
     const hasExternalPlatform = useCallback(() => {
-        return Boolean(profile?.steamProfileUrl || profile?.steamId || profile?.faceitProfileUrl || profile?.faceitNickname);
-    }, [profile?.faceitNickname, profile?.faceitProfileUrl, profile?.steamId, profile?.steamProfileUrl]);
+        return Boolean(
+            profile?.steamProfileUrl ||
+            profile?.steamId ||
+            profile?.faceitProfileUrl ||
+            profile?.faceitNickname ||
+            profile?.psnStats?.psnOnlineId ||
+            (profile as any)?.psnOnlineId
+        );
+    }, [profile?.faceitNickname, profile?.faceitProfileUrl, profile?.steamId, profile?.steamProfileUrl, profile?.psnStats?.psnOnlineId, profile]);
 
     const maybeRefreshExternalStats = useCallback(async (force = false) => {
         if (!user?._id || !hasExternalPlatform() || externalSyncInFlight.current) return;
@@ -380,7 +388,7 @@ export default function Profile() {
         switch (gameKey) {
             case 'cs2': return profile.cs2Role || 'No role set';
             case 'cs16': return profile.cs16Role || 'No role set';
-            case 'valorant': return profile.valorantRole || 'No role set';
+            case 'valorant': return formatValorantRoleAgent(profile.valorantRole, profile.valorantAgent) || 'No role set';
             case 'fc26': return profile.fcTeam || 'No team set';
             case 'tekken8': return profile.tekkenFavorites?.join(', ') || 'No characters set';
             case 'futsal': return profile.futsalPositions?.join(', ') || 'No position set';

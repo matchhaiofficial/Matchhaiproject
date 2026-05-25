@@ -700,6 +700,28 @@ export const refreshExternalStats = action({
       }
     }
 
+    const psnOnlineId = String(
+      (user as any).psnStats?.psnOnlineId || (user as any).psnOnlineId || "",
+    ).trim();
+    if (psnOnlineId) {
+      try {
+        const psnRes: any = await ctx.runAction(api.externalApis.verifyPsnProfile, {
+          psnOnlineId,
+          wantsTekken: !!(user as any).playsTekken,
+          wantsFc: !!(user as any).playsFc,
+        });
+        if (psnRes) {
+          updates.psnStats = psnRes;
+          if (psnRes.psnAccountId !== undefined) updates.psnAccountId = psnRes.psnAccountId || null;
+          if (psnRes.psnOnlineId !== undefined) updates.psnOnlineId = psnRes.psnOnlineId || null;
+          updates.psnLastSyncedAt = now;
+          refreshed.push("PSN");
+        }
+      } catch (error: any) {
+        errors.push({ platform: "PSN", message: error?.message || "PSN refresh failed" });
+      }
+    }
+
     if (refreshed.length > 0) {
       updates.lastExternalSyncAt = now;
       await ctx.runMutation(api.users.updatePlatformLinks, {
@@ -888,6 +910,7 @@ export const saveOnboardingStep2 = mutation({
     cs16Role: v.optional(v.union(v.string(), v.null())),
     playsValorant: v.optional(v.boolean()),
     valorantRole: v.optional(v.union(v.string(), v.null())),
+    valorantAgent: v.optional(v.union(v.string(), v.null())),
     playsFc: v.boolean(),
     fcTeam: v.optional(v.union(v.string(), v.null())),
     fcFormation: v.optional(v.union(v.string(), v.null())),
@@ -924,6 +947,7 @@ export const saveOnboardingStep2 = mutation({
     if (prefs.cs2Role) updateData.cs2Role = prefs.cs2Role;
     if (prefs.cs16Role) updateData.cs16Role = prefs.cs16Role;
     if (prefs.valorantRole) updateData.valorantRole = prefs.valorantRole;
+    if (prefs.valorantAgent) updateData.valorantAgent = prefs.valorantAgent;
     if (prefs.fcTeam) updateData.fcTeam = prefs.fcTeam;
     if (prefs.fcFormation) updateData.fcFormation = prefs.fcFormation;
 

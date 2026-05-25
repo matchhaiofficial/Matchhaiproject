@@ -122,6 +122,7 @@ export interface OnboardingStep2Prefs {
   cs16Role: string | null;
   playsValorant: boolean;
   valorantRole: string | null;
+  valorantAgent?: string | null;
   playsFc: boolean;
   fcTeam: string | null;
   fcFormation: string | null;
