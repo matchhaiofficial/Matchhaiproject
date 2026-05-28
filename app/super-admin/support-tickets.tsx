@@ -1,7 +1,7 @@
 
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar, AdminStatusBadge } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
@@ -237,13 +237,17 @@ export default function SuperAdminSupportTicketsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(ticket) => ticket.id}
+          renderItem={({ item }) => <TicketCard ticket={item} />}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} />)}
-          {visible.length === 0 ? (
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+          ListEmptyComponent={
             tickets.length === 0 ? (
               <AdminEmptyStateCard
                 title={emptyLabel(tab)}
@@ -257,8 +261,8 @@ export default function SuperAdminSupportTicketsScreen() {
                 icon="support"
               />
             )
-          ) : null}
-        </ScrollView>
+          }
+        />
       )}
 
       <AdminFilterDrawer

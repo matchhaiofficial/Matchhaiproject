@@ -677,28 +677,24 @@ export const listBookingQueueForZone = query({
   handler: async (ctx, args) => {
     // Authz: only the zone owner may read this zone's booking queue (S-04).
     await requireAuthenticatedZoneOwner(ctx, args.zoneId);
-    const activeStatuses = new Set(["open", "pending_payment", "accepted"]);
+    const activeStatuses = ["open", "pending_payment", "accepted"] as const;
 
-    // Get requests directed to this zone
-    const directRequests = await ctx.db
-      .query("bookingRequests")
-      .withIndex("by_status")
-      .collect();
-
-    // Filter for active requests that match zoneId or areas
-    const normalizedAreas = new Set(
-      args.branchAreas
-        .map((a) => a.trim())
-        .filter(Boolean)
+    // H-02 fix: read only THIS zone's active requests via the
+    // by_zoneId_and_status index instead of scanning the whole bookingRequests
+    // table on every (5s-polled) call. Only zoneId-matched requests are ever
+    // surfaced (the old area-matching branch was a no-op — bookingRequests has
+    // no preferredAreas usable here), so the result set is identical.
+    const filteredArrays = await Promise.all(
+      activeStatuses.map((status) =>
+        ctx.db
+          .query("bookingRequests")
+          .withIndex("by_zoneId_and_status", (q) =>
+            q.eq("zoneId", args.zoneId as any).eq("status", status),
+          )
+          .collect(),
+      ),
     );
-
-    const filtered = directRequests.filter((r) => {
-      if (!activeStatuses.has(r.status)) return false;
-      // Match by zoneId
-      if (r.zoneId && String(r.zoneId) === args.zoneId) return true;
-      // No area matching possible with current schema (bookingRequests doesn't have preferredAreas)
-      return false;
-    });
+    const filtered = filteredArrays.flat();
 
     const deduped = new Map<string, any>();
     filtered.forEach((request) => {
@@ -936,7 +932,13 @@ export const listMatchroomsForZone = query({
         matchroom.bookingSource === "walkin" ||
         matchroom.zoneAdminApproved === true);
 
-    // By zoneId
+    // By zoneId — the only source needed. H-03 fix: the former ownerUid and
+    // locationHints branches each scanned the global matchrooms table via
+    // by_createdAt.take(200) (silently dropping a zone's older rooms once 200
+    // newer rooms exist platform-wide, and re-running every 5s). They were also
+    // redundant: includeInAdminList already requires zoneId === args.zoneId, so
+    // any room they could add is already returned by this indexed by_zoneId
+    // query. Result set is unchanged; the global scans are removed.
     const byZone = await ctx.db
       .query("matchrooms")
       .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
@@ -946,35 +948,6 @@ export const listMatchroomsForZone = query({
     byZone
       .filter(includeInAdminList)
       .forEach((m) => merged.set(String(m._id), { ...m, id: m._id }));
-
-    // By ownerUid
-    if (args.ownerUid) {
-      const allMatchrooms = await ctx.db
-        .query("matchrooms")
-        .withIndex("by_createdAt")
-        .order("desc")
-        .take(200);
-
-      allMatchrooms
-        .filter((m) => m.zoneOwnerUid === args.ownerUid && includeInAdminList(m))
-        .forEach((m) => merged.set(String(m._id), { ...m, id: m._id }));
-    }
-
-    // By location hints
-    if (args.locationHints && args.locationHints.length > 0) {
-      const locationSet = new Set(args.locationHints.map((l) => l.trim()).filter(Boolean));
-      if (locationSet.size > 0) {
-        const allMatchrooms = await ctx.db
-          .query("matchrooms")
-          .withIndex("by_createdAt")
-          .order("desc")
-          .take(200);
-
-        allMatchrooms
-          .filter((m) => m.location && locationSet.has(m.location) && includeInAdminList(m))
-          .forEach((m) => merged.set(String(m._id), { ...m, id: m._id }));
-      }
-    }
 
     return Array.from(merged.values())
       .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));

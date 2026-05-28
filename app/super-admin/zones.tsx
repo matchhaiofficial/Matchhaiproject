@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
@@ -212,23 +212,29 @@ export default function SuperAdminZonesScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleZones}
+          keyExtractor={(zone) => zone.id}
+          renderItem={({ item }) => <ZoneReviewCard zone={item} />}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryText}>{visibleZones.length} {statusTitle(tab).toLowerCase()}</Text>
-          </View>
-          {visibleZones.map((zone) => <ZoneReviewCard key={zone.id} zone={zone} />)}
-          {visibleZones.length === 0 ? (
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+          ListHeaderComponent={
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryText}>{visibleZones.length} {statusTitle(tab).toLowerCase()}</Text>
+            </View>
+          }
+          ListEmptyComponent={
             zones.length === 0 ? (
               <AdminEmptyStateCard title={`No ${statusTitle(tab).toLowerCase()} zones`} description="Zone registration requests in this state will appear here." icon="business" />
             ) : (
               <AdminEmptyStateCard title="No zones match these filters." description="Reset filters to view all zones." icon="business" />
             )
-          ) : null}
-        </ScrollView>
+          }
+        />
       )}
 
       <AdminFilterDrawer

@@ -12,9 +12,14 @@ import type { UserProfile } from './convex/userService';
 export type SkillTier = 'Beginner' | 'Casual' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
 
 export interface GameSkillScore {
-    // Current rating (0-100)
+    // Current rating (0-100) — UI projection of the server ELO.
     rating: number;
     tier: SkillTier;
+
+    // Dynamic, server-authoritative MatchHai ELO (1000-based). Read-only on the
+    // client: it is computed and written ONLY by the backend after a verified
+    // match result. Optional because pre-existing scores may not have it yet.
+    elo?: number;
 
     // Stats
     matchesPlayed: number;
@@ -346,158 +351,12 @@ export async function initializeSkillIfMissing(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ELO / SKILL UPDATES (MATCH RESULTS)
+// MATCH-RESULT ELO — SERVER-AUTHORITATIVE
 // ═══════════════════════════════════════════════════════════════
-
-/**
- * Valid types for match result
- */
-export type MatchResultOutcome = 'win' | 'loss' | 'draw';
-
-const BASE_K = 4; // Low K because range is small (0-100). Max delta ~4-5 points.
-const PROVISIONAL_K = 8;
-const PROVISIONAL_LIMIT = 20;
-
-/**
- * Calculates ELO Delta based on expected score.
- * Formula: Expected = 1 / (1 + 10^((RatingB - RatingA)/40))
- * Divider is 40 (not 400) because our scale is 0-100.
- */
-export function calculateRatingChange(
-    currentRating: number,
-    opponentRating: number,
-    result: MatchResultOutcome,
-    matchesPlayed: number,
-    confidence: number = 1.0
-): number {
-    // 1. Determine K-Factor
-    const K = matchesPlayed < PROVISIONAL_LIMIT ? PROVISIONAL_K : BASE_K;
-
-    // Scale K by confidence
-    const K_eff = K * confidence;
-
-    // 2. Calculate Expected Score
-    // Divisor 40 scales the 0-100 difference to traditional ELO's 0-1000 equivalent behavior
-    const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - currentRating) / 40));
-
-    // 3. Determine Actual Score
-    let actualScore = 0.5;
-    if (result === 'win') actualScore = 1;
-    else if (result === 'loss') actualScore = 0;
-
-    // 4. Calculate Delta
-    // We round to nearest integer
-    const delta = Math.round(K_eff * (actualScore - expectedScore));
-
-    return delta;
-}
-
-export const applyMatchResult = async (
-    matchId: string,
-    gameKey: string,
-    winnerSide: 'A' | 'B',
-    sideA: string[], // Uids
-    sideB: string[], // Uids
-    confidence: number = 1.0
-) => {
-    try {
-        const canonicalGameKey = getCanonicalGameKey(gameKey);
-        const { getUserProfile } = await import('./convex/userService');
-
-        // Fetch all profiles
-        const allUids = [...sideA, ...sideB];
-        const profiles: Record<string, UserProfile> = {};
-
-        // We need existing ratings to calculate team averages
-        for (const uid of allUids) {
-            const res = await getUserProfile(uid as Id<"users">);
-            if (res.ok && res.data) {
-                profiles[uid] = res.data;
-            }
-        }
-
-        // Helper to get rating safely
-        const getRating = (uid: string): number => {
-            const p = profiles[uid];
-            if (!p || !p.skillScores) return 45;
-
-            const scores = p.skillScores as any;
-            const s = canonicalGameKey === 'fc26' ? (scores.fc26 || scores.fc25) : scores[canonicalGameKey];
-            if (typeof s?.rating === 'number') {
-                return clampRating(s.rating);
-            }
-            return 45;
-        };
-
-        // Calculate Team Averages
-        const ratingA = sideA.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideA.length);
-        const ratingB = sideB.reduce((sum, uid) => sum + getRating(uid), 0) / Math.max(1, sideB.length);
-
-        // Build batch updates
-        const updates = allUids.map(uid => {
-            const isSideA = sideA.includes(uid);
-            const userRating = getRating(uid);
-
-            const p = profiles[uid];
-            // Safe stats access
-            let currentStats = { wins: 0, losses: 0, matchesPlayed: 0 };
-            if (p && p.skillScores) {
-                const scores = p.skillScores as any;
-                const rawStats = canonicalGameKey === 'fc26' ? (scores.fc26 || scores.fc25) : scores[canonicalGameKey];
-                if (rawStats) {
-                    currentStats = {
-                        wins: rawStats.wins || 0,
-                        losses: rawStats.losses || 0,
-                        matchesPlayed: rawStats.matchesPlayed || 0
-                    };
-                }
-            }
-
-            let result: MatchResultOutcome = 'draw';
-            if (winnerSide === 'A') result = isSideA ? 'win' : 'loss';
-            else if (winnerSide === 'B') result = isSideA ? 'loss' : 'win';
-
-            const opponentRating = isSideA ? ratingB : ratingA;
-
-            const delta = calculateRatingChange(userRating, opponentRating, result, currentStats.matchesPlayed, confidence);
-            const newRating = Math.max(0, Math.min(100, userRating + delta)); // Clamp 0-100
-
-            // Stats Update
-            const newWins = currentStats.wins + (result === 'win' ? 1 : 0);
-            const newLosses = currentStats.losses + (result === 'loss' ? 1 : 0);
-
-            // Get existing initial values if present
-            const existingScores = p?.skillScores as any;
-            const existingScore = existingScores
-                ? (canonicalGameKey === 'fc26' ? (existingScores.fc26 || existingScores.fc25) : existingScores[canonicalGameKey])
-                : null;
-
-            return {
-                userId: uid as Id<"users">,
-                game: canonicalGameKey,
-                skillScore: {
-                    rating: newRating,
-                    tier: getTierFromRating(newRating),
-                    wins: newWins,
-                    losses: newLosses,
-                    matchesPlayed: currentStats.matchesPlayed + 1,
-                    initialSource: existingScore?.initialSource,
-                    initialRating: existingScore?.initialRating,
-                    lastMatchDate: Date.now(),
-                    lastUpdated: Date.now(),
-                },
-            };
-        });
-
-        await convex.mutation(api.users.applyMatchSkillUpdates, {
-            updates,
-            matchroomId: matchId as Id<"matchrooms">,
-        });
-
-        return { ok: true };
-
-    } catch (e) {
-        console.error("Error applying skills", e);
-        return { ok: false };
-    }
-};
+//
+// Dynamic ELO from match results is computed and applied entirely on the
+// backend (convex/ratingEngine.ts + convex/matchrooms.ts finalizeMatchroomResult).
+// The client neither calculates deltas nor submits ratings/averages. The former
+// client-side `calculateRatingChange` / `applyMatchResult` helpers were removed
+// to eliminate client-trusted ELO. The 0-100 `rating` shown in the UI is a
+// projection of the server `elo` (rating = (elo - 500) / 10).

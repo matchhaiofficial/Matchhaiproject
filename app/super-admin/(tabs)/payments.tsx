@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -120,6 +120,70 @@ function kindLabel(kind?: string | null) {
   return kind === "wallet_topup" ? "Wallet Top-up" : "Booking Payment";
 }
 
+const PaymentRow = React.memo(function PaymentRow({
+  item,
+  expanded,
+  onToggle,
+  onViewDetail,
+}: {
+  item: AdminPaymentListItem;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+  onViewDetail: (orderRefNum: string) => void;
+}) {
+  const flags = item.reconciliation
+    ? RECON_OPTIONS.filter((opt) => opt.key !== "all" && item.reconciliation?.[opt.key as keyof AdminPaymentReconciliation])
+    : [];
+  return (
+    <AdminListCard
+      title={kindLabel(item.kind)}
+      subtitle={item.accountOwnerName || "Unknown user"}
+      statusLabel={item.status}
+      statusTone={statusTone(item.status)}
+      onPress={() => onToggle(item.id)}
+      actions={
+        <AppButton
+          size="sm"
+          variant="secondary"
+          leadingIcon="visibility"
+          onPress={(event) => {
+            event.stopPropagation();
+            onViewDetail(item.orderRefNum);
+          }}
+        >
+          View detail
+        </AppButton>
+      }
+    >
+      <View style={styles.cardBody}>
+        <AdminInfoLine label="Created" value={`${formatDateTime(item.createdAt)} | ${item.currency} ${Math.round(item.amount).toLocaleString("en-US")}`} />
+        <AdminInfoLine label="Reference" value={item.orderRefNum} />
+        {flags.length > 0 ? (
+          <View style={styles.flagRow}>
+            {flags.map((f) => (
+              <StatusPill key={f.key} tone="danger" label={f.label} />
+            ))}
+          </View>
+        ) : null}
+        {expanded ? (
+          <View style={styles.details}>
+            <AdminInfoLine label="Provider status" value={item.providerStatus || "N/A"} />
+            <AdminInfoLine label="Provider description" value={item.providerDescription || "N/A"} />
+            <AdminInfoLine label="Provider reference" value={item.providerReference || "N/A"} />
+            <AdminInfoLine label="Processed" value={formatDateTime(item.processedAt)} />
+            <AdminInfoLine label="Expires" value={formatDateTime(item.expiresAt)} />
+            <AdminInfoLine label="Updated" value={formatDateTime(item.updatedAt)} />
+            <AdminInfoLine label="Callbacks" value={String(item.callbackCount || 0)} />
+            <AdminInfoLine label="Last sync" value={formatDateTime(item.providerPayload?.lastSyncAt)} />
+            <AdminInfoLine label="Flow" value={item.providerPayload?.flow || "N/A"} />
+            <AdminInfoLine label="Last error" value={item.lastError || "None"} />
+          </View>
+        ) : null}
+      </View>
+    </AdminListCard>
+  );
+});
+
 export default function SuperAdminPaymentsTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
@@ -207,6 +271,44 @@ export default function SuperAdminPaymentsTab() {
 
   const anyFilterActive = activeCount > 0 || search.trim().length > 0;
 
+  const handleToggle = useCallback((id: string) => {
+    setExpandedId((current) => (current === id ? null : id));
+  }, []);
+
+  const handleViewDetail = useCallback((orderRefNum: string) => {
+    router.push(`/super-admin/payment/${encodeURIComponent(orderRefNum)}` as any);
+  }, []);
+
+  const renderPayment = useCallback(
+    ({ item }: { item: AdminPaymentListItem }) => (
+      <PaymentRow
+        item={item}
+        expanded={expandedId === item.id}
+        onToggle={handleToggle}
+        onViewDetail={handleViewDetail}
+      />
+    ),
+    [expandedId, handleToggle, handleViewDetail],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      anyFilterActive ? (
+        <AdminEmptyStateCard
+          title="No payments match these filters."
+          description="Reset filters to view all payments."
+          icon="paymentWallet"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No payments found"
+          description="Payments will appear here as they are created."
+          icon="paymentWallet"
+        />
+      ),
+    [anyFilterActive],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Payments" subtitle="Auto-refreshes while focused. Pull down to refresh immediately." inlineTitle />
@@ -222,82 +324,18 @@ export default function SuperAdminPaymentsTab() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPayment}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((item) => {
-            const expanded = expandedId === item.id;
-            const flags = item.reconciliation
-              ? RECON_OPTIONS.filter((opt) => opt.key !== "all" && item.reconciliation?.[opt.key as keyof AdminPaymentReconciliation])
-              : [];
-            return (
-              <AdminListCard
-                key={item.id}
-                title={kindLabel(item.kind)}
-                subtitle={item.accountOwnerName || "Unknown user"}
-                statusLabel={item.status}
-                statusTone={statusTone(item.status)}
-                onPress={() => setExpandedId(expanded ? null : item.id)}
-                actions={
-                  <AppButton
-                    size="sm"
-                    variant="secondary"
-                    leadingIcon="visibility"
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      router.push(`/super-admin/payment/${encodeURIComponent(item.orderRefNum)}` as any);
-                    }}
-                  >
-                    View detail
-                  </AppButton>
-                }
-              >
-                <View style={styles.cardBody}>
-                  <AdminInfoLine label="Created" value={`${formatDateTime(item.createdAt)} | ${item.currency} ${Math.round(item.amount).toLocaleString("en-US")}`} />
-                  <AdminInfoLine label="Reference" value={item.orderRefNum} />
-                  {flags.length > 0 ? (
-                    <View style={styles.flagRow}>
-                      {flags.map((f) => (
-                        <StatusPill key={f.key} tone="danger" label={f.label} />
-                      ))}
-                    </View>
-                  ) : null}
-                  {expanded ? (
-                    <View style={styles.details}>
-                      <AdminInfoLine label="Provider status" value={item.providerStatus || "N/A"} />
-                      <AdminInfoLine label="Provider description" value={item.providerDescription || "N/A"} />
-                      <AdminInfoLine label="Provider reference" value={item.providerReference || "N/A"} />
-                      <AdminInfoLine label="Processed" value={formatDateTime(item.processedAt)} />
-                      <AdminInfoLine label="Expires" value={formatDateTime(item.expiresAt)} />
-                      <AdminInfoLine label="Updated" value={formatDateTime(item.updatedAt)} />
-                      <AdminInfoLine label="Callbacks" value={String(item.callbackCount || 0)} />
-                      <AdminInfoLine label="Last sync" value={formatDateTime(item.providerPayload?.lastSyncAt)} />
-                      <AdminInfoLine label="Flow" value={item.providerPayload?.flow || "N/A"} />
-                      <AdminInfoLine label="Last error" value={item.lastError || "None"} />
-                    </View>
-                  ) : null}
-                </View>
-              </AdminListCard>
-            );
-          })}
-          {visible.length === 0 ? (
-            anyFilterActive ? (
-              <AdminEmptyStateCard
-                title="No payments match these filters."
-                description="Reset filters to view all payments."
-                icon="paymentWallet"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No payments found"
-                description="Payments will appear here as they are created."
-                icon="paymentWallet"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

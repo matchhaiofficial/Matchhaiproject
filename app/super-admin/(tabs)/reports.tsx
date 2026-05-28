@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "../../../src/components/AppIcon";
 import {
@@ -22,7 +22,7 @@ import { COLORS, FONTS, SPACING } from "../../../src/theme";
 import { getReportStatusLabel, getReportStatusTone } from "../../../src/utils/statusLabels";
 
 type ReportTab = "pending" | "reviewed" | "resolved";
-type ReportTypeFilter = "Any" | SuperAdminReport["type"];
+type ReportTypeFilter = "Any" | "player" | "zone" | "matchroom" | "chat" | "support";
 
 function formatDate(value?: number) {
   if (!value) return "N/A";
@@ -31,6 +31,20 @@ function formatDate(value?: number) {
 
 function formatType(value?: string | null) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function reportTypeGroup(report: SuperAdminReport): Exclude<ReportTypeFilter, "Any"> {
+  if (report.source === "support_chatbot_moderation_report") return "support";
+  if (report.type.includes("chat_message_report")) return "chat";
+  if (report.type === "zone_complaint") return "zone";
+  if (report.type === "matchroom_complaint") return "matchroom";
+  return "player";
+}
+
+function reportContextLabel(report: SuperAdminReport) {
+  if (report.chatContextLabel) return report.chatContextLabel;
+  if (report.source === "support_chatbot_moderation_report") return "Support chatbot moderation report";
+  return formatType(report.type);
 }
 
 const ALL = "All";
@@ -56,6 +70,37 @@ function matchesDateRange(timestamp: number | null | undefined, range: DateRange
   const days = range === "Last 7 Days" ? 7 : 30;
   return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
 }
+
+const ReportRow = React.memo(function ReportRow({
+  report,
+  onPress,
+}: {
+  report: SuperAdminReport;
+  onPress: (id: string) => void;
+}) {
+  return (
+    <AdminListCard
+      title={report.reason}
+      subtitle={`${formatType(report.type)} | ${formatDate(report.createdAt)}`}
+      statusLabel={getReportStatusLabel(report.status)}
+      statusTone={getReportStatusTone(report.status)}
+      onPress={() => onPress(report.id)}
+    >
+      <View style={styles.cardBody}>
+        <View style={styles.infoStack}>
+          <AdminInfoLine label="Reporter" value={report.reporterName} />
+          {report.reportedUserName ? <AdminInfoLine label="Player" value={report.reportedUserName} /> : null}
+          {report.zoneName ? <AdminInfoLine label="Zone" value={report.zoneName} /> : null}
+          {report.matchroomTitle ? <AdminInfoLine label="Matchroom" value={report.matchroomTitle} /> : null}
+          {report.chatContextLabel || report.source ? <AdminInfoLine label="Source" value={reportContextLabel(report)} /> : null}
+          {report.messagePreview ? <AdminInfoLine label="Preview" value={report.messagePreview} /> : null}
+          {report.targetMissing ? <AdminInfoLine label="Target" value="Record no longer available" /> : null}
+        </View>
+        <Text style={styles.linkHint}>Open report details</Text>
+      </View>
+    </AdminListCard>
+  );
+});
 
 export default function SuperAdminReportsTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -92,7 +137,7 @@ export default function SuperAdminReportsTab() {
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return reports.filter((report) => {
-      if (typeFilter !== "Any" && report.type !== typeFilter) return false;
+      if (typeFilter !== "Any" && reportTypeGroup(report) !== typeFilter) return false;
       if (gameFilter !== ALL && report.game !== gameFilter) return false;
       if (!matchesDateRange(report.createdAt, dateFilter)) return false;
       if (!needle) return true;
@@ -104,6 +149,14 @@ export default function SuperAdminReportsTab() {
         report.zoneName,
         report.branchLabel,
         report.matchroomTitle,
+        report.chatContextLabel,
+        report.source,
+        report.targetType,
+        report.targetReference,
+        report.messagePreview,
+        report.chatMessageId,
+        report.teamChallengeChatId,
+        report.supportTicketId,
         report.game,
         report.type,
       ].filter(Boolean).join(" ").toLowerCase().includes(needle);
@@ -120,6 +173,33 @@ export default function SuperAdminReportsTab() {
     setGameFilter(ALL);
     setDateFilter("Any");
   }, []);
+
+  const handleOpenReport = useCallback((id: string) => {
+    router.push(`/super-admin/report/${id}` as any);
+  }, []);
+
+  const renderReport = useCallback(
+    ({ item }: { item: SuperAdminReport }) => <ReportRow report={item} onPress={handleOpenReport} />,
+    [handleOpenReport],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      reports.length === 0 ? (
+        <AdminEmptyStateCard
+          title="No reports here"
+          description="Reports in this state will appear here."
+          icon="reports"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No reports match these filters."
+          description="Reset filters to view all reports."
+          icon="reports"
+        />
+      ),
+    [reports.length],
+  );
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
@@ -158,47 +238,18 @@ export default function SuperAdminReportsTab() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(report) => report.id}
+          renderItem={renderReport}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((report) => (
-            <AdminListCard
-              key={report.id}
-              title={report.reason}
-              subtitle={`${formatType(report.type)} | ${formatDate(report.createdAt)}`}
-              statusLabel={getReportStatusLabel(report.status)}
-              statusTone={getReportStatusTone(report.status)}
-              onPress={() => router.push(`/super-admin/report/${report.id}` as any)}
-            >
-              <View style={styles.cardBody}>
-                <View style={styles.infoStack}>
-                  <AdminInfoLine label="Reporter" value={report.reporterName} />
-                  {report.reportedUserName ? <AdminInfoLine label="Player" value={report.reportedUserName} /> : null}
-                  {report.zoneName ? <AdminInfoLine label="Zone" value={report.zoneName} /> : null}
-                  {report.matchroomTitle ? <AdminInfoLine label="Matchroom" value={report.matchroomTitle} /> : null}
-                </View>
-                <Text style={styles.linkHint}>Open report details</Text>
-              </View>
-            </AdminListCard>
-          ))}
-          {visible.length === 0 ? (
-            reports.length === 0 ? (
-              <AdminEmptyStateCard
-                title="No reports here"
-                description="Reports in this state will appear here."
-                icon="reports"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No reports match these filters."
-                description="Reset filters to view all reports."
-                icon="reports"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer
@@ -212,9 +263,23 @@ export default function SuperAdminReportsTab() {
       >
         <DiscoverFilterRow
           label="Target Type"
-          options={["Any", "Player report", "Matchroom report", "Zone / venue report"]}
-          selected={typeFilter === "user_report" ? "Player report" : typeFilter === "matchroom_complaint" ? "Matchroom report" : typeFilter === "zone_complaint" ? "Zone / venue report" : "Any"}
-          onSelect={(value) => setTypeFilter(value === "Player report" ? "user_report" : value === "Matchroom report" ? "matchroom_complaint" : value === "Zone / venue report" ? "zone_complaint" : "Any")}
+          options={["Any", "Player / team report", "Matchroom report", "Zone / venue report", "Chat message report", "Support moderation report"]}
+          selected={
+            typeFilter === "player" ? "Player / team report"
+              : typeFilter === "matchroom" ? "Matchroom report"
+                : typeFilter === "zone" ? "Zone / venue report"
+                  : typeFilter === "chat" ? "Chat message report"
+                    : typeFilter === "support" ? "Support moderation report"
+                      : "Any"
+          }
+          onSelect={(value) => setTypeFilter(
+            value === "Player / team report" ? "player"
+              : value === "Matchroom report" ? "matchroom"
+                : value === "Zone / venue report" ? "zone"
+                  : value === "Chat message report" ? "chat"
+                    : value === "Support moderation report" ? "support"
+                      : "Any"
+          )}
         />
         <DiscoverFilterRow label="Game" options={gameOptions} selected={gameFilter} onSelect={setGameFilter} />
         <DiscoverFilterRow label="Date Range" options={DATE_RANGE_OPTIONS} selected={dateFilter} onSelect={(value) => setDateFilter(value as DateRangeKey)} />

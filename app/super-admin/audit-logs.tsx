@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -86,7 +86,7 @@ function dateRangeToFrom(range: DateRangeKey): number | undefined {
   return Date.now() - days * 24 * 60 * 60 * 1000;
 }
 
-function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
+const AuditLogCard = React.memo(function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
   const metadataEntries = item.metadataSafe && typeof item.metadataSafe === "object"
     ? Object.entries(item.metadataSafe).slice(0, 6)
     : [];
@@ -129,7 +129,7 @@ function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
       ) : null}
     </AdminListCard>
   );
-}
+});
 
 export default function SuperAdminAuditLogsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -203,6 +203,22 @@ export default function SuperAdminAuditLogsScreen() {
     );
   }, [rows, search]);
 
+  const renderAuditLog = useCallback(
+    ({ item }: { item: SuperAdminAuditLog }) => <AuditLogCard item={item} />,
+    [],
+  );
+
+  const renderEmpty = useCallback(
+    () => (
+      <AdminEmptyStateCard
+        title="No audit logs found"
+        description="Super Admin access and actions will appear here."
+        icon="reports"
+      />
+    ),
+    [],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader
@@ -224,20 +240,18 @@ export default function SuperAdminAuditLogsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRows}
+          keyExtractor={(item) => item.id}
+          renderItem={renderAuditLog}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visibleRows.map((item) => <AuditLogCard key={item.id} item={item} />)}
-          {visibleRows.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No audit logs found"
-              description="Super Admin access and actions will appear here."
-              icon="reports"
-            />
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

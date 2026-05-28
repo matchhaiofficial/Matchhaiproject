@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -107,6 +107,29 @@ function formatLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const MatchroomRow = React.memo(function MatchroomRow({
+  room,
+  onPress,
+}: {
+  room: SuperAdminMatchroom;
+  onPress: (id: string) => void;
+}) {
+  return (
+    <AdminListCard
+      title={room.title || "Untitled matchroom"}
+      subtitle={`${String(room.game || "Match").toUpperCase()} | ${formatDateTime(room)}`}
+      statusLabel={lifecycleLabel(room.lifecycleStatus)}
+      statusTone={lifecycleTone(room.lifecycleStatus)}
+      onPress={() => onPress(room.id)}
+    >
+      <View style={styles.cardBody}>
+        <AdminInfoLine label="Location" value={room.location || "N/A"} />
+        <AdminInfoLine label="Players" value={`${room.currentPlayers || 0}/${room.maxPlayers || 0}`} />
+      </View>
+    </AdminListCard>
+  );
+});
+
 export default function SuperAdminMatchroomsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
@@ -205,6 +228,33 @@ export default function SuperAdminMatchroomsScreen() {
     setResultFilter(ALL);
   }, []);
 
+  const handleOpenRoom = useCallback((id: string) => {
+    router.push(`/super-admin/matchroom/${id}` as any);
+  }, []);
+
+  const renderRoom = useCallback(
+    ({ item }: { item: SuperAdminMatchroom }) => <MatchroomRow room={item} onPress={handleOpenRoom} />,
+    [handleOpenRoom],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      rooms.length === 0 ? (
+        <AdminEmptyStateCard
+          title="No matchrooms found"
+          description="Matchrooms will appear here once created."
+          icon="matchroom"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No matchrooms match these filters."
+          description="Reset filters to view all matchrooms."
+          icon="matchroom"
+        />
+      ),
+    [rooms.length],
+  );
+
   return (
     <Screen style={styles.screen} scroll={false}>
       <AdminPageHeader title="Matchrooms" onBack={() => router.back()} inlineTitle />
@@ -220,42 +270,18 @@ export default function SuperAdminMatchroomsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRooms}
+          keyExtractor={(room) => room.id}
+          renderItem={renderRoom}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visibleRooms.map((room) => (
-            <AdminListCard
-              key={room.id}
-              title={room.title || "Untitled matchroom"}
-              subtitle={`${String(room.game || "Match").toUpperCase()} | ${formatDateTime(room)}`}
-              statusLabel={lifecycleLabel(room.lifecycleStatus)}
-              statusTone={lifecycleTone(room.lifecycleStatus)}
-              onPress={() => router.push(`/super-admin/matchroom/${room.id}` as any)}
-            >
-              <View style={styles.cardBody}>
-                <AdminInfoLine label="Location" value={room.location || "N/A"} />
-                <AdminInfoLine label="Players" value={`${room.currentPlayers || 0}/${room.maxPlayers || 0}`} />
-              </View>
-            </AdminListCard>
-          ))}
-          {visibleRooms.length === 0 ? (
-            rooms.length === 0 ? (
-              <AdminEmptyStateCard
-                title="No matchrooms found"
-                description="Matchrooms will appear here once created."
-                icon="matchroom"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No matchrooms match these filters."
-                description="Reset filters to view all matchrooms."
-                icon="matchroom"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

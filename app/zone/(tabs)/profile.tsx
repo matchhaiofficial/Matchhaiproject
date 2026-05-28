@@ -119,6 +119,13 @@ const BANK_OPTIONS = [
 const normalizeAccountNumberInput = (value: string) =>
     String(value || "").replace(/[^0-9 -]/g, "").slice(0, 34);
 
+const maskAccountNumber = (value: string) => {
+    const cleaned = String(value || "").replace(/\D/g, "");
+    if (!cleaned) return "";
+    const suffix = cleaned.slice(-4);
+    return `${"*".repeat(Math.max(cleaned.length - suffix.length, 4))}${suffix}`;
+};
+
 export default function ZoneProfile() {
     const router = useRouter();
     const params = useLocalSearchParams<{ withdraw?: string | string[] }>();
@@ -145,6 +152,12 @@ export default function ZoneProfile() {
     const [withdrawBankName, setWithdrawBankName] = useState("");
     const [withdrawAccountNumber, setWithdrawAccountNumber] = useState("");
     const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const [withdrawSuccess, setWithdrawSuccess] = useState<{
+        amount: number;
+        branchName: string;
+        bankName: string;
+        maskedAccount: string;
+    } | null>(null);
     const [showLogoutDialog, setShowLogoutDialog] = useState(false);
     const tabBarScrollClearance = useTabBarClearance(SPACING.lg);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.lg, tabBarScrollClearance);
@@ -206,6 +219,7 @@ export default function ZoneProfile() {
     const closeWithdrawModal = () => {
         if (withdrawSubmitting) return;
         setWithdrawVisible(false);
+        setWithdrawSuccess(null);
         setWithdrawAmount("");
         setWithdrawBankName("");
         setWithdrawAccountNumber("");
@@ -220,7 +234,7 @@ export default function ZoneProfile() {
             });
             return;
         }
-        if (!user?._id || !selectedWithdrawBranch || !canSubmitWithdrawal) return;
+        if (!user?._id || !selectedWithdrawBranch || !canSubmitWithdrawal || withdrawSubmitting || withdrawSuccess) return;
         setWithdrawSubmitting(true);
         const result = await requestZoneWithdrawal({
             userId: user._id,
@@ -239,12 +253,12 @@ export default function ZoneProfile() {
             showToast({ type: "error", title: "Request failed", message: result.message });
             return;
         }
-        showToast({
-            type: "success",
-            title: "Request sent",
-            message: "Your withdrawal request was sent to MatchHai admin.",
+        setWithdrawSuccess({
+            amount: parsedWithdrawAmount,
+            branchName: getBranchDisplayName(selectedWithdrawBranch),
+            bankName: withdrawBankName,
+            maskedAccount: maskAccountNumber(trimmedAccountNumber),
         });
-        closeWithdrawModal();
     };
 
     const handleLogout = () => {
@@ -369,11 +383,11 @@ export default function ZoneProfile() {
                     </View>
                 </AppCard>
 
-                <AppCard style={styles.profileCard}>
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                        <View>
-                            <Text style={styles.profileName}>Complete CNIC & face verification</Text>
-                            <Text style={styles.profileEmail}>
+                <AppCard style={[styles.profileCard, styles.kycCard]}>
+                    <View style={styles.kycHeaderRow}>
+                        <View style={styles.kycTextCol}>
+                            <Text style={styles.kycTitle}>Complete CNIC & face verification</Text>
+                            <Text style={styles.kycSubtitle}>
                                 Verify your identity to unlock Zone Admin features and withdrawals.
                             </Text>
                         </View>
@@ -496,96 +510,151 @@ export default function ZoneProfile() {
                 keyboardAware
             >
                 <AppModalHeader
-                    title="Withdraw request"
-                    subtitle={`Wallet balance: PKR ${Math.round(walletBalance).toLocaleString("en-US")}`}
+                    title={withdrawSuccess ? "Request submitted" : "Withdraw request"}
+                    subtitle={withdrawSuccess ? "Pending Super Admin review" : `Wallet balance: PKR ${Math.round(walletBalance).toLocaleString("en-US")}`}
                     onClose={closeWithdrawModal}
                     closeDisabled={withdrawSubmitting}
                 />
-                <AppModalBody scroll contentContainerStyle={styles.withdrawBody}>
-                    <Text style={styles.withdrawLabel}>Branch</Text>
-                    <View style={styles.withdrawBranchWrap}>
-                        {branches.map((branch: any) => {
-                            const selected = branch.id === withdrawBranchId;
-                            return (
-                                <Pressable
-                                    key={branch.id}
-                                    onPress={() => setWithdrawBranchId(branch.id)}
-                                    style={[styles.withdrawBranchChip, selected && styles.withdrawBranchChipActive]}
-                                >
-                                    <Text style={[styles.withdrawBranchChipText, selected && styles.withdrawBranchChipTextActive]}>
-                                        {getBranchDisplayName(branch)}
+                {withdrawSuccess ? (
+                    <>
+                        <AppModalBody contentContainerStyle={styles.withdrawSuccessBody}>
+                            <View style={styles.withdrawSuccessIcon}>
+                                <AppIcon name="check-circle" size={28} color={COLORS.success} />
+                            </View>
+                            <Text style={styles.withdrawSuccessTitle}>Withdrawal request submitted</Text>
+                            <Text style={styles.withdrawSuccessText}>
+                                It is now pending Super Admin review and processing.
+                            </Text>
+                            <View style={styles.withdrawSuccessPanel}>
+                                <View style={styles.withdrawSuccessRow}>
+                                    <Text style={styles.withdrawSuccessLabel}>Amount</Text>
+                                    <Text style={styles.withdrawSuccessValue}>
+                                        PKR {Math.round(withdrawSuccess.amount).toLocaleString("en-US")}
                                     </Text>
-                                </Pressable>
-                            );
-                        })}
-                    </View>
-                    <Text style={styles.withdrawLabel}>Amount</Text>
-                    <View style={styles.withdrawInputBox}>
-                        <Text style={styles.withdrawCurrency}>PKR</Text>
-                        <TextInput
-                            style={styles.withdrawInput}
-                            value={withdrawAmount}
-                            onChangeText={setWithdrawAmount}
-                            keyboardType="numeric"
-                            placeholder="Enter amount"
-                            placeholderTextColor={COLORS.muted}
-                        />
-                    </View>
-                    {parsedWithdrawAmount > walletBalance ? (
-                        <Text style={styles.withdrawWarning}>Amount cannot exceed your wallet balance.</Text>
-                    ) : null}
-                    <CustomSingleSelect
-                        label={<Text style={styles.withdrawLabel}>Bank</Text>}
-                        value={withdrawBankName}
-                        options={BANK_OPTIONS}
-                        onChange={setWithdrawBankName}
-                        icon="payment"
-                        placeholder="Select bank"
-                        containerStyle={styles.withdrawSelectContainer}
-                    />
-                    {!withdrawBankName ? (
-                        <Text style={styles.withdrawWarning}>Select a bank.</Text>
-                    ) : null}
-                    <Text style={styles.withdrawLabel}>Account number</Text>
-                    <View style={styles.withdrawInputBox}>
-                        <AppIcon name="account-balance-wallet" size={18} color={COLORS.accent} />
-                        <TextInput
-                            style={styles.withdrawInput}
-                            value={withdrawAccountNumber}
-                            onChangeText={(value) => setWithdrawAccountNumber(normalizeAccountNumberInput(value))}
-                            keyboardType="default"
-                            placeholder="Enter account number"
-                            placeholderTextColor={COLORS.muted}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                        />
-                    </View>
-                    {trimmedAccountNumber.length > 0 && !accountNumberValid ? (
-                        <Text style={styles.withdrawWarning}>
-                            Account number must be 6 to 34 characters.
-                        </Text>
-                    ) : null}
-                </AppModalBody>
-                <AppModalFooter style={styles.withdrawFooter}>
-                    <Pressable
-                        style={[styles.withdrawAction, styles.withdrawCancelAction]}
-                        onPress={closeWithdrawModal}
-                        disabled={withdrawSubmitting}
-                    >
-                        <Text style={styles.withdrawCancelText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                        style={[styles.withdrawAction, styles.withdrawSubmitAction, !canSubmitWithdrawal && styles.withdrawSubmitDisabled]}
-                        onPress={submitWithdrawRequest}
-                        disabled={!canSubmitWithdrawal || withdrawSubmitting}
-                    >
-                        {withdrawSubmitting ? (
-                            <ActivityIndicator size="small" color="#FFF" />
-                        ) : (
-                            <Text style={styles.withdrawSubmitText}>Send request</Text>
-                        )}
-                    </Pressable>
-                </AppModalFooter>
+                                </View>
+                                <View style={styles.withdrawSuccessRow}>
+                                    <Text style={styles.withdrawSuccessLabel}>Status</Text>
+                                    <StatusPill tone="warning" label="Pending" />
+                                </View>
+                                <View style={styles.withdrawSuccessRow}>
+                                    <Text style={styles.withdrawSuccessLabel}>Branch</Text>
+                                    <Text style={styles.withdrawSuccessValue} numberOfLines={1}>
+                                        {withdrawSuccess.branchName}
+                                    </Text>
+                                </View>
+                                <View style={styles.withdrawSuccessRow}>
+                                    <Text style={styles.withdrawSuccessLabel}>Bank</Text>
+                                    <Text style={styles.withdrawSuccessValue} numberOfLines={1}>
+                                        {withdrawSuccess.bankName}
+                                    </Text>
+                                </View>
+                                <View style={styles.withdrawSuccessRow}>
+                                    <Text style={styles.withdrawSuccessLabel}>Account</Text>
+                                    <Text style={styles.withdrawSuccessValue}>{withdrawSuccess.maskedAccount}</Text>
+                                </View>
+                            </View>
+                        </AppModalBody>
+                        <AppModalFooter style={styles.withdrawFooter}>
+                            <Pressable
+                                style={[styles.withdrawAction, styles.withdrawSubmitAction]}
+                                onPress={closeWithdrawModal}
+                            >
+                                <Text style={styles.withdrawSubmitText}>Done</Text>
+                            </Pressable>
+                        </AppModalFooter>
+                    </>
+                ) : (
+                    <>
+                        <AppModalBody scroll contentContainerStyle={styles.withdrawBody}>
+                            <Text style={styles.withdrawLabel}>Branch</Text>
+                            <View style={styles.withdrawBranchWrap}>
+                                {branches.map((branch: any) => {
+                                    const selected = branch.id === withdrawBranchId;
+                                    return (
+                                        <Pressable
+                                            key={branch.id}
+                                            onPress={() => setWithdrawBranchId(branch.id)}
+                                            style={[styles.withdrawBranchChip, selected && styles.withdrawBranchChipActive]}
+                                            disabled={withdrawSubmitting}
+                                        >
+                                            <Text style={[styles.withdrawBranchChipText, selected && styles.withdrawBranchChipTextActive]}>
+                                                {getBranchDisplayName(branch)}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                            <Text style={styles.withdrawLabel}>Amount</Text>
+                            <View style={styles.withdrawInputBox}>
+                                <Text style={styles.withdrawCurrency}>PKR</Text>
+                                <TextInput
+                                    style={styles.withdrawInput}
+                                    value={withdrawAmount}
+                                    onChangeText={setWithdrawAmount}
+                                    keyboardType="numeric"
+                                    placeholder="Enter amount"
+                                    placeholderTextColor={COLORS.muted}
+                                    editable={!withdrawSubmitting}
+                                />
+                            </View>
+                            {parsedWithdrawAmount > walletBalance ? (
+                                <Text style={styles.withdrawWarning}>Amount cannot exceed your wallet balance.</Text>
+                            ) : null}
+                            <CustomSingleSelect
+                                label={<Text style={styles.withdrawLabel}>Bank</Text>}
+                                value={withdrawBankName}
+                                options={BANK_OPTIONS}
+                                onChange={setWithdrawBankName}
+                                icon="payment"
+                                placeholder="Select bank"
+                                containerStyle={styles.withdrawSelectContainer}
+                            />
+                            {!withdrawBankName ? (
+                                <Text style={styles.withdrawWarning}>Select a bank.</Text>
+                            ) : null}
+                            <Text style={styles.withdrawLabel}>Account number</Text>
+                            <View style={styles.withdrawInputBox}>
+                                <AppIcon name="account-balance-wallet" size={18} color={COLORS.accent} />
+                                <TextInput
+                                    style={styles.withdrawInput}
+                                    value={withdrawAccountNumber}
+                                    onChangeText={(value) => setWithdrawAccountNumber(normalizeAccountNumberInput(value))}
+                                    keyboardType="default"
+                                    placeholder="Enter account number"
+                                    placeholderTextColor={COLORS.muted}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    editable={!withdrawSubmitting}
+                                />
+                            </View>
+                            {trimmedAccountNumber.length > 0 && !accountNumberValid ? (
+                                <Text style={styles.withdrawWarning}>
+                                    Account number must be 6 to 34 characters.
+                                </Text>
+                            ) : null}
+                        </AppModalBody>
+                        <AppModalFooter style={styles.withdrawFooter}>
+                            <Pressable
+                                style={[styles.withdrawAction, styles.withdrawCancelAction]}
+                                onPress={closeWithdrawModal}
+                                disabled={withdrawSubmitting}
+                            >
+                                <Text style={styles.withdrawCancelText}>Cancel</Text>
+                            </Pressable>
+                            <Pressable
+                                style={[styles.withdrawAction, styles.withdrawSubmitAction, (!canSubmitWithdrawal || withdrawSubmitting) && styles.withdrawSubmitDisabled]}
+                                onPress={submitWithdrawRequest}
+                                disabled={!canSubmitWithdrawal || withdrawSubmitting}
+                            >
+                                {withdrawSubmitting ? (
+                                    <ActivityIndicator size="small" color="#FFF" />
+                                ) : (
+                                    <Text style={styles.withdrawSubmitText}>Send request</Text>
+                                )}
+                            </Pressable>
+                        </AppModalFooter>
+                    </>
+                )}
             </AppDialog>
 
             <AppDialog visible={showLogoutDialog} onClose={() => setShowLogoutDialog(false)}>

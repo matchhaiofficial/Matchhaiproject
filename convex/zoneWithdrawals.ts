@@ -70,12 +70,12 @@ export const requestZoneWithdrawal = action({
     venueName: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ ok: true; reference: string }> => {
-    const { authUser } = await requireKycVerified(ctx, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
+    const { profile } = await requireKycVerified(ctx, KYC_VERIFICATION_REQUIRED_FOR_WITHDRAWAL);
+    if (!profile) {
+      throw new Error("User profile not found.");
+    }
     const requester = await ctx.runQuery(api.users.getById, { userId: args.userId });
-    if (
-      !requester ||
-      (requester.authId !== authUser.userId && String(requester._id) !== String(authUser.userId))
-    ) {
+    if (!requester || String(requester._id) !== String(profile._id)) {
       throw new Error("Not authorized.");
     }
 
@@ -87,7 +87,7 @@ export const requestZoneWithdrawal = action({
     const result: { reference: string; createdAt: number; walletBalance: number } = await ctx.runMutation(
       api.wallet.createZoneWithdrawalTransaction,
       {
-        userId: args.userId,
+        userId: profile._id,
         zoneId: args.zoneId,
         branchId: args.branchId,
         branchName: args.branchName,
@@ -116,7 +116,7 @@ export const requestZoneWithdrawal = action({
       `Account number (masked): ${accountNumberMasked}`,
       `Owner: ${args.ownerName || "Not provided"}`,
       `Owner email: ${args.ownerEmail || "Not provided"}`,
-      `User ID: ${String(args.userId)}`,
+      `User ID: ${String(profile._id)}`,
       `Zone ID: ${args.zoneId || "Not provided"}`,
       `Reference: ${result.reference}`,
     ];

@@ -10,6 +10,7 @@ import React, {
 import {
     ActivityIndicator,
     Dimensions,
+    FlatList,
     Pressable,
     ScrollView,
     Text,
@@ -260,6 +261,96 @@ const getWalletTopupErrorMessage = (error: unknown) => {
 
   return getUserFacingErrorMessage(error, fallback);
 };
+
+const WalletTransactionRow = React.memo(function WalletTransactionRow({
+  item,
+}: {
+  item: any;
+}) {
+  const tone =
+    item.status === "paid" || item.status === "completed"
+      ? "success"
+      : item.status === "pending" ||
+          item.status === "created" ||
+          item.status === "redirected" ||
+          item.status === "token_received"
+        ? "warning"
+        : item.status === "failed" ||
+            item.status === "expired" ||
+            item.status === "cancelled"
+          ? "danger"
+          : "neutral";
+  return (
+    <AppCard style={styles.transactionCard}>
+      <View style={styles.transactionTopRow}>
+        <Text style={styles.transactionTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.transactionAmount}>
+          {formatCurrency(Number(item.amount || 0))}
+        </Text>
+      </View>
+      {item.subtitle ? (
+        <Text style={styles.transactionMeta}>
+          {item.subtitle}
+        </Text>
+      ) : null}
+      <Text style={styles.transactionMeta}>
+        Reference: {formatReferenceLabel(item.reference)}
+      </Text>
+      <Text style={styles.transactionMeta}>
+        Created:{" "}
+        {getMillis(item.createdAt)
+          ? new Date(getMillis(item.createdAt)).toLocaleString()
+          : "Unknown"}
+      </Text>
+      {item.support?.orderRefNum ? (
+        <Text style={styles.transactionMeta}>
+          Order: {item.support.orderRefNum}
+        </Text>
+      ) : null}
+      {item.support?.checkoutPhoneMasked ? (
+        <Text style={styles.transactionMeta}>
+          Phone: {item.support.checkoutPhoneMasked}
+          {getPhoneSourceLabel(item.support.phoneSource)
+            ? ` (${getPhoneSourceLabel(item.support.phoneSource)})`
+            : ""}
+        </Text>
+      ) : null}
+      {item.kind === "hold" ? (
+        <Text style={styles.transactionMeta}>
+          Funds are reserved for your seat and captured when the match starts or is confirmed.
+        </Text>
+      ) : item.kind === "hold_release" ? (
+        <Text style={styles.transactionMeta}>
+          The match was cancelled before capture, so funds returned to your MatchHai Wallet.
+        </Text>
+      ) : item.kind === "hold_capture" ? (
+        <Text style={styles.transactionMeta}>
+          Funds were captured for the match. Approved refunds return to your MatchHai Wallet.
+        </Text>
+      ) : item.kind === "refund" ? (
+        <Text style={styles.transactionMeta}>
+          Refund added back to your MatchHai Wallet.
+        </Text>
+      ) : null}
+      <StatusPill
+        tone={tone}
+        label={
+          item.source === "payment"
+            ? getCheckoutStatusLabel(item.status)
+            : item.kind === "booking_payment" ||
+                item.kind === "withdrawal" ||
+                item.kind === "hold" ||
+                item.kind === "hold_release" ||
+                item.kind === "hold_capture"
+              ? getPaymentStatusLabel(item.status)
+              : getCheckoutStatusLabel(item.status)
+        }
+      />
+    </AppCard>
+  );
+});
 
 function WalletFilterRow<T extends string>({
   label,
@@ -755,6 +846,62 @@ export default function WalletScreen() {
         <View style={styles.loaderWrap}>
           <ActivityIndicator color={COLORS.accent} />
         </View>
+      ) : activeTab === "transactions" ? (
+        <FlatList
+          data={walletTransactions.length > 0 ? filteredWalletHistory : []}
+          keyExtractor={(item: any) => String(item.id)}
+          renderItem={({ item }) => <WalletTransactionRow item={item} />}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={
+            walletTransactions.length > 0 ? (
+              <View style={styles.transactionFilterBar}>
+                <Text style={styles.transactionFilterSummary}>
+                  {filteredWalletHistory.length} of {walletTransactions.length} transaction
+                  {walletTransactions.length === 1 ? "" : "s"}
+                </Text>
+                <Pressable
+                  onPress={() => setFilterDrawerOpen(true)}
+                  style={({ pressed }) => [
+                    styles.transactionFilterButton,
+                    pressed && styles.transactionFilterButtonPressed,
+                  ]}
+                >
+                  <AppIcon name="filters" size={20} color={COLORS.text} />
+                  {activeTransactionFilterCount > 0 ? (
+                    <View style={styles.filterBadge}>
+                      <Text style={styles.filterBadgeText}>
+                        {activeTransactionFilterCount}
+                      </Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            walletTransactions.length > 0 ? (
+              <AppCard variant="empty" style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No transactions match these filters.</Text>
+                <Text style={styles.emptyText}>
+                  Reset filters to view your full transaction history.
+                </Text>
+              </AppCard>
+            ) : (
+              <AppCard variant="empty" style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No transactions yet</Text>
+                <Text style={styles.emptyText}>
+                  Your payment and booking transaction history will appear
+                  here.
+                </Text>
+              </AppCard>
+            )
+          }
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       ) : (
         <ScrollView
           contentContainerStyle={styles.content}
@@ -941,138 +1088,7 @@ export default function WalletScreen() {
                 </AppCard>
               </View>
             </>
-          ) : (
-            <>
-              {walletTransactions.length > 0 ? (
-                <>
-                  <View style={styles.transactionFilterBar}>
-                    <Text style={styles.transactionFilterSummary}>
-                      {filteredWalletHistory.length} of {walletTransactions.length} transaction
-                      {walletTransactions.length === 1 ? "" : "s"}
-                    </Text>
-                    <Pressable
-                      onPress={() => setFilterDrawerOpen(true)}
-                      style={({ pressed }) => [
-                        styles.transactionFilterButton,
-                        pressed && styles.transactionFilterButtonPressed,
-                      ]}
-                    >
-                      <AppIcon name="filters" size={20} color={COLORS.text} />
-                      {activeTransactionFilterCount > 0 ? (
-                        <View style={styles.filterBadge}>
-                          <Text style={styles.filterBadgeText}>
-                            {activeTransactionFilterCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  </View>
-                  {filteredWalletHistory.length > 0 ? (
-                    filteredWalletHistory.map((item: any) => {
-                  const tone =
-                    item.status === "paid" || item.status === "completed"
-                      ? "success"
-                      : item.status === "pending" ||
-                          item.status === "created" ||
-                          item.status === "redirected" ||
-                          item.status === "token_received"
-                        ? "warning"
-                        : item.status === "failed" ||
-                            item.status === "expired" ||
-                            item.status === "cancelled"
-                          ? "danger"
-                          : "neutral";
-                  return (
-                    <AppCard key={item.id} style={styles.transactionCard}>
-                      <View style={styles.transactionTopRow}>
-                        <Text style={styles.transactionTitle} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={styles.transactionAmount}>
-                          {formatCurrency(Number(item.amount || 0))}
-                        </Text>
-                      </View>
-                      {item.subtitle ? (
-                        <Text style={styles.transactionMeta}>
-                          {item.subtitle}
-                        </Text>
-                      ) : null}
-                      <Text style={styles.transactionMeta}>
-                        Reference: {formatReferenceLabel(item.reference)}
-                      </Text>
-                      <Text style={styles.transactionMeta}>
-                        Created:{" "}
-                        {getMillis(item.createdAt)
-                          ? new Date(getMillis(item.createdAt)).toLocaleString()
-                          : "Unknown"}
-                      </Text>
-                      {item.support?.orderRefNum ? (
-                        <Text style={styles.transactionMeta}>
-                          Order: {item.support.orderRefNum}
-                        </Text>
-                      ) : null}
-                      {item.support?.checkoutPhoneMasked ? (
-                        <Text style={styles.transactionMeta}>
-                          Phone: {item.support.checkoutPhoneMasked}
-                          {getPhoneSourceLabel(item.support.phoneSource)
-                            ? ` (${getPhoneSourceLabel(item.support.phoneSource)})`
-                            : ""}
-                        </Text>
-                      ) : null}
-                      {item.kind === "hold" ? (
-                        <Text style={styles.transactionMeta}>
-                          Funds are reserved for your seat and captured when the match starts or is confirmed.
-                        </Text>
-                      ) : item.kind === "hold_release" ? (
-                        <Text style={styles.transactionMeta}>
-                          The match was cancelled before capture, so funds returned to your MatchHai Wallet.
-                        </Text>
-                      ) : item.kind === "hold_capture" ? (
-                        <Text style={styles.transactionMeta}>
-                          Funds were captured for the match. Approved refunds return to your MatchHai Wallet.
-                        </Text>
-                      ) : item.kind === "refund" ? (
-                        <Text style={styles.transactionMeta}>
-                          Refund added back to your MatchHai Wallet.
-                        </Text>
-                      ) : null}
-                      <StatusPill
-                        tone={tone}
-                        label={
-                          item.source === "payment"
-                            ? getCheckoutStatusLabel(item.status)
-                            : item.kind === "booking_payment" ||
-                                item.kind === "withdrawal" ||
-                                item.kind === "hold" ||
-                                item.kind === "hold_release" ||
-                                item.kind === "hold_capture"
-                              ? getPaymentStatusLabel(item.status)
-                              : getCheckoutStatusLabel(item.status)
-                        }
-                      />
-                    </AppCard>
-                  );
-                    })
-                  ) : (
-                    <AppCard variant="empty" style={styles.emptyCard}>
-                      <Text style={styles.emptyTitle}>No transactions match these filters.</Text>
-                      <Text style={styles.emptyText}>
-                        Reset filters to view your full transaction history.
-                      </Text>
-                    </AppCard>
-                  )}
-                </>
-              ) : (
-                <AppCard variant="empty" style={styles.emptyCard}>
-                  <Text style={styles.emptyTitle}>No transactions yet</Text>
-                  <Text style={styles.emptyText}>
-                    Your payment and booking transaction history will appear
-                    here.
-                  </Text>
-                </AppCard>
-              )}
-            </>
-          )}
+          ) : null}
         </ScrollView>
       )}
 

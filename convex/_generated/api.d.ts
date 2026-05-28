@@ -10,6 +10,7 @@
 
 import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
+import type * as authz from "../authz.js";
 import type * as bookings from "../bookings.js";
 import type * as chat from "../chat.js";
 import type * as chatAuth from "../chatAuth.js";
@@ -37,6 +38,7 @@ import type * as phoneOtp from "../phoneOtp.js";
 import type * as psnTokenCache from "../psnTokenCache.js";
 import type * as pushNotifications from "../pushNotifications.js";
 import type * as pushNotificationsActions from "../pushNotificationsActions.js";
+import type * as ratingEngine from "../ratingEngine.js";
 import type * as reports from "../reports.js";
 import type * as social from "../social.js";
 import type * as storage from "../storage.js";
@@ -68,6 +70,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   auth: typeof auth;
+  authz: typeof authz;
   bookings: typeof bookings;
   chat: typeof chat;
   chatAuth: typeof chatAuth;
@@ -95,6 +98,7 @@ declare const fullApi: ApiFromModules<{
   psnTokenCache: typeof psnTokenCache;
   pushNotifications: typeof pushNotifications;
   pushNotificationsActions: typeof pushNotificationsActions;
+  ratingEngine: typeof ratingEngine;
   reports: typeof reports;
   social: typeof social;
   storage: typeof storage;

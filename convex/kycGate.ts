@@ -79,7 +79,7 @@ export async function requireKycVerified(
     if (profile) break;
   }
 
-  assertKycAccessAllowed(profile, message);
+  assertKycAccessAllowed(profile as any, message);
 
   return { authUser, profile };
 }

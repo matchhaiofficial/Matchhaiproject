@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
@@ -79,7 +79,7 @@ function getNotificationCategory(item: SuperAdminNotification): string {
   return "system";
 }
 
-function NotificationCard({
+const NotificationCard = React.memo(function NotificationCard({
   item,
   onArchive,
   onMarkRead,
@@ -120,7 +120,7 @@ function NotificationCard({
       </View>
     </AdminListCard>
   );
-}
+});
 
 export default function SuperAdminNotificationsScreen() {
   const { showToast } = useToast();
@@ -209,6 +209,36 @@ export default function SuperAdminNotificationsScreen() {
     router.push(route as any);
   }, [markRead]);
 
+  const renderNotification = useCallback(
+    ({ item }: { item: SuperAdminNotification }) => (
+      <NotificationCard
+        item={item}
+        onArchive={archive}
+        onMarkRead={markRead}
+        onOpen={openNotification}
+      />
+    ),
+    [archive, markRead, openNotification],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      items.length === 0 ? (
+        <AdminEmptyStateCard
+          title={tab === "unread" ? "No unread notifications" : "No read notifications"}
+          description="Super Admin operational alerts will appear here."
+          icon="notifications"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No notifications match these filters."
+          description="Reset filters to view all notifications."
+          icon="notifications"
+        />
+      ),
+    [items.length, tab],
+  );
+
   return (
     <Screen style={styles.screen} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Notifications" subtitle="Super Admin inbox" onBack={() => router.back()} inlineTitle />
@@ -234,37 +264,18 @@ export default function SuperAdminNotificationsScreen() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleItems}
+          keyExtractor={(item) => item.id}
+          renderItem={renderNotification}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visibleItems.length === 0 ? (
-            items.length === 0 ? (
-              <AdminEmptyStateCard
-                title={tab === "unread" ? "No unread notifications" : "No read notifications"}
-                description="Super Admin operational alerts will appear here."
-                icon="notifications"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No notifications match these filters."
-                description="Reset filters to view all notifications."
-                icon="notifications"
-              />
-            )
-          ) : (
-            visibleItems.map((item) => (
-              <NotificationCard
-                key={item.id}
-                item={item}
-                onArchive={archive}
-                onMarkRead={markRead}
-                onOpen={openNotification}
-              />
-            ))
-          )}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

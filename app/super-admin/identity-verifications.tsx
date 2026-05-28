@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -88,7 +88,7 @@ function CheckStatusRow({ label, value }: { label: string; value?: string | null
   );
 }
 
-function VerificationCard({
+const VerificationCard = React.memo(function VerificationCard({
   item,
   reason,
   onReasonChange,
@@ -164,7 +164,7 @@ function VerificationCard({
       ) : null}
     </AppCard>
   );
-}
+});
 
 export default function SuperAdminIdentityVerificationsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -241,6 +241,41 @@ export default function SuperAdminIdentityVerificationsScreen() {
     });
   }, [rows, search, statusFilter, dateFilter]);
 
+  const handleReasonChange = useCallback((id: string, value: string) => {
+    setManualReasons((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const renderVerification = useCallback(
+    ({ item }: { item: SuperAdminIdentityVerification }) => (
+      <VerificationCard
+        item={item}
+        reason={manualReasons[item.id] || ""}
+        onReasonChange={(value) => handleReasonChange(item.id, value)}
+        onManualVerify={() => handleManualVerify(item)}
+        verifying={manualVerifyingId === item.id}
+      />
+    ),
+    [manualReasons, manualVerifyingId, handleReasonChange, handleManualVerify],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      rows.length === 0 ? (
+        <AdminEmptyStateCard
+          title="No verifications found"
+          description="Didit KYC sessions will appear here after users start verification."
+          icon="verified-user"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No verifications match these filters."
+          description="Reset filters to view all verifications."
+          icon="verified-user"
+        />
+      ),
+    [rows.length],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]} keyboardAvoiding>
       <AdminPageHeader
@@ -262,38 +297,19 @@ export default function SuperAdminIdentityVerificationsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRows}
+          keyExtractor={(item) => item.id}
+          renderItem={renderVerification}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-        >
-          {visibleRows.map((item) => (
-            <VerificationCard
-              key={item.id}
-              item={item}
-              reason={manualReasons[item.id] || ""}
-              onReasonChange={(value) => setManualReasons((current) => ({ ...current, [item.id]: value }))}
-              onManualVerify={() => handleManualVerify(item)}
-              verifying={manualVerifyingId === item.id}
-            />
-          ))}
-          {visibleRows.length === 0 ? (
-            rows.length === 0 ? (
-              <AdminEmptyStateCard
-                title="No verifications found"
-                description="Didit KYC sessions will appear here after users start verification."
-                icon="verified-user"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No verifications match these filters."
-                description="Reset filters to view all verifications."
-                icon="verified-user"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

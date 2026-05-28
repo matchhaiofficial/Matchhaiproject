@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -73,6 +73,47 @@ function matchesDateRange(timestamp: number | null | undefined, range: DateRange
   const days = range === "Last 7 Days" ? 7 : 30;
   return timestamp >= now - days * 24 * 60 * 60 * 1000 && timestamp <= now;
 }
+
+const UserRow = React.memo(function UserRow({
+  user,
+  busy,
+  onSuspend,
+  onReactivate,
+}: {
+  user: SuperAdminUser;
+  busy: boolean;
+  onSuspend: (user: SuperAdminUser) => void;
+  onReactivate: (user: SuperAdminUser) => void;
+}) {
+  const suspended = user.accountStatus === "suspended";
+  return (
+    <AdminListCard
+      title={user.fullName || user.username || "Unknown user"}
+      subtitle={user.email}
+      statusLabel={suspended ? "Suspended" : "Active"}
+      statusTone={statusTone(user.accountStatus)}
+      actions={
+        suspended ? (
+          <AppButton size="sm" variant="success" loading={busy} onPress={() => onReactivate(user)}>
+            Reactivate
+          </AppButton>
+        ) : (
+          <AppButton size="sm" variant="danger" loading={busy} onPress={() => onSuspend(user)}>
+            Suspend
+          </AppButton>
+        )
+      }
+    >
+      <View style={styles.infoStack}>
+        <AdminInfoLine label="Username" value={user.username || "N/A"} />
+        <AdminInfoLine label="Type" value={user.accountType === "zone" ? "Zone Admin" : "Player"} />
+        <AdminInfoLine label="Role" value={user.role || "Standard"} />
+        <AdminInfoLine label="Created" value={formatDate(user.createdAt)} />
+        {suspended ? <AdminInfoLine label="Reason" value={user.suspensionReason || "No reason recorded"} /> : null}
+      </View>
+    </AdminListCard>
+  );
+});
 
 export default function SuperAdminUsersScreen() {
   const router = useRouter();
@@ -155,7 +196,7 @@ export default function SuperAdminUsersScreen() {
     setDateFilter("Any");
   }, []);
 
-  const handleSuspension = async (user: SuperAdminUser, status: "active" | "suspended") => {
+  const handleSuspension = useCallback(async (user: SuperAdminUser, status: "active" | "suspended") => {
     setBusyUserId(user.id);
     const result = await setUserSuspension(user.id, {
       status,
@@ -173,7 +214,32 @@ export default function SuperAdminUsersScreen() {
     } else {
       showToast({ type: "error", title: "Update failed", message: result.message });
     }
-  };
+  }, [load, showToast]);
+
+  const handleSuspend = useCallback((user: SuperAdminUser) => handleSuspension(user, "suspended"), [handleSuspension]);
+  const handleReactivate = useCallback((user: SuperAdminUser) => handleSuspension(user, "active"), [handleSuspension]);
+
+  const renderUser = useCallback(
+    ({ item }: { item: SuperAdminUser }) => (
+      <UserRow
+        user={item}
+        busy={busyUserId === item.id}
+        onSuspend={handleSuspend}
+        onReactivate={handleReactivate}
+      />
+    ),
+    [busyUserId, handleSuspend, handleReactivate],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      users.length === 0 ? (
+        <AdminEmptyStateCard title="No users found" description="Try another tab or search term." icon="players" />
+      ) : (
+        <AdminEmptyStateCard title="No users match these filters." description="Reset filters to view all users." icon="players" />
+      ),
+    [users.length],
+  );
 
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
@@ -200,50 +266,18 @@ export default function SuperAdminUsersScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(user) => user.id}
+          renderItem={renderUser}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((user) => {
-            const suspended = user.accountStatus === "suspended";
-            return (
-              <AdminListCard
-                key={user.id}
-                title={user.fullName || user.username || "Unknown user"}
-                subtitle={user.email}
-                statusLabel={suspended ? "Suspended" : "Active"}
-                statusTone={statusTone(user.accountStatus)}
-                actions={
-                  suspended ? (
-                    <AppButton size="sm" variant="success" loading={busyUserId === user.id} onPress={() => handleSuspension(user, "active")}>
-                      Reactivate
-                    </AppButton>
-                  ) : (
-                    <AppButton size="sm" variant="danger" loading={busyUserId === user.id} onPress={() => handleSuspension(user, "suspended")}>
-                      Suspend
-                    </AppButton>
-                  )
-                }
-              >
-                <View style={styles.infoStack}>
-                  <AdminInfoLine label="Username" value={user.username || "N/A"} />
-                  <AdminInfoLine label="Type" value={user.accountType === "zone" ? "Zone Admin" : "Player"} />
-                  <AdminInfoLine label="Role" value={user.role || "Standard"} />
-                  <AdminInfoLine label="Created" value={formatDate(user.createdAt)} />
-                  {suspended ? <AdminInfoLine label="Reason" value={user.suspensionReason || "No reason recorded"} /> : null}
-                </View>
-              </AdminListCard>
-            );
-          })}
-          {visible.length === 0 ? (
-            users.length === 0 ? (
-              <AdminEmptyStateCard title="No users found" description="Try another tab or search term." icon="players" />
-            ) : (
-              <AdminEmptyStateCard title="No users match these filters." description="Reset filters to view all users." icon="players" />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

@@ -3,8 +3,8 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  FlatList,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,8 +22,10 @@ import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   approveZoneWithdrawal,
+  getZoneFinanceSummaries,
   getZoneWithdrawalRequests,
   rejectZoneWithdrawal,
+  SuperAdminZoneFinanceSummary,
   SuperAdminWithdrawalRequest,
 } from "../../src/services/convex/superAdminService";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
@@ -118,10 +120,64 @@ function matchesAmountRange(amount: number, range: AmountRangeKey) {
   return value > 5000;
 }
 
+const WithdrawalRow = React.memo(function WithdrawalRow({
+  item,
+  onSelect,
+}: {
+  item: SuperAdminWithdrawalRequest;
+  onSelect: (item: SuperAdminWithdrawalRequest) => void;
+}) {
+  return (
+    <AdminListCard
+      title={formatAmount(item.amount)}
+      subtitle={`${item.venueName || item.branchName || "Zone withdrawal"} - ${formatDateTime(item.createdAt)}`}
+      statusLabel={item.adminDecision === "rejected" ? "rejected" : item.status}
+      statusTone={statusTone(item.status)}
+      onPress={() => onSelect(item)}
+    >
+      <View style={styles.cardBody}>
+        <AdminInfoLine label="Branch" value={item.branchName || "N/A"} />
+        <AdminInfoLine label="Bank" value={item.bankName || "N/A"} />
+        <AdminInfoLine label="Masked account" value={item.accountNumberMasked || "N/A"} />
+        <Text style={styles.referenceText}>Reference: {item.reference || item.id}</Text>
+        <View style={styles.cardActionHint}>
+          <Text style={styles.cardActionHintText}>View details</Text>
+          <AppIcon name="chevron-right" size={18} color={COLORS.accent} />
+        </View>
+      </View>
+    </AdminListCard>
+  );
+});
+
+function ZoneFinanceRow({ item }: { item: SuperAdminZoneFinanceSummary }) {
+  return (
+    <View style={styles.financeRow}>
+      <View style={styles.financeTitleCol}>
+        <Text style={styles.financeZone} numberOfLines={1}>{item.zoneName || "Unknown zone"}</Text>
+        <Text style={styles.financeAdmin} numberOfLines={1}>{item.zoneAdminName || item.zoneAdminEmail || "Unknown admin"}</Text>
+      </View>
+      <View style={styles.financeMetric}>
+        <Text style={styles.financeLabel}>Earned</Text>
+        <Text style={styles.financeValue}>{formatAmount(item.earnedToday)} / {formatAmount(item.earnedThisWeek)} / {formatAmount(item.earnedThisMonth)}</Text>
+      </View>
+      <View style={styles.financeMetric}>
+        <Text style={styles.financeLabel}>Withdrawn</Text>
+        <Text style={styles.financeValue}>{formatAmount(item.withdrawnToday)} / {formatAmount(item.withdrawnThisWeek)} / {formatAmount(item.withdrawnThisMonth)}</Text>
+      </View>
+      <View style={styles.financeMetricSmall}>
+        <Text style={styles.financeLabel}>Pending</Text>
+        <Text style={styles.financeValue}>{formatAmount(item.pendingWithdrawalAmount)}</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function SuperAdminWithdrawalsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [withdrawals, setWithdrawals] = useState<SuperAdminWithdrawalRequest[]>([]);
+  const [zoneFinance, setZoneFinance] = useState<SuperAdminZoneFinanceSummary[]>([]);
+  const [zoneFinanceCapped, setZoneFinanceCapped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -143,9 +199,18 @@ export default function SuperAdminWithdrawalsScreen() {
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") setLoading(true);
     else setRefreshing(true);
-    const result = await getZoneWithdrawalRequests({ status: tabToBackendStatus(statusTab), limit: 100 });
+    const [result, financeResult] = await Promise.all([
+      getZoneWithdrawalRequests({ status: tabToBackendStatus(statusTab), limit: 100 }),
+      getZoneFinanceSummaries({ limit: 80 }),
+    ]);
     if (result.ok) setWithdrawals(result.data);
     else showToast({ type: "error", title: "Withdrawals failed", message: result.message });
+    if (financeResult.ok) {
+      setZoneFinance(financeResult.data.rows || []);
+      setZoneFinanceCapped(Boolean(financeResult.data.capped));
+    } else {
+      showToast({ type: "error", title: "Zone finance failed", message: financeResult.message });
+    }
     if (mode === "initial") setLoading(false);
     else setRefreshing(false);
   }, [showToast, statusTab]);
@@ -185,6 +250,20 @@ export default function SuperAdminWithdrawalsScreen() {
       ].filter(Boolean).join(" ").toLowerCase().includes(needle);
     });
   }, [tabFiltered, search, branchFilter, dateFilter, amountFilter]);
+
+  const visibleZoneFinance = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return zoneFinance.filter((item) => {
+      if (!needle) return true;
+      return [
+        item.zoneName,
+        item.zoneAdminName,
+        item.zoneAdminEmail,
+        item.zoneId,
+        item.zoneAdminId,
+      ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    });
+  }, [search, zoneFinance]);
 
   const activeFilterCount =
     Number(branchFilter !== ALL) +
@@ -263,6 +342,60 @@ export default function SuperAdminWithdrawalsScreen() {
     await load("refresh");
   }, [load, rejectReason, selected, showToast, submitting]);
 
+  const handleSelect = useCallback((item: SuperAdminWithdrawalRequest) => {
+    setSelectedId(item.id);
+    setRejectReason("");
+  }, []);
+
+  const renderWithdrawal = useCallback(
+    ({ item }: { item: SuperAdminWithdrawalRequest }) => (
+      <WithdrawalRow item={item} onSelect={handleSelect} />
+    ),
+    [handleSelect],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      tabFiltered.length === 0 ? (
+        <AdminEmptyStateCard
+          title={statusTab === "all" ? "No withdrawals" : `No ${statusTabTitle(statusTab)} withdrawals`}
+          description="Withdrawal requests in this status will appear here."
+          icon="wallet"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No withdrawals match these filters."
+          description="Reset filters to view all withdrawals."
+          icon="wallet"
+        />
+      ),
+    [tabFiltered.length, statusTab],
+  );
+
+  const listHeader = useMemo(() => (
+    <View style={styles.financeSection}>
+      <View style={styles.financeHeaderRow}>
+        <View>
+          <Text style={styles.financeSectionTitle}>Zone Finance</Text>
+          <Text style={styles.financeSectionSubtitle}>Today / week / month, Asia/Karachi time. Read-only payout and withdrawal analytics.</Text>
+        </View>
+        {zoneFinanceCapped ? <StatusPill tone="warning" label="capped" /> : null}
+      </View>
+      {visibleZoneFinance.length > 0 ? (
+        <View style={styles.financeTable}>
+          {visibleZoneFinance.slice(0, 12).map((item) => <ZoneFinanceRow key={item.id} item={item} />)}
+        </View>
+      ) : (
+        <AdminEmptyStateCard
+          title="No zone finance rows"
+          description="Completed venue payouts and zone withdrawal requests will appear here."
+          icon="wallet"
+        />
+      )}
+      <Text style={styles.financeFootnote}>Earned uses completed venue payout wallet deposits. Withdrawn uses completed zone withdrawal requests; pending is shown separately.</Text>
+    </View>
+  ), [visibleZoneFinance, zoneFinanceCapped]);
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Withdrawals" subtitle="Zone withdrawal requests across all statuses" onBack={() => router.back()} inlineTitle />
@@ -289,47 +422,19 @@ export default function SuperAdminWithdrawalsScreen() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(item) => item.id}
+          renderItem={renderWithdrawal}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((item) => (
-            <AdminListCard
-              key={item.id}
-              title={formatAmount(item.amount)}
-              subtitle={`${item.venueName || item.branchName || "Zone withdrawal"} - ${formatDateTime(item.createdAt)}`}
-              statusLabel={item.adminDecision === "rejected" ? "rejected" : item.status}
-              statusTone={statusTone(item.status)}
-              onPress={() => {
-                setSelectedId(item.id);
-                setRejectReason("");
-              }}
-            >
-              <View style={styles.cardBody}>
-                <AdminInfoLine label="Branch" value={item.branchName || "N/A"} />
-                <AdminInfoLine label="Bank" value={item.bankName || "N/A"} />
-                <AdminInfoLine label="Masked account" value={item.accountNumberMasked || "N/A"} />
-                <Text style={styles.referenceText}>Reference: {item.reference || item.id}</Text>
-              </View>
-            </AdminListCard>
-          ))}
-          {visible.length === 0 ? (
-            tabFiltered.length === 0 ? (
-              <AdminEmptyStateCard
-                title={statusTab === "all" ? "No withdrawals" : `No ${statusTabTitle(statusTab)} withdrawals`}
-                description="Withdrawal requests in this status will appear here."
-                icon="wallet"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No withdrawals match these filters."
-                description="Reset filters to view all withdrawals."
-                icon="wallet"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={styles.drawer} keyboardAware>
@@ -492,6 +597,22 @@ const styles = StyleSheet.create({
   content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm, marginTop: SPACING.sm },
   referenceText: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
+  cardActionHint: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 4, marginTop: 2 },
+  cardActionHintText: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
+  financeSection: { gap: SPACING.md, marginBottom: SPACING.sm },
+  financeHeaderRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: SPACING.md },
+  financeSectionTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 17 },
+  financeSectionSubtitle: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 3, lineHeight: 18 },
+  financeTable: { borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: RADII.lg, overflow: "hidden", backgroundColor: COLORS.cardDark },
+  financeRow: { gap: SPACING.sm, padding: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
+  financeTitleCol: { gap: 2 },
+  financeZone: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 14 },
+  financeAdmin: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
+  financeMetric: { gap: 2 },
+  financeMetricSmall: { gap: 2 },
+  financeLabel: { color: COLORS.textSecondary, fontFamily: FONTS.interSemiBold, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 },
+  financeValue: { color: COLORS.text, fontFamily: FONTS.interRegular, fontSize: 12, lineHeight: 18 },
+  financeFootnote: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11, lineHeight: 16 },
   drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },

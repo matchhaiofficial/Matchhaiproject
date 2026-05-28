@@ -1,5 +1,6 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireCurrentUser } from "./authz";
 
 function normalizeGameKey(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
@@ -108,7 +109,9 @@ function countJoinedFriends(room: any, friendIds: Set<string>) {
 export const getPlayerHomeSummary = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
+    const actor = await requireCurrentUser(ctx);
+    const user = actor.user;
+    const userId = user._id;
     if (!user) return null;
     const HOME_RECENT_ROOM_LIMIT = 100;
     const HOME_HOSTED_ROOM_LIMIT = 60;
@@ -116,12 +119,12 @@ export const getPlayerHomeSummary = query({
     const now = Date.now();
 
     const [friendships, bookingIntents, myRequests, zones, memberships, hostedRooms, recentRooms] = await Promise.all([
-      ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", args.userId)).collect(),
-      ctx.db.query("bookingIntents").withIndex("by_createdByUid", (q) => q.eq("createdByUid", args.userId)).collect(),
-      ctx.db.query("bookingRequests").withIndex("by_userId", (q) => q.eq("userId", args.userId)).collect(),
+      ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("bookingIntents").withIndex("by_createdByUid", (q) => q.eq("createdByUid", userId)).collect(),
+      ctx.db.query("bookingRequests").withIndex("by_userId", (q) => q.eq("userId", userId)).collect(),
       ctx.db.query("zones").withIndex("by_status", (q) => q.eq("status", "active")).order("desc").take(3),
-      ctx.db.query("teamMembers").withIndex("by_userId", (q) => q.eq("odxerId", args.userId)).take(HOME_TEAM_MEMBERSHIP_LIMIT),
-      ctx.db.query("matchrooms").withIndex("by_hostUid", (q) => q.eq("hostUid", String(args.userId))).order("desc").take(HOME_HOSTED_ROOM_LIMIT),
+      ctx.db.query("teamMembers").withIndex("by_userId", (q) => q.eq("odxerId", userId)).take(HOME_TEAM_MEMBERSHIP_LIMIT),
+      ctx.db.query("matchrooms").withIndex("by_hostUid", (q) => q.eq("hostUid", String(userId))).order("desc").take(HOME_HOSTED_ROOM_LIMIT),
       ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(HOME_RECENT_ROOM_LIMIT),
     ]);
 
@@ -156,7 +159,7 @@ export const getPlayerHomeSummary = query({
         ...recentRooms.filter(
           (room: any) =>
             Array.isArray(room?.playerUids) &&
-            room.playerUids.includes(String(args.userId))
+            room.playerUids.includes(String(userId))
         ),
       ].filter((room: any) => !isRoomExpired(room))
     );
@@ -184,8 +187,8 @@ export const getPlayerHomeSummary = query({
       .filter((room: any) => {
         const roomId = String(room._id);
         if (myRoomIds.has(roomId)) return false;
-        if (String(room.hostUid) === String(args.userId)) return false;
-        if (Array.isArray(room.playerUids) && room.playerUids.includes(String(args.userId))) return false;
+        if (String(room.hostUid) === String(userId)) return false;
+        if (Array.isArray(room.playerUids) && room.playerUids.includes(String(userId))) return false;
         if (!preferredGames.length) return true;
         const gameKey = normalizeGameKey(room.game);
         return !!gameKey && preferredGames.includes(gameKey);

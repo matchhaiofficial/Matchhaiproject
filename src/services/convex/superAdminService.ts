@@ -82,10 +82,26 @@ export type SuperAdminUser = {
   updatedAt: number;
 };
 
+export type SuperAdminReportModerationNote = {
+  id: string;
+  note: string;
+  action?: string;
+  authorUid?: string | null;
+  authorName?: string | null;
+  createdAt: number;
+};
+
 export type SuperAdminReport = {
   id: string;
   _id: string;
-  type: "matchroom_complaint" | "user_report" | "zone_complaint";
+  type:
+    | "matchroom_complaint"
+    | "user_report"
+    | "zone_complaint"
+    | "friend_chat_message_report"
+    | "matchroom_chat_message_report"
+    | "team_challenge_chat_message_report"
+    | "team_report";
   status: "pending" | "reviewed" | "resolved";
   reason: string;
   description?: string;
@@ -95,11 +111,27 @@ export type SuperAdminReport = {
   reporterName: string;
   reportedUserName?: string | null;
   reportedUserId?: string | null;
+  reportedUserStatus?: "active" | "suspended" | null;
+  zoneId?: string | null;
   zoneName?: string | null;
+  zoneStatus?: string | null;
   branchId?: string | null;
   branchLabel?: string | null;
   matchroomId?: string | null;
   matchroomTitle?: string | null;
+  matchroomStatus?: string | null;
+  source?: string | null;
+  targetType?: string | null;
+  targetReference?: string | null;
+  chatContextLabel?: string | null;
+  chatroomId?: string | null;
+  chatMessageId?: string | null;
+  teamChallengeChatId?: string | null;
+  teamChallengeChatMessageId?: string | null;
+  supportConversationId?: string | null;
+  supportTicketId?: string | null;
+  messagePreview?: string | null;
+  targetMissing?: boolean | null;
   reviewedByUid?: string | null;
   reviewedAt?: number | null;
   reviewedByName?: string | null;
@@ -108,6 +140,9 @@ export type SuperAdminReport = {
   resolvedAt?: number | null;
   resolvedByName?: string | null;
   resolutionSummary?: string | null;
+  moderationNotes?: SuperAdminReportModerationNote[] | null;
+  flaggedForReview?: boolean | null;
+  flaggedAt?: number | null;
 };
 
 export type SuperAdminSupportTicketStatus = "open" | "in_review" | "resolved";
@@ -300,6 +335,15 @@ export type SuperAdminPaymentDetail = {
     flow?: string | null;
     lastSyncAt?: number | null;
     lastProviderStatus?: string | null;
+    anomaly?: {
+      reason?: string | null;
+      source?: string | null;
+      expectedOrderRefNum?: string | null;
+      providerOrderRef?: string | null;
+      expectedAmount?: number | null;
+      providerAmount?: number | null;
+      detectedAt?: number | null;
+    } | null;
   };
   linkedWalletTransaction?: {
     _id: string;
@@ -371,6 +415,36 @@ export type SuperAdminWithdrawalRequest = {
   ownerName?: string | null;
   adminDecision?: "approved" | "rejected" | null;
   decidedAt?: number | null;
+};
+
+export type SuperAdminZoneFinanceSummary = {
+  id: string;
+  zoneId?: string | null;
+  zoneName: string;
+  zoneAdminId?: string | null;
+  zoneAdminName?: string | null;
+  zoneAdminEmail?: string | null;
+  earnedToday: number;
+  earnedThisWeek: number;
+  earnedThisMonth: number;
+  withdrawnToday: number;
+  withdrawnThisWeek: number;
+  withdrawnThisMonth: number;
+  pendingWithdrawalAmount: number;
+  availableBalance?: number | null;
+  lastWithdrawalAt?: number | null;
+};
+
+export type SuperAdminZoneFinanceResult = {
+  rows: SuperAdminZoneFinanceSummary[];
+  capped?: boolean;
+  periodStarts?: {
+    today: number;
+    week: number;
+    month: number;
+    timezone: string;
+    weekStartsOn: string;
+  };
 };
 
 export type SuperAdminWithdrawalDecisionResult = {
@@ -1094,6 +1168,28 @@ export async function getZoneWithdrawalRequests(
   }
 }
 
+export async function getZoneFinanceSummaries(
+  input?: { search?: string; limit?: number },
+): Promise<Result<SuperAdminZoneFinanceResult>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listZoneFinanceSummaries, {
+      sessionToken,
+      search: input?.search || undefined,
+      limit: input?.limit || 50,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_zone_finance_summaries",
+      module: "withdrawals",
+      metadataSafe: { filtered: Boolean(input?.search), count: result?.rows?.length || 0 },
+    });
+    return { ok: true, data: result as SuperAdminZoneFinanceResult };
+  } catch (error: any) {
+    console.error("[superAdminService] getZoneFinanceSummaries error", error);
+    return { ok: false, message: "Failed to load zone finance summaries." };
+  }
+}
+
 export async function approveZoneWithdrawal(withdrawalId: string): Promise<SuperAdminWithdrawalDecisionResult> {
   try {
     const sessionToken = await getRequiredSessionToken();
@@ -1259,6 +1355,169 @@ export async function updateReportStatus(
   } catch (error: any) {
     console.error("[superAdminService] updateReportStatus error", error);
     return { ok: false, message: "Failed to update report status." };
+  }
+}
+
+export async function addReportModerationNote(reportId: string, note: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.addReportModerationNote, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] addReportModerationNote error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to add moderation note.") };
+  }
+}
+
+export async function warnReportedUser(reportId: string, note: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.warnReportedUser, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] warnReportedUser error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to warn user.") };
+  }
+}
+
+export async function warnReportedZoneAdmin(reportId: string, note: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.warnReportedZoneAdmin, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] warnReportedZoneAdmin error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to warn zone admin.") };
+  }
+}
+
+export async function suspendReportedUser(
+  reportId: string,
+  mode: "temporary" | "permanent",
+  reason: string,
+): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.suspendReportedUser, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      mode,
+      reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] suspendReportedUser error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to suspend user.") };
+  }
+}
+
+export async function reactivateReportedUser(reportId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.reactivateReportedUser, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] reactivateReportedUser error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reactivate user.") };
+  }
+}
+
+export async function flagReportedZone(reportId: string, note?: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.flagReportedZone, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] flagReportedZone error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to flag zone.") };
+  }
+}
+
+export async function suspendReportedZone(reportId: string, reason: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.suspendReportedZone, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] suspendReportedZone error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to suspend zone.") };
+  }
+}
+
+export async function reactivateReportedZone(reportId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.reactivateReportedZone, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] reactivateReportedZone error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to reactivate zone.") };
+  }
+}
+
+export async function markReportedMatchroomForReview(reportId: string, note?: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.markReportedMatchroomForReview, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      note,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] markReportedMatchroomForReview error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to flag matchroom for review.") };
+  }
+}
+
+export async function cancelReportedMatchroom(reportId: string, reason: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.cancelReportedMatchroom, {
+      sessionToken,
+      reportId: reportId as Id<"reports">,
+      reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] cancelReportedMatchroom error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to cancel matchroom.") };
   }
 }
 

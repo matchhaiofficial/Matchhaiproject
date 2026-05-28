@@ -164,6 +164,10 @@ export default function SuperAdminDashboardTab() {
     reports: formatBadgeCount(summary?.badges?.pendingReports),
     withdrawals: formatBadgeCount(summary?.badges?.pendingWithdrawals, summary?.badges?.pendingWithdrawalsCapped),
   }), [summary]);
+  const notificationBadgeLabel = formatBadgeCount(
+    summary?.badges?.unreadNotifications,
+    summary?.badges?.unreadNotificationsCapped,
+  );
 
   const metrics = useMemo<MetricConfig[]>(() => [
     {
@@ -259,9 +263,24 @@ export default function SuperAdminDashboardTab() {
           </Pressable>
         }
         rightAction={
-          <Pressable style={styles.headerIconButton} onPress={handleLogout}>
-            <AppIcon name="logout" size={22} color={COLORS.error} />
-          </Pressable>
+          <View style={styles.headerActionsRow}>
+            <Pressable
+              style={styles.headerIconButton}
+              onPress={() => navigateTo("/super-admin/notifications")}
+              accessibilityRole="button"
+              accessibilityLabel="Open Super Admin notifications"
+            >
+              <AppIcon name="notifications" size={22} color={COLORS.text} />
+              {notificationBadgeLabel ? (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>{notificationBadgeLabel}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <Pressable style={styles.headerIconButton} onPress={handleLogout}>
+              <AppIcon name="logout" size={22} color={COLORS.error} />
+            </Pressable>
+          </View>
         }
       />
 

@@ -1,9 +1,9 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { PAYMENT_INTENT_TTL_MS } from "./timing";
+import { requireCurrentUser, requireOwnedZone } from "./authz";
 
 const BOOKING_INTENT_TTL_MS = PAYMENT_INTENT_TTL_MS;
 
@@ -120,32 +120,34 @@ async function notifyZoneOwnerOfRequest(
 }
 
 async function getAuthenticatedBookingUser(ctx: any, expectedUid?: Id<"users">) {
-  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
-  try {
-    authUser = await authComponent.getAuthUser(ctx);
-  } catch {
-    authUser = null;
-  }
-
   const expectedUser = expectedUid ? await ctx.db.get(expectedUid) : null;
-  if (authUser?.userId) {
-    const user = await resolveUserByAnyId(ctx, authUser.userId);
-    if (!user) {
-      throw new Error("User profile not found");
-    }
-
-    if (expectedUser && String(expectedUser._id) !== String(user._id)) {
-      throw new Error("You can only perform this action for your own booking.");
-    }
-
-    return user;
+  const actor = await requireCurrentUser(ctx);
+  if (expectedUser && String(expectedUser._id) !== String(actor.user._id)) {
+    throw new Error("You can only perform this action for your own booking.");
   }
+  return actor.user;
+}
 
-  if (expectedUser) {
-    return expectedUser;
+async function canActorAccessIntent(ctx: any, actorUserId: Id<"users">, intent: any) {
+  if (String(intent.createdByUid) === String(actorUserId)) return true;
+  const room = await ctx.db.get(intent.matchroomId);
+  if (!room) return false;
+  const actor = String(actorUserId);
+  if (String(room.hostUid || "") === actor) return true;
+  if (String(room.captainUidA || "") === actor || String(room.captainUidB || "") === actor) return true;
+  if (room.zoneId) {
+    const zone = await ctx.db.get(room.zoneId as Id<"zones">);
+    if (String(zone?.ownerUid || "") === actor) return true;
   }
+  return false;
+}
 
-  throw new Error("Not authenticated");
+async function requireActorCanAccessIntent(ctx: any, intent: any) {
+  const actor = await requireCurrentUser(ctx);
+  if (!(await canActorAccessIntent(ctx, actor.user._id, intent))) {
+    throw new Error("Booking intent not found");
+  }
+  return actor;
 }
 
 // ============================================
@@ -156,7 +158,10 @@ async function getAuthenticatedBookingUser(ctx: any, expectedUid?: Id<"users">) 
 export const getIntentById = query({
   args: { intentId: v.id("bookingIntents") },
   handler: async (ctx, args) => {
-    return serializeBookingIntent(await ctx.db.get(args.intentId));
+    const intent = await ctx.db.get(args.intentId);
+    if (!intent) return null;
+    await requireActorCanAccessIntent(ctx, intent);
+    return serializeBookingIntent(intent);
   },
 });
 
@@ -164,6 +169,19 @@ export const getIntentById = query({
 export const listIntentsForMatchroom = query({
   args: { matchroomId: v.id("matchrooms") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
+    const actorId = String(actor.user._id);
+    let allowed = String(room.hostUid || "") === actorId
+      || String(room.captainUidA || "") === actorId
+      || String(room.captainUidB || "") === actorId
+      || (Array.isArray(room.playerUids) && room.playerUids.map(String).includes(actorId));
+    if (!allowed && room.zoneId) {
+      const zone = await ctx.db.get(room.zoneId as Id<"zones">);
+      allowed = String(zone?.ownerUid || "") === actorId;
+    }
+    if (!allowed) throw new Error("Not authorized");
     const intents = await ctx.db
       .query("bookingIntents")
       .withIndex("by_matchroomId", (q) => q.eq("matchroomId", args.matchroomId))
@@ -177,9 +195,10 @@ export const listIntentsForMatchroom = query({
 export const listIntentsByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
     const intents = await ctx.db
       .query("bookingIntents")
-      .withIndex("by_createdByUid", (q) => q.eq("createdByUid", args.userId))
+      .withIndex("by_createdByUid", (q) => q.eq("createdByUid", user._id))
       .order("desc")
       .collect();
     return intents.map(serializeBookingIntent);
@@ -189,10 +208,11 @@ export const listIntentsByUser = query({
 export const listActiveIntentsByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
     const now = Date.now();
     const intents = await ctx.db
       .query("bookingIntents")
-      .withIndex("by_createdByUid", (q) => q.eq("createdByUid", args.userId))
+      .withIndex("by_createdByUid", (q) => q.eq("createdByUid", user._id))
       .order("desc")
       .collect();
 
@@ -212,11 +232,12 @@ export const listActiveIntentsByUserForMatchroom = query({
     matchroomId: v.id("matchrooms"),
   },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
     const now = Date.now();
     const intents = await ctx.db
       .query("bookingIntents")
       .withIndex("by_createdByUid_matchroomId", (q) =>
-        q.eq("createdByUid", args.userId).eq("matchroomId", args.matchroomId)
+        q.eq("createdByUid", user._id).eq("matchroomId", args.matchroomId)
       )
       .collect();
 
@@ -267,11 +288,12 @@ export const createIntent = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const user = await getAuthenticatedBookingUser(ctx, args.createdByUid);
 
     const intentId = await ctx.db.insert("bookingIntents", {
       matchroomId: args.matchroomId,
-      createdByUid: args.createdByUid,
-      createdByUsername: args.createdByUsername,
+      createdByUid: user._id,
+      createdByUsername: user.username || args.createdByUsername,
       side: args.side,
       selectedSlots: args.selectedSlots,
       selectedSlotIds: args.selectedSlotIds,
@@ -302,6 +324,18 @@ export const updateIntentApproval = mutation({
     const now = Date.now();
     const intent = await ctx.db.get(args.intentId);
     if (!intent) throw new Error("Booking intent not found");
+    const actor = await requireActorCanAccessIntent(ctx, intent);
+    const room = await ctx.db.get(intent.matchroomId);
+    if (!room) throw new Error("Matchroom not found");
+    if (args.approvalType === "captain") {
+      const actorId = String(actor.user._id);
+      if (String(room.hostUid || "") !== actorId && String(room.captainUidA || "") !== actorId && String(room.captainUidB || "") !== actorId) {
+        throw new Error("Captain approval requires matchroom captain or host.");
+      }
+    } else {
+      if (!room.zoneId) throw new Error("This booking has no zone approval.");
+      await requireOwnedZone(ctx, room.zoneId as Id<"zones">);
+    }
 
     const approval = {
       approved: args.approved,
@@ -345,6 +379,12 @@ export const updateIntentPaymentStatus = mutation({
     paymentStatus: v.union(v.literal("unpaid"), v.literal("paid")),
   },
   handler: async (ctx, args) => {
+    if (args.paymentStatus === "paid") {
+      throw new Error("Payment status is updated by the payment processor.");
+    }
+    const intent = await ctx.db.get(args.intentId);
+    if (!intent) throw new Error("Booking intent not found");
+    await requireActorCanAccessIntent(ctx, intent);
     await ctx.db.patch(args.intentId, {
       paymentStatus: args.paymentStatus,
       updatedAt: Date.now(),
@@ -394,7 +434,16 @@ export const cancelIntent = mutation({
 export const getRequestById = query({
   args: { requestId: v.id("bookingRequests") },
   handler: async (ctx, args) => {
-    return serializeBookingRequest(await ctx.db.get(args.requestId));
+    const request = await ctx.db.get(args.requestId);
+    if (!request) return null;
+    const actor = await requireCurrentUser(ctx);
+    let allowed = String(request.userId) === String(actor.user._id);
+    if (!allowed && request.zoneId) {
+      const zone = await ctx.db.get(request.zoneId);
+      allowed = String(zone?.ownerUid || "") === String(actor.user._id);
+    }
+    if (!allowed) throw new Error("Booking request not found");
+    return serializeBookingRequest(request);
   },
 });
 
@@ -402,9 +451,10 @@ export const getRequestById = query({
 export const listRequestsByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
     const requests = await ctx.db
       .query("bookingRequests")
-      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
       .order("desc")
       .collect();
     return requests.map(serializeBookingRequest);
@@ -415,6 +465,7 @@ export const listRequestsByUser = query({
 export const listRequestsByZone = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
+    await requireOwnedZone(ctx, args.zoneId);
     const requests = await ctx.db
       .query("bookingRequests")
       .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
@@ -481,11 +532,12 @@ export const createRequest = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     const normalizedGameKey = normalizeBookingGameKey(args.gameKey);
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
 
     if (args.matchroomId) {
       const existingByUser = await ctx.db
         .query("bookingRequests")
-        .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+        .withIndex("by_userId", (q) => q.eq("userId", user._id))
         .collect();
       const existing = existingByUser.find(
         (request) => String((request as any).matchroomId || "") === String(args.matchroomId),
@@ -496,7 +548,7 @@ export const createRequest = mutation({
     }
 
     const requestId = await ctx.db.insert("bookingRequests", {
-      userId: args.userId,
+      userId: user._id,
       gameKey: normalizedGameKey,
       zoneId: args.zoneId,
       userName: args.userName,
@@ -540,7 +592,7 @@ export const createRequest = mutation({
 
     await notifyZoneOwnerOfRequest(ctx, {
       requestId,
-      requesterId: args.userId,
+      requesterId: user._id,
       zoneId: args.zoneId,
       gameKey: normalizedGameKey,
       title: args.title,
@@ -564,6 +616,14 @@ export const updateRequestStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Booking request not found");
+    if (request.zoneId) {
+      await requireOwnedZone(ctx, request.zoneId);
+    } else {
+      const actor = await requireCurrentUser(ctx);
+      if (String(request.userId) !== String(actor.user._id)) throw new Error("Not authorized");
+    }
     await ctx.db.patch(args.requestId, {
       status: args.status,
       updatedAt: Date.now(),
@@ -580,7 +640,17 @@ export const updateRequestStatus = mutation({
 export const getOfferById = query({
   args: { offerId: v.id("zoneOffers") },
   handler: async (ctx, args) => {
-    return serializeZoneOffer(await ctx.db.get(args.offerId));
+    const offer = await ctx.db.get(args.offerId);
+    if (!offer) return null;
+    const request = await ctx.db.get(offer.requestId);
+    const actor = await requireCurrentUser(ctx);
+    let allowed = request && String(request.userId) === String(actor.user._id);
+    if (!allowed) {
+      const zone = await ctx.db.get(offer.zoneId);
+      allowed = String(zone?.ownerUid || "") === String(actor.user._id);
+    }
+    if (!allowed) throw new Error("Offer not found");
+    return serializeZoneOffer(offer);
   },
 });
 
@@ -588,6 +658,15 @@ export const getOfferById = query({
 export const listOffersForRequest = query({
   args: { requestId: v.id("bookingRequests") },
   handler: async (ctx, args) => {
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Booking request not found");
+    const actor = await requireCurrentUser(ctx);
+    let allowed = String(request.userId) === String(actor.user._id);
+    if (!allowed && request.zoneId) {
+      const zone = await ctx.db.get(request.zoneId);
+      allowed = String(zone?.ownerUid || "") === String(actor.user._id);
+    }
+    if (!allowed) throw new Error("Not authorized");
     const offers = await ctx.db
       .query("zoneOffers")
       .withIndex("by_requestId", (q) => q.eq("requestId", args.requestId))
@@ -601,6 +680,7 @@ export const listOffersForRequest = query({
 export const listOffersByZone = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
+    await requireOwnedZone(ctx, args.zoneId);
     const offers = await ctx.db
       .query("zoneOffers")
       .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
@@ -613,9 +693,10 @@ export const listOffersByZone = query({
 export const listOffersForUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedBookingUser(ctx, args.userId);
     const requests = await ctx.db
       .query("bookingRequests")
-      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
       .collect();
 
     if (requests.length === 0) {
@@ -647,6 +728,7 @@ export const createOffer = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    await requireOwnedZone(ctx, args.zoneId);
 
     const offerId = await ctx.db.insert("zoneOffers", {
       requestId: args.requestId,
@@ -676,6 +758,16 @@ export const updateOfferStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const offer = await ctx.db.get(args.offerId);
+    if (!offer) throw new Error("Offer not found");
+    const request = await ctx.db.get(offer.requestId);
+    const actor = await requireCurrentUser(ctx);
+    let allowed = request && String(request.userId) === String(actor.user._id);
+    if (!allowed) {
+      const zone = await ctx.db.get(offer.zoneId);
+      allowed = String(zone?.ownerUid || "") === String(actor.user._id);
+    }
+    if (!allowed) throw new Error("Not authorized");
     await ctx.db.patch(args.offerId, {
       status: args.status,
       updatedAt: Date.now(),

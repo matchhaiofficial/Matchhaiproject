@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -64,6 +65,42 @@ function getDateCutoff(filter: DateFilter) {
   if (filter === "30d") return now - 30 * 24 * 60 * 60 * 1000;
   return 0;
 }
+
+const AuditRow = React.memo(function AuditRow({ event }: { event: ZoneAuditEvent }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.rowBetween}>
+        <View style={styles.metaStack}>
+          <Text style={styles.moduleLabel}>{formatTarget(event.module)}</Text>
+          <Text style={styles.actionText}>{formatAction(event.action)}</Text>
+        </View>
+        <Text style={styles.timestamp}>{formatDateTime(event.createdAt)}</Text>
+      </View>
+
+      <Text style={styles.summaryText}>{event.summary}</Text>
+      <Text style={styles.metaText}>
+        Actor: {event.actorLabel || event.actorUid || "Unknown"}
+      </Text>
+      <Text style={styles.metaText}>
+        Target: {formatTarget(event.targetType)}
+        {event.targetId ? ` (${event.targetId})` : ""}
+      </Text>
+
+      {event.details ? (
+        <View style={styles.detailsBlock}>
+          {Object.entries(event.details)
+            .filter(([, value]) => value != null && value !== "")
+            .slice(0, 6)
+            .map(([key, value]) => (
+              <Text key={key} style={styles.detailText}>
+                {formatTarget(key)}: {typeof value === "object" ? JSON.stringify(value) : String(value)}
+              </Text>
+            ))}
+        </View>
+      ) : null}
+    </View>
+  );
+});
 
 export default function ZoneAuditModuleScreen() {
   const router = useRouter();
@@ -220,8 +257,14 @@ export default function ZoneAuditModuleScreen() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={filteredEvents}
+          keyExtractor={(event) => event.id}
           contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          initialNumToRender={8}
+          windowSize={11}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -229,51 +272,16 @@ export default function ZoneAuditModuleScreen() {
               tintColor={COLORS.accent}
             />
           }
-          showsVerticalScrollIndicator={false}
-        >
-          {filteredEvents.length === 0 ? (
+          ListEmptyComponent={
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>No audit events for these filters</Text>
               <Text style={styles.emptyText}>
                 Booking decisions, pricing changes, resource updates, and migration runs will appear here.
               </Text>
             </View>
-          ) : null}
-
-          {filteredEvents.map((event) => (
-            <View key={event.id} style={styles.card}>
-              <View style={styles.rowBetween}>
-                <View style={styles.metaStack}>
-                  <Text style={styles.moduleLabel}>{formatTarget(event.module)}</Text>
-                  <Text style={styles.actionText}>{formatAction(event.action)}</Text>
-                </View>
-                <Text style={styles.timestamp}>{formatDateTime(event.createdAt)}</Text>
-              </View>
-
-              <Text style={styles.summaryText}>{event.summary}</Text>
-              <Text style={styles.metaText}>
-                Actor: {event.actorLabel || event.actorUid || "Unknown"}
-              </Text>
-              <Text style={styles.metaText}>
-                Target: {formatTarget(event.targetType)}
-                {event.targetId ? ` (${event.targetId})` : ""}
-              </Text>
-
-              {event.details ? (
-                <View style={styles.detailsBlock}>
-                  {Object.entries(event.details)
-                    .filter(([, value]) => value != null && value !== "")
-                    .slice(0, 6)
-                    .map(([key, value]) => (
-                      <Text key={key} style={styles.detailText}>
-                        {formatTarget(key)}: {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                      </Text>
-                    ))}
-                </View>
-              ) : null}
-            </View>
-          ))}
-        </ScrollView>
+          }
+          renderItem={({ item: event }) => <AuditRow event={event} />}
+        />
       )}
     </Screen>
   );

@@ -99,6 +99,8 @@ type ProviderSnapshot = {
   responseDesc?: string | null;
   transactionStatus?: string | null;
   transactionId?: string | null;
+  orderRefNumber?: string | null;
+  amount?: number | string | null;
   paymentToken?: string | null;
   paymentTokenExpiryDateTime?: string | null;
   transactionDateTime?: string | null;
@@ -752,6 +754,76 @@ function getProviderReference(snapshot: ProviderSnapshot, orderRefNum: string) {
     || snapshot.rawPayload?.paymentToken
     || orderRefNum,
   );
+}
+
+function parseProviderAmountValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = Number(String(value).replace(/,/g, "").trim());
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function findProviderAmount(payload: any): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const directKeys = [
+    "amount",
+    "transactionAmount",
+    "txnAmount",
+    "paidAmount",
+    "totalAmount",
+    "grossAmount",
+  ];
+  for (const key of directKeys) {
+    const parsed = parseProviderAmountValue(payload[key]);
+    if (parsed !== null) return parsed;
+  }
+  for (const value of Object.values(payload)) {
+    if (value && typeof value === "object") {
+      const parsed = findProviderAmount(value);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
+}
+
+function findProviderOrderRef(payload: any): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const directKeys = [
+    "orderRefNum",
+    "orderRefNumber",
+    "orderId",
+    "orderID",
+    "order_id",
+    "merchantTxnRefNo",
+  ];
+  for (const key of directKeys) {
+    const value = String(payload[key] || "").trim();
+    if (value) return value;
+  }
+  for (const value of Object.values(payload)) {
+    if (value && typeof value === "object") {
+      const found = findProviderOrderRef(value);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function getProviderOrderRef(snapshot: ProviderSnapshot) {
+  return String(
+    snapshot.orderRefNumber
+    || findProviderOrderRef(snapshot.rawPayload)
+    || "",
+  ).trim();
+}
+
+function getProviderAmount(snapshot: ProviderSnapshot) {
+  const explicit = parseProviderAmountValue(snapshot.amount);
+  if (explicit !== null) return explicit;
+  return findProviderAmount(snapshot.rawPayload);
+}
+
+function amountsMatch(expected: number, actual: number) {
+  return Math.abs(Number(expected || 0) - Number(actual || 0)) < 0.01;
 }
 
 function getRestInquiryResponse(snapshot: ProviderSnapshot) {
@@ -1932,6 +2004,8 @@ export const applyProviderUpdate = internalMutation({
       && Number(row.expiresAt || 0) > now;
     const keepInquiryPending = keepMaNoResponsePending || keepInvalidOrderInquiryPending;
     const providerReference = getProviderReference(snapshot, row.orderRefNum);
+    const providerOrderRef = getProviderOrderRef(snapshot);
+    const providerAmount = getProviderAmount(snapshot);
     logGatewayDebug("provider.update", {
       transactionId: String(row._id),
       orderRefNum: row.orderRefNum,
@@ -1949,8 +2023,56 @@ export const applyProviderUpdate = internalMutation({
       providerStatus: normalized.transactionStatus || normalized.responseCode || null,
       providerDescription: normalized.responseDesc || null,
       providerReference,
+      providerOrderRef: providerOrderRef || null,
+      providerAmount,
       processedAt: row.processedAt || null,
     });
+
+    const payloadMismatch =
+      (providerOrderRef && providerOrderRef !== row.orderRefNum)
+      || (providerAmount !== null && !amountsMatch(row.amount, providerAmount));
+    if (payloadMismatch) {
+      const reason = providerOrderRef && providerOrderRef !== row.orderRefNum
+        ? "provider_order_reference_mismatch"
+        : "provider_amount_mismatch";
+      const currentPayload = row.providerPayload || {};
+      await ctx.db.patch(row._id, {
+        providerStatus: normalized.transactionStatus || normalized.responseCode || undefined,
+        providerDescription: normalized.responseDesc || undefined,
+        providerPayload: {
+          ...currentPayload,
+          anomaly: {
+            reason,
+            source: args.source,
+            expectedOrderRefNum: row.orderRefNum,
+            providerOrderRef: providerOrderRef || null,
+            expectedAmount: row.amount,
+            providerAmount,
+            detectedAt: now,
+          },
+          lastProviderStatus: normalized.transactionStatus || normalized.responseCode,
+          lastSyncAt: now,
+        },
+        providerReference,
+        callbackCount: Number(row.callbackCount || 0) + (args.source === "initiate" ? 0 : 1),
+        lastCallbackAt: args.source === "initiate" ? row.lastCallbackAt : now,
+        lastError: reason,
+        updatedAt: now,
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: row.status as PaymentStatus,
+        now,
+      });
+      return {
+        appReturnUrl: row.appReturnUrl,
+        orderRefNum: row.orderRefNum,
+        ok: false,
+        shouldRetry: false,
+        status: row.status as PaymentStatus,
+        message: "Payment provider payload did not match the expected transaction.",
+      };
+    }
     const currentPayload = row.providerPayload || {};
     const sourcePayload = args.source === "ipn"
       ? {
@@ -1994,6 +2116,32 @@ export const applyProviderUpdate = internalMutation({
       lastCallbackAt: args.source === "initiate" ? row.lastCallbackAt : now,
       updatedAt: now,
     };
+
+    if (
+      isTerminalStatus(row.status as PaymentStatus)
+      && row.status !== "paid"
+      && normalized.resolvedStatus === "paid"
+      && args.source !== "inquiry"
+    ) {
+      await ctx.db.patch(row._id, {
+        ...callbackPatch,
+        status: row.status,
+        lastError: "terminal_state_requires_provider_inquiry",
+      });
+      await notifySuperAdminsPaymentAttentionRequired(ctx, {
+        payment: row,
+        status: row.status as PaymentStatus,
+        now,
+      });
+      return {
+        appReturnUrl: row.appReturnUrl,
+        orderRefNum: row.orderRefNum,
+        ok: false,
+        shouldRetry: false,
+        status: row.status as PaymentStatus,
+        message: "Terminal payment state was not changed without provider inquiry.",
+      };
+    }
 
     if (row.processedAt || row.status === "paid") {
       await ctx.db.patch(row._id, {
@@ -2145,7 +2293,7 @@ export const applyProviderUpdate = internalMutation({
         kind: row.kind,
         amount: row.amount,
       });
-      await ctx.runMutation(api.wallet.addFunds, {
+      await ctx.runMutation(internal.wallet.addFunds, {
         userId: row.userId,
         amount: row.amount,
         reference: `easypaisa:${row.orderRefNum}`,
@@ -2167,7 +2315,7 @@ export const applyProviderUpdate = internalMutation({
           bookingIntentId: String(row.bookingIntentId),
           amount: row.amount,
         });
-        await ctx.runMutation(api.matchrooms.payMatchroomSeatIntent, {
+        await ctx.runMutation(internal.matchrooms.confirmPaidMatchroomSeatIntentFromProvider, {
           intentId: row.bookingIntentId,
           userId: row.userId,
           externalPaymentReference: `easypaisa:${row.orderRefNum}`,
@@ -2445,11 +2593,16 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
     || String(formData?.get?.("orderRefNumber") || formData?.get?.("orderRefNum") || "")
     || session.transaction.orderRefNum;
   const authToken = url.searchParams.get("auth_token") || String(formData?.get?.("auth_token") || "");
+  if (orderRefNumber !== session.transaction.orderRefNum) {
+    return new Response("Payment reference mismatch.", { status: 400 });
+  }
 
   const result = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
-    orderRefNum: orderRefNumber,
+    orderRefNum: session.transaction.orderRefNum,
     source: "hosted_finalize",
     snapshot: {
+      orderRefNumber: session.transaction.orderRefNum,
+      amount: session.transaction.amount,
       responseCode: status,
       responseDesc: desc,
       transactionStatus: status,
@@ -2494,7 +2647,7 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
         ? "Your Easypaisa payment was recorded. Returning to MatchHai."
         : result.status === "pending"
           ? "Your payment is being reconciled. MatchHai will reflect the final status shortly."
-          : `Easypaisa returned: ${desc || status || "Unknown failure"}.`,
+          : "Payment was not completed. Return to MatchHai and refresh this order for the latest status.",
       returnUrl,
     ),
     {
@@ -2555,22 +2708,47 @@ export const easypaisaIpnHandler = httpAction(async (ctx, request) => {
       return new Response("Missing IPN order reference.", { status: 400 });
     }
 
-    const result = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
+    const row: any = await ctx.runQuery((internal as any).easypaisa.getTransactionByOrderRef, {
       orderRefNum: orderRefNumber,
-      source: "ipn",
+    });
+    if (!row) {
+      return new Response("Transaction not found.", { status: 404 });
+    }
+
+    const inquiryResult: any = await ctx.runAction((internal as any).easypaisaNode.inquireRestTransaction, {
+      orderId: row.orderRefNum,
+      storeId: EASYPAISA_STORE_ID,
+    });
+    const inquiryBody = inquiryResult?.body || {};
+    const result = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
+      orderRefNum: row.orderRefNum,
+      source: "inquiry",
       snapshot: {
-        responseCode: parsedPayload?.responseCode || directPayload.responseCode || null,
-        responseDesc: parsedPayload?.responseDesc || parsedPayload?.responseMessage || parsedPayload?.description || directPayload.responseDesc || null,
-        transactionStatus: parsedPayload?.transactionStatus || parsedPayload?.status || directPayload.transactionStatus || null,
-        transactionId: parsedPayload?.transactionId || parsedPayload?.txnId || directPayload.transactionId || null,
-        paymentToken: parsedPayload?.paymentToken || directPayload.paymentToken || null,
+        orderRefNumber: row.orderRefNum,
+        amount: row.amount,
+        responseCode: inquiryBody?.responseCode || inquiryBody?.errorCode || null,
+        responseDesc: inquiryBody?.responseDesc || inquiryBody?.errorReason || null,
+        transactionStatus: inquiryBody?.transactionStatus || inquiryBody?.status || null,
+        transactionId: inquiryBody?.transactionId || inquiryBody?.txnId || null,
+        paymentToken: inquiryBody?.paymentToken || null,
         paymentTokenExpiryDateTime: parsedPayload?.paymentTokenExpiryDateTime || null,
-        transactionDateTime: parsedPayload?.transactionDateTime || null,
-        paymentMode: parsedPayload?.paymentMode || directPayload.paymentMode || null,
-        paymentMethod: parsedPayload?.paymentMethod || parsedPayload?.paymentMode || directPayload.paymentMethod || null,
-        authToken: parsedPayload?.auth_token || parsedPayload?.authToken || directPayload.authToken || null,
-        providerReference: parsedPayload?.transactionId || parsedPayload?.txnId || parsedPayload?.paymentToken || orderRefNumber,
+        transactionDateTime: inquiryBody?.transactionDateTime || null,
+        paymentMode: inquiryBody?.paymentMode || null,
+        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || null,
+        authToken: inquiryBody?.auth_token || inquiryBody?.authToken || null,
+        providerReference: inquiryBody?.transactionId || inquiryBody?.txnId || inquiryBody?.paymentToken || row.orderRefNum,
         rawPayload: {
+          rest: {
+            inquiry: {
+              status: inquiryResult?.status || null,
+              response: inquiryBody,
+              request: inquiryResult?.requestPayload || null,
+            },
+          },
+          ipn: {
+            receivedAt: Date.now(),
+            source: ipnUrl ? "provider_url" : "direct",
+          },
           ...(ipnUrl ? { ipnUrl } : {}),
           payload: parsedPayload,
           directPayload: Object.keys(formEntries).length > 0 ? directPayload.rawPayload : null,

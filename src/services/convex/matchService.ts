@@ -636,6 +636,54 @@ export async function getUserMatchrooms(
   }
 }
 
+export type UserScheduleTab = "upcoming" | "waiting" | "history";
+
+export type UserScheduleFilters = {
+  game?: string;
+  dateRange?: string;
+  venue?: string;
+  paymentStatus?: string;
+  searchText?: string;
+  statusGroup?: string;
+};
+
+export type UserSchedulePage = {
+  page: Matchroom[];
+  isDone: boolean;
+  continueCursor: string | null;
+  total?: number;
+};
+
+export async function getUserScheduleMatchroomsPage(input: {
+  uid: string;
+  tab: UserScheduleTab;
+  limit?: number;
+  cursor?: string | null;
+  filters?: UserScheduleFilters;
+}): Promise<Result<UserSchedulePage>> {
+  try {
+    const result = await convex.query((api as any).matchrooms.listForUserSchedule, {
+      uid: input.uid,
+      tab: input.tab,
+      limit: input.limit || 20,
+      cursor: input.cursor ?? null,
+      filters: input.filters,
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as Matchroom[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[matchService] getUserScheduleMatchroomsPage error:", error);
+    return { ok: false, message: "Failed to fetch your schedule" };
+  }
+}
+
 /**
  * Join a matchroom
  */

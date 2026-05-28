@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -138,66 +138,93 @@ type Props = {
   rows: BroadcastHistoryRow[];
 };
 
+const HistoryRow = React.memo(function HistoryRow({
+  row,
+  onOpenMatchroom,
+}: {
+  row: BroadcastHistoryRow;
+  onOpenMatchroom: (matchroomId: string) => void;
+}) {
+  const derived = deriveBroadcastHistoryStatus(row);
+  const date = formatDate(row.preferredDate);
+  const area = row.offer?.branchName || row.matchroom?.location || row.targetAreaLabel || row.preferredAreas?.[0];
+  const rawStatus = [
+    row.closedReason ? `Reason: ${humanize(row.closedReason)}` : null,
+    row.lifecycleStatus ? `Lifecycle: ${humanize(row.lifecycleStatus)}` : null,
+    row.offer?.status ? `Offer: ${humanize(row.offer.status)}` : null,
+  ].filter(Boolean);
+
+  return (
+    <View style={styles.historyCard}>
+      <View style={styles.historyCardHeader}>
+        <View style={styles.historyTitleWrap}>
+          <Text style={styles.historyTitle} numberOfLines={1}>
+            {row.title || "Broadcast booking request"}
+          </Text>
+          <Text style={styles.historyTimestamp}>{formatTimestamp(row.updatedAt || row.createdAt || null)}</Text>
+        </View>
+        <View style={[styles.historyStatusChip, getStatusToneStyle(derived.tone)]}>
+          <Text style={styles.historyStatusText}>{derived.label}</Text>
+        </View>
+      </View>
+
+      <View style={styles.historyMetaRow}>
+        <Text style={styles.historyMetaText}>{humanize(row.gameKey) || "Game"}</Text>
+        {date ? <Text style={styles.historyMetaText}>{date}</Text> : null}
+        {row.preferredTime ? <Text style={styles.historyMetaText}>{row.preferredTime}</Text> : null}
+      </View>
+
+      {area ? <Text style={styles.historyDetailText}>Venue area: {area}</Text> : null}
+      {row.offer?.offerType ? <Text style={styles.historyDetailText}>Offer type: {humanize(row.offer.offerType)}</Text> : null}
+      {rawStatus.length > 0 ? <Text style={styles.historyRawText}>{rawStatus.join(" | ")}</Text> : null}
+
+      {row.matchroomId ? (
+        <Pressable
+          style={({ pressed }) => [styles.historyLinkButton, pressed && styles.historyLinkButtonPressed]}
+          onPress={() => onOpenMatchroom(row.matchroomId as string)}
+        >
+          <AppIcon name="launch" size="sm" color={COLORS.accent} />
+          <Text style={styles.historyLinkText}>View matchroom</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+});
+
 export function ZoneBookingsHistorySection({ loading, rows }: Props) {
   const router = useRouter();
 
-  return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {loading ? (
+  if (loading) {
+    return (
+      <View style={styles.content}>
         <ActivityIndicator size="small" color={COLORS.accent} />
-      ) : rows.length === 0 ? (
+      </View>
+    );
+  }
+
+  return (
+    <FlatList
+      data={rows}
+      keyExtractor={(row) => row.id}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews
+      initialNumToRender={8}
+      windowSize={11}
+      ListEmptyComponent={
         <View style={styles.emptyStateCard}>
           <Text style={styles.emptyStateTitle}>No broadcast history yet.</Text>
           <Text style={styles.emptyText}>Closed broadcast requests and venue outcomes will appear here.</Text>
         </View>
-      ) : (
-        rows.map((row) => {
-          const derived = deriveBroadcastHistoryStatus(row);
-          const date = formatDate(row.preferredDate);
-          const area = row.offer?.branchName || row.matchroom?.location || row.targetAreaLabel || row.preferredAreas?.[0];
-          const rawStatus = [
-            row.closedReason ? `Reason: ${humanize(row.closedReason)}` : null,
-            row.lifecycleStatus ? `Lifecycle: ${humanize(row.lifecycleStatus)}` : null,
-            row.offer?.status ? `Offer: ${humanize(row.offer.status)}` : null,
-          ].filter(Boolean);
-
-          return (
-            <View key={row.id} style={styles.historyCard}>
-              <View style={styles.historyCardHeader}>
-                <View style={styles.historyTitleWrap}>
-                  <Text style={styles.historyTitle} numberOfLines={1}>
-                    {row.title || "Broadcast booking request"}
-                  </Text>
-                  <Text style={styles.historyTimestamp}>{formatTimestamp(row.updatedAt || row.createdAt || null)}</Text>
-                </View>
-                <View style={[styles.historyStatusChip, getStatusToneStyle(derived.tone)]}>
-                  <Text style={styles.historyStatusText}>{derived.label}</Text>
-                </View>
-              </View>
-
-              <View style={styles.historyMetaRow}>
-                <Text style={styles.historyMetaText}>{humanize(row.gameKey) || "Game"}</Text>
-                {date ? <Text style={styles.historyMetaText}>{date}</Text> : null}
-                {row.preferredTime ? <Text style={styles.historyMetaText}>{row.preferredTime}</Text> : null}
-              </View>
-
-              {area ? <Text style={styles.historyDetailText}>Venue area: {area}</Text> : null}
-              {row.offer?.offerType ? <Text style={styles.historyDetailText}>Offer type: {humanize(row.offer.offerType)}</Text> : null}
-              {rawStatus.length > 0 ? <Text style={styles.historyRawText}>{rawStatus.join(" | ")}</Text> : null}
-
-              {row.matchroomId ? (
-                <Pressable
-                  style={({ pressed }) => [styles.historyLinkButton, pressed && styles.historyLinkButtonPressed]}
-                  onPress={() => router.push({ pathname: "/matchrooms/[id]" as any, params: { id: row.matchroomId } })}
-                >
-                  <AppIcon name="launch" size="sm" color={COLORS.accent} />
-                  <Text style={styles.historyLinkText}>View matchroom</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          );
-        })
+      }
+      renderItem={({ item: row }) => (
+        <HistoryRow
+          row={row}
+          onOpenMatchroom={(matchroomId) =>
+            router.push({ pathname: "/matchrooms/[id]" as any, params: { id: matchroomId } })
+          }
+        />
       )}
-    </ScrollView>
+    />
   );
 }

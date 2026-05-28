@@ -2,9 +2,9 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Pressable,
   RefreshControl,
-  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -36,6 +36,36 @@ const getReportTone = (status: string) => {
   if (status === "reviewed") return "info";
   return "warning";
 };
+
+const ReportRow = React.memo(function ReportRow({
+  report,
+  onPress,
+}: {
+  report: AppReport;
+  onPress: (id: string) => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [pressed && styles.cardPressed]}
+      onPress={() => onPress(report.id)}
+    >
+      <AppCard style={styles.reportCard}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.reason}>{report.reason}</Text>
+          <StatusPill tone={getReportTone(report.status)} label={getReportStatusLabel(report.status)} />
+        </View>
+        <Text style={styles.meta}>
+          {formatType(report.type)} • {formatDate(report.createdAt)}
+        </Text>
+        {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
+        {report.description ? (
+          <Text style={styles.description}>{report.description}</Text>
+        ) : null}
+        <Text style={styles.linkHint}>Open report details</Text>
+      </AppCard>
+    </Pressable>
+  );
+});
 
 export default function PlayerReportsScreen() {
   const router = useRouter();
@@ -72,6 +102,16 @@ export default function PlayerReportsScreen() {
     return "No resolved reports yet.";
   }, [activeTab]);
 
+  const handleOpenReport = useCallback(
+    (id: string) => {
+      router.push({
+        pathname: "/(player)/report/[id]",
+        params: { id },
+      });
+    },
+    [router],
+  );
+
   return (
     <Screen style={styles.screen} scroll={false}>
       <AppHeader title="My Reports" onBack={() => router.back()} inlineTitle />
@@ -92,7 +132,12 @@ export default function PlayerReportsScreen() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={reports}
+          keyExtractor={(report) => report.id}
+          renderItem={({ item }) => (
+            <ReportRow report={item} onPress={handleOpenReport} />
+          )}
           contentContainerStyle={styles.content}
           refreshControl={
             <RefreshControl
@@ -102,44 +147,18 @@ export default function PlayerReportsScreen() {
             />
           }
           showsVerticalScrollIndicator={false}
-        >
-          {reports.length === 0 ? (
+          ListEmptyComponent={
             <AppCard variant="empty">
               <Text style={styles.emptyTitle}>{emptyCopy}</Text>
               <Text style={styles.emptyText}>
                 Reports you submit from matchrooms, player profiles, and venue pages will appear here.
               </Text>
             </AppCard>
-          ) : null}
-
-          {reports.map((report) => (
-            <Pressable
-              key={report.id}
-              style={({ pressed }) => [pressed && styles.cardPressed]}
-              onPress={() =>
-                router.push({
-                  pathname: "/(player)/report/[id]",
-                  params: { id: report.id },
-                })
-              }
-            >
-              <AppCard style={styles.reportCard}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.reason}>{report.reason}</Text>
-                  <StatusPill tone={getReportTone(report.status)} label={getReportStatusLabel(report.status)} />
-                </View>
-                <Text style={styles.meta}>
-                  {formatType(report.type)} • {formatDate(report.createdAt)}
-                </Text>
-                {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
-                {report.description ? (
-                  <Text style={styles.description}>{report.description}</Text>
-                ) : null}
-                <Text style={styles.linkHint}>Open report details</Text>
-              </AppCard>
-            </Pressable>
-          ))}
-        </ScrollView>
+          }
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
     </Screen>
   );

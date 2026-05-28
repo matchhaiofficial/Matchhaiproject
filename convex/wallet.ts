@@ -3,10 +3,12 @@ import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { notifySuperAdminsWithdrawalReviewNeeded, notifyZoneAdminWithdrawalRequested } from "./withdrawalNotifications";
+import { requireCurrentUser, requireSelf } from "./authz";
 
 async function getWalletUserRecord(
   ctx: any,
   userId?: Id<"users">,
+  options?: { allowInternalUserId?: boolean },
 ) {
   let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
   try {
@@ -26,7 +28,7 @@ async function getWalletUserRecord(
     }
   }
 
-  if (userId) {
+  if (userId && options?.allowInternalUserId) {
     const user = await ctx.db.get(userId);
     if (user) {
       return user;
@@ -44,7 +46,7 @@ async function getWalletUserRecord(
 export const getBalance = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
+    const { user } = await requireCurrentUser(ctx);
     return user?.walletBalance ?? 0;
   },
 });
@@ -52,7 +54,7 @@ export const getBalance = query({
 export const getSummary = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
+    const { user } = await requireCurrentUser(ctx);
     return {
       balance: user?.walletBalance ?? 0,
       heldBalance: user?.walletHeldBalance ?? 0,
@@ -64,9 +66,10 @@ export const getSummary = query({
 export const listTransactions = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const { user } = await requireCurrentUser(ctx);
     return await ctx.db
       .query("walletTransactions")
-      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
       .order("desc")
       .collect();
   },
@@ -75,14 +78,15 @@ export const listTransactions = query({
 export const listHistory = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const { user } = await requireCurrentUser(ctx);
     const [walletRows, paymentRows] = await Promise.all([
       ctx.db
         .query("walletTransactions")
-        .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+        .withIndex("by_userId", (q) => q.eq("userId", user._id))
         .collect(),
       ctx.db
         .query("paymentTransactions")
-        .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+        .withIndex("by_userId", (q) => q.eq("userId", user._id))
         .collect(),
     ]);
 
@@ -195,7 +199,8 @@ export const createZoneWithdrawalTransaction = mutation({
       throw new Error("Withdrawal amount must be positive.");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const actor = await requireSelf(ctx, args.userId);
+    const user = actor.user;
     if (args.zoneId) {
       const zone = await ctx.db.get(args.zoneId as Id<"zones">);
       if (zone && zone.ownerUid !== user._id) {
@@ -243,7 +248,7 @@ export const createZoneWithdrawalTransaction = mutation({
 // ============================================
 
 // Add funds to wallet (manual top-up)
-export const addFunds = mutation({
+export const addFunds = internalMutation({
   args: {
     amount: v.number(),
     userId: v.optional(v.id("users")),
@@ -255,7 +260,7 @@ export const addFunds = mutation({
       throw new Error("Amount must be positive");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
     if (args.reference) {
       const existing = await ctx.db
         .query("walletTransactions")
@@ -302,7 +307,7 @@ export const holdFunds = internalMutation({
       throw new Error("Amount must be positive");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
@@ -359,7 +364,7 @@ export const releaseHeldFunds = internalMutation({
       throw new Error("Amount must be positive");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
@@ -419,7 +424,7 @@ export const captureHeldFunds = internalMutation({
       throw new Error("Amount must be positive");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))
@@ -477,7 +482,7 @@ export const refundFunds = internalMutation({
       throw new Error("Amount must be positive");
     }
 
-    const user = await getWalletUserRecord(ctx, args.userId);
+    const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
     const existing = await ctx.db
       .query("walletTransactions")
       .withIndex("by_reference", (q) => q.eq("reference", args.reference))

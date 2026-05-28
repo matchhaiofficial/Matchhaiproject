@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { requireCurrentUser } from "./authz";
 
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
 const ACTIVE_TEAM_JOIN_REQUEST_TYPES = new Set(["team_join_request", "team.join_request"]);
@@ -346,6 +347,8 @@ export const listDiscoverPlayers = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    const viewerUserId = actor.user._id;
     const limit = args.limit || 150;
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
@@ -354,10 +357,10 @@ export const listDiscoverPlayers = query({
     const playerFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 300 });
     const [players, friendships, pendingRequests] = await Promise.all([
       ctx.db.query("users").withIndex("by_accountType", (q) => q.eq("accountType", "player")).take(playerFetchLimit),
-      ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", args.viewerUserId)).collect(),
+      ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", viewerUserId)).collect(),
       ctx.db
         .query("notifications")
-        .withIndex("by_fromUid", (q) => q.eq("fromUid", args.viewerUserId))
+        .withIndex("by_fromUid", (q) => q.eq("fromUid", viewerUserId))
         .order("desc")
         .collect(),
     ]);
@@ -376,7 +379,7 @@ export const listDiscoverPlayers = query({
       !!(player?.isOnline && player.lastActiveAt && (presenceNow - player.lastActiveAt) < PRESENCE_TIMEOUT_MS);
 
     return players
-      .filter((player: any) => String(player._id) !== String(args.viewerUserId))
+      .filter((player: any) => String(player._id) !== String(viewerUserId))
       .filter((player: any) => !isUserHiddenFromPublic(player))
       .filter(playerHasEnabledGame)
       .filter((player: any) => !search || String(player.username || "").toLowerCase().includes(search))
@@ -456,6 +459,7 @@ export const listDiscoverMatchrooms = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
     const limit = args.limit || 150;
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
@@ -543,6 +547,8 @@ export const listDiscoverTeams = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    const viewerUserId = actor.user._id;
     const limit = args.limit || 50;
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
@@ -561,7 +567,7 @@ export const listDiscoverTeams = query({
     if (args.mode === "my") {
       const memberships = await ctx.db
         .query("teamMembers")
-        .withIndex("by_userId", (q) => q.eq("odxerId", args.viewerUserId))
+        .withIndex("by_userId", (q) => q.eq("odxerId", viewerUserId))
         .collect();
       const teamDocs = await Promise.all(memberships.map((membership) => ctx.db.get(membership.teamId)));
       const captainMap = await hydrateCaptainMap(teamDocs.filter(Boolean));
@@ -588,7 +594,7 @@ export const listDiscoverTeams = query({
 
     const pendingRequests = await ctx.db
       .query("notifications")
-      .withIndex("by_fromUid", (q) => q.eq("fromUid", args.viewerUserId))
+      .withIndex("by_fromUid", (q) => q.eq("fromUid", viewerUserId))
       .order("desc")
       .collect();
     const requestedTeamIds = new Set(
@@ -600,7 +606,7 @@ export const listDiscoverTeams = query({
 
     const viewerCaptainTeams = await ctx.db
       .query("teams")
-      .withIndex("by_captainUid", (q) => q.eq("captainUid", args.viewerUserId))
+      .withIndex("by_captainUid", (q) => q.eq("captainUid", viewerUserId))
       .collect();
     const viewerCaptainTeamIds = new Set(viewerCaptainTeams.map((team: any) => String(team._id)));
     const pendingChallenges = viewerCaptainTeamIds.size > 0
@@ -611,7 +617,7 @@ export const listDiscoverTeams = query({
       : [];
     const pendingChallengeByOpponentTeamId = new Map<string, string>();
     pendingChallenges
-      .filter((challenge: any) => String(challenge.captainAUid || "") === String(args.viewerUserId))
+      .filter((challenge: any) => String(challenge.captainAUid || "") === String(viewerUserId))
       .filter((challenge: any) => viewerCaptainTeamIds.has(String(challenge.challengerTeamId)))
       .forEach((challenge: any) => {
         const opponentTeamId = String(challenge.opponentTeamId || "");
@@ -629,7 +635,7 @@ export const listDiscoverTeams = query({
     return baseTeams
       .filter(isActiveTeam)
       .filter((team: any) => !isDisabledPhysicalGame(team.game))
-      .filter((team: any) => !Array.isArray(team.memberUids) || !team.memberUids.includes(String(args.viewerUserId)))
+      .filter((team: any) => !Array.isArray(team.memberUids) || !team.memberUids.includes(String(viewerUserId)))
       .filter((team: any) => {
         if (!search) return true;
         return (

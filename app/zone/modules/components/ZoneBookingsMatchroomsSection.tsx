@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, Dimensions, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -81,8 +81,8 @@ export function ZoneBookingsMatchroomsSection({
 }: Props) {
   const insets = useSafeAreaInsets();
 
-  return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  const header = (
+    <>
       <View style={styles.searchRow}>
         <View style={styles.searchBar}>
           <AppIcon name="search" size={20} color={COLORS.muted} />
@@ -152,34 +152,60 @@ export function ZoneBookingsMatchroomsSection({
         </View>
       </AppDrawer>
 
-      {loadingMatchrooms ? (
-        <ActivityIndicator size="small" color={COLORS.accent} />
-      ) : matchrooms.length === 0 ? (
-        <Text style={styles.emptyText}>No matchrooms found for this zone.</Text>
-      ) : (
-        <>
-          <View style={styles.resultsCount}>
-            <Text style={styles.resultsCountText}>
-              {matchrooms.length} matchroom{matchrooms.length !== 1 ? "s" : ""} found
-            </Text>
-          </View>
-          {matchrooms.map((item) => (
-            <View
-              key={item.id}
-              style={
-                focusedMatchroomId === item.id
-                  ? styles.matchroomFocusedWrap
-                  : styles.walkinMatchroomItem
-              }
-            >
-              <MatchroomCard
-                room={buildMatchroomCardData(item)}
-                containerStyle={focusedMatchroomId === item.id ? { marginBottom: 0 } : undefined}
-              />
-            </View>
-          ))}
-        </>
+      {!loadingMatchrooms && matchrooms.length > 0 ? (
+        <View style={styles.resultsCount}>
+          <Text style={styles.resultsCountText}>
+            {matchrooms.length} matchroom{matchrooms.length !== 1 ? "s" : ""} found
+          </Text>
+        </View>
+      ) : null}
+    </>
+  );
+
+  return (
+    <FlatList
+      data={loadingMatchrooms ? [] : matchrooms}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews
+      initialNumToRender={8}
+      windowSize={11}
+      keyboardShouldPersistTaps="handled"
+      ListHeaderComponent={header}
+      ListEmptyComponent={
+        loadingMatchrooms ? (
+          <ActivityIndicator size="small" color={COLORS.accent} />
+        ) : (
+          <Text style={styles.emptyText}>No matchrooms found for this zone.</Text>
+        )
+      }
+      renderItem={({ item }) => (
+        <MatchroomRow
+          item={item}
+          focused={focusedMatchroomId === item.id}
+          buildMatchroomCardData={buildMatchroomCardData}
+        />
       )}
-    </ScrollView>
+    />
   );
 }
+
+const MatchroomRow = React.memo(function MatchroomRow({
+  item,
+  focused,
+  buildMatchroomCardData,
+}: {
+  item: ZoneMatchroomListItem;
+  focused: boolean;
+  buildMatchroomCardData: (item: ZoneMatchroomListItem) => Matchroom;
+}) {
+  return (
+    <View style={focused ? styles.matchroomFocusedWrap : styles.walkinMatchroomItem}>
+      <MatchroomCard
+        room={buildMatchroomCardData(item)}
+        containerStyle={focused ? { marginBottom: 0 } : undefined}
+      />
+    </View>
+  );
+});

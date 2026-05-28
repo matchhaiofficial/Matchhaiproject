@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import React, { memo, useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
@@ -435,29 +435,37 @@ export default function ZoneNotificationsModule() {
                 style={styles.segmentTabs}
             />
 
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                {loading ? (
-                    <ActivityIndicator size="small" color={COLORS.accent} />
-                ) : filteredItems.length === 0 ? (
-                    <AdminEmptyStateCard
-                        title="No admin notifications yet"
-                        description="Booking, resource, and moderation alerts will appear here."
-                        icon="notifications"
-                    />
-                ) : (
-                    filteredItems.map((item) => (
-                        <NotificationRow
-                            key={item.id}
-                            item={item}
-                            processingId={processingId}
-                            onOpen={(notification) => void openNotification(notification)}
-                            onAccept={handleAccept}
-                            onReject={handleReject}
-                            onMarkSeen={(notification) => void markSeenIfPending(notification)}
+            <FlatList
+                data={loading ? [] : filteredItems}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.content}
+                showsVerticalScrollIndicator={false}
+                removeClippedSubviews
+                initialNumToRender={8}
+                windowSize={11}
+                extraData={processingId}
+                ListEmptyComponent={
+                    loading ? (
+                        <ActivityIndicator size="small" color={COLORS.accent} />
+                    ) : (
+                        <AdminEmptyStateCard
+                            title="No admin notifications yet"
+                            description="Booking, resource, and moderation alerts will appear here."
+                            icon="notifications"
                         />
-                    ))
+                    )
+                }
+                renderItem={({ item }) => (
+                    <NotificationRow
+                        item={item}
+                        processingId={processingId}
+                        onOpen={(notification) => void openNotification(notification)}
+                        onAccept={handleAccept}
+                        onReject={handleReject}
+                        onMarkSeen={(notification) => void markSeenIfPending(notification)}
+                    />
                 )}
-            </ScrollView>
+            />
 
             <AppDialog visible={Boolean(clearDialogMode)} onClose={() => setClearDialogMode(null)}>
                 <AppModalHeader
