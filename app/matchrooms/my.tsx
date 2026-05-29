@@ -23,7 +23,7 @@ import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 
 import { useAuth } from "../../src/context/AuthContext";
-import { getUserMatchrooms, Matchroom } from "../../src/services/convex/matchService";
+import { getUserMatchroomsPage, Matchroom } from "../../src/services/convex/matchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { getRoomDisplayStatus } from "../../src/utils/matchroomLifecycle";
@@ -46,6 +46,7 @@ const DEFAULT_MATCHROOM_FILTERS: MatchroomFilters = {
     game: "all",
     dateRange: "all",
 };
+const PAGE_SIZE = 20;
 const DATE_RANGE_OPTIONS: { key: MatchroomDateRange; label: string }[] = [
     { key: "all", label: "All" },
     { key: "today", label: "Today" },
@@ -215,6 +216,7 @@ export default function MyMatchrooms() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<Tab>('hosted');
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
     const [filtersByTab, setFiltersByTab] = useState<Record<Tab, MatchroomFilters>>({
@@ -224,31 +226,93 @@ export default function MyMatchrooms() {
 
     const [hostedRooms, setHostedRooms] = useState<Matchroom[]>([]);
     const [joinedRooms, setJoinedRooms] = useState<Matchroom[]>([]);
+    const [cursorByTab, setCursorByTab] = useState<Record<Tab, string | null>>({
+        hosted: null,
+        joined: null,
+    });
+    const [doneByTab, setDoneByTab] = useState<Record<Tab, boolean>>({
+        hosted: false,
+        joined: false,
+    });
+    const [totalByTab, setTotalByTab] = useState<Record<Tab, number>>({
+        hosted: 0,
+        joined: 0,
+    });
 
-    const fetchData = async () => {
+    const mergeUniqueRooms = useCallback((current: Matchroom[], next: Matchroom[]) => {
+        const byId = new Map<string, Matchroom>();
+        [...current, ...next].forEach((item) => {
+            const id = String(item.id || item._id || "");
+            if (id) byId.set(id, item);
+        });
+        return Array.from(byId.values());
+    }, []);
+
+    const fetchData = useCallback(async (options?: { tab?: Tab; append?: boolean }) => {
         if (!user) return;
+        const tab = options?.tab || activeTab;
+        const append = options?.append === true;
+        const cursor = append ? cursorByTab[tab] : null;
+        if (append && (loadingMore || doneByTab[tab])) return;
+
+        if (append) {
+            setLoadingMore(true);
+        } else if (!refreshing) {
+            setLoading(true);
+        }
         try {
-            const res = await getUserMatchrooms(user._id);
+            const res = await getUserMatchroomsPage({
+                uid: user._id,
+                tab,
+                limit: PAGE_SIZE,
+                cursor,
+                filters: filtersByTab[tab],
+            });
             if (res.ok && res.data) {
-                setHostedRooms(res.data.hosted);
-                setJoinedRooms(res.data.joined);
+                const setter = tab === "hosted" ? setHostedRooms : setJoinedRooms;
+                setter((current) => append ? mergeUniqueRooms(current, res.data!.page) : res.data!.page);
+                setCursorByTab((current) => ({ ...current, [tab]: res.data!.continueCursor }));
+                setDoneByTab((current) => ({ ...current, [tab]: res.data!.isDone }));
+                setTotalByTab((current) => ({ ...current, [tab]: res.data!.total ?? res.data!.page.length }));
             }
         } catch (e) {
             Logger.error("MyMatchrooms", "Error fetching data", e);
         } finally {
             setLoading(false);
+            setLoadingMore(false);
             setRefreshing(false);
         }
-    };
+    }, [
+        activeTab,
+        cursorByTab,
+        doneByTab,
+        filtersByTab,
+        loadingMore,
+        mergeUniqueRooms,
+        refreshing,
+        user,
+    ]);
 
     useEffect(() => {
-        fetchData();
-    }, [user]);
+        setHostedRooms([]);
+        setJoinedRooms([]);
+        setCursorByTab({ hosted: null, joined: null });
+        setDoneByTab({ hosted: false, joined: false });
+        setTotalByTab({ hosted: 0, joined: 0 });
+    }, [user?._id]);
+
+    useEffect(() => {
+        fetchData({ tab: activeTab, append: false });
+    }, [user?._id, activeTab, filtersByTab]);
 
     const onRefresh = useCallback(() => {
         setRefreshing(true);
-        fetchData();
-    }, []);
+        fetchData({ tab: activeTab, append: false });
+    }, [activeTab, fetchData]);
+
+    const loadMore = useCallback(() => {
+        fetchData({ tab: activeTab, append: true });
+    }, [activeTab, fetchData]);
 
     const openRoom = useCallback((id: string) => {
         router.push(`/matchrooms/${id}`);
@@ -301,27 +365,7 @@ export default function MyMatchrooms() {
             [activeTab]: DEFAULT_MATCHROOM_FILTERS,
         }));
     }, [activeTab]);
-    const filteredActiveRooms = useMemo(
-        () =>
-            activeRooms.filter((item) => {
-                const status = getRoomDisplayStatus(item);
-                if (activeFilters.status !== "all" && status !== activeFilters.status) return false;
-                if (activeFilters.game !== "all" && item.game !== activeFilters.game) return false;
-                if (!isInDateRange(item, activeFilters.dateRange)) return false;
-
-                const query = normalizeSearchValue(activeFilters.searchText);
-                if (!query) return true;
-
-                const searchable = [
-                    item.title,
-                    item.game,
-                    status,
-                    getStartLabel(item),
-                ].map(normalizeSearchValue);
-                return searchable.some((value) => value.includes(query));
-            }),
-        [activeFilters, activeRooms],
-    );
+    const filteredActiveRooms = activeRooms;
 
     return (
         <Screen style={styles.screen} scroll={false}>
@@ -334,7 +378,7 @@ export default function MyMatchrooms() {
                     onPress={() => setActiveTab('hosted')}
                 >
                     <Text style={[styles.tabText, activeTab === 'hosted' && styles.activeTabText]}>
-                        Hosted ({hostedRooms.length})
+                        Hosted ({totalByTab.hosted || hostedRooms.length})
                     </Text>
                 </Pressable>
                 <Pressable
@@ -342,7 +386,7 @@ export default function MyMatchrooms() {
                     onPress={() => setActiveTab('joined')}
                 >
                     <Text style={[styles.tabText, activeTab === 'joined' && styles.activeTabText]}>
-                        Joined ({joinedRooms.length})
+                        Joined ({totalByTab.joined || joinedRooms.length})
                     </Text>
                 </Pressable>
             </View>
@@ -406,6 +450,15 @@ export default function MyMatchrooms() {
                             </Text>
                         </View>
                     }
+                    ListFooterComponent={
+                        loadingMore ? (
+                            <View style={styles.loadingContainer}>
+                                <ActivityIndicator color={COLORS.accent} />
+                            </View>
+                        ) : null
+                    }
+                    onEndReached={loadMore}
+                    onEndReachedThreshold={0.4}
                 />
             )}
 

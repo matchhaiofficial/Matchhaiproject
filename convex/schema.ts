@@ -651,6 +651,7 @@ export default defineSchema({
     paymentAmount: v.optional(v.number()),
     paymentReservedSlots: v.optional(v.number()),
     paymentCurrency: v.optional(v.string()),
+    sourcePaymentOrderRefNum: v.optional(v.string()),
     merchantSettlementStatus: v.optional(v.union(v.literal("pending"), v.literal("captured"))),
     merchantSettlementAt: v.optional(v.number()),
     merchantSettlementAmount: v.optional(v.number()),
@@ -723,6 +724,7 @@ export default defineSchema({
     .index("by_zoneId_and_status_and_createdAt", ["zoneId", "status", "createdAt"])
     .index("by_zoneId_and_bookingSource_and_createdAt", ["zoneId", "bookingSource", "createdAt"])
     .index("by_matchCode", ["matchCode"])
+    .index("by_sourcePaymentOrderRefNum", ["sourcePaymentOrderRefNum"])
     .index("by_createdAt", ["createdAt"]),
 
   // ============================================

@@ -16,6 +16,7 @@ import {
 import {
   cleanConvexErrorMessage,
   getUserFacingErrorMessage,
+  isAuthSessionError,
 } from "../../utils/userFacingErrors";
 
 export interface Slot {
@@ -390,6 +391,107 @@ function normalizeMaxPlayersForFixedFormats(roomData: Matchroom): number {
 }
 
 /**
+ * Build the Convex mutation args for a matchroom create request.
+ * Used by both direct creates and payment-backed create drafts.
+ */
+export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
+  const normalizedMaxPlayers = normalizeMaxPlayersForFixedFormats(roomData);
+
+  // Prepare players array
+  let players = roomData.players || [];
+  if (players.length === 0) {
+    players = [
+      {
+        uid: roomData.hostUid,
+        username: roomData.hostName,
+        joinedAt: Date.now(),
+        role: "Host",
+      },
+    ];
+  }
+
+  const playerUids = roomData.playerUids || players.map((p) => p.uid);
+
+  // Generate slots if not provided
+  let slotsA = roomData.slotsA || [];
+  let slotsB = roomData.slotsB || [];
+
+  if (
+    (!slotsA.length || !slotsB.length) &&
+    normalizedMaxPlayers &&
+    normalizedMaxPlayers % 2 === 0
+  ) {
+    const teamSize = normalizedMaxPlayers / 2;
+    slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
+    slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
+  }
+
+  // Calculate timing
+  const scheduledStartAt = parseScheduledStartAt(
+    roomData.scheduledDate,
+    roomData.scheduledTime
+  ) ?? undefined;
+  const lockAt = getMatchroomLockAtMs(scheduledStartAt) ?? undefined;
+  const expiresAt = undefined;
+
+  return {
+    hostUid: roomData.hostUid,
+    hostName: roomData.hostName,
+    game: roomData.game,
+    title: roomData.title || `${roomData.game} Match`,
+    description: roomData.description,
+    maxPlayers: normalizedMaxPlayers,
+    players: players.map((p) => ({
+      uid: p.uid,
+      username: p.username,
+      joinedAt: typeof p.joinedAt === "number" ? p.joinedAt : Date.now(),
+      role: p.role,
+      skillTier: p.skillTier,
+    })),
+    playerUids,
+    location: roomData.location,
+    locationMode: roomData.locationMode,
+    broadcastAreas: roomData.broadcastAreas,
+    broadcastRequestStatus: roomData.broadcastRequestStatus,
+    zoneId: roomData.zoneId,
+    zoneOwnerUid: roomData.zoneOwnerUid,
+    scheduledDate: roomData.scheduledDate,
+    scheduledTime: roomData.scheduledTime,
+    scheduledStartAt,
+    lockAt,
+    expiresAt,
+    durationMinutes: roomData.durationMinutes,
+    pricing: roomData.pricing,
+    requestedResourceAssetType: roomData.requestedResourceAssetType,
+    requestedResourceSurface: roomData.requestedResourceSurface,
+    requestedResourceTier: roomData.requestedResourceTier,
+    selectedZoneRateKey: roomData.selectedZoneRateKey,
+    slotsA,
+    slotsB,
+    captainUidA: roomData.captainUidA || roomData.hostUid,
+    captainUidB: roomData.captainUidB,
+    format: roomData.format,
+    selectedMaps: roomData.selectedMaps,
+    skillLevel: roomData.skillLevel,
+    hostSkillScore: roomData.hostSkillScore ?? undefined,
+    hostSkillTier: roomData.hostSkillTier,
+    hostRole: roomData.hostRole,
+    teamMode: roomData.teamMode,
+    teamId: roomData.teamId || undefined,
+    teamName: roomData.teamName || undefined,
+    reservedSlots: roomData.reservedSlots,
+    teamPaymentMode: roomData.teamPaymentMode,
+    bookingSource: roomData.bookingSource,
+    isPrivate: roomData.isPrivate,
+    paymentStatus: roomData.paymentStatus,
+    paymentAmount: roomData.paymentAmount,
+    paymentReservedSlots: roomData.paymentReservedSlots,
+    paymentCurrency: roomData.paymentCurrency,
+    zoneAdminApproved: roomData.zoneAdminApproved,
+  };
+}
+
+/**
  * Create a new matchroom
  */
 export async function createMatchroom(
@@ -420,105 +522,20 @@ export async function createMatchroom(
       }
     }
 
-    const normalizedMaxPlayers = normalizeMaxPlayersForFixedFormats(roomData);
-
-    // Prepare players array
-    let players = roomData.players || [];
-    if (players.length === 0) {
-      players = [
-        {
-          uid: roomData.hostUid,
-          username: roomData.hostName,
-          joinedAt: Date.now(),
-          role: "Host",
-        },
-      ];
+    const mutationArgs = buildMatchroomCreateMutationArgs(roomData) as any;
+    let matchroomId: any;
+    try {
+      matchroomId = await convex.mutation(api.matchrooms.create, mutationArgs);
+    } catch (error) {
+      if (!isAuthSessionError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      matchroomId = await convex.mutation(api.matchrooms.create, mutationArgs);
     }
-
-    const playerUids = roomData.playerUids || players.map((p) => p.uid);
-
-    // Generate slots if not provided
-    let slotsA = roomData.slotsA || [];
-    let slotsB = roomData.slotsB || [];
-
-    if (
-      (!slotsA.length || !slotsB.length) &&
-      normalizedMaxPlayers &&
-      normalizedMaxPlayers % 2 === 0
-    ) {
-      const teamSize = normalizedMaxPlayers / 2;
-      slotsA = generateSlots(teamSize, "A", players.slice(0, teamSize));
-      slotsB = generateSlots(teamSize, "B", players.slice(teamSize));
-    }
-
-    // Calculate timing
-    const scheduledStartAt = parseScheduledStartAt(
-      roomData.scheduledDate,
-      roomData.scheduledTime
-    ) ?? undefined;
-    const lockAt = getMatchroomLockAtMs(scheduledStartAt) ?? undefined;
-    const expiresAt = undefined;
-
-    const matchroomId = await convex.mutation(api.matchrooms.create, {
-      hostUid: roomData.hostUid,
-      hostName: roomData.hostName,
-      game: roomData.game,
-      title: roomData.title || `${roomData.game} Match`,
-      description: roomData.description,
-      maxPlayers: normalizedMaxPlayers,
-      players: players.map((p) => ({
-        uid: p.uid,
-        username: p.username,
-        joinedAt: typeof p.joinedAt === "number" ? p.joinedAt : Date.now(),
-        role: p.role,
-        skillTier: p.skillTier,
-      })),
-      playerUids,
-      location: roomData.location,
-      locationMode: roomData.locationMode,
-      broadcastAreas: roomData.broadcastAreas,
-      broadcastRequestStatus: roomData.broadcastRequestStatus,
-      zoneId: roomData.zoneId,
-      zoneOwnerUid: roomData.zoneOwnerUid,
-      scheduledDate: roomData.scheduledDate,
-      scheduledTime: roomData.scheduledTime,
-      scheduledStartAt,
-      lockAt,
-      expiresAt,
-      durationMinutes: roomData.durationMinutes,
-      pricing: roomData.pricing,
-      requestedResourceAssetType: roomData.requestedResourceAssetType,
-      requestedResourceSurface: roomData.requestedResourceSurface,
-      requestedResourceTier: roomData.requestedResourceTier,
-      selectedZoneRateKey: roomData.selectedZoneRateKey,
-      slotsA,
-      slotsB,
-      captainUidA: roomData.captainUidA || roomData.hostUid,
-      captainUidB: roomData.captainUidB,
-      format: roomData.format,
-      selectedMaps: roomData.selectedMaps,
-      skillLevel: roomData.skillLevel,
-      hostSkillScore: roomData.hostSkillScore ?? undefined,
-      hostSkillTier: roomData.hostSkillTier,
-      hostRole: roomData.hostRole,
-      teamMode: roomData.teamMode,
-      teamId: roomData.teamId || undefined,
-      teamName: roomData.teamName || undefined,
-      reservedSlots: roomData.reservedSlots,
-      teamPaymentMode: roomData.teamPaymentMode,
-      bookingSource: roomData.bookingSource,
-      isPrivate: roomData.isPrivate,
-      paymentStatus: roomData.paymentStatus,
-      paymentAmount: roomData.paymentAmount,
-      paymentReservedSlots: roomData.paymentReservedSlots,
-      paymentCurrency: roomData.paymentCurrency,
-      zoneAdminApproved: roomData.zoneAdminApproved,
-    });
 
     return { ok: true, id: matchroomId };
   } catch (error: any) {
-    console.error("[matchService] createMatchroom error:", error);
-    return { ok: false, message: cleanConvexErrorMessage(error, "Failed to create matchroom") };
+    const message = getUserFacingErrorMessage(error, "Failed to create matchroom");
+    return { ok: false, message };
   }
 }
 
@@ -632,6 +649,52 @@ export async function getUserMatchrooms(
     };
   } catch (error: any) {
     console.error("[matchService] getUserMatchrooms error:", error);
+    return { ok: false, message: "Failed to fetch your matchrooms" };
+  }
+}
+
+export type UserMatchroomsTab = "hosted" | "joined";
+
+export type UserMatchroomsFilters = {
+  searchText?: string;
+  status?: string;
+  game?: string;
+  dateRange?: string;
+};
+
+export type UserMatchroomsPage = {
+  page: Matchroom[];
+  isDone: boolean;
+  continueCursor: string | null;
+  total?: number;
+};
+
+export async function getUserMatchroomsPage(input: {
+  uid: string;
+  tab: UserMatchroomsTab;
+  limit?: number;
+  cursor?: string | null;
+  filters?: UserMatchroomsFilters;
+}): Promise<Result<UserMatchroomsPage>> {
+  try {
+    const result = await convex.query((api as any).matchrooms.listUserMatchroomsPage, {
+      uid: input.uid,
+      tab: input.tab,
+      limit: input.limit || 20,
+      cursor: input.cursor ?? null,
+      filters: input.filters,
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as Matchroom[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[matchService] getUserMatchroomsPage error:", error);
     return { ok: false, message: "Failed to fetch your matchrooms" };
   }
 }

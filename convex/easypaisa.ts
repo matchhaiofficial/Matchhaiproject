@@ -920,6 +920,7 @@ export const getStartCheckoutContext = internalQuery({
     userId: v.optional(v.id("users")),
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
+    matchroomCreateArgs: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
@@ -1141,6 +1142,14 @@ export const getStartCheckoutContext = internalQuery({
       throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
     }
 
+    if (
+      activeTransaction
+      && args.matchroomCreateArgs
+      && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+    ) {
+      activeTransaction = null;
+    }
+
     // Avoid reusing old pending wallet top-ups; polling updates `updatedAt`, but does not resend
     // the Easypaisa mobile-account approval request.
     if (
@@ -1177,6 +1186,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
     flow: v.string(),
     phoneSource: v.optional(v.string()),
     checkoutPhoneMasked: v.optional(v.string()),
+    matchroomCreateArgs: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1236,7 +1246,14 @@ export const createCheckoutTransactionWithLock = internalMutation({
           if (Number(pointedTransaction.amount || 0) !== Number(args.amount || 0)) {
             throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
           }
+          if (
+            args.matchroomCreateArgs
+            && !pointedTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+          ) {
+            // Do not bind a matchroom create payment to a generic wallet top-up.
+          } else {
           return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+          }
         }
       }
 
@@ -1256,6 +1273,12 @@ export const createCheckoutTransactionWithLock = internalMutation({
         if (Number(activeTransaction.amount || 0) !== Number(args.amount || 0)) {
           throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
         }
+        if (
+          args.matchroomCreateArgs
+          && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+        ) {
+          // Continue below and create a domain-linked checkout.
+        } else {
         await ctx.db.patch(args.userId, {
           activeTopupPaymentTransactionId: activeTransaction._id,
           activeTopupAmount: activeTransaction.amount,
@@ -1263,6 +1286,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
           updatedAt: now,
         });
         return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+        }
       }
     }
 
@@ -1283,6 +1307,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
         checkoutContext: {
           phoneSource: args.phoneSource || "profile",
           checkoutPhoneMasked: args.checkoutPhoneMasked || null,
+          matchroomCreateArgs: args.matchroomCreateArgs || null,
         },
         checkoutDebug: {
           env: EASYPAISA_ENV,
@@ -1459,6 +1484,7 @@ export const startCheckout = action({
     transactionType: v.optional(v.union(v.literal("MA"), v.literal("OTC"))),
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
+    matchroomCreateArgs: v.optional(v.any()),
   },
   handler: async (ctx, args): Promise<any> => {
     ensurePaymentConfig();
@@ -1471,6 +1497,7 @@ export const startCheckout = action({
       userId: args.userId,
       phone: args.phone,
       forceNew: args.forceNew,
+      matchroomCreateArgs: args.matchroomCreateArgs,
     });
     const userId = context.userId as Id<"users">;
     const userPhone = String(context.userPhone || "");
@@ -1545,6 +1572,7 @@ export const startCheckout = action({
       flow,
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
+      matchroomCreateArgs: args.matchroomCreateArgs,
     });
     const transaction = checkoutStart.transaction;
     const attempt = String(checkoutStart.attempt || "created") as CheckoutAttempt;
@@ -1886,6 +1914,7 @@ export const getCheckoutStatus = query({
       callbackCount: latest.callbackCount || 0,
       lastError: latest.lastError || null,
       providerPayload: latest.providerPayload || null,
+      finalizedMatchroomId: latest.providerPayload?.matchroomCreate?.matchroomId || null,
       createdAt: latest.createdAt,
       updatedAt: latest.updatedAt,
     };
@@ -2074,7 +2103,7 @@ export const applyProviderUpdate = internalMutation({
       };
     }
     const currentPayload = row.providerPayload || {};
-    const sourcePayload = args.source === "ipn"
+    let sourcePayload = args.source === "ipn"
       ? {
           ...currentPayload,
           ipn: {
@@ -2144,8 +2173,48 @@ export const applyProviderUpdate = internalMutation({
     }
 
     if (row.processedAt || row.status === "paid") {
+      const matchroomCreateArgs = row.kind === "wallet_topup"
+        ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
+        : null;
+      if (matchroomCreateArgs && !row.providerPayload?.matchroomCreate?.matchroomId) {
+        const finalizeResult: any = await ctx.runMutation(
+          internal.matchrooms.finalizePaidCreateFromProvider,
+          {
+            orderRefNum: row.orderRefNum,
+            userId: row.userId,
+            amount: row.amount,
+            matchroomCreateArgs,
+          },
+        );
+        const matchroomId = finalizeResult?.matchroomId;
+        if (matchroomId) {
+          await ctx.runMutation(internal.wallet.deductFundsInternal, {
+            amount: row.amount,
+            metadata: {
+              flow: String(matchroomCreateArgs.locationMode || "") === "broadcast"
+                ? "broadcast_matchroom_create"
+                : "zone_matchroom_create",
+              matchroomId: String(matchroomId),
+              provider: "easypaisa",
+              orderRefNum: row.orderRefNum,
+              transactionId: String(row._id),
+            },
+            reference: `matchroom_create:${String(matchroomId)}`,
+            source: "matchroom_create",
+            userId: row.userId,
+          });
+          sourcePayload = {
+            ...sourcePayload,
+            matchroomCreate: {
+              finalizedAt: now,
+              matchroomId: String(matchroomId),
+            },
+          };
+        }
+      }
       await ctx.db.patch(row._id, {
         ...callbackPatch,
+        providerPayload: sourcePayload,
         status: "paid",
       });
       await clearActivePaymentPointerIfMatching(ctx, row, now);
@@ -2320,6 +2389,52 @@ export const applyProviderUpdate = internalMutation({
           userId: row.userId,
           externalPaymentReference: `easypaisa:${row.orderRefNum}`,
         });
+      }
+
+      const matchroomCreateArgs = row.kind === "wallet_topup"
+        ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
+        : null;
+      if (matchroomCreateArgs) {
+        logGatewayDebug("reconcile.matchroom_create.begin", {
+          transactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          userId: String(row.userId),
+          amount: row.amount,
+        });
+        const finalizeResult: any = await ctx.runMutation(
+          internal.matchrooms.finalizePaidCreateFromProvider,
+          {
+            orderRefNum: row.orderRefNum,
+            userId: row.userId,
+            amount: row.amount,
+            matchroomCreateArgs,
+          },
+        );
+        const matchroomId = finalizeResult?.matchroomId;
+        if (matchroomId) {
+          await ctx.runMutation(internal.wallet.deductFundsInternal, {
+            amount: row.amount,
+            metadata: {
+              flow: String(matchroomCreateArgs.locationMode || "") === "broadcast"
+                ? "broadcast_matchroom_create"
+                : "zone_matchroom_create",
+              matchroomId: String(matchroomId),
+              provider: "easypaisa",
+              orderRefNum: row.orderRefNum,
+              transactionId: String(row._id),
+            },
+            reference: `matchroom_create:${String(matchroomId)}`,
+            source: "matchroom_create",
+            userId: row.userId,
+          });
+          sourcePayload = {
+            ...sourcePayload,
+            matchroomCreate: {
+              finalizedAt: now,
+              matchroomId: String(matchroomId),
+            },
+          };
+        }
       }
 
       await ctx.db.patch(row._id, {

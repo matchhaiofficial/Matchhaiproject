@@ -765,42 +765,28 @@ export async function resolveUserByAnyId(ctx: any, value?: string | null) {
 }
 
 async function requireVerifiedActor(ctx: any, expectedUid?: string) {
-  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
-  try {
-    authUser = await authComponent.getAuthUser(ctx);
-  } catch {
-    authUser = null;
-  }
-
+  const actor = await requireCurrentUser(ctx);
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
 
   console.log("[matchrooms] auth gate", {
-    authId: authUser?.userId ?? null,
-    email: authUser?.email ?? null,
+    authId: actor.authUser?.userId ?? actor.identity?.tokenIdentifier ?? actor.identity?.subject ?? null,
+    email: actor.authUser?.email ?? actor.identity?.email ?? null,
     expectedUid: expectedUid ?? null,
     expectedAuthId: expectedUser?.authId ?? null,
   });
 
-  if (authUser?.userId) {
-    const authUserRecord = await resolveUserByAnyId(ctx, authUser.userId);
-    if (!authUserRecord) {
-      throw new Error("User profile not found");
-    }
-    assertKycAccessAllowed(authUserRecord, KYC_VERIFICATION_REQUIRED_MESSAGE);
+  assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
-    if (expectedUser && expectedUser._id !== authUserRecord._id) {
-      throw new Error("You can only perform this action for your own account");
-    }
-
-    return {
-      userId: authUser.userId,
-      kycVerified: true,
-      email: authUser.email ?? null,
-      convexUser: authUserRecord,
-    };
+  if (expectedUser && expectedUser._id !== actor.user._id) {
+    throw new Error("You can only perform this action for your own account");
   }
 
-  throw new Error("Not authenticated");
+  return {
+    userId: actor.user.authId || String(actor.user._id),
+    kycVerified: true,
+    email: actor.authUser?.email ?? actor.identity?.email ?? null,
+    convexUser: actor.user,
+  };
 }
 
 async function requireRoomActor(ctx: any, room: any, allowed: Array<"host" | "captain" | "participant" | "zoneOwner">) {
@@ -2398,6 +2384,81 @@ export const getUserMatchrooms = query({
   },
 });
 
+export const listUserMatchroomsPage = query({
+  args: {
+    uid: v.string(),
+    tab: v.union(v.literal("hosted"), v.literal("joined")),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    filters: v.optional(v.object({
+      searchText: v.optional(v.string()),
+      status: v.optional(v.string()),
+      game: v.optional(v.string()),
+      dateRange: v.optional(v.string()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const now = Date.now();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayStart = startOfToday.getTime();
+    const tomorrowStart = todayStart + 24 * 60 * 60 * 1000;
+    const nextSevenDays = now + 7 * 24 * 60 * 60 * 1000;
+    const filters = args.filters || {};
+    const searchNeedle = String(filters.searchText || "").trim().toLowerCase();
+    const statusFilter = String(filters.status || "all").toLowerCase();
+    const gameFilter = String(filters.game || "all").toLowerCase();
+    const dateRange = String(filters.dateRange || "all").toLowerCase();
+
+    const hostedRooms = args.tab === "hosted"
+      ? await ctx.db
+          .query("matchrooms")
+          .withIndex("by_hostUid", (q) => q.eq("hostUid", args.uid))
+          .order("desc")
+          .collect()
+      : [];
+    const joinedRooms = args.tab === "joined"
+      ? (await getRoomsForUserViaMembers(ctx, args.uid)).filter((m) => String(m.hostUid) !== String(args.uid))
+      : [];
+
+    const rows = [...hostedRooms, ...joinedRooms]
+      .filter((room) => {
+        if (isRoomExpired(room)) return false;
+        if (statusFilter !== "all" && String(room.status || "").toLowerCase() !== statusFilter) return false;
+        if (gameFilter !== "all" && String(room.game || "").toLowerCase() !== gameFilter) return false;
+        const start = getScheduleRoomStartMs(room) || Number(room.createdAt || 0);
+        if (dateRange === "today" && !(start >= todayStart && start < tomorrowStart)) return false;
+        if (dateRange === "this_week" && !(start >= now && start <= nextSevenDays)) return false;
+        if (dateRange === "past" && !(start < todayStart)) return false;
+        if (searchNeedle) {
+          const haystack = [
+            room.title,
+            room.game,
+            room.status,
+            room.location,
+            room.scheduledDate,
+            room.scheduledTime,
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(searchNeedle)) return false;
+        }
+        return true;
+      })
+      .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
+      .map((room) => ({ ...room, id: room._id }));
+
+    const page = rows.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: nextOffset >= rows.length,
+      continueCursor: nextOffset >= rows.length ? null : String(nextOffset),
+      total: rows.length,
+    };
+  },
+});
+
 // List matchrooms by zone
 export const listByZone = query({
   args: { zoneId: v.string() },
@@ -2499,9 +2560,7 @@ export const checkCreateAvailability = query({
 // MUTATIONS
 // ============================================
 
-// Create a new matchroom
-export const create = mutation({
-  args: {
+const createMatchroomArgsValidator = {
     hostUid: v.string(),
     hostName: v.string(),
     game: v.string(),
@@ -2575,131 +2634,185 @@ export const create = mutation({
     paymentReservedSlots: v.optional(v.number()),
     paymentCurrency: v.optional(v.string()),
     zoneAdminApproved: v.optional(v.boolean()),
+    sourcePaymentOrderRefNum: v.optional(v.string()),
+};
+
+async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
+  trustedHostUid?: boolean;
+  sourcePaymentOrderRefNum?: string | null;
+}) {
+  const actor = options?.trustedHostUid
+    ? {
+        convexUser: await ctx.db.get(args.hostUid as Id<"users">),
+      }
+    : await requireVerifiedActor(ctx, args.hostUid);
+  if (!actor.convexUser) {
+    throw new Error("User profile not found");
+  }
+  const actorUid = String(actor.convexUser._id);
+
+  if (actorUid !== args.hostUid) {
+    throw new Error("You can only create a matchroom as yourself");
+  }
+
+  const sourcePaymentOrderRefNum = String(options?.sourcePaymentOrderRefNum || args.sourcePaymentOrderRefNum || "").trim();
+  if (sourcePaymentOrderRefNum) {
+    const existing = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_sourcePaymentOrderRefNum", (q: any) => q.eq("sourcePaymentOrderRefNum", sourcePaymentOrderRefNum))
+      .unique();
+    if (existing) {
+      return existing._id;
+    }
+  }
+
+  const now = Date.now();
+  const scheduleValidation = validateMatchroomScheduleWindow(args.scheduledStartAt, now);
+  if (!scheduleValidation.ok) {
+    throw new Error(scheduleValidation.message);
+  }
+
+  if (
+    args.locationMode === "zone"
+    && args.zoneId
+    && typeof args.scheduledStartAt === "number"
+  ) {
+    const conflict = await findVenueGameTimeConflict(ctx, {
+      game: args.game,
+      scheduledStartAt: args.scheduledStartAt,
+      zoneId: args.zoneId,
+    });
+    if (conflict) {
+      throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
+    }
+  }
+
+  const normalizedPlayers = await Promise.all(
+    args.players.map((player: any) =>
+      createPlayerRecord(
+        ctx,
+        args.game,
+        String(player.uid),
+        player.username,
+        typeof player.joinedAt === "number" ? player.joinedAt : now,
+        player.role,
+      ),
+    ),
+  );
+  const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
+  const hostSkill = await requireUserGameSkill(ctx, actorUid, args.game);
+  const skillStats = await buildRoomSkillStats(ctx, args.game, normalizedPlayerUids);
+
+  const matchroomId = await ctx.db.insert("matchrooms", {
+    hostUid: actorUid,
+    hostName: args.hostName,
+    game: args.game,
+    title: args.title,
+    description: args.description,
+    status: "open",
+    maxPlayers: args.maxPlayers,
+    currentPlayers: normalizedPlayers.length,
+    players: normalizedPlayers,
+    playerUids: normalizedPlayerUids,
+    location: args.location,
+    locationMode: args.locationMode as any,
+    broadcastAreas: args.broadcastAreas,
+    broadcastRequestStatus:
+      args.locationMode === "broadcast"
+        ? (args.broadcastRequestStatus || "waiting_for_fill")
+        : undefined,
+    zoneId: args.zoneId,
+    zoneOwnerUid: args.zoneOwnerUid,
+    scheduledDate: args.scheduledDate,
+    scheduledTime: args.scheduledTime,
+    scheduledStartAt: args.scheduledStartAt,
+    lockAt: args.lockAt || getMatchroomLockAt(args.scheduledStartAt) || undefined,
+    expiresAt: args.expiresAt,
+    durationMinutes: args.durationMinutes,
+    pricing: args.pricing,
+    requestedResourceAssetType: args.requestedResourceAssetType,
+    requestedResourceSurface: args.requestedResourceSurface,
+    requestedResourceTier: args.requestedResourceTier,
+    selectedZoneRateKey: args.selectedZoneRateKey,
+    matchCode: args.matchCode,
+    slotsA: args.slotsA,
+    slotsB: args.slotsB,
+    captainUidA: args.captainUidA || actorUid,
+    captainUidB: args.captainUidB,
+    format: args.format,
+    selectedMaps: args.selectedMaps,
+    skillLevel: args.skillLevel,
+    hostSkillScore: hostSkill.rating,
+    hostSkillTier: hostSkill.tier || args.hostSkillTier,
+    hostRole: args.hostRole,
+    avgSkillScoreLive: skillStats.avgSkillScoreLive,
+    totalSkillSum: skillStats.totalSkillSum,
+    ratedPlayerCount: skillStats.ratedPlayerCount,
+    teamMode: args.teamMode as any,
+    teamId: args.teamId,
+    teamName: args.teamName,
+    reservedSlots: args.reservedSlots,
+    teamPaymentMode: args.teamPaymentMode as any,
+    bookingSource: args.bookingSource,
+    isPrivate: args.isPrivate,
+    paymentStatus: args.paymentStatus as any,
+    paymentAmount: args.paymentAmount,
+    paymentReservedSlots: args.paymentReservedSlots,
+    paymentCurrency: args.paymentCurrency,
+    sourcePaymentOrderRefNum: sourcePaymentOrderRefNum || undefined,
+    zoneAdminApproved: args.zoneAdminApproved,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await syncMatchroomMembers(ctx, matchroomId, normalizedPlayerUids);
+
+  if (
+    args.locationMode === "broadcast" &&
+    (args.broadcastAreas || []).length > 0
+  ) {
+    await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
+  }
+
+  if (
+    args.locationMode === "zone" &&
+    normalizedPlayers.length >= args.maxPlayers &&
+    Number(args.paymentReservedSlots || 0) >= args.maxPlayers
+  ) {
+    await dispatchZoneAdminRequestForFullMatchroom(ctx, matchroomId);
+  }
+
+  return matchroomId;
+}
+
+// Create a new matchroom
+export const create = mutation({
+  args: createMatchroomArgsValidator,
+  handler: async (ctx, args) => {
+    return await createMatchroomFromValidatedArgs(ctx, args);
+  },
+});
+
+export const finalizePaidCreateFromProvider = internalMutation({
+  args: {
+    orderRefNum: v.string(),
+    userId: v.id("users"),
+    amount: v.number(),
+    matchroomCreateArgs: v.object(createMatchroomArgsValidator),
   },
   handler: async (ctx, args) => {
-    const actor = await requireVerifiedActor(ctx, args.hostUid);
-    const actorUid = String(actor.convexUser._id);
-
-    if (actorUid !== args.hostUid) {
-      throw new Error("You can only create a matchroom as yourself");
+    if (String(args.matchroomCreateArgs.hostUid) !== String(args.userId)) {
+      throw new Error("Payment user does not match matchroom host.");
     }
-
-    const now = Date.now();
-    const scheduleValidation = validateMatchroomScheduleWindow(args.scheduledStartAt, now);
-    if (!scheduleValidation.ok) {
-      throw new Error(scheduleValidation.message);
+    const expectedAmount = Number(args.matchroomCreateArgs.paymentAmount || 0);
+    if (expectedAmount > 0 && Math.ceil(expectedAmount) !== Math.ceil(Number(args.amount || 0))) {
+      throw new Error("Payment amount does not match matchroom request.");
     }
-
-    if (
-      args.locationMode === "zone"
-      && args.zoneId
-      && typeof args.scheduledStartAt === "number"
-    ) {
-      const conflict = await findVenueGameTimeConflict(ctx, {
-        game: args.game,
-        scheduledStartAt: args.scheduledStartAt,
-        zoneId: args.zoneId,
-      });
-      if (conflict) {
-        throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
-      }
-    }
-
-    const normalizedPlayers = await Promise.all(
-      args.players.map((player) =>
-        createPlayerRecord(
-          ctx,
-          args.game,
-          String(player.uid),
-          player.username,
-          typeof player.joinedAt === "number" ? player.joinedAt : now,
-          player.role,
-        ),
-      ),
-    );
-    const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
-    const hostSkill = await requireUserGameSkill(ctx, actorUid, args.game);
-    const skillStats = await buildRoomSkillStats(ctx, args.game, normalizedPlayerUids);
-
-    const matchroomId = await ctx.db.insert("matchrooms", {
-      hostUid: actorUid,
-      hostName: args.hostName,
-      game: args.game,
-      title: args.title,
-      description: args.description,
-      status: "open",
-      maxPlayers: args.maxPlayers,
-      currentPlayers: normalizedPlayers.length,
-      players: normalizedPlayers,
-      playerUids: normalizedPlayerUids,
-      location: args.location,
-      locationMode: args.locationMode as any,
-      broadcastAreas: args.broadcastAreas,
-      broadcastRequestStatus:
-        args.locationMode === "broadcast"
-          ? (args.broadcastRequestStatus || "waiting_for_fill")
-          : undefined,
-      zoneId: args.zoneId,
-      zoneOwnerUid: args.zoneOwnerUid,
-      scheduledDate: args.scheduledDate,
-      scheduledTime: args.scheduledTime,
-      scheduledStartAt: args.scheduledStartAt,
-      lockAt: args.lockAt || getMatchroomLockAt(args.scheduledStartAt) || undefined,
-      expiresAt: args.expiresAt,
-      durationMinutes: args.durationMinutes,
-      pricing: args.pricing,
-      requestedResourceAssetType: args.requestedResourceAssetType,
-      requestedResourceSurface: args.requestedResourceSurface,
-      requestedResourceTier: args.requestedResourceTier,
-      selectedZoneRateKey: args.selectedZoneRateKey,
-      matchCode: args.matchCode,
-      slotsA: args.slotsA,
-      slotsB: args.slotsB,
-      captainUidA: args.captainUidA || actorUid,
-      captainUidB: args.captainUidB,
-      format: args.format,
-      selectedMaps: args.selectedMaps,
-      skillLevel: args.skillLevel,
-      hostSkillScore: hostSkill.rating,
-      hostSkillTier: hostSkill.tier || args.hostSkillTier,
-      hostRole: args.hostRole,
-      avgSkillScoreLive: skillStats.avgSkillScoreLive,
-      totalSkillSum: skillStats.totalSkillSum,
-      ratedPlayerCount: skillStats.ratedPlayerCount,
-      teamMode: args.teamMode as any,
-      teamId: args.teamId,
-      teamName: args.teamName,
-      reservedSlots: args.reservedSlots,
-      teamPaymentMode: args.teamPaymentMode as any,
-      bookingSource: args.bookingSource,
-      isPrivate: args.isPrivate,
-      paymentStatus: args.paymentStatus as any,
-      paymentAmount: args.paymentAmount,
-      paymentReservedSlots: args.paymentReservedSlots,
-      paymentCurrency: args.paymentCurrency,
-      zoneAdminApproved: args.zoneAdminApproved,
-      createdAt: now,
-      updatedAt: now,
+    const matchroomId = await createMatchroomFromValidatedArgs(ctx, args.matchroomCreateArgs, {
+      trustedHostUid: true,
+      sourcePaymentOrderRefNum: args.orderRefNum,
     });
-
-    await syncMatchroomMembers(ctx, matchroomId, normalizedPlayerUids);
-
-    if (
-      args.locationMode === "broadcast" &&
-      (args.broadcastAreas || []).length > 0
-    ) {
-      await dispatchBroadcastZoneRequestsForMatchroom(ctx, matchroomId);
-    }
-
-    if (
-      args.locationMode === "zone" &&
-      normalizedPlayers.length >= args.maxPlayers &&
-      Number(args.paymentReservedSlots || 0) >= args.maxPlayers
-    ) {
-      await dispatchZoneAdminRequestForFullMatchroom(ctx, matchroomId);
-    }
-
-    return matchroomId;
+    return { ok: true, matchroomId };
   },
 });
 

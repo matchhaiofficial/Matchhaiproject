@@ -735,6 +735,110 @@ export const listBookingQueueForZone = query({
   },
 });
 
+export const listBookingQueuePageForZone = query({
+  args: {
+    zoneId: v.string(),
+    branchAreas: v.optional(v.array(v.string())),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    filters: v.optional(v.object({
+      requestKind: v.optional(v.string()),
+      status: v.optional(v.string()),
+      branchId: v.optional(v.string()),
+      game: v.optional(v.string()),
+      dateFrom: v.optional(v.number()),
+      dateTo: v.optional(v.number()),
+      searchText: v.optional(v.string()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const filters = args.filters || {};
+    const requestedStatus = String(filters.status || "active");
+    const activeStatuses = ["open", "pending_payment", "accepted"] as const;
+    const statuses = requestedStatus && requestedStatus !== "all" && requestedStatus !== "active"
+      ? [requestedStatus]
+      : [...activeStatuses];
+
+    const filteredArrays = await Promise.all(
+      statuses.map((status) =>
+        ctx.db
+          .query("bookingRequests")
+          .withIndex("by_zoneId_and_status", (q: any) =>
+            q.eq("zoneId", args.zoneId as any).eq("status", status),
+          )
+          .collect(),
+      ),
+    );
+    const deduped = new Map<string, any>();
+    filteredArrays.flat().forEach((request) => {
+      const key = getRequestIdentityKey(request);
+      const existing = deduped.get(key);
+      if (!existing || (request.createdAt || 0) > (existing.createdAt || 0)) {
+        deduped.set(key, request);
+      }
+    });
+
+    const searchNeedle = String(filters.searchText || "").trim().toLowerCase();
+    const rows = Array.from(deduped.values())
+      .filter((request: any) => {
+        if (filters.requestKind && String(request.requestKind || "direct_zone") !== String(filters.requestKind)) return false;
+        if (filters.branchId && String(request.branchId || "") !== String(filters.branchId)) return false;
+        if (filters.game && String(filters.game) !== "all" && normalizeGameKey(request.gameKey) !== normalizeGameKey(filters.game)) return false;
+        const requestTime = parseLocalDateTimeMillis(request.preferredDate, request.preferredTime) || Number(request.createdAt || 0);
+        if (filters.dateFrom !== undefined && requestTime < filters.dateFrom) return false;
+        if (filters.dateTo !== undefined && requestTime > filters.dateTo) return false;
+        if (searchNeedle) {
+          const haystack = [
+            request.title,
+            request.userName,
+            request.gameKey,
+            request.preferredDate,
+            request.preferredTime,
+            request.branchName,
+            request.targetAreaLabel,
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(searchNeedle)) return false;
+        }
+        return true;
+      })
+      .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+
+    const pageRows = rows.slice(offset, offset + limit);
+    const users = await Promise.all(
+      pageRows.map((request) => ctx.db.get(request.userId)).map((promise) => promise.catch(() => null)),
+    );
+    const userMap = new Map(pageRows.map((request, index) => [String(request.userId), users[index]]));
+    const page = pageRows.map((r: any) => ({
+      ...r,
+      id: String(r._id),
+      requestId: String(r._id),
+      userId: String(r.userId),
+      zoneId: r.zoneId ? String(r.zoneId) : undefined,
+      gameKey: normalizeGameKey(r.gameKey),
+      requestKind: r.requestKind || "direct_zone",
+      responseExpiresAt: r.responseExpiresAt,
+      targetAreaLabel: r.targetAreaLabel || undefined,
+      userName:
+        r.userName ||
+        (userMap.get(String(r.userId)) as any)?.username ||
+        (userMap.get(String(r.userId)) as any)?.fullName ||
+        "Player",
+      title: r.title || `Booking request for ${normalizeGameKey(r.gameKey).toUpperCase()}`,
+      matchroomId: (r as any).matchroomId ? String((r as any).matchroomId) : undefined,
+    }));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: nextOffset >= rows.length,
+      continueCursor: nextOffset >= rows.length ? null : String(nextOffset),
+      total: rows.length,
+    };
+  },
+});
+
 export const listBookingHistoryForZone = query({
   args: {
     zoneId: v.string(),
@@ -951,6 +1055,82 @@ export const listMatchroomsForZone = query({
 
     return Array.from(merged.values())
       .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
+  },
+});
+
+export const listMatchroomsPageForZone = query({
+  args: {
+    zoneId: v.string(),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    filters: v.optional(v.object({
+      status: v.optional(v.string()),
+      bookingSource: v.optional(v.string()),
+      paymentStatus: v.optional(v.string()),
+      dateFrom: v.optional(v.number()),
+      dateTo: v.optional(v.number()),
+      searchText: v.optional(v.string()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const limit = Math.max(1, Math.min(50, Math.floor(Number(args.limit || 20))));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const filters = args.filters || {};
+    const searchNeedle = String(filters.searchText || "").trim().toLowerCase();
+    const source = String(filters.bookingSource || "all");
+
+    const baseRows = source && source !== "all"
+      ? await ctx.db
+          .query("matchrooms")
+          .withIndex("by_zoneId_and_bookingSource_and_createdAt", (q: any) =>
+            q.eq("zoneId", args.zoneId).eq("bookingSource", source),
+          )
+          .order("desc")
+          .collect()
+      : await ctx.db
+          .query("matchrooms")
+          .withIndex("by_zoneId", (q) => q.eq("zoneId", args.zoneId))
+          .order("desc")
+          .collect();
+
+    const rows = baseRows
+      .filter((matchroom: any) =>
+        String(matchroom.zoneId || "") === args.zoneId &&
+        (matchroom.bookingSource === "zone_accepted" ||
+          matchroom.bookingSource === "walkin" ||
+          matchroom.zoneAdminApproved === true)
+      )
+      .filter((matchroom: any) => {
+        if (filters.status && String(filters.status) !== "all" && String(matchroom.status || "") !== String(filters.status)) return false;
+        if (filters.paymentStatus && String(filters.paymentStatus) !== "all" && String(matchroom.paymentStatus || "unpaid") !== String(filters.paymentStatus)) return false;
+        const start = Number(matchroom.scheduledStartAt || matchroom.createdAt || 0);
+        if (filters.dateFrom !== undefined && start < filters.dateFrom) return false;
+        if (filters.dateTo !== undefined && start > filters.dateTo) return false;
+        if (searchNeedle) {
+          const haystack = [
+            matchroom.title,
+            matchroom.game,
+            matchroom.hostName,
+            matchroom.location,
+            matchroom.scheduledDate,
+            matchroom.scheduledTime,
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(searchNeedle)) return false;
+        }
+        return true;
+      })
+      .sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .map((matchroom: any) => ({ ...matchroom, id: matchroom._id }));
+
+    const page = rows.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: nextOffset >= rows.length,
+      continueCursor: nextOffset >= rows.length ? null : String(nextOffset),
+      total: rows.length,
+    };
   },
 });
 

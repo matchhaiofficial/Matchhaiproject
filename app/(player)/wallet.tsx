@@ -1,4 +1,4 @@
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
     useCallback,
@@ -103,6 +103,7 @@ const DEFAULT_WALLET_FILTERS: WalletFilters = {
   dateRange: "all",
   amountRange: "all",
 };
+const WALLET_HISTORY_PAGE_SIZE = 20;
 const TYPE_FILTERS: { key: WalletFilterType; label: string }[] = [
   { key: "all", label: "All" },
   { key: "topup", label: "Wallet Top-up" },
@@ -413,6 +414,7 @@ export default function WalletScreen() {
   const [activeOrderRef, setActiveOrderRef] = useState<string | null>(null);
   useRouteLogger("WalletScreen", { activeTab, userId: user?._id });
   const { showToast } = useToast();
+  const convexClient = useConvex();
 
   const userId = user?._id as Id<"users"> | undefined;
   const startCheckout = useAction((api as any).easypaisa.startCheckout);
@@ -424,10 +426,12 @@ export default function WalletScreen() {
   );
   const walletBalance = walletSummary?.balance ?? 0;
   const walletHeldBalance = walletSummary?.heldBalance ?? 0;
-  const walletHistory = useQuery(
-    api.wallet.listHistory,
-    userId ? { userId } : "skip",
-  );
+  const [walletHistory, setWalletHistory] = useState<any[]>([]);
+  const [walletHistoryCursor, setWalletHistoryCursor] = useState<string | null>(null);
+  const [walletHistoryDone, setWalletHistoryDone] = useState(false);
+  const [walletHistoryLoading, setWalletHistoryLoading] = useState(false);
+  const [walletHistoryLoadingMore, setWalletHistoryLoadingMore] = useState(false);
+  const [walletHistoryTotal, setWalletHistoryTotal] = useState(0);
 
   const bookingIntents = useQuery(
     api.bookings.listIntentsByUser,
@@ -500,6 +504,57 @@ export default function WalletScreen() {
       setServiceLoading(false);
     }
   }, [user?._id]);
+
+  const mergeWalletHistory = useCallback((current: any[], next: any[]) => {
+    const byId = new Map<string, any>();
+    [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+    return Array.from(byId.values()).sort(
+      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
+    );
+  }, []);
+
+  const fetchWalletHistoryPage = useCallback(async (options?: { append?: boolean }) => {
+    if (!userId) {
+      setWalletHistory([]);
+      setWalletHistoryCursor(null);
+      setWalletHistoryDone(true);
+      setWalletHistoryTotal(0);
+      return;
+    }
+    const append = options?.append === true;
+    if (append && (walletHistoryLoadingMore || walletHistoryDone)) return;
+    if (append) {
+      setWalletHistoryLoadingMore(true);
+    } else {
+      setWalletHistoryLoading(true);
+    }
+    try {
+      const result: any = await convexClient.query((api as any).wallet.listHistoryPage, {
+        userId,
+        limit: WALLET_HISTORY_PAGE_SIZE,
+        cursor: append ? walletHistoryCursor : null,
+        filters: transactionFilters,
+      });
+      const page = Array.isArray(result?.page) ? result.page : [];
+      setWalletHistory((current) => append ? mergeWalletHistory(current, page) : page);
+      setWalletHistoryCursor(result?.continueCursor ?? null);
+      setWalletHistoryDone(Boolean(result?.isDone));
+      setWalletHistoryTotal(Number(result?.total || page.length));
+    } catch (error) {
+      Logger.error("Wallet", "Failed to fetch wallet history page", error);
+    } finally {
+      setWalletHistoryLoading(false);
+      setWalletHistoryLoadingMore(false);
+    }
+  }, [
+    convexClient,
+    mergeWalletHistory,
+    transactionFilters,
+    userId,
+    walletHistoryCursor,
+    walletHistoryDone,
+    walletHistoryLoadingMore,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -595,7 +650,8 @@ export default function WalletScreen() {
     authLoading ||
     serviceLoading ||
     (Boolean(userId) && walletSummary === undefined) ||
-    (Boolean(userId) && bookingIntents === undefined);
+    (Boolean(userId) && bookingIntents === undefined) ||
+    (Boolean(userId) && walletHistoryLoading && walletHistory.length === 0);
   const quickAmounts = [500, 1000, 2000, 5000];
   const activeTransactionFilterCount =
     Number(transactionFilters.type !== DEFAULT_WALLET_FILTERS.type) +
@@ -603,17 +659,7 @@ export default function WalletScreen() {
     Number(transactionFilters.dateRange !== DEFAULT_WALLET_FILTERS.dateRange) +
     Number(transactionFilters.amountRange !== DEFAULT_WALLET_FILTERS.amountRange);
   const walletTransactions = walletHistory || [];
-  const filteredWalletHistory = useMemo(
-    () =>
-      walletTransactions.filter((item: any) => {
-        if (transactionFilters.type !== "all" && getWalletTransactionType(item) !== transactionFilters.type) return false;
-        if (transactionFilters.status !== "all" && getWalletTransactionStatus(item) !== transactionFilters.status) return false;
-        if (!isInDateRange(item, transactionFilters.dateRange)) return false;
-        if (!isInAmountRange(item, transactionFilters.amountRange)) return false;
-        return true;
-      }),
-    [transactionFilters, walletTransactions],
-  );
+  const filteredWalletHistory = walletTransactions;
   const hasActiveCheckout = ACTIVE_CHECKOUT_STATUSES.has(
     String(checkoutStatus?.status || ""),
   );
@@ -645,6 +691,10 @@ export default function WalletScreen() {
       orderRefNum: activeOrderRef || params.orderRefNum || null,
     },
   });
+
+  useEffect(() => {
+    fetchWalletHistoryPage({ append: false });
+  }, [userId, transactionFilters]);
 
   useEffect(() => {
     if (params.orderRefNum) {
@@ -834,7 +884,7 @@ export default function WalletScreen() {
           { key: "overview", label: "Overview" },
           {
             key: "transactions",
-            label: `Transactions (${walletHistory?.length || 0})`,
+            label: `Transactions (${walletHistoryTotal || walletHistory.length || 0})`,
           },
         ]}
         value={activeTab}
@@ -860,6 +910,7 @@ export default function WalletScreen() {
                 <Text style={styles.transactionFilterSummary}>
                   {filteredWalletHistory.length} of {walletTransactions.length} transaction
                   {walletTransactions.length === 1 ? "" : "s"}
+                  {walletHistoryTotal > walletTransactions.length ? ` loaded (${walletHistoryTotal} total)` : ""}
                 </Text>
                 <Pressable
                   onPress={() => setFilterDrawerOpen(true)}
@@ -901,6 +952,15 @@ export default function WalletScreen() {
           removeClippedSubviews
           initialNumToRender={10}
           windowSize={11}
+          ListFooterComponent={
+            walletHistoryLoadingMore ? (
+              <View style={styles.loaderWrap}>
+                <ActivityIndicator color={COLORS.accent} />
+              </View>
+            ) : null
+          }
+          onEndReached={() => fetchWalletHistoryPage({ append: true })}
+          onEndReachedThreshold={0.4}
         />
       ) : (
         <ScrollView
