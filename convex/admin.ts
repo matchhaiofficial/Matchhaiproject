@@ -1604,6 +1604,115 @@ export const listPaymentsV2 = query({
   },
 });
 
+export const listPaymentsPageV2 = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(
+      v.literal("created"),
+      v.literal("redirected"),
+      v.literal("token_received"),
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("expired"),
+      v.literal("cancelled"),
+    )),
+    kind: v.optional(v.union(v.literal("booking_intent"), v.literal("wallet_topup"))),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    amountMin: v.optional(v.number()),
+    amountMax: v.optional(v.number()),
+    search: v.optional(v.string()),
+    includeReconciliation: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 5, limit), 1000);
+    const searchNeedle = String(args.search || "").trim().toLowerCase();
+    const rows = args.status
+      ? await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_status_and_createdAt", (q: any) => {
+            let r = q.eq("status", args.status);
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_createdAt", (q: any) => {
+            let r = q;
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit);
+
+    const filtered = rows.filter((row) => {
+      if (row.provider !== "easypaisa") return false;
+      if (args.kind && row.kind !== args.kind) return false;
+      const amount = Number(row.amount || 0);
+      if (args.amountMin !== undefined && amount < args.amountMin) return false;
+      if (args.amountMax !== undefined && amount > args.amountMax) return false;
+      if (searchNeedle) {
+        const haystack = `${row.orderRefNum || ""} ${row.providerReference || ""}`.toLowerCase();
+        if (!haystack.includes(searchNeedle)) return false;
+      }
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(
+      pageRows.map(async (row) => {
+        const owner: any = await ctx.db.get(row.userId);
+        const providerDescription = truncateAdminProviderText(row.providerDescription || null);
+        return {
+          id: row._id,
+          _id: row._id,
+          paymentTransactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          kind: row.kind,
+          status: row.status,
+          amount: row.amount,
+          currency: row.currency,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          processedAt: row.processedAt || null,
+          expiresAt: row.expiresAt || null,
+          providerStatus: row.providerStatus || null,
+          providerReference: row.providerReference || null,
+          providerDescription: providerDescription.text,
+          accountOwnerName: owner?.fullName || owner?.username || "Unknown user",
+          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
+          lastError: row.lastError || null,
+          callbackCount: row.callbackCount || 0,
+          providerPayload: {
+            lastProviderStatus: row.providerPayload?.lastProviderStatus || null,
+            lastSyncAt: row.providerPayload?.lastSyncAt || null,
+            flow: row.providerPayload?.flow || null,
+          },
+          reconciliation: null,
+        };
+      }),
+    );
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
 export const listZones = query({
   args: {
     sessionToken: v.string(),
@@ -1704,6 +1813,75 @@ export const listReports = query({
   },
 });
 
+export const listReportsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved"))),
+    typeGroup: v.optional(v.string()),
+    game: v.optional(v.string()),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit), 1000);
+    const needle = String(args.search || "").trim().toLowerCase();
+    const docs = args.status
+      ? await ctx.db
+          .query("reports")
+          .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db.query("reports").withIndex("by_updatedAt").order("desc").take(scanLimit);
+    const filtered = docs.filter((report: any) => {
+      if (args.game && args.game !== "All" && String(report.game || "") !== args.game) return false;
+      const createdAt = Number(report.createdAt || 0);
+      if (args.dateFrom !== undefined && createdAt < args.dateFrom) return false;
+      if (args.dateTo !== undefined && createdAt > args.dateTo) return false;
+      if (args.typeGroup && args.typeGroup !== "Any") {
+        const source = String(report.source || "");
+        const type = String(report.type || "");
+        const group =
+          source === "support_chatbot_moderation_report" ? "support"
+          : type.includes("chat_message_report") ? "chat"
+          : type === "zone_complaint" ? "zone"
+          : type === "matchroom_complaint" ? "matchroom"
+          : "player";
+        if (group !== args.typeGroup) return false;
+      }
+      if (needle) {
+        const haystack = [
+          report.reason,
+          report.description,
+          report.game,
+          report.type,
+          report.source,
+          report.targetType,
+          report.targetReference,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(pageRows.map((report) => enrichAdminReport(ctx, report, false)));
+    const nextOffset = offset + page.length;
+    const capped = docs.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
 export const getReportById = query({
   args: {
     sessionToken: v.string(),
@@ -1772,6 +1950,84 @@ export const listZoneWithdrawalRequests = query({
       .filter((row) => status === "any" || row.status === status)
       .slice(0, limit)
       .map(serializeAdminZoneWithdrawal);
+  },
+});
+
+export const listZoneWithdrawalRequestsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(
+      v.literal("any"),
+      v.literal("pending"),
+      v.literal("completed"),
+      v.literal("failed"),
+    )),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    amountMin: v.optional(v.number()),
+    amountMax: v.optional(v.number()),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 8, limit), 1000);
+    const status = args.status || "pending";
+    const rows = status !== "any"
+      ? await ctx.db
+          .query("walletTransactions")
+          .withIndex("by_type_and_status_and_createdAt", (q: any) => {
+            let r = q.eq("type", "withdrawal").eq("status", status);
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db
+          .query("walletTransactions")
+          .withIndex("by_type", (q) => q.eq("type", "withdrawal"))
+          .order("desc")
+          .take(scanLimit);
+    const needle = String(args.search || "").trim().toLowerCase();
+    const filtered = rows
+      .filter(isZoneWithdrawalRequest)
+      .filter((row) => {
+        const createdAt = Number(row.createdAt || 0);
+        if (args.dateFrom !== undefined && createdAt < args.dateFrom) return false;
+        if (args.dateTo !== undefined && createdAt > args.dateTo) return false;
+        const amount = Number(row.amount || 0);
+        if (args.amountMin !== undefined && amount < args.amountMin) return false;
+        if (args.amountMax !== undefined && amount > args.amountMax) return false;
+        if (needle) {
+          const metadata = row.metadata || {};
+          const haystack = [
+            row.reference,
+            metadata.ownerName,
+            metadata.ownerEmail,
+            metadata.venueName,
+            metadata.branchName,
+            metadata.bankName,
+            metadata.accountNumberMasked,
+            String(row.amount || ""),
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(needle)) return false;
+        }
+        return true;
+      });
+    const page = filtered.slice(offset, offset + limit).map(serializeAdminZoneWithdrawal);
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
   },
 });
 

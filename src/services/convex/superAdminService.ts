@@ -542,6 +542,13 @@ export type SuperAdminAllowlistEntry = {
 
 type Result<T> = { ok: true; data: T } | { ok: false; message: string };
 type BasicResult = { ok: true } | { ok: false; message: string };
+export type SuperAdminPageResult<T> = {
+  page: T[];
+  isDone: boolean;
+  continueCursor: string | null;
+  total?: number;
+  capped?: boolean;
+};
 
 type CacheEntry<T> = {
   expiresAt: number;
@@ -1187,6 +1194,140 @@ export async function getZoneFinanceSummaries(
   } catch (error: any) {
     console.error("[superAdminService] getZoneFinanceSummaries error", error);
     return { ok: false, message: "Failed to load zone finance summaries." };
+  }
+}
+
+export async function getZoneWithdrawalRequestsPage(
+  input?: {
+    status?: SuperAdminWithdrawalStatus | "any";
+    limit?: number;
+    cursor?: string | null;
+    dateFrom?: number;
+    dateTo?: number;
+    amountMin?: number;
+    amountMax?: number;
+    search?: string;
+  }
+): Promise<Result<SuperAdminPageResult<SuperAdminWithdrawalRequest>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listZoneWithdrawalRequestsPage, {
+      sessionToken,
+      status: input?.status || "pending",
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+      dateFrom: input?.dateFrom,
+      dateTo: input?.dateTo,
+      amountMin: input?.amountMin,
+      amountMax: input?.amountMax,
+      search: input?.search,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_withdrawals",
+      module: "withdrawals",
+      metadataSafe: { status: input?.status || "pending", paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminWithdrawalRequest[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getZoneWithdrawalRequestsPage error", error);
+    return { ok: false, message: "Failed to load withdrawal requests." };
+  }
+}
+
+export async function getAdminPaymentsPage(
+  input?: AdminPaymentsQueryInput & { cursor?: string | null },
+): Promise<Result<SuperAdminPageResult<AdminPaymentListItem>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listPaymentsPageV2, {
+      sessionToken,
+      status: input?.status,
+      kind: input?.kind,
+      dateFrom: input?.dateFrom,
+      dateTo: input?.dateTo,
+      amountMin: input?.amountMin,
+      amountMax: input?.amountMax,
+      search: input?.search,
+      includeReconciliation: input?.includeReconciliation,
+      limit: input?.limit ?? 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_payment_transaction",
+      module: "payments",
+      metadataSafe: {
+        status: input?.status || "any",
+        kind: input?.kind || "any",
+        paginated: true,
+        count: result?.page?.length || 0,
+      },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as AdminPaymentListItem[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getAdminPaymentsPage error", error);
+    return { ok: false, message: "Failed to load payments." };
+  }
+}
+
+export async function getReportsPage(input?: {
+  status?: "pending" | "reviewed" | "resolved";
+  typeGroup?: string;
+  game?: string;
+  dateFrom?: number;
+  dateTo?: number;
+  search?: string;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminReport>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listReportsPage, {
+      sessionToken,
+      status: input?.status,
+      typeGroup: input?.typeGroup,
+      game: input?.game,
+      dateFrom: input?.dateFrom,
+      dateTo: input?.dateTo,
+      search: input?.search,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_reports",
+      module: "reports",
+      metadataSafe: { status: input?.status || "all", paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminReport[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getReportsPage error", error);
+    return { ok: false, message: "Failed to load reports." };
   }
 }
 

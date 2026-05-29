@@ -64,6 +64,8 @@ type Props = {
   onSearchQueryChange: (query: string) => void;
   onResetFilters: () => void;
   filteredQueue: ZoneBookingQueueItem[];
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   pendingOffers?: any[];
   selectedRequestId: string | null;
   processingAction: ProcessingAction;
@@ -191,6 +193,8 @@ export function ZoneBookingsRequestsSection({
   onSearchQueryChange,
   onResetFilters,
   filteredQueue,
+  loadingMore = false,
+  onLoadMore,
   pendingOffers = [],
   selectedRequestId,
   processingAction,
@@ -306,6 +310,15 @@ export function ZoneBookingsRequestsSection({
           </View>
         )
       }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.listFooterLoader}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+          </View>
+        ) : null
+      }
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.4}
       renderItem={({ item }) => (
         <RequestRow
           item={item}

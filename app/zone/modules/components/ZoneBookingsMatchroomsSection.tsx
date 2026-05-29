@@ -55,6 +55,8 @@ function FilterChipGroup({ label, options, value, onSelect }: FilterGroup) {
 type Props = {
   loadingMatchrooms: boolean;
   matchrooms: ZoneMatchroomListItem[];
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   showFilters: boolean;
   onToggleFilters: () => void;
   filterGroups: FilterGroup[];
@@ -69,6 +71,8 @@ type Props = {
 export function ZoneBookingsMatchroomsSection({
   loadingMatchrooms,
   matchrooms,
+  loadingMore = false,
+  onLoadMore,
   showFilters,
   onToggleFilters,
   filterGroups,
@@ -180,6 +184,15 @@ export function ZoneBookingsMatchroomsSection({
           <Text style={styles.emptyText}>No matchrooms found for this zone.</Text>
         )
       }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.listFooterLoader}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+          </View>
+        ) : null
+      }
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.4}
       renderItem={({ item }) => (
         <MatchroomRow
           item={item}

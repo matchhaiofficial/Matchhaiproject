@@ -19,7 +19,7 @@ import {
   AdminPaymentListItem,
   AdminPaymentReconciliation,
   AdminPaymentStatus,
-  getAdminPayments,
+  getAdminPaymentsPage,
 } from "../../../src/services/convex/superAdminService";
 import { COLORS, SPACING } from "../../../src/theme";
 
@@ -190,6 +190,10 @@ export default function SuperAdminPaymentsTab() {
   const [transactions, setTransactions] = useState<AdminPaymentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<KindFilter>("Any");
   const [status, setStatus] = useState<StatusFilter>("Any");
@@ -200,25 +204,41 @@ export default function SuperAdminPaymentsTab() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Server-driven filters. reconFilter only toggles the opt-in (page-scoped) reconciliation compute.
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeRows = useCallback((current: AdminPaymentListItem[], next: AdminPaymentListItem[]) => {
+    const byId = new Map<string, AdminPaymentListItem>();
+    [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+    return Array.from(byId.values());
+  }, []);
+
+  // Server-driven filters. Reconciliation flags remain page-scoped.
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
+    else if (mode === "more") setLoadingMore(true);
     else setRefreshing(true);
     const bounds = amountRangeToBounds(amountFilter);
-    const result = await getAdminPayments({
+    const result = await getAdminPaymentsPage({
       kind: kind === "Any" ? undefined : kind,
       status: status === "Any" ? undefined : status,
       dateFrom: dateRangeToFrom(dateFilter),
       amountMin: bounds.amountMin,
       amountMax: bounds.amountMax,
       includeReconciliation: reconFilter !== "all",
+      search: search.trim() || undefined,
       limit: 50,
+      cursor: mode === "more" ? cursor : null,
     });
-    if (result.ok) setTransactions(result.data);
+    if (result.ok) {
+      setTransactions((current) => mode === "more" ? mergeRows(current, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+      setTotal(result.data.total || result.data.page.length);
+    }
     else showToast({ type: "error", title: "Payments failed", message: result.message });
     if (mode === "initial") setLoading(false);
+    else if (mode === "more") setLoadingMore(false);
     else setRefreshing(false);
-  }, [showToast, kind, status, dateFilter, amountFilter, reconFilter]);
+  }, [amountFilter, cursor, dateFilter, isDone, kind, loadingMore, mergeRows, reconFilter, search, showToast, status]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -331,6 +351,9 @@ export default function SuperAdminPaymentsTab() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={COLORS.accent} /> : null}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}

@@ -588,6 +588,11 @@ export default StyleSheet.create({
         fontFamily: FONTS.body,
         fontSize: TEXT_SIZES.caption,
     },
+    listFooterLoader: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: SPACING.md,
+    },
     walkinMatchroomItem: {
         marginBottom: SPACING.sm,
     },

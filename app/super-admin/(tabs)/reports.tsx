@@ -17,7 +17,7 @@ import SegmentedTabs from "../../../src/components/SegmentedTabs";
 import { DiscoverFilterRow } from "../../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useToast } from "../../../src/hooks/useToast";
-import { getReports, SuperAdminReport } from "../../../src/services/convex/superAdminService";
+import { getReportsPage, SuperAdminReport } from "../../../src/services/convex/superAdminService";
 import { COLORS, FONTS, SPACING } from "../../../src/theme";
 import { getReportStatusLabel, getReportStatusTone } from "../../../src/utils/statusLabels";
 
@@ -109,21 +109,45 @@ export default function SuperAdminReportsTab() {
   const [reports, setReports] = useState<SuperAdminReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ReportTypeFilter>("Any");
   const [gameFilter, setGameFilter] = useState<string>(ALL);
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeReports = useCallback((current: SuperAdminReport[], next: SuperAdminReport[]) => {
+    const byId = new Map<string, SuperAdminReport>();
+    [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+    return Array.from(byId.values());
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
+    else if (mode === "more") setLoadingMore(true);
     else setRefreshing(true);
-    const result = await getReports(tab);
-    if (result.ok) setReports(result.data);
+    const result = await getReportsPage({
+      status: tab,
+      typeGroup: typeFilter === "Any" ? undefined : typeFilter,
+      game: gameFilter === ALL ? undefined : gameFilter,
+      dateFrom: dateFilter === "Any" ? undefined : Date.now() - (dateFilter === "Today" ? 24 : dateFilter === "Last 7 Days" ? 7 * 24 : 30 * 24) * 60 * 60 * 1000,
+      search: search.trim() || undefined,
+      limit: 50,
+      cursor: mode === "more" ? cursor : null,
+    });
+    if (result.ok) {
+      setReports((current) => mode === "more" ? mergeReports(current, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    }
     else showToast({ type: "error", title: "Reports failed", message: result.message });
     if (mode === "initial") setLoading(false);
+    else if (mode === "more") setLoadingMore(false);
     else setRefreshing(false);
-  }, [showToast, tab]);
+  }, [cursor, dateFilter, gameFilter, isDone, loadingMore, mergeReports, search, showToast, tab, typeFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -245,6 +269,9 @@ export default function SuperAdminReportsTab() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={COLORS.accent} /> : null}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}

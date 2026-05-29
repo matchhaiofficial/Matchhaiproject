@@ -23,7 +23,7 @@ import { useToast } from "../../src/hooks/useToast";
 import {
   approveZoneWithdrawal,
   getZoneFinanceSummaries,
-  getZoneWithdrawalRequests,
+  getZoneWithdrawalRequestsPage,
   rejectZoneWithdrawal,
   SuperAdminZoneFinanceSummary,
   SuperAdminWithdrawalRequest,
@@ -180,6 +180,9 @@ export default function SuperAdminWithdrawalsScreen() {
   const [zoneFinanceCapped, setZoneFinanceCapped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
@@ -196,14 +199,31 @@ export default function SuperAdminWithdrawalsScreen() {
     [selectedId, withdrawals],
   );
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeWithdrawals = useCallback((current: SuperAdminWithdrawalRequest[], next: SuperAdminWithdrawalRequest[]) => {
+    const byId = new Map<string, SuperAdminWithdrawalRequest>();
+    [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+    return Array.from(byId.values());
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
+    else if (mode === "more") setLoadingMore(true);
     else setRefreshing(true);
     const [result, financeResult] = await Promise.all([
-      getZoneWithdrawalRequests({ status: tabToBackendStatus(statusTab), limit: 100 }),
+      getZoneWithdrawalRequestsPage({
+        status: tabToBackendStatus(statusTab),
+        limit: 50,
+        cursor: mode === "more" ? cursor : null,
+        search: search.trim() || undefined,
+      }),
       getZoneFinanceSummaries({ limit: 80 }),
     ]);
-    if (result.ok) setWithdrawals(result.data);
+    if (result.ok) {
+      setWithdrawals((current) => mode === "more" ? mergeWithdrawals(current, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    }
     else showToast({ type: "error", title: "Withdrawals failed", message: result.message });
     if (financeResult.ok) {
       setZoneFinance(financeResult.data.rows || []);
@@ -212,8 +232,9 @@ export default function SuperAdminWithdrawalsScreen() {
       showToast({ type: "error", title: "Zone finance failed", message: financeResult.message });
     }
     if (mode === "initial") setLoading(false);
+    else if (mode === "more") setLoadingMore(false);
     else setRefreshing(false);
-  }, [showToast, statusTab]);
+  }, [cursor, isDone, loadingMore, mergeWithdrawals, search, showToast, statusTab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -430,6 +451,9 @@ export default function SuperAdminWithdrawalsScreen() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={COLORS.accent} /> : null}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}

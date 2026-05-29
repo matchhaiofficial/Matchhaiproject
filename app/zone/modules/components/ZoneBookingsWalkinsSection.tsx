@@ -1,5 +1,5 @@
 import React from "react";
-import { FlatList, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Text, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -12,9 +12,12 @@ import {
 } from "../../../../src/services/convex/zoneAdminBookingService";
 import MatchroomCard from "../../../matchrooms/components/MatchroomCard";
 import styles from "../bookings.styles";
+import { COLORS } from "../../../../src/theme";
 
 type Props = {
   walkInRooms: ZoneMatchroomListItem[];
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   processingAction: "accept" | "reject" | "counter" | null;
   onCreateWalkIn: () => void;
   buildMatchroomCardData: (item: ZoneMatchroomListItem) => Matchroom;
@@ -36,6 +39,8 @@ const WalkinRow = React.memo(function WalkinRow({
 
 export function ZoneBookingsWalkinsSection({
   walkInRooms,
+  loadingMore = false,
+  onLoadMore,
   processingAction,
   onCreateWalkIn,
   buildMatchroomCardData,
@@ -75,6 +80,15 @@ export function ZoneBookingsWalkinsSection({
           icon="matchroom"
         />
       }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.listFooterLoader}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+          </View>
+        ) : null
+      }
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.4}
       renderItem={({ item }) => (
         <WalkinRow item={item} buildMatchroomCardData={buildMatchroomCardData} />
       )}

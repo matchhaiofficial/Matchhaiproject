@@ -113,6 +113,13 @@ export interface ZoneMatchroomListItem {
     slotsB?: any[];
 }
 
+export type ZonePageResult<T> = {
+    page: T[];
+    isDone: boolean;
+    continueCursor: string | null;
+    total?: number;
+};
+
 const POLL_INTERVAL_MS = 5000;
 const queuePollingState = new Map<string, SharedPollingState<ZoneBookingQueueItem>>();
 const matchroomPollingState = new Map<string, SharedPollingState<ZoneMatchroomListItem>>();
@@ -327,6 +334,114 @@ const normalizeBookingRequest = (data: Record<string, any>): ZoneBookingQueueIte
     };
 };
 
+const normalizeZoneMatchroom = (data: Record<string, any>): ZoneMatchroomListItem => {
+    const perPlayer = Number(data.pricing?.perPlayer ?? data.pricePerPlayer ?? 0);
+    const playersForAmount = Number(data.currentPlayers || data.maxPlayers || 0);
+    const fallbackTotal = perPlayer > 0 && playersForAmount > 0 ? perPlayer * playersForAmount : 0;
+    const totalAmountRaw = Number(data.pricing?.total ?? data.totalAmount ?? fallbackTotal ?? 0);
+    const durationMinutesRaw = Number(
+        data.durationMinutes ??
+        ((Number(data.durationHours || 0) > 0 ? Number(data.durationHours) * 60 : 0)),
+    );
+
+    return {
+        id: String(data.id || data._id),
+        hostUid: data.hostUid || null,
+        hostName: data.hostName || null,
+        title: data.title || "Matchroom",
+        game: data.game || "unknown",
+        status: data.status || "open",
+        scheduledDate: data.scheduledDate,
+        scheduledTime: data.scheduledTime,
+        maxPlayers: Number(data.maxPlayers || 0),
+        currentPlayers: Number(data.currentPlayers || 0),
+        paymentStatus: data.paymentStatus || "unpaid",
+        bookingSource: data.bookingSource || "standard",
+        walkInPaymentMode: data.walkIn?.paymentMode || null,
+        location: data.location || null,
+        branchId: data.branchId || data.walkIn?.branchId || null,
+        durationMinutes: Number.isFinite(durationMinutesRaw) ? durationMinutesRaw : 0,
+        pricePerPlayer: Number.isFinite(perPlayer) ? perPlayer : 0,
+        totalAmount: Number.isFinite(totalAmountRaw) ? totalAmountRaw : 0,
+        currency: data.pricing?.currency || data.currency || "PKR",
+        zoneId: data.zoneId || null,
+        zoneOwnerUid: data.zoneOwnerUid || null,
+        resourceIds: Array.isArray(data.resourceIds)
+            ? data.resourceIds.map((id: any) => String(id)).filter(Boolean)
+            : [],
+        createdAt: data.createdAt,
+        hostSkillTier: data.hostSkillTier || "Any",
+        hostSkillScore: data.hostSkillScore ?? null,
+        format: data.format,
+        seriesType: data.seriesType || null,
+        durationHours: data.durationHours || null,
+        overs: data.overs ? Number(data.overs) : null,
+        slotsA: data.slotsA || [],
+        slotsB: data.slotsB || [],
+    };
+};
+
+export async function fetchZoneBookingQueuePage(input: {
+    zoneId: string;
+    branchAreas?: string[];
+    limit?: number;
+    cursor?: string | null;
+    filters?: {
+        requestKind?: string;
+        status?: string;
+        branchId?: string;
+        game?: string;
+        dateFrom?: number;
+        dateTo?: number;
+        searchText?: string;
+    };
+}): Promise<ZonePageResult<ZoneBookingQueueItem>> {
+    const result = await convex.query((api as any).zoneAdminBooking.listBookingQueuePageForZone, {
+        zoneId: input.zoneId,
+        branchAreas: normalizeAreaList(input.branchAreas || []),
+        limit: input.limit || 20,
+        cursor: input.cursor ?? null,
+        filters: input.filters,
+    });
+    const page = (result?.page || [])
+        .map((row: any) => normalizeBookingRequest(row))
+        .filter((item: ZoneBookingQueueItem) => ACTIVE_QUEUE_STATUSES.has(item.status));
+    return {
+        page,
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || page.length),
+    };
+}
+
+export async function fetchZoneMatchroomsPage(input: {
+    zoneId: string;
+    limit?: number;
+    cursor?: string | null;
+    filters?: {
+        status?: string;
+        bookingSource?: string;
+        paymentStatus?: string;
+        dateFrom?: number;
+        dateTo?: number;
+        searchText?: string;
+    };
+}): Promise<ZonePageResult<ZoneMatchroomListItem>> {
+    const result = await convex.query((api as any).zoneAdminBooking.listMatchroomsPageForZone, {
+        zoneId: input.zoneId,
+        limit: input.limit || 20,
+        cursor: input.cursor ?? null,
+        filters: input.filters,
+    });
+    const page = (result?.page || []).map((row: any) => normalizeZoneMatchroom(row));
+    return {
+        page,
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || page.length),
+    };
+}
+
 /**
  * Subscribe to zone booking queue using polling.
  * For real-time reactivity, use useQuery(api.zoneAdminBooking.listBookingQueueForZone) in components.
@@ -421,52 +536,7 @@ export function subscribeZoneMatchrooms(
                 locationHints: normalizeHintList(options?.locationHints),
             });
 
-            const rows: ZoneMatchroomListItem[] = results.map((data: any) => {
-                const perPlayer = Number(data.pricing?.perPlayer ?? data.pricePerPlayer ?? 0);
-                const playersForAmount = Number(data.currentPlayers || data.maxPlayers || 0);
-                const fallbackTotal = perPlayer > 0 && playersForAmount > 0 ? perPlayer * playersForAmount : 0;
-                const totalAmountRaw = Number(data.pricing?.total ?? data.totalAmount ?? fallbackTotal ?? 0);
-                const durationMinutesRaw = Number(
-                    data.durationMinutes ??
-                    ((Number(data.durationHours || 0) > 0 ? Number(data.durationHours) * 60 : 0)),
-                );
-
-                return {
-                    id: String(data.id || data._id),
-                    hostUid: data.hostUid || null,
-                    hostName: data.hostName || null,
-                    title: data.title || "Matchroom",
-                    game: data.game || "unknown",
-                    status: data.status || "open",
-                    scheduledDate: data.scheduledDate,
-                    scheduledTime: data.scheduledTime,
-                    maxPlayers: Number(data.maxPlayers || 0),
-                    currentPlayers: Number(data.currentPlayers || 0),
-                    paymentStatus: data.paymentStatus || "unpaid",
-                    bookingSource: data.bookingSource || "standard",
-                    walkInPaymentMode: data.walkIn?.paymentMode || null,
-                    location: data.location || null,
-                    branchId: data.branchId || data.walkIn?.branchId || null,
-                    durationMinutes: Number.isFinite(durationMinutesRaw) ? durationMinutesRaw : 0,
-                    pricePerPlayer: Number.isFinite(perPlayer) ? perPlayer : 0,
-                    totalAmount: Number.isFinite(totalAmountRaw) ? totalAmountRaw : 0,
-                    currency: data.pricing?.currency || data.currency || "PKR",
-                    zoneId: data.zoneId || null,
-                    zoneOwnerUid: data.zoneOwnerUid || null,
-                    resourceIds: Array.isArray(data.resourceIds)
-                        ? data.resourceIds.map((id: any) => String(id)).filter(Boolean)
-                        : [],
-                    createdAt: data.createdAt,
-                    hostSkillTier: data.hostSkillTier || "Any",
-                    hostSkillScore: data.hostSkillScore ?? null,
-                    format: data.format,
-                    seriesType: data.seriesType || null,
-                    durationHours: data.durationHours || null,
-                    overs: data.overs ? Number(data.overs) : null,
-                    slotsA: data.slotsA || [],
-                    slotsB: data.slotsB || [],
-                };
-            });
+            const rows: ZoneMatchroomListItem[] = results.map((data: any) => normalizeZoneMatchroom(data));
 
             recordRateMetric("zone_admin.matchroom_reads_per_minute", rows.length, {
                 zoneId,
