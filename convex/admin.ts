@@ -1182,6 +1182,29 @@ export const listSuperAdminMatchrooms = query({
   },
 });
 
+export const listSuperAdminMatchroomsPage = query({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map(mapAdminMatchroom);
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
+  },
+});
+
 export const getSuperAdminMatchroomById = query({
   args: {
     sessionToken: v.string(),
@@ -1747,6 +1770,47 @@ export const listZones = query({
   },
 });
 
+export const listZonesPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(
+        v.literal("pending-review"),
+        v.literal("approved_pending_migration"),
+        v.literal("active"),
+        v.literal("rejected"),
+        v.literal("suspended")
+      )
+    ),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.status
+      ? await ctx.db
+          .query("zones")
+          .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("zones").withIndex("by_updatedAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map((zone) => ({
+      id: zone._id,
+      ...zone,
+    }));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
+  },
+});
+
 export const getZoneById = query({
   args: {
     sessionToken: v.string(),
@@ -1786,6 +1850,39 @@ export const listUsers = query({
         id: user._id,
         ...user,
       }));
+  },
+});
+
+export const listUsersPage = query({
+  args: {
+    sessionToken: v.string(),
+    accountType: v.optional(v.union(v.literal("player"), v.literal("zone"))),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.accountType
+      ? await ctx.db
+          .query("users")
+          .withIndex("by_accountType_updatedAt", (q) => q.eq("accountType", args.accountType!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("users").withIndex("by_updatedAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map((user) => ({
+      id: user._id,
+      ...user,
+    }));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
   },
 });
 
@@ -1920,6 +2017,39 @@ export const listSupportTickets = query({
       : await ctx.db.query("supportTickets").order("desc").take(limit);
 
     return await Promise.all(docs.map((ticket) => serializeSupportTicket(ctx, ticket, false)));
+  },
+});
+
+export const listSupportTicketsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(v.literal("open"), v.literal("in_review"), v.literal("resolved"))
+    ),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.status
+      ? await ctx.db
+          .query("supportTickets")
+          .withIndex("by_status_createdAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("supportTickets").order("desc").take(takeLimit);
+    const pageRows = docs.slice(offset, offset + limit);
+    const page = await Promise.all(pageRows.map((ticket) => serializeSupportTicket(ctx, ticket, false)));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
   },
 });
 

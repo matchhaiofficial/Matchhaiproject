@@ -113,6 +113,9 @@ interface DiscoverZoneListProps {
   bottomPadding?: number;
 }
 
+const PAGE_SIZE = 40;
+const MAX_DISCOVER_LIMIT = 1000;
+
 export default function DiscoverZoneList({
   filters,
   searchQuery,
@@ -121,13 +124,17 @@ export default function DiscoverZoneList({
   const router = useRouter();
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(true);
 
   const userArea = null;
   const userCity = "Karachi";
 
-  const fetchZones = useCallback(async () => {
+  const fetchZones = useCallback(async (nextLimit = PAGE_SIZE, silent = false) => {
     try {
+      if (!silent) setLoading(true);
       const rows = await convex.query(api.discover.listDiscoverZones, {
         selectedVenueType: filters.venueType,
         selectedGame: filters.gameOrSport,
@@ -138,7 +145,7 @@ export default function DiscoverZoneList({
         selectedPlatform: filters.platform,
         userArea: userArea || undefined,
         userCity: userCity || undefined,
-        limit: 200,
+        limit: nextLimit,
       });
 
       const mapped = (rows as Zone[]).map((zone) => {
@@ -154,6 +161,8 @@ export default function DiscoverZoneList({
       });
 
       setZones(mapped);
+      setLimit(nextLimit);
+      setHasMore(mapped.length >= nextLimit && nextLimit < MAX_DISCOVER_LIMIT);
       recordPayloadMetric("discover.zones_payload", mapped, {
         venueType: filters.venueType,
         game: filters.gameOrSport,
@@ -163,19 +172,28 @@ export default function DiscoverZoneList({
       Logger.error("DiscoverZones", "Failed to fetch zones", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [filters, searchQuery]);
 
   useEffect(() => {
     setLoading(true);
-    fetchZones();
+    fetchZones(PAGE_SIZE);
   }, [fetchZones]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchZones();
+    fetchZones(PAGE_SIZE);
   }, [fetchZones]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || refreshing || !hasMore) return;
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_DISCOVER_LIMIT);
+    if (nextLimit <= limit) return;
+    setLoadingMore(true);
+    fetchZones(nextLimit, true);
+  }, [fetchZones, hasMore, limit, loading, loadingMore, refreshing]);
 
   const contentContainerStyle = useMemo(
     () => [styles.listContent, { paddingBottom: bottomPadding ?? 24 }],
@@ -226,6 +244,8 @@ export default function DiscoverZoneList({
         initialNumToRender={6}
         maxToRenderPerBatch={8}
         windowSize={7}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -239,6 +259,13 @@ export default function DiscoverZoneList({
             title="No Venues Found"
             description="Try adjusting your search or filters."
           />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 16 }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            </View>
+          ) : null
         }
       />
     </View>

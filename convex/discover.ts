@@ -69,6 +69,12 @@ function getCandidateFetchLimit(limit: number, options: { min: number; max: numb
   return Math.min(options.max, Math.max(options.min, limit * multiplier));
 }
 
+function getSafeDiscoverLimit(value: number | undefined, fallback: number, max: number) {
+  const parsed = Number(value || fallback);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(parsed)));
+}
+
 function parseRoomStartAt(room: any) {
   if (typeof room?.scheduledStartAt === "number") return room.scheduledStartAt;
   const date = String(room?.scheduledDate || "").trim();
@@ -349,12 +355,12 @@ export const listDiscoverPlayers = query({
   handler: async (ctx, args) => {
     const actor = await requireCurrentUser(ctx);
     const viewerUserId = actor.user._id;
-    const limit = args.limit || 150;
+    const limit = getSafeDiscoverLimit(args.limit, 150, 1000);
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
     }
 
-    const playerFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 300 });
+    const playerFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 1200 });
     const [players, friendships, pendingRequests] = await Promise.all([
       ctx.db.query("users").withIndex("by_accountType", (q) => q.eq("accountType", "player")).take(playerFetchLimit),
       ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", viewerUserId)).collect(),
@@ -460,12 +466,12 @@ export const listDiscoverMatchrooms = query({
   },
   handler: async (ctx, args) => {
     await requireCurrentUser(ctx);
-    const limit = args.limit || 150;
+    const limit = getSafeDiscoverLimit(args.limit, 150, 1000);
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
     }
 
-    const roomFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 250 });
+    const roomFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 1200 });
     const baseRooms =
       args.selectedGame !== "all"
         ? await ctx.db
@@ -549,12 +555,12 @@ export const listDiscoverTeams = query({
   handler: async (ctx, args) => {
     const actor = await requireCurrentUser(ctx);
     const viewerUserId = actor.user._id;
-    const limit = args.limit || 50;
+    const limit = getSafeDiscoverLimit(args.limit, 50, 1000);
     if (isDisabledPhysicalGame(args.selectedGame)) {
       return [];
     }
 
-    const teamFetchLimit = getCandidateFetchLimit(limit, { min: 100, max: 200 });
+    const teamFetchLimit = getCandidateFetchLimit(limit, { min: 100, max: 1200 });
     const search = args.searchQuery.trim().toLowerCase();
     const hydrateCaptainMap = async (teams: any[]) => {
       const captainIds = Array.from(
@@ -689,12 +695,12 @@ export const listDiscoverZones = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit || 100;
+    const limit = getSafeDiscoverLimit(args.limit, 100, 1000);
     if (isDisabledPhysicalGame(args.selectedGame) || args.selectedVenueType === "courts") {
       return [];
     }
 
-    const zoneFetchLimit = getCandidateFetchLimit(limit, { min: 40, max: 100, multiplier: 2 });
+    const zoneFetchLimit = getCandidateFetchLimit(limit, { min: 40, max: 1200, multiplier: 2 });
     const zones = await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "active"))

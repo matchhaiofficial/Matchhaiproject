@@ -17,7 +17,7 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
-  getUsers,
+  getUsersPage,
   setUserSuspension,
   type SuperAdminUser,
 } from "../../src/services/convex/superAdminService";
@@ -39,6 +39,7 @@ function formatLabel(value: string) {
 }
 
 const ALL = "All";
+const PAGE_SIZE = 50;
 
 // Canonical KYC lifecycle order (matches users.kycVerificationStatus enum).
 // Missing kycVerificationStatus is treated as "not_started".
@@ -123,7 +124,10 @@ export default function SuperAdminUsersScreen() {
   const [users, setUsers] = useState<SuperAdminUser[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(ALL);
@@ -131,18 +135,32 @@ export default function SuperAdminUsersScreen() {
   const [kycFilter, setKycFilter] = useState<string>(ALL);
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeUsers = useCallback((current: SuperAdminUser[], next: SuperAdminUser[]) => {
+    const seen = new Set(current.map((user) => user.id));
+    return [...current, ...next.filter((user) => !seen.has(user.id))];
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
-    const result = await getUsers(tab === "all" ? undefined : tab);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+    const result = await getUsersPage({
+      accountType: tab === "all" ? undefined : tab,
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
     if (result.ok) {
-      setUsers(result.data);
+      setUsers((previous) => mode === "more" ? mergeUsers(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
     } else {
       showToast({ type: "error", title: "Users failed", message: result.message });
     }
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast, tab]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeUsers, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -273,10 +291,17 @@ export default function SuperAdminUsersScreen() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}
           windowSize={11}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View>
+            ) : null
+          }
         />
       )}
 
@@ -304,6 +329,7 @@ const styles = StyleSheet.create({
   searchBar: { marginBottom: SPACING.md },
   tabs: { marginBottom: SPACING.md },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   infoStack: { gap: SPACING.sm },
 });

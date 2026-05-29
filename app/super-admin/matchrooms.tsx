@@ -14,7 +14,7 @@ import Screen from "../../src/components/Screen";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
-import { getSuperAdminMatchrooms, SuperAdminMatchroom } from "../../src/services/convex/superAdminService";
+import { getSuperAdminMatchroomsPage, SuperAdminMatchroom } from "../../src/services/convex/superAdminService";
 import { COLORS, SPACING } from "../../src/theme";
 
 type MatchroomFilter = "Any" | SuperAdminMatchroom["lifecycleStatus"];
@@ -55,6 +55,7 @@ function formatDateTime(room: SuperAdminMatchroom) {
 }
 
 const ALL = "All";
+const PAGE_SIZE = 50;
 
 type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
 const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
@@ -135,7 +136,10 @@ export default function SuperAdminMatchroomsScreen() {
   const { showToast } = useToast();
   const [rooms, setRooms] = useState<SuperAdminMatchroom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<MatchroomFilter>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -146,15 +150,30 @@ export default function SuperAdminMatchroomsScreen() {
   const [zoneFilter, setZoneFilter] = useState<string>(ALL);
   const [resultFilter, setResultFilter] = useState<string>(ALL);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeRooms = useCallback((current: SuperAdminMatchroom[], next: SuperAdminMatchroom[]) => {
+    const seen = new Set(current.map((room) => room.id));
+    return [...current, ...next.filter((room) => !seen.has(room.id))];
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
-    const result = await getSuperAdminMatchrooms();
-    if (result.ok) setRooms(result.data);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+    const result = await getSuperAdminMatchroomsPage({
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
+    if (result.ok) {
+      setRooms((previous) => mode === "more" ? mergeRooms(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    }
     else showToast({ type: "error", title: "Matchrooms failed", message: result.message });
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeRooms, showToast]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -277,10 +296,17 @@ export default function SuperAdminMatchroomsScreen() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}
           windowSize={11}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View>
+            ) : null
+          }
         />
       )}
 
@@ -319,6 +345,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm },
 });

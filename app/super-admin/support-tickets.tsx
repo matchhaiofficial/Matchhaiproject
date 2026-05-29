@@ -10,7 +10,7 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
-  getSupportTickets,
+  getSupportTicketsPage,
   type SuperAdminSupportTicket,
   type SuperAdminSupportTicketStatus,
 } from "../../src/services/convex/superAdminService";
@@ -26,6 +26,7 @@ function formatValue(value?: string | null) {
 }
 
 const ALL = "All";
+const PAGE_SIZE = 50;
 const UNASSIGNED = "__unassigned__";
 const PRIORITY_ORDER = ["urgent", "high", "medium", "low"];
 
@@ -117,7 +118,10 @@ export default function SuperAdminSupportTicketsScreen() {
   const [tab, setTab] = useState<SuperAdminSupportTicketStatus>("open");
   const [tickets, setTickets] = useState<SuperAdminSupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<string>(ALL);
@@ -126,17 +130,33 @@ export default function SuperAdminSupportTicketsScreen() {
   const [assignedFilter, setAssignedFilter] = useState<string>(ALL);
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+  const mergeTickets = useCallback((current: SuperAdminSupportTicket[], next: SuperAdminSupportTicket[]) => {
+    const seen = new Set(current.map((ticket) => ticket.id));
+    return [...current, ...next.filter((ticket) => !seen.has(ticket.id))];
+  }, []);
 
-    const result = await getSupportTickets(tab, { forceRefresh: true });
-    if (result.ok) setTickets(result.data);
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "initial") setLoading(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+
+    const result = await getSupportTicketsPage({
+      status: tab,
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
+    if (result.ok) {
+      setTickets((previous) => mode === "more" ? mergeTickets(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    }
     else showToast({ type: "error", title: "Support tickets failed", message: result.message });
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast, tab]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeTickets, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -243,6 +263,8 @@ export default function SuperAdminSupportTicketsScreen() {
           renderItem={({ item }) => <TicketCard ticket={item} />}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}
@@ -261,6 +283,11 @@ export default function SuperAdminSupportTicketsScreen() {
                 icon="support"
               />
             )
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View>
+            ) : null
           }
         />
       )}
@@ -290,6 +317,7 @@ const styles = StyleSheet.create({
   searchBar: { marginBottom: SPACING.md },
   tabs: { marginBottom: SPACING.md },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

@@ -33,6 +33,9 @@ interface DiscoverMatchroomListProps {
   bottomPadding?: number;
 }
 
+const PAGE_SIZE = 40;
+const MAX_DISCOVER_LIMIT = 1000;
+
 const MatchroomRow = React.memo(function MatchroomRow({
   room,
   viewerUserId,
@@ -86,7 +89,10 @@ export default function DiscoverMatchroomList({
   const { showToast } = useToast();
   const [rooms, setRooms] = useState<Matchroom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(true);
   const [optimisticRoomStatuses, setOptimisticRoomStatuses] = useState<
     Record<string, string>
   >({});
@@ -95,15 +101,18 @@ export default function DiscoverMatchroomList({
   const { roomStatuses, activeIntentIdsByRoom } = useMyActiveMatchroomRoomStates();
   const { startJoin, setupModal } = useMatchroomJoinFlow();
 
-  const fetchRooms = useCallback(async () => {
+  const fetchRooms = useCallback(async (nextLimit = PAGE_SIZE, silent = false) => {
     if (!user) {
       setRooms([]);
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
+      setHasMore(false);
       return;
     }
 
     try {
+      if (!silent) setLoading(true);
       const rows = await convex.query(api.discover.listDiscoverMatchrooms, {
         viewerUserId: user._id as any,
         selectedGame: filters.game,
@@ -118,9 +127,11 @@ export default function DiscoverMatchroomList({
         selectedTimeline: filters.timeline,
         selectedOpenSlots: filters.openSlots,
         selectedPriceRange: filters.priceRange,
-        limit: 200,
+        limit: nextLimit,
       });
       setRooms(rows as Matchroom[]);
+      setLimit(nextLimit);
+      setHasMore(rows.length >= nextLimit && nextLimit < MAX_DISCOVER_LIMIT);
       recordPayloadMetric("discover.matchrooms_payload", rows, {
         game: filters.game,
         query: searchQuery,
@@ -129,6 +140,7 @@ export default function DiscoverMatchroomList({
       Logger.error("DiscoverMatchrooms", "Failed to fetch rooms", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [filters, searchQuery, user]);
@@ -151,13 +163,21 @@ export default function DiscoverMatchroomList({
 
   useEffect(() => {
     setLoading(true);
-    fetchRooms();
+    fetchRooms(PAGE_SIZE);
   }, [fetchRooms]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchRooms();
+    fetchRooms(PAGE_SIZE);
   }, [fetchRooms]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || refreshing || !hasMore) return;
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_DISCOVER_LIMIT);
+    if (nextLimit <= limit) return;
+    setLoadingMore(true);
+    fetchRooms(nextLimit, true);
+  }, [fetchRooms, hasMore, limit, loading, loadingMore, refreshing]);
 
   const handleRequestToJoin = useCallback(
     async (room: Matchroom) => {
@@ -304,6 +324,8 @@ export default function DiscoverMatchroomList({
         initialNumToRender={6}
         maxToRenderPerBatch={8}
         windowSize={7}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -317,6 +339,13 @@ export default function DiscoverMatchroomList({
             title="No matchrooms found"
             description="Try adjusting your search or filters, or be the first to create a matchroom."
           />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 16 }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            </View>
+          ) : null
         }
       />
 

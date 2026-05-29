@@ -70,6 +70,9 @@ type BookingFilterGroup = {
     onSelect: (value: string) => void;
 };
 
+const HISTORY_PAGE_SIZE = 20;
+const HISTORY_MAX_LIMIT = 100;
+
 const MATCHROOM_STATUS_OPTIONS: FilterOption[] = [
     { key: "all", label: "All" },
     { key: "open", label: "Open" },
@@ -522,6 +525,8 @@ export default function ZoneBookingsModule() {
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
+    const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+    const [loadingHistoryMore, setLoadingHistoryMore] = useState(false);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
     const [errorText, setErrorText] = useState<string | null>(null);
     const [matchroomLookupDone, setMatchroomLookupDone] = useState(false);
@@ -556,8 +561,31 @@ export default function ZoneBookingsModule() {
     );
     const historyRows = useQuery(
         api.zoneAdminBooking.listBookingHistoryForZone,
-        zone?.id && segment === "history" ? { zoneId: zone.id, limit: 20 } : "skip",
+        zone?.id && segment === "history" ? { zoneId: zone.id, limit: historyLimit } : "skip",
     );
+    const historyHasMore = Boolean(
+        Array.isArray(historyRows) &&
+        historyRows.length >= historyLimit &&
+        historyLimit < HISTORY_MAX_LIMIT,
+    );
+
+    useEffect(() => {
+        setHistoryLimit(HISTORY_PAGE_SIZE);
+        setLoadingHistoryMore(false);
+    }, [segment, zone?.id]);
+
+    useEffect(() => {
+        if (historyRows !== undefined) {
+            setLoadingHistoryMore(false);
+        }
+    }, [historyRows]);
+
+    const loadHistoryMore = useCallback(() => {
+        if (loadingHistoryMore || !historyHasMore) return;
+        setLoadingHistoryMore(true);
+        setHistoryLimit((current) => Math.min(current + HISTORY_PAGE_SIZE, HISTORY_MAX_LIMIT));
+    }, [historyHasMore, loadingHistoryMore]);
+
     const pageBranchAreas = useMemo(() => {
         const allAreas = new Set<string>();
         const rawBranches = Array.isArray((zone as any)?.branches) ? (zone as any).branches : [];
@@ -1427,6 +1455,8 @@ export default function ZoneBookingsModule() {
             {segment === "history" ? (
                 <ZoneBookingsHistorySection
                     loading={historyRows === undefined}
+                    loadingMore={loadingHistoryMore}
+                    onLoadMore={loadHistoryMore}
                     rows={(historyRows || []) as any[]}
                 />
             ) : null}

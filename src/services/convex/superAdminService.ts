@@ -702,6 +702,39 @@ export async function getZones(
   }
 }
 
+export async function getZonesPage(input?: {
+  status?: "pending-review" | "approved_pending_migration" | "active" | "rejected" | "suspended";
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<Zone>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listZonesPage, {
+      sessionToken,
+      status: input?.status,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_zone",
+      module: "zones",
+      metadataSafe: { status: input?.status || "all", paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: ((result?.page || []) as any[]).map(mapZone),
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getZonesPage error", error);
+    return { ok: false, message: "Failed to load zones." };
+  }
+}
+
 export async function getPendingZones(): Promise<Result<Zone[]>> {
   return getZones("pending-review");
 }
@@ -753,6 +786,39 @@ export async function getUsers(
     return { ok: true, data: users as SuperAdminUser[] };
   } catch (error: any) {
     console.error("[superAdminService] getUsers error", error);
+    return { ok: false, message: "Failed to load users." };
+  }
+}
+
+export async function getUsersPage(input?: {
+  accountType?: "player" | "zone";
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminUser>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listUsersPage, {
+      sessionToken,
+      accountType: input?.accountType,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_user",
+      module: "users",
+      metadataSafe: { accountType: input?.accountType || "all", paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminUser[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getUsersPage error", error);
     return { ok: false, message: "Failed to load users." };
   }
 }
@@ -897,6 +963,39 @@ export async function getSupportTickets(
     return { ok: true, data: tickets as SuperAdminSupportTicket[] };
   } catch (error: any) {
     console.error("[superAdminService] getSupportTickets error", error);
+    return { ok: false, message: "Failed to load support tickets." };
+  }
+}
+
+export async function getSupportTicketsPage(input?: {
+  status?: SuperAdminSupportTicketStatus;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminSupportTicket>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listSupportTicketsPage, {
+      sessionToken,
+      status: input?.status,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_support_tickets",
+      module: "support",
+      metadataSafe: { status: input?.status || "all", paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminSupportTicket[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getSupportTicketsPage error", error);
     return { ok: false, message: "Failed to load support tickets." };
   }
 }
@@ -1376,6 +1475,37 @@ export async function getSuperAdminMatchrooms(): Promise<Result<SuperAdminMatchr
     return { ok: true, data: rooms as SuperAdminMatchroom[] };
   } catch (error: any) {
     console.error("[superAdminService] getSuperAdminMatchrooms error", error);
+    return { ok: false, message: "Failed to load matchrooms." };
+  }
+}
+
+export async function getSuperAdminMatchroomsPage(input?: {
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminMatchroom>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listSuperAdminMatchroomsPage, {
+      sessionToken,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_matchrooms",
+      module: "matchrooms",
+      metadataSafe: { paginated: true, count: result?.page?.length || 0 },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminMatchroom[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminMatchroomsPage error", error);
     return { ok: false, message: "Failed to load matchrooms." };
   }
 }

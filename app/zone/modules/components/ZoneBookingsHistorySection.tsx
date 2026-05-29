@@ -135,6 +135,8 @@ const getStatusToneStyle = (tone: DerivedHistoryStatus["tone"]) => {
 
 type Props = {
   loading: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   rows: BroadcastHistoryRow[];
 };
 
@@ -191,7 +193,7 @@ const HistoryRow = React.memo(function HistoryRow({
   );
 });
 
-export function ZoneBookingsHistorySection({ loading, rows }: Props) {
+export function ZoneBookingsHistorySection({ loading, loadingMore, onLoadMore, rows }: Props) {
   const router = useRouter();
 
   if (loading) {
@@ -211,11 +213,20 @@ export function ZoneBookingsHistorySection({ loading, rows }: Props) {
       removeClippedSubviews
       initialNumToRender={8}
       windowSize={11}
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.4}
       ListEmptyComponent={
         <View style={styles.emptyStateCard}>
           <Text style={styles.emptyStateTitle}>No broadcast history yet.</Text>
           <Text style={styles.emptyText}>Closed broadcast requests and venue outcomes will appear here.</Text>
         </View>
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.content}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+          </View>
+        ) : null
       }
       renderItem={({ item: row }) => (
         <HistoryRow
