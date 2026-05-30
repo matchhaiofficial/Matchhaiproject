@@ -39,7 +39,13 @@ export default function DashboardQuickActionTile({
           >
             <AppIcon name={icon} size={24} color={color} />
           </View>
-          <Text style={styles.quickActionText}>{label}</Text>
+          <Text
+            style={styles.quickActionText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {label}
+          </Text>
         </AppCard>
       </Animated.View>
     </Pressable>

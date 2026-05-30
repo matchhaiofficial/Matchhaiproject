@@ -3631,7 +3631,28 @@ export const syncLifecycleIfDue = mutation({
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.matchroomId);
     if (!room) return { changed: false };
-    await requireRoomActor(ctx, room, ["host", "captain", "zoneOwner"]);
+
+    // Only host/captain/zoneOwner may trigger lifecycle transitions. For any
+    // other viewer (participant or public viewer opening a discoverable room)
+    // we no-op silently so opening the matchroom does not surface a raw
+    // "Not authorized" error. Server sweeps still progress lifecycle for rooms
+    // without privileged opens.
+    const actor = await requireCurrentUser(ctx);
+    const actorId = String(actor.user._id);
+    const isHost = String(room.hostUid || "") === actorId;
+    const isCaptain =
+      isHost ||
+      String(room.captainUidA || "") === actorId ||
+      String(room.captainUidB || "") === actorId;
+    let isZoneOwner = false;
+    if (room.zoneId) {
+      const zone = await ctx.db.get(room.zoneId as Id<"zones">);
+      isZoneOwner = String(zone?.ownerUid || "") === actorId;
+    }
+    if (!isHost && !isCaptain && !isZoneOwner) {
+      return { changed: false, skipped: "unauthorized" as const };
+    }
+    assertKycAccessAllowed(actor.user, KYC_VERIFICATION_REQUIRED_MESSAGE);
 
     const now = Date.now();
     const scheduledStartAt = room.scheduledStartAt || room.startTime;

@@ -459,12 +459,6 @@ export default function ZoneDashboardHome() {
                     </View>
                 ) : null}
             </Pressable>
-            <Pressable
-                onPress={handleLogout}
-                style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-            >
-                <AppIcon name="logout" size={22} tone="danger" />
-            </Pressable>
         </View>
     );
 

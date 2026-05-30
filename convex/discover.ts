@@ -106,10 +106,63 @@ function matchesTimeline(room: any, timeline: string) {
   return true;
 }
 
+const NON_DISCOVERABLE_ROOM_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "expired",
+  "closed",
+  "in-progress",
+  "admin_review",
+  "payment_failed",
+]);
+
+function isRosterFullForDiscover(room: any) {
+  const slotsA = Array.isArray(room?.slotsA) ? room.slotsA : [];
+  const slotsB = Array.isArray(room?.slotsB) ? room.slotsB : [];
+  if (slotsA.length === 0 && slotsB.length === 0) return false;
+  const teamAFilled =
+    slotsA.length === 0 ||
+    slotsA.every((slot: any) => slot?.status === "confirmed");
+  const teamBFilled =
+    slotsB.length === 0 ||
+    slotsB.every((slot: any) => slot?.status === "confirmed");
+  return teamAFilled && teamBFilled;
+}
+
 function isRoomExpired(room: any) {
-  if (["completed", "cancelled", "expired"].includes(String(room?.status || ""))) {
+  const status = String(room?.status || "").toLowerCase();
+  if (NON_DISCOVERABLE_ROOM_STATUSES.has(status)) return true;
+
+  const now = Date.now();
+
+  // Time-based expiry: if the scheduled start has passed and the roster is not
+  // full, the room is no longer joinable even if the lifecycle sweep has not
+  // yet stamped `status = "expired"`.
+  const scheduledStartAt = parseRoomStartAt(room);
+  if (
+    scheduledStartAt != null &&
+    scheduledStartAt <= now &&
+    !isRosterFullForDiscover(room)
+  ) {
     return true;
   }
+
+  // Explicit expiry field
+  const expiresAt = Number(room?.expiresAt || 0);
+  if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
+    return true;
+  }
+
+  // Broadcast rooms whose zone-response window has elapsed without a zone
+  if (
+    room?.locationMode === "broadcast" &&
+    room?.broadcastRequestStatus === "waiting_for_zones" &&
+    Number(room?.broadcastRequestExpiresAt || 0) > 0 &&
+    Number(room.broadcastRequestExpiresAt) <= now
+  ) {
+    return true;
+  }
+
   return false;
 }
 

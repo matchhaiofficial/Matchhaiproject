@@ -39,6 +39,7 @@ import { canSubmitComplain } from "../../src/utils/matchroomLifecycle";
 import {
   getSlotUserId,
 } from "./utils/matchroomLobbyState";
+import { deriveLobbyBanner, type LobbyBannerTone } from "./utils/lobbyBanner";
 import { useMatchroomDetailState } from "./hooks/useMatchroomDetailState";
 import { useMatchroomDetailActions } from "./hooks/useMatchroomDetailActions";
 import { useMatchroomDetailUiState } from "./hooks/useMatchroomDetailUiState";
@@ -557,48 +558,33 @@ export default function MatchroomDetails() {
           onLayout={(event) => logDebugLayout("lobby_scroll_view", event)}
         >
           <Animated.View style={contentEntranceStyle}>
-            {/* Expired Banner */}
-            {isExpired && (
-              <View style={[styles.banner, styles.expiredBanner]}>
-                <AppIcon name="warning" size={20} color="#FFF" />
-                <Text style={styles.bannerText}>
-                  This matchroom has expired (valid for 48 hours)
-                </Text>
-              </View>
-            )}
-
-            {/* Full / Locked Banner — "full" and "locked" are separate states.
-                Full = all slots filled. Locked = within 24h of start (or zone-confirmed).
-                A full room is NOT locked until the 24h window. */}
-            {!isExpired && (isTimeLocked || isFull) && (
-              <View
-                style={[
-                  styles.banner,
-                  isTimeLocked ? styles.lockedBanner : styles.fullBanner,
-                ]}
-              >
-                <AppIcon
-                  name={isTimeLocked ? "lock" : "people"}
-                  size={20}
-                  color="#FFF"
-                />
-                <View style={styles.bannerTextWrap}>
-                  <Text style={styles.bannerTitle}>
-                    {isTimeLocked && isFull
-                      ? "Matchroom is full and locked"
-                      : isTimeLocked
-                        ? "Matchroom is locked"
-                        : "Matchroom is full"}
-                  </Text>
-                  {isTimeLocked ? (
-                    <Text style={styles.bannerSubText}>
-                      Players can no longer leave because the match starts within
-                      24 hours.
-                    </Text>
-                  ) : null}
+            {(() => {
+              const lobbyBanner = deriveLobbyBanner(room, {
+                isExpired,
+                isFull,
+                isTimeLocked,
+              });
+              if (!lobbyBanner) return null;
+              const toneStyle: Record<LobbyBannerTone, any> = {
+                danger: styles.expiredBanner,
+                warning: styles.lockedBanner,
+                action: styles.actionBanner,
+                success: styles.successBanner,
+                info: styles.infoBanner,
+                accent: styles.fullBanner,
+              };
+              return (
+                <View style={[styles.banner, toneStyle[lobbyBanner.tone]]}>
+                  <AppIcon name={lobbyBanner.icon} size={20} color="#FFF" />
+                  <View style={styles.bannerTextWrap}>
+                    <Text style={styles.bannerTitle}>{lobbyBanner.title}</Text>
+                    {lobbyBanner.body ? (
+                      <Text style={styles.bannerSubText}>{lobbyBanner.body}</Text>
+                    ) : null}
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            })()}
 
             <MatchroomSummarySection
               room={room}

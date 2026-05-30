@@ -60,7 +60,7 @@ export default function DashboardVenueCard({
               {title}
             </Text>
             <View style={styles.bookSlotBtn}>
-              <Text style={styles.bookSlotText}>View venue</Text>
+              <Text style={styles.bookSlotText}>Check Slots</Text>
             </View>
           </View>
 

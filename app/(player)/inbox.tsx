@@ -358,21 +358,16 @@ export default function Inbox() {
       />
 
       <Animated.View style={[styles.contentWrap, entranceStyle]}>
-        <SegmentedTabs
-          items={[
-            { key: "pending", label: "Pending", badge: pendingCount > 0 ? pendingCount : undefined },
-            { key: "resolved", label: "History" },
-          ]}
-          value={activeTab}
-          onChange={setActiveTab}
-          style={styles.segmentTabs}
-        />
-
-        <View style={styles.filterBar}>
-          <Text style={styles.filterSummary}>
-            {filteredNotifications.length} of {tabNotifications.length} notification
-            {tabNotifications.length === 1 ? "" : "s"}
-          </Text>
+        <View style={styles.tabsFilterRow}>
+          <SegmentedTabs
+            items={[
+              { key: "pending", label: "Pending", badge: pendingCount > 0 ? pendingCount : undefined },
+              { key: "resolved", label: "History" },
+            ]}
+            value={activeTab}
+            onChange={setActiveTab}
+            style={styles.tabsInRow}
+          />
           <Pressable
             onPress={() => setFilterDrawerOpen(true)}
             style={({ pressed }) => [
@@ -388,6 +383,13 @@ export default function Inbox() {
               </View>
             ) : null}
           </Pressable>
+        </View>
+
+        <View style={styles.filterSummaryRow}>
+          <Text style={styles.filterSummary}>
+            {filteredNotifications.length} of {tabNotifications.length} notification
+            {tabNotifications.length === 1 ? "" : "s"}
+          </Text>
         </View>
 
       {activeTab === "resolved" && resolvedCount > 0 && (

@@ -8,7 +8,11 @@ import { AppButton, AppCard } from "../../../src/components/AppPrimitives";
 import { COLORS } from "../../../src/theme";
 
 type PendingRequest = {
-  id: string;
+  id?: string;
+  _id?: string;
+  fromUid?: string;
+  matchroomId?: string;
+  notificationId?: string;
   fromUsername?: string;
   meta?: {
     role?: string;
@@ -17,6 +21,19 @@ type PendingRequest = {
     requesterSkillTier?: string;
     roomAverageRating?: number;
   };
+};
+
+const getNotificationId = (req: PendingRequest): string | null => {
+  const direct = req._id || req.notificationId || req.id;
+  return direct ? String(direct) : null;
+};
+
+const getRequestKey = (req: PendingRequest, index: number): string => {
+  const direct = getNotificationId(req);
+  if (direct) return direct;
+  if (req.matchroomId && req.fromUid) return `${req.matchroomId}:${req.fromUid}`;
+  if (req.fromUid) return `uid:${req.fromUid}`;
+  return `pending-request-${index}`;
 };
 
 type Props = {
@@ -34,9 +51,16 @@ export function MatchroomPendingRequestsPanel({
 
   return (
     <View>
-      {requests.map((req) => (
+      {requests.map((req, index) => {
+        const notifId = getNotificationId(req);
+        const acceptKey = notifId ? `${notifId}:accept` : null;
+        const rejectKey = notifId ? `${notifId}:reject` : null;
+        const isAccepting = !!acceptKey && processingRequestId === acceptKey;
+        const isRejecting = !!rejectKey && processingRequestId === rejectKey;
+        const rowBusy = isAccepting || isRejecting;
+        return (
         <AppCard
-          key={req.id}
+          key={getRequestKey(req, index)}
           style={{
             flexDirection: "row",
             alignItems: "center",
@@ -99,10 +123,10 @@ export function MatchroomPendingRequestsPanel({
             <AppButton
               variant="success"
               size="sm"
-              disabled={processingRequestId === req.id}
+              disabled={rowBusy}
               onPress={() => onRespond(req, "accept")}
             >
-              {processingRequestId === req.id ? (
+              {isAccepting ? (
                 <ActivityIndicator size="small" color="#FFF" />
               ) : (
                 <Text
@@ -119,10 +143,10 @@ export function MatchroomPendingRequestsPanel({
             <AppButton
               variant="danger"
               size="sm"
-              disabled={processingRequestId === req.id}
+              disabled={rowBusy}
               onPress={() => onRespond(req, "reject")}
             >
-              {processingRequestId === req.id ? (
+              {isRejecting ? (
                 <ActivityIndicator size="small" color="#FFF" />
               ) : (
                 <Text
@@ -138,7 +162,8 @@ export function MatchroomPendingRequestsPanel({
             </AppButton>
           </View>
         </AppCard>
-      ))}
+        );
+      })}
     </View>
   );
 }

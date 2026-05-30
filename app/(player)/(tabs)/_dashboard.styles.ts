@@ -238,6 +238,63 @@ export default StyleSheet.create({
   section: {
     marginTop: SPACING.xl,
   },
+  uspCardWrap: {
+    marginBottom: SPACING.xs,
+  },
+  uspCard: {
+    borderRadius: CONTROL_SIZES.cardRadius + 2,
+    borderWidth: 1,
+    borderColor: `${COLORS.accent}33`,
+    backgroundColor: `${COLORS.accent}0F`,
+    padding: SPACING.md + 2,
+    gap: 6,
+  },
+  uspTagline: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: 18,
+  },
+  uspSubtitle: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interRegular,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  uspStepsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: SPACING.sm,
+    gap: 2,
+  },
+  uspStep: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  uspStepIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: `${COLORS.accent}1F`,
+    borderWidth: 1,
+    borderColor: `${COLORS.accent}33`,
+  },
+  uspStepLabel: {
+    color: COLORS.text,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 10,
+    flexShrink: 1,
+  },
+  uspStepDivider: {
+    width: 4,
+    height: 1,
+    backgroundColor: `${COLORS.accent}55`,
+  },
   quickActionsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
