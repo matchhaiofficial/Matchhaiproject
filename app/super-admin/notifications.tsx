@@ -10,7 +10,7 @@ import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   archiveSuperAdminNotification,
-  getSuperAdminNotifications,
+  getSuperAdminNotificationsPage,
   markSuperAdminNotificationRead,
   type SuperAdminNotification,
   type SuperAdminNotificationTab,
@@ -128,25 +128,42 @@ export default function SuperAdminNotificationsScreen() {
   const [tab, setTab] = useState<SuperAdminNotificationTab>("unread");
   const [items, setItems] = useState<SuperAdminNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>(ALL);
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeItems = useCallback((current: SuperAdminNotification[], next: SuperAdminNotification[]) => {
+    const seen = new Set(current.map((row) => row.id));
+    return [...current, ...next.filter((row) => !seen.has(row.id))];
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
-    const result = await getSuperAdminNotifications(tab, { forceRefresh: mode === "refresh" });
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+    const result = await getSuperAdminNotificationsPage({
+      tab,
+      limit: 50,
+      cursor: mode === "more" ? cursor : null,
+    });
     if (result.ok) {
-      setItems(result.data);
+      setItems((previous) => mode === "more" ? mergeItems(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
     } else {
       showToast({ type: "error", title: "Notifications failed", message: result.message });
     }
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast, tab]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeItems, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -271,6 +288,9 @@ export default function SuperAdminNotificationsScreen() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View> : null}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           initialNumToRender={10}
@@ -308,6 +328,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  footerLoader: {
+    paddingVertical: SPACING.md,
+    alignItems: "center",
   },
   content: {
     gap: SPACING.md,

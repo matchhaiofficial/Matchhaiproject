@@ -15,7 +15,7 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
-  getIdentityVerifications,
+  getIdentityVerificationsPage,
   manuallyVerifyIdentityVerification,
   type SuperAdminIdentityVerification,
 } from "../../src/services/convex/superAdminService";
@@ -173,27 +173,45 @@ export default function SuperAdminIdentityVerificationsScreen() {
   const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]["key"]>("all");
   const [rows, setRows] = useState<SuperAdminIdentityVerification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [manualReasons, setManualReasons] = useState<Record<string, string>>({});
   const [manualVerifyingId, setManualVerifyingId] = useState<string | null>(null);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+  const mergeRows = useCallback((current: SuperAdminIdentityVerification[], next: SuperAdminIdentityVerification[]) => {
+    const seen = new Set(current.map((row) => row.id));
+    return [...current, ...next.filter((row) => !seen.has(row.id))];
+  }, []);
 
-    const result = await getIdentityVerifications({
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "initial") setLoading(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+
+    const result = await getIdentityVerificationsPage({
       status: statusFilter === "all" ? undefined : statusFilter,
       role: roleFilter === "all" ? undefined : roleFilter,
+      limit: 50,
+      cursor: mode === "more" ? cursor : null,
     });
-    if (result.ok) setRows(result.data);
-    else showToast({ type: "error", title: "Verifications failed", message: result.message });
+    if (result.ok) {
+      setRows((previous) => mode === "more" ? mergeRows(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    } else {
+      showToast({ type: "error", title: "Verifications failed", message: result.message });
+    }
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [roleFilter, showToast, statusFilter]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeRows, roleFilter, showToast, statusFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -304,6 +322,9 @@ export default function SuperAdminIdentityVerificationsScreen() {
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View> : null}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           removeClippedSubviews
@@ -363,6 +384,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  footerLoader: {
+    paddingVertical: SPACING.md,
+    alignItems: "center",
   },
   content: {
     gap: SPACING.md,

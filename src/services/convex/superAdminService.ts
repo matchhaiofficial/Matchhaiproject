@@ -1023,6 +1023,126 @@ export async function getSuperAdminNotifications(
   }
 }
 
+export async function getSuperAdminAuditLogsPage(input?: {
+  superAdminEmail?: string;
+  action?: string;
+  module?: string;
+  status?: "success" | "failed" | "denied";
+  targetId?: string;
+  from?: number;
+  to?: number;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminAuditLog>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listSuperAdminAuditLogsPage, {
+      sessionToken,
+      superAdminEmail: input?.superAdminEmail || undefined,
+      action: input?.action || undefined,
+      module: input?.module || undefined,
+      status: input?.status,
+      targetId: input?.targetId || undefined,
+      from: input?.from,
+      to: input?.to,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_super_admin_audit_logs",
+      module: "super_admin",
+      metadataSafe: {
+        filtered: Boolean(input?.superAdminEmail || input?.action || input?.module || input?.status || input?.targetId),
+        paginated: true,
+        count: result?.page?.length || 0,
+      },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminAuditLog[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminAuditLogsPage error", error);
+    return { ok: false, message: "Failed to load audit logs." };
+  }
+}
+
+export async function getIdentityVerificationsPage(input?: {
+  status?: string;
+  role?: string;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminIdentityVerification>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listIdentityVerificationsPage, {
+      sessionToken,
+      status: input?.status,
+      role: input?.role,
+      limit: input?.limit || 50,
+      cursor: input?.cursor ?? null,
+    });
+    await recordSuperAdminAuditSafe({
+      action: "view_identity_verifications",
+      module: "identity",
+      metadataSafe: {
+        status: input?.status || "all",
+        role: input?.role || "all",
+        paginated: true,
+        count: result?.page?.length || 0,
+      },
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminIdentityVerification[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getIdentityVerificationsPage error", error);
+    return { ok: false, message: "Failed to load identity verifications." };
+  }
+}
+
+export async function getSuperAdminNotificationsPage(input: {
+  tab: SuperAdminNotificationTab;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<SuperAdminPageResult<SuperAdminNotification>>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const result = await convex.query((api as any).admin.listMyNotificationsPage, {
+      sessionToken,
+      tab: input.tab,
+      limit: input.limit || 50,
+      cursor: input.cursor ?? null,
+    });
+    return {
+      ok: true,
+      data: {
+        page: (result?.page || []) as SuperAdminNotification[],
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+        capped: Boolean(result?.capped),
+      },
+    };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminNotificationsPage error", error);
+    return { ok: false, message: "Failed to load notifications." };
+  }
+}
+
 export async function getSuperAdminUnreadNotificationCount(): Promise<Result<number>> {
   try {
     const sessionToken = await getRequiredSessionToken();

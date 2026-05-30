@@ -2053,6 +2053,171 @@ export const listSupportTicketsPage = query({
   },
 });
 
+export const listSuperAdminAuditLogsPage = query({
+  args: {
+    sessionToken: v.string(),
+    superAdminEmail: v.optional(v.string()),
+    action: v.optional(v.string()),
+    module: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("success"), v.literal("failed"), v.literal("denied"))),
+    targetId: v.optional(v.string()),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit * 4), 1000);
+    const rows = await ctx.db
+      .query("superAdminAuditLogs")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(scanLimit);
+    const normalizedEmailFilter = args.superAdminEmail ? normalizeEmail(args.superAdminEmail) : undefined;
+    const filtered = rows.filter((row) => {
+      if (normalizedEmailFilter && row.superAdminEmail !== normalizedEmailFilter) return false;
+      if (args.action && row.action !== args.action) return false;
+      if (args.module && row.module !== args.module) return false;
+      if (args.status && row.status !== args.status) return false;
+      if (args.targetId && !String(row.targetId || "").toLowerCase().includes(args.targetId.toLowerCase())) return false;
+      if (args.from && row.createdAt < args.from) return false;
+      if (args.to && row.createdAt > args.to) return false;
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit).map((row) => ({
+      id: row._id,
+      superAdminUserId: row.superAdminUserId || null,
+      superAdminAuthId: row.superAdminAuthId || null,
+      superAdminName: row.superAdminName,
+      superAdminEmail: row.superAdminEmail,
+      action: row.action,
+      module: row.module,
+      targetType: row.targetType || null,
+      targetId: row.targetId || null,
+      status: row.status,
+      reason: row.reason || null,
+      metadataSafe: row.metadataSafe || null,
+      createdAt: row.createdAt,
+    }));
+    const nextOffset = offset + pageRows.length;
+    const capped = rows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page: pageRows,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
+export const listIdentityVerificationsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.string()),
+    role: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 3, limit * 3), 600);
+    const pendingLikeStatuses = new Set(["not_started", "pending", "in_progress", "in_review"]);
+    const baseRows = args.status === "pending"
+      ? (await ctx.db
+          .query("identityVerifications")
+          .order("desc")
+          .take(scanLimit))
+          .filter((row) => pendingLikeStatuses.has(row.status))
+      : args.status
+        ? await ctx.db
+            .query("identityVerifications")
+            .withIndex("by_status_and_submittedAt", (q) => q.eq("status", args.status as any))
+            .order("desc")
+            .take(scanLimit)
+        : await ctx.db.query("identityVerifications").order("desc").take(scanLimit);
+    const filtered = args.role ? baseRows.filter((row) => row.role === args.role) : baseRows;
+    const pageDocs = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(
+      pageDocs.map(async (row) => {
+        const user = await ctx.db.get(row.userId);
+        return {
+          id: row._id,
+          userId: row.userId,
+          userName: user?.fullName || user?.username || "Unknown user",
+          userEmail: user?.email || null,
+          role: row.role,
+          provider: row.provider,
+          workflowId: row.workflowId,
+          status: row.status,
+          submittedAt: row.submittedAt,
+          verifiedAt: row.verifiedAt || null,
+          rejectedAt: row.rejectedAt || null,
+          rejectionReason: row.rejectionReason || null,
+          emailVerificationStatus: row.emailVerificationStatus || null,
+          idVerificationStatus: row.idVerificationStatus || null,
+          livenessStatus: row.livenessStatus || null,
+          faceMatchStatus: row.faceMatchStatus || null,
+          amlStatus: row.amlStatus || null,
+          ipAnalysisStatus: row.ipAnalysisStatus || null,
+        };
+      }),
+    );
+    const nextOffset = offset + page.length;
+    const capped = baseRows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
+export const listMyNotificationsPage = query({
+  args: {
+    sessionToken: v.string(),
+    tab: v.union(v.literal("unread"), v.literal("read")),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit * 4), 800);
+    const rows = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", admin.profile._id))
+      .order("desc")
+      .take(scanLimit);
+    const filtered = rows
+      .filter((notification: any) => notification.isArchived !== true)
+      .filter((notification: any) => !notification.recipientRole || notification.recipientRole === "super_admin")
+      .filter((notification: any) => (args.tab === "read" ? notification.isRead === true : notification.isRead !== true));
+    const pageDocs = filtered.slice(offset, offset + limit);
+    const page = pageDocs.map(serializeAdminNotification);
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
 export const listZoneWithdrawalRequests = query({
   args: {
     sessionToken: v.string(),

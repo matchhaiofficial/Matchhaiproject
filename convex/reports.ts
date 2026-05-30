@@ -618,6 +618,35 @@ export const listMine = query({
   },
 });
 
+export const listMineByStatusPage = query({
+  args: {
+    status: v.optional(v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved"))),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const { user } = await getAuthenticatedConvexUser(ctx);
+    const limit = Math.max(1, Math.min(args.limit || 25, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const reports = await ctx.db
+      .query("reports")
+      .withIndex("by_reporterUid", (q: any) => q.eq("reporterUid", user._id))
+      .collect();
+    const filtered = args.status ? reports.filter((report: any) => report.status === args.status) : reports;
+    const sorted = sortReportsDesc(filtered);
+    const pageDocs = sorted.slice(offset, offset + limit);
+    const page = await Promise.all(pageDocs.map((report) => enrichReportForReporter(ctx, report)));
+    const nextOffset = offset + page.length;
+    const isDone = nextOffset >= sorted.length;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: sorted.length,
+    };
+  },
+});
+
 export const listByStatus = query({
   args: {
     status: v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved")),

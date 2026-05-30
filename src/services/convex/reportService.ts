@@ -302,6 +302,39 @@ export async function getMyReports(status?: ReportStatus): Promise<Result<AppRep
   }
 }
 
+export type MyReportsPageResult = {
+  page: AppReport[];
+  isDone: boolean;
+  continueCursor: string | null;
+  total?: number;
+};
+
+export async function getMyReportsPage(input: {
+  status?: ReportStatus;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<MyReportsPageResult>> {
+  try {
+    const result: any = await convex.query((api as any).reports.listMineByStatusPage, {
+      status: input.status,
+      limit: input.limit || 25,
+      cursor: input.cursor ?? null,
+    });
+    return {
+      ok: true,
+      data: {
+        page: ((result?.page || []) as any[]).map(toAppReport),
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    Logger.error("reportService", "getMyReportsPage failed", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load reports.") };
+  }
+}
+
 export async function getMyReportById(reportId: string): Promise<Result<AppReport>> {
   try {
     const rows = await getMyReportRows();

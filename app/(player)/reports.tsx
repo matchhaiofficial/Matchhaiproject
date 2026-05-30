@@ -14,7 +14,7 @@ import { AppCard, StatusPill } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
-import { AppReport, getMyReports, ReportStatus } from "../../src/services/convex/reportService";
+import { AppReport, getMyReportsPage, ReportStatus } from "../../src/services/convex/reportService";
 import { COLORS } from "../../src/theme";
 import { getReportStatusLabel } from "../../src/utils/statusLabels";
 import styles from "./reports.styles";
@@ -67,28 +67,49 @@ const ReportRow = React.memo(function ReportRow({
   );
 });
 
+const PAGE_SIZE = 25;
+
 export default function PlayerReportsScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<ReportTab>("pending");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [reports, setReports] = useState<AppReport[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   useRouteLogger("PlayerReportsScreen", { activeTab });
 
-  const loadReports = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+  const mergeReports = useCallback((current: AppReport[], next: AppReport[]) => {
+    const seen = new Set(current.map((r) => r.id));
+    return [...current, ...next.filter((r) => !seen.has(r.id))];
+  }, []);
 
-    const result = await getMyReports(activeTab as ReportStatus);
+  const loadReports = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "initial") setLoading(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+
+    const result = await getMyReportsPage({
+      status: activeTab as ReportStatus,
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
     if (result.ok) {
-      setReports(result.data);
-    } else {
+      setReports((previous) => mode === "more" ? mergeReports(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    } else if (mode !== "more") {
       setReports([]);
+      setCursor(null);
+      setIsDone(true);
     }
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [activeTab]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [activeTab, cursor, isDone, loadingMore, mergeReports]);
 
   useFocusEffect(
     useCallback(() => {
@@ -146,6 +167,8 @@ export default function PlayerReportsScreen() {
               tintColor={COLORS.accent}
             />
           }
+          onEndReached={() => loadReports("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <AppCard variant="empty">
@@ -154,6 +177,13 @@ export default function PlayerReportsScreen() {
                 Reports you submit from matchrooms, player profiles, and venue pages will appear here.
               </Text>
             </AppCard>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loaderWrap}>
+                <ActivityIndicator color={COLORS.accent} />
+              </View>
+            ) : null
           }
           removeClippedSubviews
           initialNumToRender={10}
