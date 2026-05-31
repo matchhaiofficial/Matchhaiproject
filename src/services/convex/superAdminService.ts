@@ -413,8 +413,18 @@ export type SuperAdminWithdrawalRequest = {
   accountNumberMasked?: string | null;
   accountNumberLast4?: string | null;
   ownerName?: string | null;
+  ownerEmail?: string | null;
+  ownerPhone?: string | null;
+  ownerCity?: string | null;
+  ownerKycStatus?: string | null;
+  ownerAccountStatus?: string | null;
+  availableBalance?: number | null;
+  zoneName?: string | null;
+  zoneStatus?: string | null;
+  zoneCity?: string | null;
   adminDecision?: "approved" | "rejected" | null;
   decidedAt?: number | null;
+  rejectionReason?: string | null;
 };
 
 export type SuperAdminZoneFinanceSummary = {
@@ -1287,6 +1297,36 @@ export async function resolveSupportTicket(ticketId: string, resolutionSummary: 
   } catch (error: any) {
     console.error("[superAdminService] resolveSupportTicket error", error);
     return { ok: false, message: getUserFacingErrorMessage(error, "Failed to resolve support ticket.") };
+  }
+}
+
+export async function processAccountDeletion(ticketId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.processAccountDeletion, {
+      sessionToken,
+      ticketId: ticketId as Id<"supportTickets">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] processAccountDeletion error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to process account deletion.") };
+  }
+}
+
+export async function deleteUserAccount(userId: string): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.deleteUserAccount, {
+      sessionToken,
+      userId: userId as Id<"users">,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] deleteUserAccount error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to delete user account.") };
   }
 }
 

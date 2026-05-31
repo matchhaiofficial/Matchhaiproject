@@ -6,11 +6,22 @@ export const DEFAULT_USER_FACING_ERROR =
 export const SESSION_EXPIRED_MESSAGE =
   "Your session has expired. Please log in again.";
 
-// Matches the auth/session failures Convex surfaces when a function requires an
-// identity but the request had no (valid) token: better-auth's "Unauthenticated"
-// ConvexError plus the "please sign in" guards used across our Convex handlers.
-const AUTH_SESSION_ERROR_MARKER =
-  /\bunauthenticated\b|not authenticated|please sign in|please log ?in|sign in to continue|session (?:has )?expired|auth(?:entication)? (?:required|expired)/i;
+export const SESSION_VERIFY_MESSAGE =
+  "We could not verify your session. Please refresh and try again.";
+
+// True session / token failures: token absent, expired, or explicitly signed-out.
+const SESSION_EXPIRED_MARKER =
+  /\bunauthenticated\b|not authenticated|please sign in|please log ?in|sign in to continue|session (?:has )?expired|authentication expired/i;
+
+// Identity-lookup failures: token present but backend could not match a user record.
+// Distinct from session expiry — the user IS authenticated but the lookup failed.
+const AUTH_REQUIRED_MARKER = /\bauthentication required\b/i;
+
+// Combined marker used by isAuthSessionError (retry logic, etc.)
+const AUTH_SESSION_ERROR_MARKER = new RegExp(
+  `${SESSION_EXPIRED_MARKER.source}|${AUTH_REQUIRED_MARKER.source}`,
+  "i",
+);
 
 export function isAuthSessionError(error: unknown): boolean {
   return AUTH_SESSION_ERROR_MARKER.test(getRawErrorMessage(error));
@@ -64,8 +75,11 @@ export function getUserFacingErrorMessage(
 ): string {
   const raw = getRawErrorMessage(error);
 
-  if (AUTH_SESSION_ERROR_MARKER.test(raw)) {
+  if (SESSION_EXPIRED_MARKER.test(raw)) {
     return SESSION_EXPIRED_MESSAGE;
+  }
+  if (AUTH_REQUIRED_MARKER.test(raw)) {
+    return SESSION_VERIFY_MESSAGE;
   }
 
   if (/slot is no longer available|selected slot is no longer available/i.test(raw)) {

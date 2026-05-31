@@ -128,32 +128,9 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         const openSlots = [...(room.slotsA || []), ...(room.slotsB || [])].filter(
             (slot) => slot.status === "open"
         );
-
-        if (openSlots.length === 0) {
-            return null;
-        }
-
-        const roleCounts = new Map<string, number>();
-        for (const slot of openSlots) {
-            const role = String(slot.role || "Player").trim() || "Player";
-            roleCounts.set(role, (roleCounts.get(role) || 0) + 1);
-        }
-
-        const sortedRoles = Array.from(roleCounts.entries()).sort((left, right) => {
-            if (right[1] !== left[1]) return right[1] - left[1];
-            return left[0].localeCompare(right[0]);
-        });
-
-        const [topRole, topCount] = sortedRoles[0];
-        const totalOpen = openSlots.length;
-        const hasMultipleRoles = sortedRoles.length > 1;
-
-        if (hasMultipleRoles || topCount !== 1) {
-            return `${totalOpen}x ${topRole}`;
-        }
-
-        return topRole;
-    }, [room.hostSkillTier, room.skillLevel, room.slotsA, room.slotsB]);
+        if (openSlots.length === 0) return null;
+        return openSlots.length === 1 ? "1 seat remaining" : `${openSlots.length} seats remaining`;
+    }, [room.slotsA, room.slotsB]);
 
     const friendJoinedLabel = useMemo(() => {
         const total = Number(room.friendJoinedCount || 0);

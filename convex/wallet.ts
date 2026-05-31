@@ -10,6 +10,7 @@ async function getWalletUserRecord(
   userId?: Id<"users">,
   options?: { allowInternalUserId?: boolean },
 ) {
+  // Primary: Better Auth session lookup.
   let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
   try {
     authUser = await authComponent.getAuthUser(ctx);
@@ -22,17 +23,38 @@ async function getWalletUserRecord(
       .query("users")
       .withIndex("by_authId", (q: any) => q.eq("authId", authUser.userId))
       .unique();
+    if (user) return user;
+  }
 
-    if (user) {
-      return user;
+  // Fallback: Convex JWT identity with normalized candidates.
+  // Handles both stored forms: full "https://issuer|shortId" and plain "shortId".
+  // Required when Better Auth getAuthUser returns null but ctx.auth has a valid token.
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity) {
+    const candidates = new Set<string>();
+    for (const raw of [identity.subject, identity.tokenIdentifier]) {
+      if (!raw) continue;
+      candidates.add(raw);
+      // tokenIdentifier is typically "https://issuer|shortId"; also try the shortId alone.
+      if (raw.includes("|")) {
+        const suffix = raw.split("|").pop();
+        if (suffix) candidates.add(suffix);
+      }
+    }
+    for (const candidate of candidates) {
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_authId", (q: any) => q.eq("authId", candidate))
+        .unique();
+      if (user) return user;
     }
   }
 
+  // Internal server calls: allow direct userId lookup when the caller has already
+  // verified the actor via requireCurrentUser / requireVerifiedActor.
   if (userId && options?.allowInternalUserId) {
     const user = await ctx.db.get(userId);
-    if (user) {
-      return user;
-    }
+    if (user) return user;
   }
 
   throw new Error("Authentication required.");
@@ -622,7 +644,7 @@ const deductFundsArgs = {
     userId: v.optional(v.id("users")),
 };
 
-async function deductWalletFunds(
+export async function deductWalletFunds(
   ctx: any,
   args: {
     amount: number;

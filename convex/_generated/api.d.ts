@@ -58,6 +58,7 @@ import type * as zoneAdminResources from "../zoneAdminResources.js";
 import type * as zoneAudit from "../zoneAudit.js";
 import type * as zoneBranchMigration from "../zoneBranchMigration.js";
 import type * as zonePilot from "../zonePilot.js";
+import type * as zoneWallet from "../zoneWallet.js";
 import type * as zoneWithdrawals from "../zoneWithdrawals.js";
 import type * as zones from "../zones.js";
 
@@ -118,6 +119,7 @@ declare const fullApi: ApiFromModules<{
   zoneAudit: typeof zoneAudit;
   zoneBranchMigration: typeof zoneBranchMigration;
   zonePilot: typeof zonePilot;
+  zoneWallet: typeof zoneWallet;
   zoneWithdrawals: typeof zoneWithdrawals;
   zones: typeof zones;
 }>;

@@ -314,7 +314,7 @@ const formatKycBannerMessage = (status?: string | null, reason?: string | null) 
 export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
-  const { user, authUser, refreshSession } = useAuth();
+  const { user, authUser, refreshSession, refreshUser } = useAuth();
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
@@ -463,20 +463,26 @@ export default function PlayerDashboard() {
   }, [showToast, startDiditKyc]);
 
   const handleRefreshVerification = useCallback(async () => {
-    if (!currentKyc?._id) {
-      await refreshSession();
-      return;
-    }
     setRefreshingKyc(true);
     try {
-      await refreshDiditStatus({ verificationId: currentKyc._id });
+      if (currentKyc?._id) {
+        await refreshDiditStatus({ verificationId: currentKyc._id });
+      }
       await refreshSession();
+      await refreshUser();
     } catch (error: any) {
       Logger.error("Dashboard", "Could not refresh KYC", error?.message || error);
+      // Best-effort: re-fetch profile from Convex even if Better Auth session call failed.
+      try { await refreshUser(); } catch {}
+      showToast({
+        type: "info",
+        title: "Could not refresh",
+        message: "Could not refresh right now. Please check your connection and try again.",
+      });
     } finally {
       setRefreshingKyc(false);
     }
-  }, [currentKyc?._id, refreshDiditStatus, refreshSession]);
+  }, [currentKyc?._id, refreshDiditStatus, refreshSession, refreshUser, showToast]);
 
   return (
     <Screen

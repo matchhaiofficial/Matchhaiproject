@@ -545,7 +545,16 @@ async function requireActorCanReadMatchroomNotifications(ctx: any, matchroomId: 
   const isHost = String(room.hostUid || "") === actorId;
   const isCaptain = String(room.captainUidA || "") === actorId || String(room.captainUidB || "") === actorId;
   const isPlayer = Array.isArray(room.playerUids) && room.playerUids.map(String).includes(actorId);
-  if (!isHost && !isCaptain && !isPlayer) {
+  let isZoneOwner = false;
+  if (room.zoneId) {
+    try {
+      const zone = await ctx.db.get(room.zoneId);
+      isZoneOwner = String(zone?.ownerUid || "") === actorId;
+    } catch {
+      isZoneOwner = false;
+    }
+  }
+  if (!isHost && !isCaptain && !isPlayer && !isZoneOwner) {
     throw new Error("Not authorized");
   }
   return actor;

@@ -463,8 +463,59 @@ function serializeAdminZoneWithdrawal(row: any) {
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
     ownerName: metadata.ownerName || null,
+    ownerEmail: metadata.ownerEmail || null,
     adminDecision: metadata.adminDecision || null,
     decidedAt: metadata.decidedAt || null,
+    rejectionReason: metadata.rejectionReasonSafe || null,
+  };
+}
+
+// Enriched serializer used by the paginated Super Admin withdrawal query.
+// Accepts pre-fetched user/zone maps to avoid N+1 reads.
+// Only called from Super Admin queries; never exposed on Zone Admin paths.
+function serializeAdminZoneWithdrawalEnriched(
+  row: any,
+  userMap: Map<string, any>,
+  zoneMap: Map<string, any>,
+) {
+  const metadata = row.metadata || {};
+  const user = userMap.get(String(row.userId ?? "")) ?? null;
+  const zoneId = metadata.zoneId;
+  const zone = zoneId ? (zoneMap.get(String(zoneId)) ?? null) : null;
+
+  return {
+    id: String(row._id),
+    _id: row._id,
+    userId: String(row.userId),
+    amount: Number(row.amount || 0),
+    status: row.status,
+    reference: row.reference || null,
+    createdAt: row.createdAt,
+    branchId: metadata.branchId || null,
+    branchName: metadata.branchName || null,
+    // Prefer zone's official name; fall back to metadata value stored at request time
+    venueName: zone?.venueBrandName || metadata.venueName || null,
+    bankName: metadata.bankName || null,
+    accountNumberMasked: metadata.accountNumberMasked || null,
+    accountNumberLast4: metadata.accountNumberLast4 || null,
+    // Owner identity — metadata stored at request time, verified from user record
+    ownerName: metadata.ownerName || user?.fullName || user?.username || null,
+    ownerEmail: metadata.ownerEmail || user?.email || null,
+    // Safe masked phone; never expose raw phone
+    ownerPhone: user?.phoneNumberMasked || null,
+    ownerCity: user?.city || null,
+    ownerKycStatus: user?.kycVerificationStatus || null,
+    ownerAccountStatus: user?.accountStatus || null,
+    // Current wallet balance at query time (pre-deduction for pending)
+    availableBalance: typeof user?.walletBalance === "number" ? user.walletBalance : null,
+    // Zone context
+    zoneStatus: zone?.status || null,
+    zoneCity: zone?.city || null,
+    zoneName: zone?.venueBrandName || zone?.name || metadata.venueName || null,
+    // Admin decision fields
+    adminDecision: metadata.adminDecision || null,
+    decidedAt: metadata.decidedAt || null,
+    rejectionReason: metadata.rejectionReasonSafe || null,
   };
 }
 
@@ -2313,7 +2364,23 @@ export const listZoneWithdrawalRequestsPage = query({
         }
         return true;
       });
-    const page = filtered.slice(offset, offset + limit).map(serializeAdminZoneWithdrawal);
+    const pageRows = filtered.slice(offset, offset + limit);
+
+    // Batch-fetch users and zones for enriched context (deduplicated, O(unique_ids) reads)
+    const uniqueUserIds = [...new Set(pageRows.map((r: any) => String(r.userId || "")).filter(Boolean))];
+    const uniqueZoneIds = [...new Set(
+      pageRows.map((r: any) => r.metadata?.zoneId ? String(r.metadata.zoneId) : "").filter(Boolean)
+    )];
+    const [userDocs, zoneDocs] = await Promise.all([
+      Promise.all(uniqueUserIds.map((id: any) => ctx.db.get(id).catch(() => null))),
+      Promise.all(uniqueZoneIds.map((id: any) => ctx.db.get(id).catch(() => null))),
+    ]);
+    const userMap = new Map<string, any>();
+    for (const u of userDocs) { if (u) userMap.set(String(u._id), u); }
+    const zoneMap = new Map<string, any>();
+    for (const z of zoneDocs) { if (z) zoneMap.set(String(z._id), z); }
+
+    const page = pageRows.map((row: any) => serializeAdminZoneWithdrawalEnriched(row, userMap, zoneMap));
     const nextOffset = offset + page.length;
     const capped = rows.length >= scanLimit;
     return {
@@ -2612,6 +2679,7 @@ export const approveZoneWithdrawal = mutation({
       withdrawalId: args.withdrawalId,
       zoneAdminUserId: withdrawal.userId,
       decision: "approved",
+      amount,
     });
 
     await insertSuperAdminAuditLog(ctx, admin, {
@@ -2684,6 +2752,7 @@ export const rejectZoneWithdrawal = mutation({
       withdrawalId: args.withdrawalId,
       zoneAdminUserId: withdrawal.userId,
       decision: "rejected",
+      amount: Number(withdrawal.amount || 0),
     });
 
     await insertSuperAdminAuditLog(ctx, admin, {
@@ -3898,6 +3967,145 @@ export const resolveSupportTicket = mutation({
       status: "success",
       metadataSafe: { reference: ticket.reference },
     });
+    return { ok: true };
+  },
+});
+
+// Shared core for account deletion. Anonymizes PII in both the Convex users table
+// and the Better Auth auth record, then revokes all active sessions.
+// Financial/KYC/audit records are intentionally retained for legal compliance.
+async function applyAccountDeletion(ctx: any, user: any, now: number) {
+  const shortId = String(user._id).slice(-8);
+  const anonEmail = `deleted_${shortId}@deleted.matchhai.internal`;
+
+  // 1. Anonymize Convex user record.
+  await ctx.db.patch(user._id, {
+    fullName: "Deleted User",
+    username: `deleted_${shortId}`,
+    usernameLower: `deleted_${shortId}`,
+    email: anonEmail,
+    photoURL: undefined,
+    phone: undefined,
+    bio: undefined,
+    // Platform URLs and external IDs
+    steamProfileUrl: undefined,
+    faceitProfileUrl: undefined,
+    steamId: undefined,
+    steamPersonaName: undefined,
+    steamCs2Hours: undefined,
+    faceitId: undefined,
+    faceitNickname: undefined,
+    faceitElo: undefined,
+    faceitSkillLevel: undefined,
+    faceitGame: undefined,
+    faceitStats: undefined,
+    psnAccountId: undefined,
+    psnOnlineId: undefined,
+    psnStats: undefined,
+    steamStats: undefined,
+    accountStatus: "suspended",
+    suspendedAt: now,
+    suspensionReason: "account_deletion_processed",
+    updatedAt: now,
+  });
+
+  // 2. Anonymize Better Auth auth record and revoke all sessions.
+  // Wrapped in try/catch so Convex changes persist even if auth ops fail.
+  if (user.authId) {
+    try {
+      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+        input: {
+          model: "user",
+          where: [{ field: "_id", operator: "eq", value: user.authId }],
+          update: { email: anonEmail, name: "Deleted User", updatedAt: now },
+        },
+      });
+    } catch {}
+
+    try {
+      await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+        input: {
+          model: "session",
+          where: [{ field: "userId", operator: "eq", value: user.authId }],
+        },
+        paginationOpts: { cursor: null, numItems: 500 },
+      });
+    } catch {}
+  }
+
+  return { shortId, anonEmail };
+}
+
+// Processes an account deletion ticket submitted via the in-app deletion flow.
+// Call this from the support ticket detail screen.
+export const processAccountDeletion = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+    if (ticket.category !== "account_deletion") {
+      throw new Error("This is not an account deletion ticket.");
+    }
+    if (ticket.status === "resolved") {
+      throw new Error("This deletion request has already been processed.");
+    }
+
+    const user = await ctx.db.get(ticket.userId);
+    if (!user) throw new Error("User not found — account may already be deleted.");
+
+    const now = Date.now();
+    const { shortId } = await applyAccountDeletion(ctx, user, now);
+
+    await ctx.db.patch(args.ticketId, {
+      status: "resolved",
+      assignedAdminId: ticket.assignedAdminId || admin.profile._id,
+      resolutionSummary: `Account deletion processed by ${admin.profile.fullName || admin.profile.username || "super admin"}. PII anonymized, auth email cleared, sessions revoked. Financial and KYC records retained.`,
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "process_account_deletion",
+      module: "users",
+      targetType: "user",
+      targetId: String(user._id),
+      status: "success",
+      metadataSafe: { reference: ticket.reference, ticketId: String(args.ticketId), anonymizedUsername: `deleted_${shortId}` },
+    });
+
+    return { ok: true };
+  },
+});
+
+// Directly deletes a user account from the Users admin screen (no ticket required).
+// Use this when the ticket is already resolved or no ticket exists.
+export const deleteUserAccount = mutation({
+  args: {
+    sessionToken: v.string(),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found.");
+    // Allow re-running on already-deleted accounts so stale deletions (run before
+    // auth-email anonymization was added) can have their Better Auth record cleaned up.
+
+    const now = Date.now();
+    const { shortId } = await applyAccountDeletion(ctx, user, now);
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "delete_user_account",
+      module: "users",
+      targetType: "user",
+      targetId: String(user._id),
+      status: "success",
+      metadataSafe: { anonymizedUsername: `deleted_${shortId}` },
+    });
+
     return { ok: true };
   },
 });

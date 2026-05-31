@@ -143,8 +143,6 @@ const EASYPAY_PENDING_STATUSES = ["created", "redirected", "token_received", "pe
 // Completing a matchroom after payment can involve waiting for wallet balance propagation
 // and a few retries, so allow a bit more time before marking it as pending.
 const PAYMENT_RESUME_TIMEOUT_MS = 45000;
-const WALLET_BALANCE_WAIT_MS = 12000;
-const WALLET_BALANCE_POLL_MS = 800;
 
 async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = PAYMENT_RESUME_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -158,34 +156,6 @@ async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = PA
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-async function waitForWalletBalance(params: {
-  userId: Id<"users">;
-  amountDue: number;
-  getBalance: () => Promise<number>;
-  timeoutMs?: number;
-}): Promise<{ ok: true } | { ok: false; lastBalance: number }> {
-  const timeoutMs = Math.max(1000, params.timeoutMs ?? WALLET_BALANCE_WAIT_MS);
-  const amountDue = Math.max(0, Math.ceil(Number(params.amountDue || 0)));
-  const startedAt = Date.now();
-  let lastBalance = 0;
-
-  if (amountDue <= 0) return { ok: true };
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      lastBalance = Math.max(0, Number(await params.getBalance()) || 0);
-      if (lastBalance >= amountDue) {
-        return { ok: true };
-      }
-    } catch {
-      // Ignore and retry until timeout.
-    }
-    await new Promise((resolve) => setTimeout(resolve, WALLET_BALANCE_POLL_MS));
-  }
-
-  return { ok: false, lastBalance };
 }
 
 function generateMatchCode(zoneName?: string | null) {
@@ -842,83 +812,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         message: result.ok ? undefined : result.message,
       });
       if (result.ok) {
-        try {
-          if (amountDue > 0) {
-            const getBalance = async () => {
-              const balance = await convex.query(api.wallet.getBalance, {
-                userId: user._id as Id<"users">,
-              });
-              return Number(balance || 0);
-            };
-            const balanceReady = await waitForWalletBalance({
-              userId: user._id as Id<"users">,
-              amountDue,
-              getBalance,
-            });
-            if (!balanceReady.ok) {
-              Logger.warn("CreateMatchroomPayment", "Wallet balance not updated yet after payment confirmation", {
-                amountDue,
-                lastBalance: balanceReady.lastBalance,
-                matchroomId: result.id,
-              });
-            }
-
-            Logger.info("CreateMatchroomPayment", "Deducting wallet for created matchroom", {
-              amountDue,
-              matchroomId: result.id,
-            });
-
-            let lastDeductionError: any = null;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              try {
-                await withTimeout(
-                  convex.mutation(api.wallet.deductFunds, {
-                    amount: amountDue,
-                    metadata: {
-                      flow: isBroadcastFlow ? "broadcast_matchroom_create" : "zone_matchroom_create",
-                      matchroomId: result.id,
-                    },
-                    reference: `matchroom_create:${result.id}`,
-                    source: "matchroom_create",
-                    userId: user._id as Id<"users">,
-                  }),
-                  `Wallet deduction (attempt ${attempt})`,
-                  10000,
-                );
-                lastDeductionError = null;
-                break;
-              } catch (error) {
-                lastDeductionError = error;
-                const message = String((error as any)?.message || error || "");
-                const shouldRetry = attempt < 3 && /insufficient/i.test(message);
-                Logger.warn("CreateMatchroomPayment", "Wallet deduction failed", {
-                  attempt,
-                  shouldRetry,
-                  message,
-                  matchroomId: result.id,
-                });
-                if (!shouldRetry) break;
-                await new Promise((resolve) => setTimeout(resolve, 1200));
-              }
-            }
-
-            if (lastDeductionError) {
-              throw lastDeductionError;
-            }
-          }
-        } catch (error) {
-          await convex.mutation(api.matchrooms.remove, {
-            matchroomId: result.id as Id<"matchrooms">,
-          });
-          notify({
-            message: "Wallet payment could not be confirmed yet. Your funds are safe in your wallet. Please try creating the matchroom again in a few seconds.",
-            title: "Payment confirmation pending",
-            type: "error",
-          });
-          setSubmitting(false);
-          return false;
-        }
-
+        // Wallet payment is now deducted atomically inside the create mutation
+        // (convex/matchrooms.ts), so a failed charge rolls the matchroom back on
+        // the server and surfaces here as result.ok === false. No separate
+        // client-side deductFunds call is needed.
         setShowEasypaisaPhonePrompt(false);
         setActiveEasypaisaOrderRef(null);
         setEasypaisaPaymentPhase("idle");

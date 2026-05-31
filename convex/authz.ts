@@ -40,13 +40,19 @@ export async function getCurrentUser(ctx: any) {
     authUser = null;
   }
 
-  const candidateAuthIds = uniqueStrings([
+  // Build normalized candidates. tokenIdentifier is typically "https://issuer|shortId";
+  // also extract the shortId suffix so stored authIds in either form can be matched.
+  const rawIdentityFields: Array<string | null | undefined> = [
     identity?.tokenIdentifier,
     identity?.subject,
     authUser?.userId,
     (authUser as any)?.id,
     authUser?._id,
-  ]);
+  ];
+  for (const raw of [identity?.tokenIdentifier, identity?.subject]) {
+    if (raw && raw.includes("|")) rawIdentityFields.push(raw.split("|").pop());
+  }
+  const candidateAuthIds = uniqueStrings(rawIdentityFields);
 
   for (const authId of candidateAuthIds) {
     const user = await ctx.db

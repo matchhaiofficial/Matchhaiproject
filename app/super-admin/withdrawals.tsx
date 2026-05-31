@@ -48,11 +48,33 @@ function statusTone(status?: string | null) {
   return "neutral" as const;
 }
 
+function kycTone(status?: string | null) {
+  if (status === "verified") return "success" as const;
+  if (status === "rejected" || status === "expired") return "danger" as const;
+  if (status === "pending" || status === "in_progress" || status === "in_review") return "warning" as const;
+  return "neutral" as const;
+}
+
+function accountStatusTone(status?: string | null) {
+  if (status === "active") return "success" as const;
+  if (status === "suspended") return "danger" as const;
+  return "neutral" as const;
+}
+
+function zoneStatusTone(status?: string | null) {
+  if (status === "active") return "success" as const;
+  if (status === "suspended" || status === "rejected") return "danger" as const;
+  if (status === "pending-review" || status === "approved_pending_migration") return "warning" as const;
+  return "neutral" as const;
+}
+
+function derivedStatusLabel(item: Pick<SuperAdminWithdrawalRequest, "status" | "adminDecision">) {
+  if (item.adminDecision === "rejected") return "rejected";
+  return item.status;
+}
+
 const ALL = "All";
 
-// Status view. Backend only knows pending/completed/failed; "rejected" is derived
-// (failed + adminDecision === "rejected") and "failed" is the system-failure remainder
-// (failed + adminDecision !== "rejected"). "all" fetches every status via the "any" arg.
 type StatusTabKey = "all" | "pending" | "completed" | "rejected" | "failed";
 const STATUS_TABS: { key: StatusTabKey; label: string }[] = [
   { key: "all", label: "All" },
@@ -62,14 +84,12 @@ const STATUS_TABS: { key: StatusTabKey; label: string }[] = [
   { key: "failed", label: "Failed" },
 ];
 
-// Map the UI status tab to the existing backend `status` arg (no new backend args).
 function tabToBackendStatus(tab: StatusTabKey): "any" | "pending" | "completed" | "failed" {
   if (tab === "all") return "any";
   if (tab === "rejected" || tab === "failed") return "failed";
   return tab;
 }
 
-// Tab-scoped post-filter that splits the backend "failed" set into Rejected vs Failed.
 function matchesStatusTab(item: SuperAdminWithdrawalRequest, tab: StatusTabKey): boolean {
   if (tab === "rejected") return item.status === "failed" && item.adminDecision === "rejected";
   if (tab === "failed") return item.status === "failed" && item.adminDecision !== "rejected";
@@ -120,6 +140,58 @@ function matchesAmountRange(amount: number, range: AmountRangeKey) {
   return value > 5000;
 }
 
+// ─── Summary Metrics ──────────────────────────────────────────────────────────
+
+function SummaryMetrics({
+  zoneFinance,
+  pendingWithdrawals,
+  zoneFinanceCapped,
+}: {
+  zoneFinance: SuperAdminZoneFinanceSummary[];
+  pendingWithdrawals: SuperAdminWithdrawalRequest[];
+  zoneFinanceCapped: boolean;
+}) {
+  const totalPendingAmount = zoneFinance.reduce((sum, z) => sum + (z.pendingWithdrawalAmount || 0), 0);
+  const pendingCount = pendingWithdrawals.filter((w) => w.status === "pending").length;
+  const withdrawnToday = zoneFinance.reduce((sum, z) => sum + (z.withdrawnToday || 0), 0);
+  const withdrawnThisWeek = zoneFinance.reduce((sum, z) => sum + (z.withdrawnThisWeek || 0), 0);
+  const withdrawnThisMonth = zoneFinance.reduce((sum, z) => sum + (z.withdrawnThisMonth || 0), 0);
+
+  return (
+    <View style={s.metricsWrap}>
+      <View style={s.metricsRow}>
+        <View style={[s.metricCard, s.metricCardAccent]}>
+          <Text style={s.metricLabel}>Pending</Text>
+          <Text style={s.metricValue}>{formatAmount(totalPendingAmount)}</Text>
+          <Text style={s.metricSub}>{pendingCount} request{pendingCount !== 1 ? "s" : ""}{zoneFinanceCapped ? " (est.)" : ""}</Text>
+        </View>
+        <View style={s.metricCard}>
+          <Text style={s.metricLabel}>Today</Text>
+          <Text style={s.metricValue}>{formatAmount(withdrawnToday)}</Text>
+          <Text style={s.metricSub}>processed</Text>
+        </View>
+      </View>
+      <View style={s.metricsRow}>
+        <View style={s.metricCard}>
+          <Text style={s.metricLabel}>This week</Text>
+          <Text style={s.metricValue}>{formatAmount(withdrawnThisWeek)}</Text>
+          <Text style={s.metricSub}>processed</Text>
+        </View>
+        <View style={s.metricCard}>
+          <Text style={s.metricLabel}>This month</Text>
+          <Text style={s.metricValue}>{formatAmount(withdrawnThisMonth)}</Text>
+          <Text style={s.metricSub}>processed</Text>
+        </View>
+      </View>
+      <Text style={s.metricsFootnote}>
+        Pending and processed totals from zone finance data (Karachi time).{zoneFinanceCapped ? " Showing first 80 zones." : ""}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Withdrawal Card ──────────────────────────────────────────────────────────
+
 const WithdrawalRow = React.memo(function WithdrawalRow({
   item,
   onSelect,
@@ -127,50 +199,110 @@ const WithdrawalRow = React.memo(function WithdrawalRow({
   item: SuperAdminWithdrawalRequest;
   onSelect: (item: SuperAdminWithdrawalRequest) => void;
 }) {
+  const statusLabel = derivedStatusLabel(item);
+  const adminName = item.ownerName || "Unknown admin";
+  const zoneName = item.zoneName || item.venueName || null;
+  const title = zoneName
+    ? `${zoneName}${item.branchName && item.branchName !== zoneName ? ` – ${item.branchName}` : ""}`
+    : item.branchName || "Zone withdrawal";
+
   return (
     <AdminListCard
       title={formatAmount(item.amount)}
-      subtitle={`${item.venueName || item.branchName || "Zone withdrawal"} - ${formatDateTime(item.createdAt)}`}
-      statusLabel={item.adminDecision === "rejected" ? "rejected" : item.status}
+      subtitle={`${title} • ${formatDateTime(item.createdAt)}`}
+      statusLabel={statusLabel}
       statusTone={statusTone(item.status)}
       onPress={() => onSelect(item)}
     >
-      <View style={styles.cardBody}>
-        <AdminInfoLine label="Branch" value={item.branchName || "N/A"} />
-        <AdminInfoLine label="Bank" value={item.bankName || "N/A"} />
-        <AdminInfoLine label="Masked account" value={item.accountNumberMasked || "N/A"} />
-        <Text style={styles.referenceText}>Reference: {item.reference || item.id}</Text>
-        <View style={styles.cardActionHint}>
-          <Text style={styles.cardActionHintText}>View details</Text>
-          <AppIcon name="chevron-right" size={18} color={COLORS.accent} />
+      <View style={s.cardBody}>
+        {/* Admin identity row */}
+        <View style={s.cardIdentityRow}>
+          <View style={s.cardIdentityIcon}>
+            <AppIcon name="person" size={14} color={COLORS.textSecondary} />
+          </View>
+          <View style={s.cardIdentityText}>
+            <Text style={s.cardAdminName} numberOfLines={1}>{adminName}</Text>
+            {item.ownerEmail ? (
+              <Text style={s.cardAdminEmail} numberOfLines={1}>{item.ownerEmail}</Text>
+            ) : null}
+          </View>
+          {item.ownerKycStatus ? (
+            <StatusPill tone={kycTone(item.ownerKycStatus)} label={item.ownerKycStatus === "verified" ? "KYC ✓" : `KYC: ${item.ownerKycStatus}`} />
+          ) : null}
+        </View>
+
+        {/* Bank payout row */}
+        <View style={s.cardBankRow}>
+          <AppIcon name="account-balance-wallet" size={14} color={COLORS.textSecondary} />
+          <Text style={s.cardBankText} numberOfLines={1}>
+            {item.bankName || "N/A"}
+            {item.accountNumberMasked ? `  •  ${item.accountNumberMasked}` : ""}
+          </Text>
+        </View>
+
+        {/* Zone status + reference row */}
+        <View style={s.cardMetaRow}>
+          {item.zoneStatus ? (
+            <StatusPill tone={zoneStatusTone(item.zoneStatus)} label={item.zoneStatus} />
+          ) : null}
+          {item.ownerAccountStatus && item.ownerAccountStatus !== "active" ? (
+            <StatusPill tone={accountStatusTone(item.ownerAccountStatus)} label={item.ownerAccountStatus} />
+          ) : null}
+        </View>
+
+        <View style={s.cardActionHint}>
+          <Text style={s.referenceText} numberOfLines={1}>
+            {item.reference ? `Ref: ${item.reference.slice(0, 36)}` : item.id.slice(0, 24)}
+          </Text>
+          <View style={s.cardActionHintLabel}>
+            <Text style={s.cardActionHintText}>
+              {item.status === "pending" ? "Review" : "View details"}
+            </Text>
+            <AppIcon name="chevron-right" size={16} color={COLORS.accent} />
+          </View>
         </View>
       </View>
     </AdminListCard>
   );
 });
 
+// ─── Zone Finance summary row ──────────────────────────────────────────────────
+
 function ZoneFinanceRow({ item }: { item: SuperAdminZoneFinanceSummary }) {
   return (
-    <View style={styles.financeRow}>
-      <View style={styles.financeTitleCol}>
-        <Text style={styles.financeZone} numberOfLines={1}>{item.zoneName || "Unknown zone"}</Text>
-        <Text style={styles.financeAdmin} numberOfLines={1}>{item.zoneAdminName || item.zoneAdminEmail || "Unknown admin"}</Text>
+    <View style={s.financeRow}>
+      <View style={s.financeTitleCol}>
+        <Text style={s.financeZone} numberOfLines={1}>{item.zoneName || "Unknown zone"}</Text>
+        <Text style={s.financeAdmin} numberOfLines={1}>{item.zoneAdminName || item.zoneAdminEmail || "Unknown admin"}</Text>
       </View>
-      <View style={styles.financeMetric}>
-        <Text style={styles.financeLabel}>Earned</Text>
-        <Text style={styles.financeValue}>{formatAmount(item.earnedToday)} / {formatAmount(item.earnedThisWeek)} / {formatAmount(item.earnedThisMonth)}</Text>
+      <View style={s.financeMetric}>
+        <Text style={s.financeLabel}>Earned</Text>
+        <Text style={s.financeValue}>{formatAmount(item.earnedToday)} / {formatAmount(item.earnedThisWeek)} / {formatAmount(item.earnedThisMonth)}</Text>
       </View>
-      <View style={styles.financeMetric}>
-        <Text style={styles.financeLabel}>Withdrawn</Text>
-        <Text style={styles.financeValue}>{formatAmount(item.withdrawnToday)} / {formatAmount(item.withdrawnThisWeek)} / {formatAmount(item.withdrawnThisMonth)}</Text>
+      <View style={s.financeMetric}>
+        <Text style={s.financeLabel}>Withdrawn</Text>
+        <Text style={s.financeValue}>{formatAmount(item.withdrawnToday)} / {formatAmount(item.withdrawnThisWeek)} / {formatAmount(item.withdrawnThisMonth)}</Text>
       </View>
-      <View style={styles.financeMetricSmall}>
-        <Text style={styles.financeLabel}>Pending</Text>
-        <Text style={styles.financeValue}>{formatAmount(item.pendingWithdrawalAmount)}</Text>
+      <View style={s.financeMetricSmall}>
+        <Text style={s.financeLabel}>Pending</Text>
+        <Text style={s.financeValue}>{formatAmount(item.pendingWithdrawalAmount)}</Text>
       </View>
     </View>
   );
 }
+
+// ─── Detail Drawer sections ────────────────────────────────────────────────────
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={s.detailSection}>
+      <Text style={s.detailSectionLabel}>{title}</Text>
+      <View style={s.detailSectionBody}>{children}</View>
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function SuperAdminWithdrawalsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -240,7 +372,6 @@ export default function SuperAdminWithdrawalsScreen() {
     void load("initial");
   }, [load]));
 
-  // Tab-scoped set (splits backend "failed" into Rejected vs Failed) before drawer/search filters.
   const tabFiltered = useMemo(
     () => withdrawals.filter((item) => matchesStatusTab(item, statusTab)),
     [withdrawals, statusTab],
@@ -262,6 +393,8 @@ export default function SuperAdminWithdrawalsScreen() {
       if (!needle) return true;
       return [
         item.ownerName,
+        item.ownerEmail,
+        item.zoneName,
         item.venueName,
         item.branchName,
         item.bankName,
@@ -394,52 +527,60 @@ export default function SuperAdminWithdrawalsScreen() {
   );
 
   const listHeader = useMemo(() => (
-    <View style={styles.financeSection}>
-      <View style={styles.financeHeaderRow}>
-        <View>
-          <Text style={styles.financeSectionTitle}>Zone Finance</Text>
-          <Text style={styles.financeSectionSubtitle}>Today / week / month, Asia/Karachi time. Read-only payout and withdrawal analytics.</Text>
+    <View style={s.listHeaderWrap}>
+      <SummaryMetrics
+        zoneFinance={zoneFinance}
+        pendingWithdrawals={withdrawals}
+        zoneFinanceCapped={zoneFinanceCapped}
+      />
+
+      <View style={s.financeSection}>
+        <View style={s.financeHeaderRow}>
+          <View>
+            <Text style={s.financeSectionTitle}>Zone Finance</Text>
+            <Text style={s.financeSectionSubtitle}>Today / week / month, Asia/Karachi time.</Text>
+          </View>
+          {zoneFinanceCapped ? <StatusPill tone="warning" label="capped" /> : null}
         </View>
-        {zoneFinanceCapped ? <StatusPill tone="warning" label="capped" /> : null}
+        {visibleZoneFinance.length > 0 ? (
+          <View style={s.financeTable}>
+            {visibleZoneFinance.slice(0, 12).map((item) => <ZoneFinanceRow key={item.id} item={item} />)}
+          </View>
+        ) : (
+          <AdminEmptyStateCard
+            title="No zone finance rows"
+            description="Completed venue payouts and zone withdrawal requests will appear here."
+            icon="wallet"
+          />
+        )}
+        <Text style={s.financeFootnote}>Earned uses completed venue payout wallet deposits. Withdrawn uses completed zone withdrawal requests; pending is shown separately.</Text>
       </View>
-      {visibleZoneFinance.length > 0 ? (
-        <View style={styles.financeTable}>
-          {visibleZoneFinance.slice(0, 12).map((item) => <ZoneFinanceRow key={item.id} item={item} />)}
-        </View>
-      ) : (
-        <AdminEmptyStateCard
-          title="No zone finance rows"
-          description="Completed venue payouts and zone withdrawal requests will appear here."
-          icon="wallet"
-        />
-      )}
-      <Text style={styles.financeFootnote}>Earned uses completed venue payout wallet deposits. Withdrawn uses completed zone withdrawal requests; pending is shown separately.</Text>
     </View>
-  ), [visibleZoneFinance, zoneFinanceCapped]);
+  ), [zoneFinance, zoneFinanceCapped, visibleZoneFinance, withdrawals]);
 
   return (
-    <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
+    <Screen style={s.screen} contentStyle={s.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Withdrawals" subtitle="Zone withdrawal requests across all statuses" onBack={() => router.back()} inlineTitle />
 
       <AdminSearchFilterBar
         value={search}
         onChangeText={setSearch}
-        placeholder="Search owner, branch, bank, reference"
+        placeholder="Search owner, zone, branch, bank, reference"
         onFilterPress={() => setDrawerOpen(true)}
         activeFilterCount={activeFilterCount}
-        style={styles.searchBar}
+        style={s.searchBar}
       />
 
       <SegmentedTabs
         items={STATUS_TABS}
         value={statusTab}
         onChange={(value) => setStatusTab(value)}
-        style={styles.tabs}
-        itemTextStyle={styles.tabText}
+        style={s.tabs}
+        itemTextStyle={s.tabText}
       />
 
       {loading ? (
-        <View style={styles.loaderWrap}>
+        <View style={s.loaderWrap}>
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
@@ -449,7 +590,7 @@ export default function SuperAdminWithdrawalsScreen() {
           renderItem={renderWithdrawal}
           ListHeaderComponent={listHeader}
           ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
+          contentContainerStyle={[s.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
           ListFooterComponent={loadingMore ? <ActivityIndicator color={COLORS.accent} /> : null}
           onEndReached={() => load("more")}
@@ -461,66 +602,114 @@ export default function SuperAdminWithdrawalsScreen() {
         />
       )}
 
-      <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={styles.drawer} keyboardAware>
-        <View style={styles.drawerContent}>
+      {/* ── Withdrawal detail drawer ── */}
+      <AppDrawer visible={Boolean(selected)} onClose={closeDrawer} drawerStyle={s.drawer} keyboardAware>
+        <View style={s.drawerContent}>
           <AppModalHeader
             title="Withdrawal detail"
-            subtitle={selected ? `${formatAmount(selected.amount)} - ${selected.status}` : undefined}
+            subtitle={selected ? `${formatAmount(selected.amount)} · ${derivedStatusLabel(selected)}` : undefined}
             onClose={closeDrawer}
             compact
           />
-          <AppModalBody scroll contentContainerStyle={styles.drawerBody}>
+          <AppModalBody scroll contentContainerStyle={s.drawerBody}>
             {selected ? (
               <>
-                <View style={styles.detailTopRow}>
-                  <View style={styles.detailIcon}>
+                {/* Header row */}
+                <View style={s.detailTopRow}>
+                  <View style={s.detailIcon}>
                     <AppIcon name="wallet" size={22} color={COLORS.accent} />
                   </View>
-                  <View style={styles.detailTitleWrap}>
-                    <Text style={styles.detailTitle}>{selected.venueName || selected.branchName || "Zone withdrawal"}</Text>
-                    <Text style={styles.detailSubtitle}>{formatDateTime(selected.createdAt)}</Text>
+                  <View style={s.detailTitleWrap}>
+                    <Text style={s.detailTitle}>{formatAmount(selected.amount)}</Text>
+                    <Text style={s.detailSubtitle}>{formatDateTime(selected.createdAt)}</Text>
                   </View>
-                  <StatusPill tone={statusTone(selected.status)} label={selected.status} />
+                  <StatusPill
+                    tone={statusTone(selected.status)}
+                    label={derivedStatusLabel(selected)}
+                  />
                 </View>
-                <View style={styles.detailSection}>
-                  <AdminInfoLine label="Amount" value={formatAmount(selected.amount)} />
-                  <AdminInfoLine label="Owner" value={selected.ownerName || "N/A"} />
-                  <AdminInfoLine label="Branch" value={selected.branchName || "N/A"} />
-                  <AdminInfoLine label="Bank" value={selected.bankName || "N/A"} />
-                  <AdminInfoLine label="Masked account" value={selected.accountNumberMasked || "N/A"} />
-                  <AdminInfoLine label="Reference" value={selected.reference || selected.id} />
-                  {selected.status !== "pending" ? (
-                    <>
-                      <AdminInfoLine label="Decision" value={selected.adminDecision || "N/A"} />
-                      <AdminInfoLine label="Decided" value={formatDateTime(selected.decidedAt)} />
-                    </>
+
+                {/* Zone Admin Identity */}
+                <DetailSection title="Zone Admin">
+                  <AdminInfoLine label="Name" value={selected.ownerName || "N/A"} />
+                  {selected.ownerEmail ? <AdminInfoLine label="Email" value={selected.ownerEmail} /> : null}
+                  {selected.ownerPhone ? <AdminInfoLine label="Phone" value={selected.ownerPhone} /> : null}
+                  {selected.ownerCity ? <AdminInfoLine label="City" value={selected.ownerCity} /> : null}
+                  <View style={s.detailBadgeRow}>
+                    {selected.ownerKycStatus ? (
+                      <StatusPill tone={kycTone(selected.ownerKycStatus)} label={`KYC: ${selected.ownerKycStatus}`} />
+                    ) : null}
+                    {selected.ownerAccountStatus ? (
+                      <StatusPill tone={accountStatusTone(selected.ownerAccountStatus)} label={selected.ownerAccountStatus} />
+                    ) : null}
+                  </View>
+                </DetailSection>
+
+                {/* Zone & Branch */}
+                <DetailSection title="Zone & Branch">
+                  {selected.zoneName ? <AdminInfoLine label="Zone" value={selected.zoneName} /> : null}
+                  {selected.zoneStatus ? (
+                    <View style={s.detailInlineRow}>
+                      <Text style={s.detailInlineLabel}>Zone status</Text>
+                      <StatusPill tone={zoneStatusTone(selected.zoneStatus)} label={selected.zoneStatus} />
+                    </View>
                   ) : null}
-                </View>
+                  {selected.zoneCity ? <AdminInfoLine label="Zone city" value={selected.zoneCity} /> : null}
+                  <AdminInfoLine label="Branch" value={selected.branchName || "N/A"} />
+                </DetailSection>
+
+                {/* Bank Payout */}
+                <DetailSection title="Bank Payout">
+                  <AdminInfoLine label="Bank" value={selected.bankName || "N/A"} />
+                  <AdminInfoLine label="Account" value={selected.accountNumberMasked || "N/A"} />
+                  <AdminInfoLine label="Reference" value={selected.reference || selected.id} />
+                </DetailSection>
+
+                {/* Wallet */}
+                {typeof selected.availableBalance === "number" ? (
+                  <DetailSection title="Wallet">
+                    <AdminInfoLine label="Available balance" value={formatAmount(selected.availableBalance)} />
+                  </DetailSection>
+                ) : null}
+
+                {/* Decision (non-pending) */}
+                {selected.status !== "pending" ? (
+                  <DetailSection title="Decision">
+                    <AdminInfoLine label="Decision" value={selected.adminDecision || "N/A"} />
+                    <AdminInfoLine label="Decided" value={formatDateTime(selected.decidedAt)} />
+                    {selected.rejectionReason ? (
+                      <AdminInfoLine label="Rejection reason" value={selected.rejectionReason} />
+                    ) : null}
+                  </DetailSection>
+                ) : null}
+
+                {/* Reject reason input (pending only) */}
                 {selected.status === "pending" ? (
-                  <View style={styles.reasonBlock}>
-                    <Text style={styles.reasonLabel}>Reject reason</Text>
+                  <View style={s.reasonBlock}>
+                    <Text style={s.reasonLabel}>Rejection reason</Text>
                     <TextInput
                       value={rejectReason}
                       onChangeText={setRejectReason}
                       placeholder="Required for rejection"
                       placeholderTextColor={COLORS.textSecondary}
-                      style={styles.reasonInput}
+                      style={s.reasonInput}
                       multiline
                       maxLength={300}
                       editable={!submitting}
                     />
-                    <Text style={styles.reasonCounter}>{rejectReason.trim().length}/300</Text>
+                    <Text style={s.reasonCounter}>{rejectReason.trim().length}/300</Text>
                   </View>
                 ) : null}
               </>
             ) : null}
           </AppModalBody>
+
           {selected && selected.status === "pending" ? (
             <AppModalFooter>
-              <View style={styles.footerRow}>
+              <View style={s.footerRow}>
                 <AppButton
                   variant="danger"
-                  style={styles.footerButton}
+                  style={s.footerButton}
                   onPress={handleReject}
                   disabled={!selected || Boolean(submitting)}
                   loading={submitting === "reject"}
@@ -529,7 +718,7 @@ export default function SuperAdminWithdrawalsScreen() {
                 </AppButton>
                 <AppButton
                   variant="success"
-                  style={styles.footerButton}
+                  style={s.footerButton}
                   onPress={handleApprove}
                   disabled={!selected || Boolean(submitting)}
                   loading={submitting === "approve"}
@@ -542,23 +731,24 @@ export default function SuperAdminWithdrawalsScreen() {
         </View>
       </AppDrawer>
 
+      {/* ── Approve confirmation ── */}
       <AppDialog visible={confirmAction === "approve"} onClose={() => setConfirmAction(null)}>
         <AppModalHeader title="Approve withdrawal" onClose={() => setConfirmAction(null)} />
-        <AppModalBody contentContainerStyle={styles.confirmBody}>
-          <Text style={styles.confirmText}>
+        <AppModalBody contentContainerStyle={s.confirmBody}>
+          <Text style={s.confirmText}>
             {selected
-              ? `Approve ${formatAmount(selected.amount)} for payout? This will deduct the zone admin wallet balance once.`
+              ? `Approve ${formatAmount(selected.amount)} for ${selected.ownerName || "this zone admin"}? This will deduct the zone admin wallet balance once.`
               : "Approve this withdrawal for payout? This will deduct the zone admin wallet balance once."}
           </Text>
         </AppModalBody>
         <AppModalFooter>
-          <View style={styles.footerRow}>
-            <AppButton variant="secondary" style={styles.footerButton} onPress={() => setConfirmAction(null)}>
+          <View style={s.footerRow}>
+            <AppButton variant="secondary" style={s.footerButton} onPress={() => setConfirmAction(null)}>
               Cancel
             </AppButton>
             <AppButton
               variant="success"
-              style={styles.footerButton}
+              style={s.footerButton}
               onPress={confirmApprove}
               disabled={!selected || Boolean(submitting)}
               loading={submitting === "approve"}
@@ -569,21 +759,22 @@ export default function SuperAdminWithdrawalsScreen() {
         </AppModalFooter>
       </AppDialog>
 
+      {/* ── Reject confirmation ── */}
       <AppDialog visible={confirmAction === "reject"} onClose={() => setConfirmAction(null)}>
         <AppModalHeader title="Reject withdrawal" onClose={() => setConfirmAction(null)} />
-        <AppModalBody contentContainerStyle={styles.confirmBody}>
-          <Text style={styles.confirmText}>
+        <AppModalBody contentContainerStyle={s.confirmBody}>
+          <Text style={s.confirmText}>
             Reject this withdrawal request? The reason is stored for admin context and is not sent in the notification.
           </Text>
         </AppModalBody>
         <AppModalFooter>
-          <View style={styles.footerRow}>
-            <AppButton variant="secondary" style={styles.footerButton} onPress={() => setConfirmAction(null)}>
+          <View style={s.footerRow}>
+            <AppButton variant="secondary" style={s.footerButton} onPress={() => setConfirmAction(null)}>
               Cancel
             </AppButton>
             <AppButton
               variant="danger"
-              style={styles.footerButton}
+              style={s.footerButton}
               onPress={confirmReject}
               disabled={!selected || Boolean(submitting)}
               loading={submitting === "reject"}
@@ -594,6 +785,7 @@ export default function SuperAdminWithdrawalsScreen() {
         </AppModalFooter>
       </AppDialog>
 
+      {/* ── Filter drawer ── */}
       <AdminFilterDrawer
         visible={drawerOpen}
         title="Filters"
@@ -611,7 +803,7 @@ export default function SuperAdminWithdrawalsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { paddingTop: 0 },
   searchBar: { marginBottom: SPACING.md },
@@ -619,11 +811,46 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 11 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { gap: SPACING.md },
+
+  // ── Summary metrics ──
+  metricsWrap: { gap: SPACING.sm, marginBottom: SPACING.md },
+  metricsRow: { flexDirection: "row", gap: SPACING.sm },
+  metricCard: {
+    flex: 1,
+    borderRadius: RADII.lg,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardDark,
+    padding: SPACING.md,
+    gap: 2,
+  },
+  metricCardAccent: {
+    borderColor: `${COLORS.accent}44`,
+    backgroundColor: `${COLORS.accent}10`,
+  },
+  metricLabel: { color: COLORS.textSecondary, fontFamily: FONTS.interSemiBold, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
+  metricValue: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16, marginTop: 2 },
+  metricSub: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11, marginTop: 1 },
+  metricsFootnote: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11, lineHeight: 15 },
+
+  // ── Card ──
   cardBody: { gap: SPACING.sm, marginTop: SPACING.sm },
-  referenceText: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
-  cardActionHint: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 4, marginTop: 2 },
+  cardIdentityRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  cardIdentityIcon: { width: 22, alignItems: "center" },
+  cardIdentityText: { flex: 1, minWidth: 0, gap: 1 },
+  cardAdminName: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 13 },
+  cardAdminEmail: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11 },
+  cardBankRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  cardBankText: { flex: 1, color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12 },
+  cardMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.xs },
+  referenceText: { flex: 1, color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11 },
+  cardActionHint: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4, marginTop: 2 },
+  cardActionHintLabel: { flexDirection: "row", alignItems: "center", gap: 2 },
   cardActionHintText: { color: COLORS.accent, fontFamily: FONTS.interSemiBold, fontSize: 12 },
-  financeSection: { gap: SPACING.md, marginBottom: SPACING.sm },
+
+  // ── Zone Finance ──
+  listHeaderWrap: { gap: SPACING.lg, marginBottom: SPACING.sm },
+  financeSection: { gap: SPACING.md },
   financeHeaderRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: SPACING.md },
   financeSectionTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 17 },
   financeSectionSubtitle: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 3, lineHeight: 18 },
@@ -637,19 +864,50 @@ const styles = StyleSheet.create({
   financeLabel: { color: COLORS.textSecondary, fontFamily: FONTS.interSemiBold, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 },
   financeValue: { color: COLORS.text, fontFamily: FONTS.interRegular, fontSize: 12, lineHeight: 18 },
   financeFootnote: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 11, lineHeight: 16 },
+
+  // ── Drawer ──
   drawer: { width: DRAWER_WIDTH, flex: 1, backgroundColor: COLORS.backgroundDark },
   drawerContent: { flex: 1 },
   drawerBody: { gap: SPACING.lg },
+
   detailTopRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
   detailIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: "rgba(66,165,245,0.12)", alignItems: "center", justifyContent: "center" },
   detailTitleWrap: { flex: 1, minWidth: 0 },
-  detailTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 16 },
+  detailTitle: { color: COLORS.text, fontFamily: FONTS.heading, fontSize: 18 },
   detailSubtitle: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, marginTop: 2 },
-  detailSection: { gap: SPACING.sm },
+
+  detailSection: { gap: SPACING.xs },
+  detailSectionLabel: {
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.interSemiBold,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    paddingBottom: SPACING.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+  },
+  detailSectionBody: { gap: SPACING.sm },
+  detailBadgeRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.xs, marginTop: 2 },
+  detailInlineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.sm },
+  detailInlineLabel: { color: COLORS.textSecondary, fontFamily: FONTS.body, fontSize: 13, flex: 1 },
+
   reasonBlock: { gap: SPACING.sm },
   reasonLabel: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 13 },
-  reasonInput: { minHeight: 96, borderRadius: RADII.md, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardDark, color: COLORS.text, fontFamily: FONTS.body, fontSize: 14, padding: SPACING.md, textAlignVertical: "top" },
+  reasonInput: {
+    minHeight: 88,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardDark,
+    color: COLORS.text,
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    padding: SPACING.md,
+    textAlignVertical: "top",
+  },
   reasonCounter: { color: COLORS.textSecondary, fontFamily: FONTS.interRegular, fontSize: 12, textAlign: "right" },
+
   confirmBody: { gap: SPACING.md },
   confirmText: { color: COLORS.textSecondary, fontFamily: FONTS.body, fontSize: 14, lineHeight: 20 },
   footerRow: { flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },

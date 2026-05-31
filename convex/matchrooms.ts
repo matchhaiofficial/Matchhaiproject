@@ -5,6 +5,7 @@ import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { requireCurrentUser, requireSuperAdmin } from "./authz";
+import { deductWalletFunds } from "./wallet";
 import {
   dispatchBroadcastZoneRequestsForMatchroom,
   finalizeBroadcastFailure,
@@ -1443,7 +1444,11 @@ async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: I
     .query("bookingRequests")
     .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", matchroomId))
     .first();
-  if (existing) return existing._id;
+  if (existing) {
+    // Booking request already exists — still notify the zone admin if not yet done.
+    await maybeNotifyZoneAdminMatchroomFull(ctx, matchroomId, room);
+    return existing._id;
+  }
 
   const maxPlayers = Math.max(1, Number(room.maxPlayers || room.currentPlayers || 1));
   if (Number(room.currentPlayers || 0) < maxPlayers) return null;
@@ -1457,7 +1462,7 @@ async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: I
   if (!host) return null;
 
   const now = Date.now();
-  return await ctx.db.insert("bookingRequests", {
+  const requestId = await ctx.db.insert("bookingRequests", {
     userId: host._id,
     gameKey: normalizeGameKey(room.game) || String(room.game || ""),
     zoneId: room.zoneId as Id<"zones">,
@@ -1497,6 +1502,51 @@ async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: I
     status: "open",
     createdAt: now,
     updatedAt: now,
+  });
+
+  // Notify the zone admin that the matchroom is full and ready for confirmation.
+  await maybeNotifyZoneAdminMatchroomFull(ctx, matchroomId, room);
+
+  return requestId;
+}
+
+// Sends a ONE-TIME idempotent notification to the zone owner when a zone-linked
+// matchroom becomes full. Dedupe key ensures this fires at most once per matchroom.
+async function maybeNotifyZoneAdminMatchroomFull(ctx: any, matchroomId: Id<"matchrooms">, room: any) {
+  if (!room?.zoneId) return;
+
+  let zone: any = null;
+  try {
+    zone = await ctx.db.get(room.zoneId as Id<"zones">);
+  } catch {
+    zone = null;
+  }
+  if (!zone?.ownerUid) return;
+
+  const dedupeKey = `zone.matchroom_full:${String(matchroomId)}`;
+  if (await notificationExistsByDedupeKey(ctx, dedupeKey)) return;
+
+  const zoneOwner = await resolveUserByAnyId(ctx, String(zone.ownerUid));
+  if (!zoneOwner?._id) return;
+
+  await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+    type: "zone.matchroom_full",
+    toUid: zoneOwner._id,
+    recipientRole: "zone_admin" as const,
+    status: "pending",
+    dedupeKey,
+    dedupePolicy: "upsert_active",
+    pushPolicy: "eligible",
+    matchroomId,
+    route: `/matchrooms/${String(matchroomId)}`,
+    title: "Matchroom is ready",
+    body: `${room.title || "Matchroom"} is full and ready for zone confirmation.`,
+    data: {
+      matchroomId: String(matchroomId),
+      matchroomTitle: room.title || null,
+      zoneId: String(room.zoneId),
+      href: `/matchrooms/${String(matchroomId)}`,
+    },
   });
 }
 
@@ -2789,7 +2839,34 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
 export const create = mutation({
   args: createMatchroomArgsValidator,
   handler: async (ctx, args) => {
-    return await createMatchroomFromValidatedArgs(ctx, args);
+    const matchroomId = await createMatchroomFromValidatedArgs(ctx, args);
+
+    // Charge the host's wallet inside the same authenticated transaction so
+    // creation and payment succeed or fail together. If the deduction throws
+    // (insufficient funds or auth), the whole mutation rolls back and we never
+    // leave an unpaid matchroom behind. This replaces the previous fragile
+    // two-step client flow (create, then a separate deductFunds mutation that
+    // could fail with "Authentication required"). The Easypaisa-funded flow
+    // goes through finalizePaidCreateFromProvider and deducts on its own, so it
+    // is unaffected by this public-create deduction.
+    const paymentAmount = Math.max(0, Math.ceil(Number(args.paymentAmount || 0)));
+    if (String(args.paymentStatus || "") === "paid" && paymentAmount > 0) {
+      await deductWalletFunds(ctx, {
+        amount: paymentAmount,
+        metadata: {
+          flow:
+            args.locationMode === "broadcast"
+              ? "broadcast_matchroom_create"
+              : "zone_matchroom_create",
+          matchroomId: String(matchroomId),
+        },
+        reference: `matchroom_create:${String(matchroomId)}`,
+        source: "matchroom_create",
+        userId: args.hostUid as Id<"users">,
+      });
+    }
+
+    return matchroomId;
   },
 });
 

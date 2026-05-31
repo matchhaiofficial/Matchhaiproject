@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -17,6 +17,7 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
+  deleteUserAccount,
   getUsersPage,
   setUserSuspension,
   type SuperAdminUser,
@@ -80,28 +81,43 @@ const UserRow = React.memo(function UserRow({
   busy,
   onSuspend,
   onReactivate,
+  onDelete,
 }: {
   user: SuperAdminUser;
   busy: boolean;
   onSuspend: (user: SuperAdminUser) => void;
   onReactivate: (user: SuperAdminUser) => void;
+  onDelete: (user: SuperAdminUser) => void;
 }) {
   const suspended = user.accountStatus === "suspended";
+  const isDeleted = (user as any).suspensionReason === "account_deletion_processed";
+  const isSuperAdmin = user.role === "super_admin" || user.role === "super-admin";
   return (
     <AdminListCard
       title={user.fullName || user.username || "Unknown user"}
       subtitle={user.email}
-      statusLabel={suspended ? "Suspended" : "Active"}
-      statusTone={statusTone(user.accountStatus)}
+      statusLabel={isDeleted ? "Deleted" : suspended ? "Suspended" : "Active"}
+      statusTone={isDeleted || suspended ? "danger" : "success"}
       actions={
-        suspended ? (
+        isDeleted ? (
+          <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
+            Re-run Cleanup
+          </AppButton>
+        ) : suspended ? (
           <AppButton size="sm" variant="success" loading={busy} onPress={() => onReactivate(user)}>
             Reactivate
           </AppButton>
         ) : (
-          <AppButton size="sm" variant="danger" loading={busy} onPress={() => onSuspend(user)}>
-            Suspend
-          </AppButton>
+          <View style={styles.actionStack}>
+            <AppButton size="sm" variant="danger" loading={busy} onPress={() => onSuspend(user)}>
+              Suspend
+            </AppButton>
+            {!isSuperAdmin ? (
+              <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
+                Delete Account
+              </AppButton>
+            ) : null}
+          </View>
         )
       }
     >
@@ -110,7 +126,7 @@ const UserRow = React.memo(function UserRow({
         <AdminInfoLine label="Type" value={user.accountType === "zone" ? "Zone Admin" : "Player"} />
         <AdminInfoLine label="Role" value={user.role || "Standard"} />
         <AdminInfoLine label="Created" value={formatDate(user.createdAt)} />
-        {suspended ? <AdminInfoLine label="Reason" value={user.suspensionReason || "No reason recorded"} /> : null}
+        {suspended ? <AdminInfoLine label="Reason" value={(user as any).suspensionReason || "No reason recorded"} /> : null}
       </View>
     </AdminListCard>
   );
@@ -237,6 +253,33 @@ export default function SuperAdminUsersScreen() {
   const handleSuspend = useCallback((user: SuperAdminUser) => handleSuspension(user, "suspended"), [handleSuspension]);
   const handleReactivate = useCallback((user: SuperAdminUser) => handleSuspension(user, "active"), [handleSuspension]);
 
+  const handleDelete = useCallback((user: SuperAdminUser) => {
+    Alert.alert(
+      "Delete Account",
+      (user as any).suspensionReason === "account_deletion_processed"
+        ? `Re-run auth cleanup for ${user.username || user.email}. This will re-anonymize the Better Auth email and revoke any remaining sessions. Safe to run on already-deleted accounts.\n\nProceed?`
+        : `This will permanently anonymize ${user.fullName || user.username || "this user"}'s name, email, and phone, and revoke all sessions. Financial and KYC records are kept for legal compliance. Cannot be undone.\n\nProceed?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: async () => {
+            setBusyUserId(user.id);
+            const result = await deleteUserAccount(user.id);
+            setBusyUserId(null);
+            if (result.ok) {
+              showToast({ type: "success", title: "Account deleted", message: "User data anonymized and sessions revoked." });
+              await load("refresh");
+            } else {
+              showToast({ type: "error", title: "Deletion failed", message: result.message });
+            }
+          },
+        },
+      ],
+    );
+  }, [load, showToast]);
+
   const renderUser = useCallback(
     ({ item }: { item: SuperAdminUser }) => (
       <UserRow
@@ -244,9 +287,10 @@ export default function SuperAdminUsersScreen() {
         busy={busyUserId === item.id}
         onSuspend={handleSuspend}
         onReactivate={handleReactivate}
+        onDelete={handleDelete}
       />
     ),
-    [busyUserId, handleSuspend, handleReactivate],
+    [busyUserId, handleDelete, handleSuspend, handleReactivate],
   );
 
   const renderEmpty = useCallback(
@@ -332,4 +376,5 @@ const styles = StyleSheet.create({
   footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   infoStack: { gap: SPACING.sm },
+  actionStack: { gap: SPACING.xs },
 });

@@ -50,7 +50,6 @@ import Logger from "../../src/utils/logger";
 import {
     PAYMENT_VERIFICATION_SAFE_MESSAGE,
     RESERVED_WALLET_HELPER_TEXT,
-    UNPAID_BOOKINGS_HELPER_TEXT,
     WALLET_BALANCE_HELPER_TEXT,
 } from "../../src/utils/paymentUiCopy";
 import { Perf } from "../../src/utils/perfInstrumentation";
@@ -153,6 +152,14 @@ const ACTIVE_CHECKOUT_STATUSES = new Set([
   "redirected",
   "token_received",
   "pending",
+]);
+
+// Intent statuses that represent actionable (not yet resolved) pending payments.
+// Excludes cancelled, expired, rejected, confirmed.
+const ACTIONABLE_INTENT_STATUSES = new Set([
+  "pending_approvals",
+  "approved",
+  "approved_pending_payment",
 ]);
 
 const formatReferenceLabel = (value?: string | null) => {
@@ -625,6 +632,9 @@ export default function WalletScreen() {
     const unpaidIntentMap = new Map<string, any>();
     for (const item of intents) {
       if (item.paymentStatus === "paid") continue;
+      // Only include actionable (not yet cancelled/expired/rejected/confirmed) intents.
+      const intentStatus = String(item.status || "");
+      if (!ACTIONABLE_INTENT_STATUSES.has(intentStatus)) continue;
       const slotIds = Array.isArray(item.selectedSlotIds) && item.selectedSlotIds.length > 0
         ? [...item.selectedSlotIds].map(String).sort().join(",")
         : Array.isArray(item.selectedSlots)
@@ -1120,15 +1130,17 @@ export default function WalletScreen() {
               </AppCard>
 
               <View style={styles.statsGrid}>
-                <AppCard style={styles.statCard}>
-                  <Text style={styles.statLabel}>Unpaid Bookings</Text>
-                  <Text style={styles.statValue}>
-                    {formatCurrency(totals.pendingAmount)}
-                  </Text>
-                  <Text style={styles.statHelperText}>
-                    {UNPAID_BOOKINGS_HELPER_TEXT}
-                  </Text>
-                </AppCard>
+                {totals.pendingAmount > 0 ? (
+                  <AppCard style={styles.statCard}>
+                    <Text style={styles.statLabel}>Pending Payments</Text>
+                    <Text style={styles.statValue}>
+                      {formatCurrency(totals.pendingAmount)}
+                    </Text>
+                    <Text style={styles.statHelperText}>
+                      {"Payments you started but haven't completed."}
+                    </Text>
+                  </AppCard>
+                ) : null}
                 <AppCard style={styles.statCard}>
                   <Text style={styles.statLabel}>Reserved</Text>
                   <Text style={styles.statValue}>
