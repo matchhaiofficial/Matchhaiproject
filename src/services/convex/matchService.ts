@@ -97,7 +97,10 @@ export interface Matchroom {
   requestedResourceSurface?: string;
   requestedResourceTier?: string;
   selectedZoneRateKey?: string;
-  matchCode?: string;
+  matchCode?: string | null;
+  // Server-derived: true only for host/captain/joined participants/owning zone
+  // admin/super admin. Outsiders receive `false` and a null matchCode.
+  canViewCheckIn?: boolean;
   flexibility?: string;
   bookingSource?: string;
   skipBookingRequest?: boolean;

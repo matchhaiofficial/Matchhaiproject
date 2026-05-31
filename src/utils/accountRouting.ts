@@ -27,6 +27,10 @@ export function isSuperAdminProfile(user: Pick<UserProfile, "_id" | "email" | "r
   const role = String(user.role || "");
   const hasAdminRole = role === "super_admin" || role === "super-admin";
   if (hasAdminRole) return true;
+  // Separate Super Admin account type is also a routing hint (backend remains
+  // authoritative). These accounts always carry the super_admin role too, but
+  // this keeps routing correct if a hint loads before the role is hydrated.
+  if ((user as any).accountType === "super_admin") return true;
   // FALLBACK only: public-env email/id hints for env-allowlist admins. These are
   // routing hints, never the security boundary — the backend re-checks every
   // Super Admin call (convex/admin.ts getAuthenticatedAdmin / requireSuperAdmin).

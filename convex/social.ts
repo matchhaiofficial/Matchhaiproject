@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
+import { isUserHiddenFromPublic } from "./userVisibility";
 
 function doesUserPlayGame(friend: any, game: string) {
   switch (game) {
@@ -250,6 +251,13 @@ export const sendFriendRequest = mutation({
     toUid: v.id("users"),
   },
   handler: async (ctx, args): Promise<any> => {
+    // Super Admin / hidden accounts are not social entities and cannot be
+    // friended (defense-in-depth: they never appear in discovery/search either).
+    const target = await ctx.db.get(args.toUid);
+    if (!target || isUserHiddenFromPublic(target)) {
+      throw new Error("This user is not available.");
+    }
+
     // Check if already friends
     const existingFriendship = await ctx.db
       .query("friendships")

@@ -63,7 +63,7 @@ export type SuperAdminUser = {
   username: string;
   email: string;
   phone?: string;
-  accountType: "player" | "zone";
+  accountType: "player" | "zone" | "super_admin";
   role?: string;
   accountStatus?: "active" | "suspended";
   kycVerificationStatus?:
@@ -908,16 +908,30 @@ export type SuperAdminDbRoleAccount = {
   source: "db_role" | "env_allowlist" | "both";
   mustChangePassword: boolean;
   passwordChangedAt: number | null;
+  isSystemAdminAccount: boolean;
+  hiddenFromPublic: boolean;
+  isSeparateAccount: boolean;
 };
 
+export type PartnerSuperAdminBootstrapStatus =
+  | "created"
+  | "already_exists"
+  | "conflict_existing_player_account"
+  | "missing_temp_password_env"
+  | "failed"
+  | "skipped_protected";
+
 export type PartnerSuperAdminBootstrapResult = {
-  ok: true;
-  passwordSetupMethod: "forgot_password_reset_link";
+  ok: boolean;
+  configured: boolean;
+  // Present only when nothing could be created (e.g. missing env password).
+  message?: string;
+  // No password is ever returned to the client.
+  passwordSetupMethod?: "env_temp_password_forced_change";
   results: Array<{
     email: string;
-    status: "already_super_admin" | "granted" | "linked" | "created" | "must_register";
-    hasSuperAdmin: boolean;
-    mustChangePassword: boolean;
+    status: PartnerSuperAdminBootstrapStatus;
+    message: string;
   }>;
 };
 
@@ -1009,13 +1023,12 @@ export async function revokeSuperAdmin(input: {
   }
 }
 
-// Onboards partner Super Admins (default: the known partner list). By default
-// existing users are granted the role and missing ones are reported; pass
-// createMissing to provision missing accounts (random temp password + reset-link
-// onboarding). Never returns or stores any password.
+// Creates the SEPARATE partner Super Admin accounts (default: the known partner
+// list). Existing accounts are verified/skipped; existing player accounts are
+// reported as conflicts and never upgraded. Requires the server-side temp
+// password env var. Never returns or stores any password.
 export async function bootstrapPartnerSuperAdmins(input?: {
   emails?: string[];
-  createMissing?: boolean;
   reason?: string;
 }): Promise<Result<PartnerSuperAdminBootstrapResult>> {
   try {
@@ -1023,7 +1036,6 @@ export async function bootstrapPartnerSuperAdmins(input?: {
     const data = await convex.mutation(api.admin.bootstrapPartnerSuperAdmins, {
       sessionToken,
       emails: input?.emails,
-      createMissing: input?.createMissing,
       reason: input?.reason,
     });
     clearSuperAdminCache();

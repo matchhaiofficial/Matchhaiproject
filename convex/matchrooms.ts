@@ -4,7 +4,8 @@ import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
-import { requireCurrentUser, requireSuperAdmin } from "./authz";
+import { requireCurrentUser, requireSuperAdmin, getCurrentUser, isSuperAdminProfile } from "./authz";
+import { isUserHiddenFromPublic } from "./userVisibility";
 import { deductWalletFunds } from "./wallet";
 import {
   dispatchBroadcastZoneRequestsForMatchroom,
@@ -2049,6 +2050,47 @@ async function closePendingJoinRequestsForJoinedUser(
 // ============================================
 
 // Get matchroom by ID
+// Non-throwing access check for matchroom check-in details (QR + match code).
+// Authorized: host, either captain, any joined participant (playerUids or slots),
+// the owning zone's admin, and super admins. Everyone else is an "outsider".
+async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
+  try {
+    const actor = await getCurrentUser(ctx);
+    const viewer = actor.user;
+    if (!viewer) return false;
+    const viewerId = String(viewer._id);
+
+    if (String(room.hostUid || "") === viewerId) return true;
+    if (String(room.captainUidA || "") === viewerId) return true;
+    if (String(room.captainUidB || "") === viewerId) return true;
+    if (
+      Array.isArray(room.playerUids) &&
+      room.playerUids.map(String).includes(viewerId)
+    ) {
+      return true;
+    }
+
+    const slotUids = [...(room.slotsA || []), ...(room.slotsB || [])]
+      .map((slot: any) => slot?.user?._id || slot?.user?.uid || slot?.uid)
+      .filter(Boolean)
+      .map(String);
+    if (slotUids.includes(viewerId)) return true;
+
+    if (isSuperAdminProfile(viewer, actor.authUser?.email || actor.identity?.email)) {
+      return true;
+    }
+
+    if (room.zoneId) {
+      const zone = await ctx.db.get(room.zoneId as Id<"zones">);
+      if (zone && String(zone.ownerUid || "") === viewerId) return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export const getById = query({
   args: { matchroomId: v.string() },
   handler: async (ctx, args) => {
@@ -2056,7 +2098,14 @@ export const getById = query({
       const id = args.matchroomId as Id<"matchrooms">;
       const room = await ctx.db.get(id);
       if (room) {
-        return { ...room, id: room._id };
+        // Gate the check-in code: outsiders never receive the real matchCode, so
+        // the secret can't leak via the payload even if a client renders it.
+        const canViewCheckIn = await resolveCheckInAccess(ctx, room);
+        const result: any = { ...room, id: room._id, canViewCheckIn };
+        if (!canViewCheckIn) {
+          result.matchCode = null;
+        }
+        return result;
       }
     } catch {
       // Not a valid Convex ID
@@ -3664,6 +3713,13 @@ export const inviteToMatchroom = mutation({
     // Not already in room
     if (room.playerUids.includes(args.toUid)) {
       throw new Error("User is already in this matchroom.");
+    }
+
+    // Super Admin / hidden accounts are not players and cannot be invited
+    // (defense-in-depth: they never surface in discovery/search/invites either).
+    const invitee = await ctx.db.get(args.toUid);
+    if (!invitee || isUserHiddenFromPublic(invitee)) {
+      throw new Error("This user is not available.");
     }
 
     const entityKey = `match.seat_invite:${args.matchroomId}:${args.toUid}:${args.slotId}`;

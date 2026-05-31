@@ -4541,6 +4541,11 @@ export const listSuperAdminAccess = query({
       source: resolveSuperAdminAccessSource(user, user.email) || "db_role",
       mustChangePassword: user.mustChangePassword === true,
       passwordChangedAt: user.passwordChangedAt ?? null,
+      // Separate-account markers so the access overview can distinguish a
+      // provisioned admin account from an upgraded/legacy one.
+      isSystemAdminAccount: user.isSystemAdminAccount === true,
+      hiddenFromPublic: user.hiddenFromPublic === true,
+      isSeparateAccount: user.accountType === "super_admin",
     }));
 
     const allowlist = getSuperAdminAllowlist();
@@ -4582,12 +4587,20 @@ export const listSuperAdminAccess = query({
   },
 });
 
-// Partner Super Admin onboarding. Emails are NOT secret (already named in the
-// allowlist config); passwords are never accepted, returned, logged or stored
-// in plaintext here. Missing users are created only when `createMissing` is
-// explicitly true, each with a UNIQUE cryptographically-random temp password
-// that NO ONE sees — the partner then sets their own password via the existing
-// Forgot Password reset link, and the mustChangePassword gate enforces a change.
+// Partner Super Admin onboarding — SEPARATE operational accounts model.
+//
+// Super Admin accounts are a distinct account type (accountType "super_admin"),
+// NOT upgraded player accounts. This flow creates missing partner admin accounts
+// and verifies existing ones. It NEVER upgrades or modifies an existing player
+// account that happens to share an email — that case is reported as a conflict.
+//
+// Password safety (never hardcoded, returned, logged or stored in plaintext):
+//   - the temporary first-login password is read ONLY from the server-side env
+//     var SUPER_ADMIN_BOOTSTRAP_TEMP_PASSWORD (dev/staging convenience);
+//   - if it is not configured, NO accounts are created;
+//   - created accounts are flagged mustChangePassword so the existing forced
+//     password-change gate forces a change before the Super Admin panel opens.
+// Emails are NOT secret (already named in the allowlist config).
 const PARTNER_SUPER_ADMIN_EMAILS = [
   "zeerak@matchhai.com",
   "junaid@matchhai.com",
@@ -4596,53 +4609,67 @@ const PARTNER_SUPER_ADMIN_EMAILS = [
   "mubeen@matchhai.com",
 ] as const;
 
-// Cryptographically-random password meeting the app's complexity rules. Used
-// only so a created Better Auth credential account is never left with a weak or
-// shared secret; it is intentionally NOT returned to any caller.
-function generateRandomTempPassword() {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower = "abcdefghijkmnpqrstuvwxyz";
-  const digits = "23456789";
-  const special = "!@#$%^&*()-_=+";
-  const all = upper + lower + digits + special;
-  const pick = (set: string, byte: number) => set[byte % set.length];
-  // Guarantee one of each class, then fill the rest from the full set.
-  const chars = [
-    pick(upper, bytes[0]),
-    pick(lower, bytes[1]),
-    pick(digits, bytes[2]),
-    pick(special, bytes[3]),
-  ];
-  for (let i = 4; i < bytes.length; i += 1) chars.push(pick(all, bytes[i]));
-  // Fisher-Yates shuffle using fresh randomness so class chars aren't positional.
-  const shuffle = new Uint8Array(chars.length);
-  crypto.getRandomValues(shuffle);
-  for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = shuffle[i] % (i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join("");
+// Email that must never be touched by the bootstrap flow (already provisioned
+// and working). Kept here as a hard guard even if passed in the emails arg.
+const PRIMARY_SUPER_ADMIN_PROTECTED_EMAIL = "ovais@matchhai.com";
+
+type PartnerBootstrapStatus =
+  | "created"
+  | "already_exists"
+  | "conflict_existing_player_account"
+  | "missing_temp_password_env"
+  | "failed"
+  | "skipped_protected";
+
+const PARTNER_BOOTSTRAP_MESSAGES: Record<PartnerBootstrapStatus, string> = {
+  created: "Super Admin account created. The partner must change the temporary password on first login.",
+  already_exists: "Super Admin account already exists.",
+  conflict_existing_player_account: "Player account exists with this email. Admin account not created.",
+  missing_temp_password_env: "Temporary bootstrap password is not configured.",
+  failed: "Could not create this Super Admin account.",
+  skipped_protected: "Primary Super Admin account is managed separately and was left untouched.",
+};
+
+function readBootstrapTempPassword() {
+  return String(process.env.SUPER_ADMIN_BOOTSTRAP_TEMP_PASSWORD || "");
 }
 
-async function createProvisionedSuperAdminUser(
+// Pick a username that does not collide with any existing account (super admins
+// are hidden from username lookup, but `by_usernameLower` is read with .unique()
+// elsewhere, so duplicates would break those reads).
+async function allocateSuperAdminUsername(ctx: any, email: string) {
+  const base = normalizeUsername(email.split("@")[0] || "admin").replace(/[^a-z0-9_]/g, "") || "admin";
+  let candidate = base;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_usernameLower", (q: any) => q.eq("usernameLower", candidate))
+      .unique();
+    if (!existing) return candidate;
+    const suffix = Math.floor(Math.random() * 1e6).toString(36);
+    candidate = `${base}_${suffix}`;
+  }
+  return `${base}_${Date.now().toString(36)}`;
+}
+
+// Creates a brand-new SEPARATE Super Admin account (Better Auth user + credential
+// + hidden users profile). The temp password is supplied by the caller from env
+// and is never returned or logged.
+async function createSeparateSuperAdminAccount(
   ctx: any,
-  args: { email: string; actorEmail: string },
+  args: { email: string; tempPassword: string; actorEmail: string },
 ) {
   const now = Date.now();
-  // Random, never-revealed temp password. The partner replaces it via the reset
-  // link before they can ever sign in (they don't know this value).
-  const tempPassword = generateRandomTempPassword();
-  const authPassword = await hashPassword(tempPassword);
-  const username = normalizeUsername(args.email.split("@")[0] || "partner");
+  const authPassword = await hashPassword(args.tempPassword);
+  const displayName = args.email.split("@")[0] || "Partner Super Admin";
+  const username = await allocateSuperAdminUsername(ctx, args.email);
 
   const authUser = await ctx.runMutation(components.betterAuth.adapter.create, {
     input: {
       model: "user",
       data: {
         email: args.email,
-        name: args.email.split("@")[0] || "Partner Super Admin",
+        name: displayName,
         emailVerified: true,
         createdAt: now,
         updatedAt: now,
@@ -4669,14 +4696,18 @@ async function createProvisionedSuperAdminUser(
   const userId = await ctx.db.insert("users", {
     authId: authUserId,
     email: args.email,
-    fullName: args.email.split("@")[0] || "Partner Super Admin",
+    fullName: displayName,
     username,
     usernameLower: username,
-    accountType: "player",
+    // Separate admin account type — excluded from every player/zone surface.
+    accountType: "super_admin",
     isOnline: false,
+    // No player onboarding / games / KYC / wallet / phone for admin accounts.
     onboardingCompleted: true,
     onboardingStep: 4,
     role: SUPER_ADMIN_ROLE,
+    isSystemAdminAccount: true,
+    hiddenFromPublic: true,
     mustChangePassword: true,
     passwordChangedAt: null,
     createdBySuperAdmin: args.actorEmail,
@@ -4693,10 +4724,6 @@ export const bootstrapPartnerSuperAdmins = mutation({
     sessionToken: v.string(),
     // Defaults to the known partner list; callers may pass a custom set.
     emails: v.optional(v.array(v.string())),
-    // Off by default: existing users are upgraded/granted, missing users are
-    // only REPORTED. Pass true to provision missing accounts (random temp
-    // password + reset-link onboarding).
-    createMissing: v.optional(v.boolean()),
     reason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -4709,71 +4736,107 @@ export const bootstrapPartnerSuperAdmins = mutation({
     ).map(normalizeEmail).filter(Boolean);
     const emails = Array.from(new Set(inputEmails));
 
-    const results: Array<{
-      email: string;
-      status: "already_super_admin" | "granted" | "linked" | "created" | "must_register";
-      hasSuperAdmin: boolean;
-      mustChangePassword: boolean;
-    }> = [];
+    const makeResult = (email: string, status: PartnerBootstrapStatus) => ({
+      email,
+      status,
+      message: PARTNER_BOOTSTRAP_MESSAGES[status],
+    });
+
+    // No temp password configured → create nothing, report a safe config error
+    // for every requested email. Never reveal whether the value exists elsewhere.
+    const tempPassword = readBootstrapTempPassword();
+    if (!tempPassword) {
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "bootstrap_partner_super_admin",
+        module: "access",
+        status: "failed",
+        reason: args.reason,
+        metadataSafe: { outcome: "missing_temp_password_env", requested: emails.length },
+      });
+      return {
+        ok: false,
+        configured: false,
+        message: PARTNER_BOOTSTRAP_MESSAGES.missing_temp_password_env,
+        results: emails.map((email) => makeResult(email, "missing_temp_password_env")),
+      };
+    }
+
+    const results: Array<{ email: string; status: PartnerBootstrapStatus; message: string }> = [];
 
     for (const email of emails) {
-      const profile = await ctx.db
-        .query("users")
-        .withIndex("by_email", (q) => q.eq("email", email))
-        .unique();
+      // Never touch the primary super admin via this flow.
+      if (email === PRIMARY_SUPER_ADMIN_PROTECTED_EMAIL) {
+        results.push(makeResult(email, "skipped_protected"));
+        continue;
+      }
 
-      if (profile) {
-        if (isSuperAdminRole(profile.role) && profile.role === SUPER_ADMIN_ROLE) {
-          results.push({ email, status: "already_super_admin", hasSuperAdmin: true, mustChangePassword: profile.mustChangePassword === true });
+      try {
+        const profile = await ctx.db
+          .query("users")
+          .withIndex("by_email", (q) => q.eq("email", email))
+          .unique();
+
+        if (profile) {
+          // An existing SEPARATE super admin account (by role or admin markers)
+          // is left as-is. We never re-create or duplicate.
+          const isAdminAccount =
+            isSuperAdminRole(profile.role) ||
+            profile.accountType === "super_admin" ||
+            profile.isSystemAdminAccount === true;
+          if (isAdminAccount) {
+            results.push(makeResult(email, "already_exists"));
+            await insertSuperAdminAuditLog(ctx, admin, {
+              action: "bootstrap_partner_super_admin",
+              module: "access",
+              targetType: "user",
+              targetId: String(profile._id),
+              status: "success",
+              reason: args.reason,
+              metadataSafe: { targetEmail: email, outcome: "already_exists" },
+            });
+            continue;
+          }
+
+          // A normal player/zone account exists with this email. Do NOT upgrade
+          // or merge — report a conflict and leave it untouched.
+          results.push(makeResult(email, "conflict_existing_player_account"));
           await insertSuperAdminAuditLog(ctx, admin, {
             action: "bootstrap_partner_super_admin",
             module: "access",
             targetType: "user",
             targetId: String(profile._id),
-            status: "success",
+            status: "denied",
             reason: args.reason,
-            metadataSafe: { targetEmail: email, outcome: "already_super_admin" },
+            metadataSafe: {
+              targetEmail: email,
+              outcome: "conflict_existing_player_account",
+              existingAccountType: profile.accountType ?? null,
+            },
           });
           continue;
         }
-        await ctx.db.patch(profile._id, { role: SUPER_ADMIN_ROLE, updatedAt: Date.now() });
-        await insertSuperAdminAuditLog(ctx, admin, {
-          action: "bootstrap_partner_super_admin",
-          module: "access",
-          targetType: "user",
-          targetId: String(profile._id),
-          status: "success",
-          reason: args.reason,
-          metadataSafe: { targetEmail: email, outcome: "granted", previousRole: profile.role ?? null },
-        });
-        results.push({ email, status: "granted", hasSuperAdmin: true, mustChangePassword: profile.mustChangePassword === true });
-        continue;
-      }
 
-      // No profile row. Check whether a Better Auth user already exists.
-      const authUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
-        model: "user",
-        where: [{ field: "email", operator: "eq", value: email }],
-      });
-
-      if (authUser) {
-        const authUserId = String((authUser as any)._id || (authUser as any).id || "");
-        const userId = await ctx.db.insert("users", {
-          authId: authUserId,
-          email,
-          fullName: (authUser as any).name || email.split("@")[0] || "Partner Super Admin",
-          username: normalizeUsername(email.split("@")[0] || "partner"),
-          usernameLower: normalizeUsername(email.split("@")[0] || "partner"),
-          accountType: "player",
-          isOnline: false,
-          onboardingCompleted: true,
-          onboardingStep: 4,
-          role: SUPER_ADMIN_ROLE,
-          createdBySuperAdmin: actorEmail,
-          phoneValidated: false,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+        // No profile row. If a Better Auth user already owns this email we cannot
+        // safely create a fresh credential account — treat as a conflict rather
+        // than silently linking/merging.
+        const authUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+          model: "user",
+          where: [{ field: "email", operator: "eq", value: email }],
         });
+        if (authUser) {
+          results.push(makeResult(email, "conflict_existing_player_account"));
+          await insertSuperAdminAuditLog(ctx, admin, {
+            action: "bootstrap_partner_super_admin",
+            module: "access",
+            status: "denied",
+            reason: args.reason,
+            metadataSafe: { targetEmail: email, outcome: "conflict_existing_auth_account" },
+          });
+          continue;
+        }
+
+        const userId = await createSeparateSuperAdminAccount(ctx, { email, tempPassword, actorEmail });
+        results.push(makeResult(email, "created"));
         await insertSuperAdminAuditLog(ctx, admin, {
           action: "bootstrap_partner_super_admin",
           module: "access",
@@ -4781,35 +4844,26 @@ export const bootstrapPartnerSuperAdmins = mutation({
           targetId: String(userId),
           status: "success",
           reason: args.reason,
-          metadataSafe: { targetEmail: email, outcome: "linked" },
+          metadataSafe: { targetEmail: email, outcome: "created", mustChangePassword: true, accountType: "super_admin" },
         });
-        results.push({ email, status: "linked", hasSuperAdmin: true, mustChangePassword: false });
-        continue;
+      } catch (error: any) {
+        results.push(makeResult(email, "failed"));
+        await insertSuperAdminAuditLog(ctx, admin, {
+          action: "bootstrap_partner_super_admin",
+          module: "access",
+          status: "failed",
+          reason: args.reason,
+          // Only a coarse error class is logged — never the password or stack.
+          metadataSafe: { targetEmail: email, outcome: "failed" },
+        });
       }
-
-      if (!args.createMissing) {
-        results.push({ email, status: "must_register", hasSuperAdmin: false, mustChangePassword: false });
-        continue;
-      }
-
-      const userId = await createProvisionedSuperAdminUser(ctx, { email, actorEmail });
-      await insertSuperAdminAuditLog(ctx, admin, {
-        action: "bootstrap_partner_super_admin",
-        module: "access",
-        targetType: "user",
-        targetId: String(userId),
-        status: "success",
-        reason: args.reason,
-        metadataSafe: { targetEmail: email, outcome: "created", mustChangePassword: true },
-      });
-      results.push({ email, status: "created", hasSuperAdmin: true, mustChangePassword: true });
     }
 
     return {
       ok: true,
-      // Created partners must set their own password via the Forgot Password
-      // reset link; no temporary password is ever returned.
-      passwordSetupMethod: "forgot_password_reset_link" as const,
+      configured: true,
+      // No temporary password is ever returned to the caller.
+      passwordSetupMethod: "env_temp_password_forced_change" as const,
       results,
     };
   },

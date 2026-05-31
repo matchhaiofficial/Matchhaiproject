@@ -208,6 +208,11 @@ export const getByUsername = query({
         q.eq("usernameLower", normalizeUsername(args.username))
       )
       .unique();
+    if (!user) return null;
+    // Super Admin / hidden accounts are not exposed via public username lookup.
+    const actor = await getCurrentUser(ctx);
+    if (!canViewerAccessPublicUser(actor.user || null, user)) return null;
+    if (actor.user && String(actor.user._id) === String(user._id)) return user;
     return publicUser(user);
   },
 });
@@ -765,6 +770,17 @@ export const updatePlatformLinks = mutation({
 
 const EXTERNAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 
+// Authorizes an external-stats refresh: owner-only, or super admin. Used by the
+// refreshExternalStats action (actions cannot touch ctx.db / auth-derived lookups
+// directly, so the check runs as a query).
+export const assertCanRefreshStats = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args): Promise<null> => {
+    await requireSelfOrSuperAdmin(ctx, args.userId);
+    return null;
+  },
+});
+
 export const refreshExternalStats = action({
   args: {
     userId: v.id("users"),
@@ -776,8 +792,11 @@ export const refreshExternalStats = action({
     errors: Array<{ platform: string; message: string }>;
     updates: Record<string, unknown>;
   }> => {
-    const actor: any = await ctx.runQuery(api.users.getById, { userId: args.userId });
-    if (!actor || String(actor._id) !== String(args.userId)) throw new Error("User not found");
+    // Only the account owner (or a super admin) may trigger an external sync.
+    // The previous guard compared the *target* doc id to itself and never checked
+    // the caller, so any authenticated viewer could drive external provider calls
+    // against another user's linked accounts. Cooldown below still rate-limits.
+    await ctx.runQuery(internal.users.assertCanRefreshStats, { userId: args.userId });
     const user = await ctx.runQuery(api.users.getById, { userId: args.userId });
     if (!user) throw new Error("User not found");
 

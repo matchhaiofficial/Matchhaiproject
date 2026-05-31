@@ -99,6 +99,9 @@ type Props = {
   isLocked: boolean;
   qrValue: string | null;
   matchCode: string | null;
+  // Only host/captain/joined participants/owning zone admin/super admin may see
+  // the QR + check-in code. Outsiders never get this section rendered.
+  canViewCheckIn: boolean;
   styles: any;
 };
 
@@ -107,6 +110,7 @@ export function MatchroomSummarySection({
   isLocked,
   qrValue,
   matchCode,
+  canViewCheckIn,
   styles,
 }: Props) {
   const isBroadcastPending = isBroadcastVenuePending(room);
@@ -127,7 +131,7 @@ export function MatchroomSummarySection({
 
   return (
     <>
-      {isLocked && qrValue ? (
+      {canViewCheckIn && isLocked && qrValue ? (
         <View style={styles.qrCard}>
           <View style={styles.qrHeader}>
             <Text style={styles.qrTitle}>Matchroom QR</Text>

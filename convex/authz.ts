@@ -103,6 +103,20 @@ export async function getOwnedZoneForCurrentUser(ctx: any) {
   return { ...actor, zone };
 }
 
+// Privacy-safe projection of PSN stats for public profiles. Only exposes the
+// public online handle and per-game trophy progress — never the raw provider
+// payload (avatar/profile URLs, trophy tier blobs, sync timestamps, etc.).
+function publicPsnStats(psnStats: any) {
+  if (!psnStats || typeof psnStats !== "object") return null;
+  const pickProgress = (game: any) =>
+    game && typeof game.progress === "number" ? { progress: game.progress } : undefined;
+  return {
+    psnOnlineId: psnStats.psnOnlineId ?? null,
+    tekken8: pickProgress(psnStats.tekken8),
+    fc: pickProgress(psnStats.fc),
+  };
+}
+
 export function publicUser(user: any) {
   if (!user) return null;
   return {
@@ -119,14 +133,52 @@ export function publicUser(user: any) {
     skillScores: user.skillScores || {},
     isOnline: user.isOnline,
     lastActiveAt: user.lastActiveAt,
+    trustScore: typeof user.trustScore === "number" ? user.trustScore : undefined,
+
+    // Privacy preferences (so public viewers honor the owner's choices).
+    hideAreasPublicly: !!user.hideAreasPublicly,
+    hidePlatformsPublicly: !!user.hidePlatformsPublicly,
+
+    // Game participation + display details (non-sensitive).
     playsCs2: !!user.playsCs2,
     playsCs16: !!user.playsCs16,
     playsValorant: !!user.playsValorant,
     playsFc: !!user.playsFc,
     playsTekken: !!user.playsTekken,
+    playsFutsal: !!user.playsFutsal,
+    playsIndoorCricket: !!user.playsIndoorCricket,
+    playsPadel: !!user.playsPadel,
+    playsPickleball: !!user.playsPickleball,
+    cs2Role: user.cs2Role ?? null,
+    cs16Role: user.cs16Role ?? null,
+    valorantRole: user.valorantRole ?? null,
+    valorantAgent: user.valorantAgent ?? null,
     fcTeam: user.fcTeam,
+    fcFormation: user.fcFormation ?? null,
     tekkenFavorites: Array.isArray(user.tekkenFavorites) ? user.tekkenFavorites : [],
+    futsalPosition: user.futsalPosition ?? null,
+    indoorCricketRole: user.indoorCricketRole ?? null,
+    indoorCricketBattingStyle: user.indoorCricketBattingStyle ?? null,
+    indoorCricketBowlingStyle: user.indoorCricketBowlingStyle ?? null,
+    padelRole: user.padelRole ?? null,
+    pickleballRole: user.pickleballRole ?? null,
+
+    // Verified external-platform connections. These are public-facing identifiers
+    // and display values only — NO tokens, secrets, or raw provider payloads.
+    steamId: user.steamId ?? null,
+    steamProfileUrl: user.steamProfileUrl ?? null,
+    steamPersonaName: user.steamPersonaName ?? null,
+    steamCs2Hours: user.steamCs2Hours ?? null,
+    steamTekken8Hours: user.steamTekken8Hours ?? null,
+    steamFc26Hours: user.steamFc26Hours ?? null,
+    faceitId: user.faceitId ?? null,
+    faceitProfileUrl: user.faceitProfileUrl ?? null,
+    faceitNickname: user.faceitNickname ?? null,
+    faceitGame: user.faceitGame ?? null,
     faceitElo: user.faceitElo,
     faceitSkillLevel: user.faceitSkillLevel,
+    psnAccountId: user.psnAccountId ?? null,
+    psnOnlineId: user.psnOnlineId ?? null,
+    psnStats: publicPsnStats(user.psnStats),
   };
 }
