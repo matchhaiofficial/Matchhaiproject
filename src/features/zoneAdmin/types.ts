@@ -9,7 +9,8 @@ export type ZoneAdminModuleId =
   | "venue_settings"
   | "migration_tools"
   | "notifications_center"
-  | "audit_security";
+  | "audit_security"
+  | "wallet";
 
 export type ZoneBookingStatus =
   | "held"

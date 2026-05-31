@@ -53,11 +53,11 @@ const getTxLabel = (item: any): string => {
     return "Transaction";
 };
 
-const getTxTone = (item: any): "success" | "warning" | "error" | "neutral" => {
+const getTxTone = (item: any): "success" | "warning" | "danger" | "neutral" => {
     if (item.type === "deposit" && item.source === "matchroom_completion_payout")
         return "success";
     if (item.status === "pending") return "warning";
-    if (item.status === "failed") return "error";
+    if (item.status === "failed") return "danger";
     return "neutral";
 };
 
