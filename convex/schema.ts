@@ -167,7 +167,12 @@ export default defineSchema({
     phoneNumberHash: v.optional(v.string()),
     pendingEmail: v.optional(v.union(v.string(), v.null())),
     pendingPhone: v.optional(v.union(v.string(), v.null())),
-    accountType: v.union(v.literal("player"), v.literal("zone")),
+    // "super_admin" is a SEPARATE operational/admin account type, never a
+    // player/zone account. Super Admin accounts are created via the bootstrap
+    // flow (admin.bootstrapPartnerSuperAdmins) and are hidden from every
+    // player/zone-facing surface (see convex/userVisibility.ts). Backend
+    // authorization still treats role === "super_admin" as the source of truth.
+    accountType: v.union(v.literal("player"), v.literal("zone"), v.literal("super_admin")),
 
     // Profile
     photoURL: v.optional(v.string()),
@@ -291,6 +296,23 @@ export default defineSchema({
 
     // Role for super admin
     role: v.optional(v.string()),
+
+    // Forced password change (e.g. system-provisioned partner Super Admins).
+    // mustChangePassword gates the app until the user sets their own password.
+    // No plaintext password is ever stored here — only these flags/metadata.
+    mustChangePassword: v.optional(v.boolean()),
+    passwordChangedAt: v.optional(v.union(v.number(), v.null())),
+    passwordResetRequestedAt: v.optional(v.number()),
+    createdBySuperAdmin: v.optional(v.string()),
+
+    // Separate Super Admin / system-admin account markers. These accounts are
+    // operational only and MUST stay hidden from every player/zone surface.
+    // isSystemAdminAccount marks an account provisioned as an admin (not an
+    // upgraded player); hiddenFromPublic is the explicit public-visibility kill
+    // switch honored by convex/userVisibility.ts.
+    isSystemAdminAccount: v.optional(v.boolean()),
+    hiddenFromPublic: v.optional(v.boolean()),
+    isHiddenFromDiscovery: v.optional(v.boolean()),
 
     // Team references
     teamsByGame: v.optional(v.any()),

@@ -638,8 +638,21 @@ export default function PlayerProfile() {
         );
     };
 
-    const renderPlatformCard = (name: string, value: string | null | undefined, icon: string, color: string, isVerified: boolean) => {
-        if (!value || !profile) {
+    // `connected` is derived from any verified identifier/profile for the platform,
+    // not just the display value — so a linked account never reads "Not connected".
+    // `displayValue` is a safe public label; `linkUrl` is opened only when it is a
+    // real, non-private URL.
+    const renderPlatformCard = (
+        name: string,
+        connected: boolean,
+        displayValue: string | null | undefined,
+        icon: string,
+        color: string,
+        linkUrl?: string | null,
+    ) => {
+        const isOwnProfile = uid === user?._id;
+
+        if (!connected || !profile) {
             return (
                 <View style={[styles.platformCard, styles.notConnected]}>
                     <View style={[styles.platformIcon, { backgroundColor: color }]}>
@@ -649,7 +662,7 @@ export default function PlayerProfile() {
                         <Text style={styles.platformName}>{name}</Text>
                         <Text style={styles.platformValue}>Not connected</Text>
                     </View>
-                    {uid === user?._id && (
+                    {isOwnProfile && (
                         <Pressable onPress={() => router.push('/(player)/profile/edit' as any)}>
                             <AppIcon name="add-circle-outline" size={24} color={COLORS.muted} />
                         </Pressable>
@@ -657,6 +670,12 @@ export default function PlayerProfile() {
                 </View>
             );
         }
+
+        // Hide the raw identifier/URL from other viewers when the owner opted into
+        // platform privacy; still show that the account is connected/verified.
+        const platformsHidden = !!profile.hidePlatformsPublicly && !isOwnProfile;
+        const safeValue = platformsHidden ? 'Verified Account' : (displayValue || 'Connected');
+        const canOpenLink = !platformsHidden && !!linkUrl;
 
         return (
             <View style={styles.platformCard}>
@@ -666,17 +685,13 @@ export default function PlayerProfile() {
                 <View style={styles.platformInfo}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={styles.platformName}>{name}</Text>
-                        {isVerified && (
-                            <View style={[styles.badge, styles.verifiedBadge]}>
-                                <Text style={styles.verifiedBadgeText}>Verified</Text>
-                            </View>
-                        )}
+                        <View style={[styles.badge, styles.verifiedBadge]}>
+                            <Text style={styles.verifiedBadgeText}>Verified</Text>
+                        </View>
                     </View>
-                    <Text style={styles.platformValue}>
-                        {profile.hidePlatformsPublicly && uid !== user?._id ? 'Verified Account' : value}
-                    </Text>
+                    <Text style={styles.platformValue}>{safeValue}</Text>
                 </View>
-                {uid === user?._id && (
+                {isOwnProfile && (
                     <Pressable
                         onPressIn={() => {
                             if (touchDebugEnabled) {
@@ -695,8 +710,8 @@ export default function PlayerProfile() {
                         )}
                     </Pressable>
                 )}
-                {!isVerified && value && (
-                    <Pressable onPress={() => Linking.openURL(value)}>
+                {canOpenLink && (
+                    <Pressable onPress={() => Linking.openURL(linkUrl as string)}>
                         <AppIcon name="launch" size={20} color={COLORS.muted} style={{ marginLeft: 8 }} />
                     </Pressable>
                 )}
@@ -707,15 +722,51 @@ export default function PlayerProfile() {
     const renderPlatforms = () => {
         if (!profile) return null;
 
+        const steamConnected = !!(profile.steamId || profile.steamProfileUrl);
+        const faceitConnected = !!(profile.faceitId || profile.faceitNickname || profile.faceitProfileUrl);
+        const psnConnected = !!(
+            profile.psnAccountId ||
+            profile.psnOnlineId ||
+            (profile as any).psnStats?.psnOnlineId
+        );
+
+        const faceitDisplay =
+            profile.faceitNickname ||
+            (typeof profile.faceitSkillLevel === 'number' ? `Level ${profile.faceitSkillLevel}` : null) ||
+            (typeof profile.faceitElo === 'number' ? `ELO ${profile.faceitElo}` : null) ||
+            profile.faceitProfileUrl;
+        const psnDisplay = profile.psnOnlineId || (profile as any).psnStats?.psnOnlineId;
+
         return (
             <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Connected Platforms</Text>
                 </View>
                 <View style={styles.sectionPadding}>
-                    {renderPlatformCard('Steam', profile.steamProfileUrl, 'steam', '#1b2838', !!profile.steamId)}
-                    {renderPlatformCard('FACEIT', profile.faceitProfileUrl, 'foursquare', '#ff5500', !!profile.faceitId)}
-                    {renderPlatformCard('PlayStation', profile.psnOnlineId, 'playstation', '#003791', !!profile.psnAccountId)}
+                    {renderPlatformCard(
+                        'Steam',
+                        steamConnected,
+                        profile.steamPersonaName || profile.steamProfileUrl,
+                        'steam',
+                        '#1b2838',
+                        profile.steamProfileUrl,
+                    )}
+                    {renderPlatformCard(
+                        'FACEIT',
+                        faceitConnected,
+                        faceitDisplay,
+                        'foursquare',
+                        '#ff5500',
+                        profile.faceitProfileUrl,
+                    )}
+                    {renderPlatformCard(
+                        'PlayStation',
+                        psnConnected,
+                        psnDisplay,
+                        'playstation',
+                        '#003791',
+                        null,
+                    )}
                 </View>
             </View>
         );

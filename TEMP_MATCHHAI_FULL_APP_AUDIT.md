@@ -1013,5 +1013,89 @@ Crons (every ~2 min): lifecycle transitions (lock, expire-not-full, start, resul
 
 *End of audit.*
 
+---
 
+## Section 18 — Super Admin access model audit
+
+**Source of truth:** the **backend** is authoritative. Two independent server gates enforce Super Admin; the client only routes.
+
+| Layer | File | Gate function | What it checks |
+|---|---|---|---|
+| Backend (admin dashboard queries/mutations, session-token based) | `convex/admin.ts` | `getAuthenticatedAdmin` → `isAuthorizedSuperAdmin(profile,email)` | active **allowlist email** OR DB `role` ∈ {`super_admin`,`super-admin`} |
+| Backend (identity/`ctx.auth` based, e.g. matchrooms, self-or-admin) | `convex/authz.ts` | `requireSuperAdmin` → `isSuperAdminProfile` | DB `role` ∈ {`super_admin`,`super-admin`} OR **allowlist email** |
+| Client (routing + route guard only — NOT a security boundary) | `src/utils/accountRouting.ts`, `app/super-admin/_layout.tsx` | `isSuperAdminProfile(user)` | DB `role` OR `EXPO_PUBLIC_SUPER_ADMIN_EMAIL*` OR legacy id |
+
+**Gate composition (Q1/Q2):** access = **env allowlist email match (active)** OR **DB user `role`**. No `accountType` grant. **No hardcoded email/id fallback** — all three layers fail closed if env is empty (CR-03 remediated). `accountType` stays `player`/`zone` even for super admins; role is the privilege field.
+
+**Role canonicalization (Q5):** canonical = `super_admin` (underscore). Legacy `super-admin` (hyphen) is still **accepted on read** everywhere so existing/seed admins aren't locked out. ⚠️ `demoSeed.ts` writes the hyphen form; `getDashboardSummary` counts only `userRoles["super-admin"]`, so a `super_admin` (underscore) admin is undercounted in the dashboard stat (cosmetic).
+
+**⚠️ Key structural risk — three divergent env sets.** Each gate reads a *different* variable set:
+- `convex/admin.ts`: `SUPER_ADMIN_EMAIL`, `EXPO_PUBLIC_SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_EMAIL_{JUNAID,EHTESHAN,ZEERAK,MUBEEN,SAAD,OVAIS}`, **`SUPER_ADMIN_ALLOWLIST_JSON`**
+- `convex/authz.ts`: same as above **minus** `SUPER_ADMIN_ALLOWLIST_JSON` (a JSON-only admin passes the dashboard gate but FAILS identity-based `requireSuperAdmin` paths)
+- client: `EXPO_PUBLIC_SUPER_ADMIN_EMAIL`, `EXPO_PUBLIC_SUPER_ADMIN_EMAIL_{NAMES}`, `EXPO_PUBLIC_SUPER_ADMIN_EMAILS` (CSV)
+
+Consequence: an **email-allowlist** partner must be set in **both** a server var *and* the matching `EXPO_PUBLIC_` client var, or the client route guard (`_layout.tsx`) redirects them out even though the backend would authorize. The only way to satisfy **all** gates with a **single** change is **DB `role = "super_admin"`**.
+
+**Client routing (Q6):** ✅ correct. `login.tsx` → `isSuperAdminProfile` → `router.replace(superAdminHome)`; `getDefaultSignedInRoute` and the `_layout.tsx` guard agree.
+
+**Backend independent enforcement (Q7):** ✅ yes. Every super-admin query/mutation calls `getAuthenticatedAdmin(sessionToken)` server-side; never trusts client routing. Identity paths use `requireSuperAdmin`.
+
+**Self-promotion (Q10):** ✅ **not possible.** `role` is in `PROTECTED_USER_FIELDS` (`convex/users.ts`) and stripped by `stripProtectedUserFields` in `updateFullProfile`/`updateGamePreferences`. `users.create` does not accept `role`. No client mutation writes `role`.
+
+**Create another super admin from UI (Q11):** ❌ no UI/mutation exists. `getSuperAdminAllowlistConfig` is **read-only**. Adding an admin requires env (Convex dashboard) or a direct DB role write. There is **no** in-app "grant super admin" flow, no audit-logged role-change mutation.
+
+**Unsafe hardcoded fallback (Q8):** none found.
+
+## Section 19 — Current Super Admin accounts found / configured
+
+| Email | How discoverable | Status |
+|---|---|---|
+| `EXPO_PUBLIC_SUPER_ADMIN_EMAIL` (primary) | set **non-empty** in `.env.local`; domain `@matchhai.com`; **value is NOT `ovais@matchhai.com`** (some other matchhai.com address — likely the original super admin) | Active on client routing; backend depends on Convex deployment env |
+| `ovais@matchhai.com` | **Not** the value of `EXPO_PUBLIC_SUPER_ADMIN_EMAIL` in `.env.local`; the `Ovais` slot (`SUPER_ADMIN_EMAIL_OVAIS` / `EXPO_PUBLIC_SUPER_ADMIN_EMAIL_OVAIS`) exists in code but is **empty/absent in `.env.local`** | **Cannot confirm active from local files.** Would be active only if `SUPER_ADMIN_EMAIL_OVAIS` is set in the **Convex dashboard** (not readable here) or the user holds DB `role`. **Verify in Convex dashboard env + `users` table.** |
+| Partner slots Junaid, Ehteshan, Zeerak, Mubeen, Saad | dedicated env slots exist in code; **all empty/absent in `.env.local`** | **Not configured** (no partner accounts exist yet) |
+| `demo_superadmin` (`buildEmail("super",0)`) | `demoSeed.ts` sets `role:"super-admin"` | Exists **only** in seeded/demo deployments |
+
+> Server-only (non-`EXPO_PUBLIC_`) values live in the **Convex deployment env**, which this audit cannot read. No secrets/values were printed.
+
+**Q3 — Is `ovais@matchhai.com` env- or DB-configured?** Indeterminate from repo. Not via local `EXPO_PUBLIC_SUPER_ADMIN_EMAIL`. Confirm via Convex dashboard (`SUPER_ADMIN_EMAIL_OVAIS`) and the `users` table (`role`).
+**Q4 — Other users already super admin?** None configured in local env. DB roles can't be enumerated from the repo — query the `users` table for `role ∈ {super_admin, super-admin}`.
+
+## Section 20 — How to safely add five partner Super Admin accounts (Q9)
+
+Five named slots already exist (`Junaid, Ehteshan, Zeerak, Mubeen, Saad`) — Ovais is the 6th. **Yes, five partner Super Admins can be added with no code change.** Recommended, in order of safety:
+
+**Option A (preferred — DB role, satisfies all gates in one place):**
+1. Create/verify each partner's normal account (email/password via the standard auth flow — **do not create passwords for them**; have them register).
+2. A trusted operator sets `role = "super_admin"` on each `users` row (Convex dashboard data editor, or a new audit-logged internal mutation — see Section 22). This is recognized by `admin.ts`, `authz.ts`, **and** the client guard simultaneously.
+3. No env changes needed.
+
+**Option B (env allowlist — must set BOTH targets):**
+1. In the **Convex deployment dashboard** (server env): set `SUPER_ADMIN_EMAIL_JUNAID … _SAAD` to the partner emails (lowercase). Covers `admin.ts` + `authz.ts`.
+2. In the **app build env** (`.env.local` / `eas.json` per profile): set the matching `EXPO_PUBLIC_SUPER_ADMIN_EMAIL_JUNAID … _SAAD` so the client routes them and `_layout.tsx` doesn't redirect them out. Requires an **app rebuild/redeploy**.
+3. Alternative: a single `SUPER_ADMIN_ALLOWLIST_JSON` on the server covers `admin.ts` only — **not** `authz.ts` identity paths — so avoid JSON-only for full coverage.
+
+## Section 21 — Required env / database steps (Q12)
+
+- **Option A:** **DB only** (one `role` write per partner). No env, no rebuild.
+- **Option B:** **Convex env + app env + app rebuild.** Server var alone authorizes the backend but the client guard blocks the route; client var alone routes them but the backend denies every query.
+- Either way: emails must be **lowercase**; canonical role string is **`super_admin`** (use underscore for new data).
+
+## Section 22 — Security risks & missing Super Admin management tooling
+
+| ID | Risk | Severity | Recommendation |
+|---|---|---|---|
+| SA-A | Three divergent env-var sets (admin.ts / authz.ts / client) → partial-config foot-gun; JSON allowlist not honored by `authz.ts` | High | Centralize allowlist resolution in one shared module imported by both Convex gates; make `authz.ts` read the JSON allowlist too. Prefer DB-role onboarding to sidestep entirely. |
+| SA-B | No in-app, audit-logged grant/revoke Super Admin mutation; role changes done by raw DB edits | High | Add an internal mutation `grantSuperAdmin`/`revokeSuperAdmin` that **requires an existing authenticated Super Admin**, writes canonical `super_admin`, and logs to `superAdminAuditLogs`. Never client-self-callable. |
+| SA-C | `demoSeed.ts` writes legacy `super-admin`; `getDashboardSummary` counts only the hyphen variant | Low | Seed canonical `super_admin`; count both forms in the dashboard stat. |
+| SA-D | `ovais@matchhai.com` activation unverifiable from repo | Info | Confirm in Convex dashboard env (`SUPER_ADMIN_EMAIL_OVAIS`) and `users` table before relying on it. |
+| SA-E | Onboarding via env requires app rebuild for the client var | Medium | Standardize on **DB role** for partners so no rebuild is needed and all gates agree. |
+
+**Validation checklist:**
+- ✅ Existing primary Super Admin (configured `EXPO_PUBLIC_SUPER_ADMIN_EMAIL`) still authorized — gate unchanged.
+- ✅ Non-Super-Admin blocked at backend (`getAuthenticatedAdmin`/`requireSuperAdmin` throw) **and** client (`_layout.tsx` redirect).
+- ✅ Normal user cannot self-promote (`role` protected/denylisted).
+- ⚠️ Role strings consistent on **read**; standardize **writes** to `super_admin`.
+- ✅ No unsafe hardcoded fallback remains.
+
+*End of Super Admin access audit.*
 

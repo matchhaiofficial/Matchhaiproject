@@ -258,6 +258,12 @@ export default function MatchroomDetails() {
     identityMatches,
   });
 
+  // QR + check-in code visibility. The backend (getById) returns a zone-scoped,
+  // authoritative `canViewCheckIn` flag and strips the real matchCode for
+  // outsiders; host/joined are added as a safe client-side fallback only.
+  const canViewCheckIn =
+    Boolean((room as any)?.canViewCheckIn) || isHost || isJoined;
+
   const {
     handleRespondToRequest: handleRespondToRequestAction,
     handleZoneAccept: handleZoneAcceptAction,
@@ -591,6 +597,7 @@ export default function MatchroomDetails() {
               isLocked={isLocked}
               qrValue={qrValue}
               matchCode={matchCode}
+              canViewCheckIn={canViewCheckIn}
               styles={styles}
             />
 

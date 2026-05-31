@@ -63,7 +63,7 @@ export type SuperAdminUser = {
   username: string;
   email: string;
   phone?: string;
-  accountType: "player" | "zone";
+  accountType: "player" | "zone" | "super_admin";
   role?: string;
   accountStatus?: "active" | "suspended";
   kycVerificationStatus?:
@@ -891,6 +891,158 @@ export async function getSuperAdminAllowlistConfig(): Promise<Result<SuperAdminA
   } catch (error: any) {
     console.error("[superAdminService] getSuperAdminAllowlistConfig error", error);
     return { ok: false, message: "Failed to load Super Admin allowlist." };
+  }
+}
+
+export type SuperAdminDbRoleAccount = {
+  userId: string;
+  fullName: string;
+  email: string | null;
+  role: string | null;
+  isCanonicalRole: boolean;
+  isLegacyRole: boolean;
+  accountType: string | null;
+  accountStatus: string;
+  createdAt: number | null;
+  lastActiveAt: number | null;
+  source: "db_role" | "env_allowlist" | "both";
+  mustChangePassword: boolean;
+  passwordChangedAt: number | null;
+  isSystemAdminAccount: boolean;
+  hiddenFromPublic: boolean;
+  isSeparateAccount: boolean;
+};
+
+export type PartnerSuperAdminBootstrapStatus =
+  | "created"
+  | "already_exists"
+  | "conflict_existing_player_account"
+  | "missing_temp_password_env"
+  | "failed"
+  | "skipped_protected";
+
+export type PartnerSuperAdminBootstrapResult = {
+  ok: boolean;
+  configured: boolean;
+  // Present only when nothing could be created (e.g. missing env password).
+  message?: string;
+  // No password is ever returned to the client.
+  passwordSetupMethod?: "env_temp_password_forced_change";
+  results: Array<{
+    email: string;
+    status: PartnerSuperAdminBootstrapStatus;
+    message: string;
+  }>;
+};
+
+export type SuperAdminEnvAllowlistAccount = {
+  displayName: string;
+  email: string;
+  role: "super_admin";
+  source: "env_allowlist";
+  hasMatchingAccount: boolean;
+  userId: string | null;
+  accountStatus: string | null;
+  lastActiveAt: number | null;
+};
+
+export type SuperAdminAccessOverview = {
+  dbRoleAdmins: SuperAdminDbRoleAccount[];
+  envAllowlistAdmins: SuperAdminEnvAllowlistAccount[];
+  summary: {
+    dbRoleCount: number;
+    canonicalRoleCount: number;
+    legacyRoleCount: number;
+    envAllowlistCount: number;
+    envAllowlistOnlyCount: number;
+  };
+};
+
+// Read-only overview of who currently has Super Admin access (DB role + env
+// allowlist) and via which source. Use to confirm Ovais/partner access.
+export async function getSuperAdminAccessOverview(
+  options?: { forceRefresh?: boolean },
+): Promise<Result<SuperAdminAccessOverview>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const data = await getCachedOrLoad(
+      `superAdminAccessOverview:${sessionToken}`,
+      () => convex.query(api.admin.listSuperAdminAccess, { sessionToken }),
+      options,
+    );
+    return { ok: true, data: data as SuperAdminAccessOverview };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminAccessOverview error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load Super Admin access overview.") };
+  }
+}
+
+// Grant the canonical "super_admin" DB role to an EXISTING user (by id or email).
+// Caller must already be an authenticated Super Admin; the backend enforces this.
+export async function grantSuperAdmin(input: {
+  targetUserId?: string;
+  targetEmail?: string;
+  reason?: string;
+}): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.grantSuperAdmin, {
+      sessionToken,
+      targetUserId: input.targetUserId ? (input.targetUserId as Id<"users">) : undefined,
+      targetEmail: input.targetEmail,
+      reason: input.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] grantSuperAdmin error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to grant Super Admin access.") };
+  }
+}
+
+// Revoke the DB Super Admin role. Self-revoke and last-admin removal are blocked
+// server-side.
+export async function revokeSuperAdmin(input: {
+  targetUserId?: string;
+  targetEmail?: string;
+  reason?: string;
+}): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.revokeSuperAdmin, {
+      sessionToken,
+      targetUserId: input.targetUserId ? (input.targetUserId as Id<"users">) : undefined,
+      targetEmail: input.targetEmail,
+      reason: input.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] revokeSuperAdmin error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to revoke Super Admin access.") };
+  }
+}
+
+// Creates the SEPARATE partner Super Admin accounts (default: the known partner
+// list). Existing accounts are verified/skipped; existing player accounts are
+// reported as conflicts and never upgraded. Requires the server-side temp
+// password env var. Never returns or stores any password.
+export async function bootstrapPartnerSuperAdmins(input?: {
+  emails?: string[];
+  reason?: string;
+}): Promise<Result<PartnerSuperAdminBootstrapResult>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const data = await convex.mutation(api.admin.bootstrapPartnerSuperAdmins, {
+      sessionToken,
+      emails: input?.emails,
+      reason: input?.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true, data: data as PartnerSuperAdminBootstrapResult };
+  } catch (error: any) {
+    console.error("[superAdminService] bootstrapPartnerSuperAdmins error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to onboard partner Super Admins.") };
   }
 }
 

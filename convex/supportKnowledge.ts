@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
+import { isAuthorizedSuperAdmin, isSuperAdminAllowlistedEmail } from "./superAdminAccess";
 
 const EMBEDDING_DIMENSIONS = 384;
 const DEFAULT_EMBEDDING_MODEL = "@cf/baai/bge-small-en-v1.5";
@@ -27,10 +28,6 @@ type RoleScope = "player" | "zone_admin" | "super_admin" | "all";
 type Locale = "en" | "ur" | "mixed";
 type SourceType = "markdown" | "manual" | "policy" | "faq" | "internal";
 
-function normalizeEmail(email?: string | null) {
-  return String(email || "").trim().toLowerCase();
-}
-
 function normalizeSlug(value: string) {
   return String(value || "")
     .trim()
@@ -40,20 +37,6 @@ function normalizeSlug(value: string) {
     .slice(0, 120);
 }
 
-function getSuperAdminEmails() {
-  const values = [
-    process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL,
-    process.env.SUPER_ADMIN_EMAIL_JUNAID,
-    process.env.SUPER_ADMIN_EMAIL_EHTESHAN,
-    process.env.SUPER_ADMIN_EMAIL_ZEERAK,
-    process.env.SUPER_ADMIN_EMAIL_MUBEEN,
-    process.env.SUPER_ADMIN_EMAIL_SAAD,
-    process.env.SUPER_ADMIN_EMAIL_OVAIS,
-    ...(process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAILS || "").split(","),
-  ];
-  return new Set(values.map(normalizeEmail).filter(Boolean));
-}
-
 function requireKnowledgeIngestKey(ingestKey: string) {
   const expected = String(process.env.SUPPORT_KNOWLEDGE_INGEST_KEY || "").trim();
   if (!expected) throw new Error("SUPPORT_KNOWLEDGE_INGEST_KEY is not configured");
@@ -61,7 +44,9 @@ function requireKnowledgeIngestKey(ingestKey: string) {
 }
 
 function isSuperAdminProfile(profile: any, email?: string | null) {
-  return profile?.role === "super-admin" || getSuperAdminEmails().has(normalizeEmail(email || profile?.email));
+  // Centralized resolver: canonical "super_admin" + legacy "super-admin" + the
+  // full env allowlist. Previously this only accepted the legacy hyphen role.
+  return isAuthorizedSuperAdmin(profile, email);
 }
 
 async function requireSupportKnowledgeAdmin(ctx: any) {
@@ -519,7 +504,7 @@ export const isAdminFromIdentity = internalQuery({
       const profile = await ctx.db.query("users").withIndex("by_authId", (q: any) => q.eq("authId", authId)).unique();
       if (isSuperAdminProfile(profile, args.email)) return true;
     }
-    return getSuperAdminEmails().has(normalizeEmail(args.email));
+    return isSuperAdminAllowlistedEmail(args.email);
   },
 });
 
@@ -538,7 +523,7 @@ export const getRoleFromIdentity = internalQuery({
       if (profile.accountType === "zone") return "zone_admin";
       return "player";
     }
-    return getSuperAdminEmails().has(normalizeEmail(args.email)) ? "super_admin" : "player";
+    return isSuperAdminAllowlistedEmail(args.email) ? "super_admin" : "player";
   },
 });
 

@@ -42,6 +42,7 @@ import type * as ratingEngine from "../ratingEngine.js";
 import type * as reports from "../reports.js";
 import type * as social from "../social.js";
 import type * as storage from "../storage.js";
+import type * as superAdminAccess from "../superAdminAccess.js";
 import type * as support from "../support.js";
 import type * as supportEmail from "../supportEmail.js";
 import type * as supportKnowledge from "../supportKnowledge.js";
@@ -103,6 +104,7 @@ declare const fullApi: ApiFromModules<{
   reports: typeof reports;
   social: typeof social;
   storage: typeof storage;
+  superAdminAccess: typeof superAdminAccess;
   support: typeof support;
   supportEmail: typeof supportEmail;
   supportKnowledge: typeof supportKnowledge;

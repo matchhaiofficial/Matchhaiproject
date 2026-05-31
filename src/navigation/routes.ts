@@ -4,6 +4,7 @@ export const APP_ROUTES = {
   playerDiscover: "/(player)/(tabs)/discover",
   zoneHome: "/zone",
   superAdminHome: "/super-admin",
+  authChangePassword: "/auth/change-password",
 } as const;
 
 export type DiscoverSegmentRoute =
