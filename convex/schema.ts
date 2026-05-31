@@ -747,7 +747,15 @@ export default defineSchema({
     .index("by_zoneId_and_bookingSource_and_createdAt", ["zoneId", "bookingSource", "createdAt"])
     .index("by_matchCode", ["matchCode"])
     .index("by_sourcePaymentOrderRefNum", ["sourcePaymentOrderRefNum"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_title", {
+      searchField: "title",
+      filterFields: ["game"],
+    })
+    .searchIndex("search_location", {
+      searchField: "location",
+      filterFields: ["game"],
+    }),
 
   // ============================================
   // MATCHROOM MEMBERS (player-scoped index)
@@ -1037,7 +1045,11 @@ export default defineSchema({
   })
     .index("by_captainUid", ["captainUid"])
     .index("by_game", ["game"])
-    .index("by_nameLower", ["nameLower"]),
+    .index("by_nameLower", ["nameLower"])
+    .searchIndex("search_name", {
+      searchField: "name",
+      filterFields: ["game"],
+    }),
 
   // ============================================
   // TEAM MEMBERS
@@ -1381,7 +1393,31 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_updatedAt", ["updatedAt"])
     .index("by_status_updatedAt", ["status", "updatedAt"])
-    .index("by_pilotStatus_and_pilotEndsAt", ["pilotStatus", "pilotEndsAt"]),
+    .index("by_pilotStatus_and_pilotEndsAt", ["pilotStatus", "pilotEndsAt"])
+    .searchIndex("search_name", {
+      searchField: "name",
+      filterFields: ["status"],
+    })
+    .searchIndex("search_venueBrandName", {
+      searchField: "venueBrandName",
+      filterFields: ["status"],
+    })
+    .searchIndex("search_city", {
+      searchField: "city",
+      filterFields: ["status"],
+    })
+    .searchIndex("search_address", {
+      searchField: "address",
+      filterFields: ["status"],
+    })
+    .searchIndex("search_primaryBranch_areaLabel", {
+      searchField: "primaryBranch.areaLabel",
+      filterFields: ["status"],
+    })
+    .searchIndex("search_primaryBranch_addressLine1", {
+      searchField: "primaryBranch.addressLine1",
+      filterFields: ["status"],
+    }),
 
   // ============================================
   // ZONE PRICING RULES
