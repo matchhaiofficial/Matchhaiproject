@@ -149,15 +149,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   logoStage: {
-    width: 116,
-    height: 116,
+    width: 144,
+    height: 144,
     alignItems: "center",
     justifyContent: "center",
   },
   logoShell: {
-    width: 104,
-    height: 104,
-    borderRadius: 28,
+    width: 132,
+    height: 132,
+    borderRadius: 36,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.025)",
@@ -165,8 +165,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.07)",
   },
   logo: {
-    width: 76,
-    height: 76,
+    width: 96,
+    height: 96,
   },
   copy: {
     alignItems: "center",
