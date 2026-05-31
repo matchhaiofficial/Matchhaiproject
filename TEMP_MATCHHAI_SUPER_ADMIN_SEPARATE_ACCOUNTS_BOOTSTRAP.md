@@ -42,6 +42,26 @@ Never touched by the bootstrap (already provisioned + working):
 
 - ovais@matchhai.com  (hard-guarded: skipped even if passed in `emails`)
 
+## Access Management card removed from Super Admin Profile (2026-06-01)
+
+Partners are provisioned and verified logging in / changing passwords, so the
+entire **Access Management** card (overview list, last-run panel, and the
+"Create partner Super Admins" button + confirm dialog) was removed from
+`app/super-admin/(tabs)/profile.tsx`, along with its now-dead state/imports/styles.
+
+Kept intact (NOT removed):
+- Backend mutation `admin.bootstrapPartnerSuperAdmins` (super-admin gated).
+- Service helpers `bootstrapPartnerSuperAdmins` / `getSuperAdminAccessOverview`
+  in `src/services/convex/superAdminService.ts` (no longer called from the UI,
+  available for future re-wiring).
+- Login + forced password change flow
+  (`app/super-admin/_layout.tsx` → `/auth/change-password` →
+  `users.completeForcedPasswordChange`) — fully independent and unaffected.
+
+To re-enable UI onboarding later, re-add a trigger that calls
+`bootstrapPartnerSuperAdmins` (and ensure `SUPER_ADMIN_BOOTSTRAP_TEMP_PASSWORD`
+is set on the target deployment).
+
 ## Bootstrap button behavior
 
 - Location: Super Admin → Profile tab → **Access Management** card.
