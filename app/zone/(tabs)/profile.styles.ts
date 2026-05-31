@@ -10,6 +10,9 @@ export default StyleSheet.create({
     scrollContent: {
         paddingTop: 10,
     },
+    scroll: {
+        flex: 1,
+    },
     loadingContainer: {
         flex: 1,
         alignItems: "center",
@@ -338,6 +341,7 @@ export default StyleSheet.create({
     },
     logoutButton: {
         marginTop: SPACING.lg,
+        marginBottom: SPACING.lg,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",

@@ -159,8 +159,8 @@ export default function ZoneProfile() {
         maskedAccount: string;
     } | null>(null);
     const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-    const tabBarScrollClearance = useTabBarClearance(SPACING.lg);
-    const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.lg, tabBarScrollClearance);
+    const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
+    const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
     const kycVerified = isUserFullyVerified(authUser, user);
 
     const branches = useMemo(() => {
@@ -316,14 +316,10 @@ export default function ZoneProfile() {
     return (
         <Screen
             style={styles.screen}
-            scroll
+            scroll={false}
             routeKey="/zone/(tabs)/profile"
-            contentStyle={[
-                styles.scrollContent,
-                { paddingBottom: profileBottomPadding },
-            ]}
+            contentStyle={styles.scrollContent}
             edges={["top"]}
-            scrollProps={{ showsVerticalScrollIndicator: false }}
         >
             <BlockingLoader visible={loggingOut} label="Logging out..." />
             <AppHeader
@@ -351,6 +347,11 @@ export default function ZoneProfile() {
                 )}
             />
 
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={{ paddingBottom: profileBottomPadding }}
+                showsVerticalScrollIndicator={false}
+            >
             <Animated.View style={entranceStyle}>
                 <AppCard style={styles.profileCard}>
                     <View style={styles.avatar}>
@@ -501,6 +502,7 @@ export default function ZoneProfile() {
                     <Text style={styles.logoutButtonText}>Logout</Text>
                 </AppButton>
             </Animated.View>
+            </ScrollView>
 
             <AppDialog
                 visible={withdrawVisible}
