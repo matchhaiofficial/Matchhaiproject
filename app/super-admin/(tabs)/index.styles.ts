@@ -13,6 +13,11 @@ export default StyleSheet.create({
   headerBar: {
     marginBottom: SPACING.sm,
   },
+  headerActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
   headerIconButton: {
     width: 40,
     height: 40,
@@ -22,6 +27,25 @@ export default StyleSheet.create({
     backgroundColor: COLORS.cardDark,
     alignItems: "center",
     justifyContent: "center",
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: -5,
+    right: -7,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.error,
+    borderWidth: 2,
+    borderColor: COLORS.backgroundDark,
+  },
+  notificationBadgeText: {
+    color: "#fff",
+    fontFamily: FONTS.heading,
+    fontSize: 11,
   },
   contentWrap: {
     flex: 1,

@@ -1,9 +1,8 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api } from "../../convex/_generated/api";
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
 import {
@@ -19,16 +18,17 @@ import { useAuth } from "../../src/context/AuthContext";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { DISCOVER_GAMES } from "../../src/features/discover/filterConfig";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
-import { convex } from "../../src/lib/convex";
-import { Matchroom, getUserMatchrooms } from "../../src/services/convex/matchService";
-import { getMyReports } from "../../src/services/convex/reportService";
+import {
+  Matchroom,
+  getUserScheduleMatchroomsPage,
+  type UserScheduleTab,
+} from "../../src/services/convex/matchService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
-import { getReportStatusLabel } from "../../src/utils/statusLabels";
 import { getRoomStartDate } from "../../src/utils/timeFilters";
 import styles from "./schedule.styles";
 
-type ScheduleTab = "upcoming" | "actions" | "history";
+type ScheduleTab = UserScheduleTab;
 type ScheduleDateFilter = "Any" | "Today" | "Tomorrow" | "This Week";
 // Coarse, display-only status buckets. The internal per-room statuses produced
 // by getRoomScheduleState are unchanged; these only collapse them for filtering.
@@ -44,15 +44,6 @@ type ScheduleFilters = {
   status: ScheduleStatusFilter;
   venue: ScheduleVenueFilter;
   payment: SchedulePaymentFilter;
-};
-
-type TimelineActionItem = {
-  key: string;
-  title: string;
-  subtitle: string;
-  status: string;
-  cta: string;
-  onPress: () => void;
 };
 
 type BookingIntentRow = {
@@ -105,14 +96,6 @@ const formatStatusLabel = (value?: string | null) =>
   String(value || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
-
-const getTimelineTone = (value?: string | null) => {
-  const status = String(value || "").toLowerCase();
-  if (status.includes("resolved") || status.includes("completed")) return "success";
-  if (status.includes("pending") || status.includes("reviewed")) return "warning";
-  if (status.includes("rejected") || status.includes("cancelled") || status.includes("expired")) return "danger";
-  return "info";
-};
 
 const getRoomId = (room: Matchroom) => String(room.id || room._id || "");
 
@@ -226,201 +209,178 @@ const getActiveFilterCount = (filters: ScheduleFilters) =>
   Number(filters.venue !== DEFAULT_FILTERS.venue) +
   Number(filters.payment !== DEFAULT_FILTERS.payment);
 
+const PAGE_SIZE = 20;
+
+const mapDateFilterToQuery = (date: ScheduleDateFilter) => {
+  if (date === "Today") return "today";
+  if (date === "Tomorrow") return "tomorrow";
+  if (date === "This Week") return "week";
+  return "all";
+};
+
+const mapStatusFilterToQuery = (status: ScheduleStatusFilter) => {
+  if (status === "Upcoming") return "upcoming";
+  if (status === "Needs Action") return "needs_action";
+  if (status === "Completed") return "completed";
+  if (status === "Cancelled") return "cancelled";
+  return "all";
+};
+
+const getBackendScheduleState = (room: Matchroom): Pick<ScheduleRoomItem, "status" | "reason" | "tone"> | null => {
+  const derivedStatus = (room as any).derivedScheduleState;
+  if (!derivedStatus) return null;
+  return {
+    status: String(derivedStatus),
+    reason: String((room as any).scheduleReason || ""),
+    tone: ((room as any).scheduleTone || "neutral") as ScheduleRoomItem["tone"],
+  };
+};
+
+const ScheduleRoomCard = React.memo(function ScheduleRoomCard({
+  item,
+  onOpenRoom,
+  onOpenBookingStatus,
+}: {
+  item: ScheduleRoomItem;
+  onOpenRoom: (roomId: string) => void;
+  onOpenBookingStatus: (intentId: string) => void;
+}) {
+  const intentId = getIntentId(item.intent);
+  return (
+    <Pressable onPress={() => onOpenRoom(getRoomId(item.room))}>
+      <AppCard style={styles.timelineCard}>
+        <View style={styles.timelineTopRow}>
+          <Text style={styles.timelineTitle}>{item.room.title}</Text>
+          <StatusPill tone={item.tone} label={item.status} />
+        </View>
+        <Text style={styles.timelineSubtitle}>
+          {formatGameLabel(item.room.game)} • {item.reason}
+        </Text>
+        <Text style={styles.timelineMeta}>
+          {item.room.scheduledDate || "Date TBA"} {item.room.scheduledTime || ""} • {isZoneRoom(item.room) ? "Zone" : "Broadcast"}
+        </Text>
+        <View style={styles.cardActions}>
+          <Text style={styles.timelineCta}>Open lobby</Text>
+          {intentId ? (
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                onOpenBookingStatus(intentId);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.timelineCta}>Booking status</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </AppCard>
+    </Pressable>
+  );
+});
+
 export default function ScheduleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<ScheduleTab>("upcoming");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [rooms, setRooms] = useState<Matchroom[]>([]);
   const [intents, setIntents] = useState<BookingIntentRow[]>([]);
-  const [actionItems, setActionItems] = useState<TimelineActionItem[]>([]);
-  const [historyItems, setHistoryItems] = useState<TimelineActionItem[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(true);
+  const [tabCounts, setTabCounts] = useState<Partial<Record<ScheduleTab, number>>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ScheduleFilters>(DEFAULT_FILTERS);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   useRouteLogger("ScheduleScreen", { activeTab, userId: user?._id });
 
-  const fetchTimeline = useCallback(async () => {
+  const fetchSchedule = useCallback(async (reset = true, nextCursor: string | null = null) => {
     if (!user?._id) {
       setRooms([]);
       setIntents([]);
-      setActionItems([]);
-      setHistoryItems([]);
+      setCursor(null);
+      setIsDone(true);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
     try {
-      const [matchroomResult, allIntents, activeIntents, inboxPending, reportsResult] = await Promise.all([
-        getUserMatchrooms(user._id),
-        convex.query(api.bookings.listIntentsByUser, { userId: user._id }),
-        convex.query(api.bookings.listActiveIntentsByUser, { userId: user._id }),
-        convex.query(api.notifications.listInboxPage, { userId: user._id, tab: "pending", limit: 40 }),
-        getMyReports(),
-      ]);
-      const reports = reportsResult.ok ? reportsResult.data : [];
-
-      setRooms(
-        matchroomResult.ok && matchroomResult.data
-          ? dedupeRooms([...(matchroomResult.data.hosted || []), ...(matchroomResult.data.joined || [])])
-          : [],
-      );
-      setIntents((allIntents || []) as BookingIntentRow[]);
-
-      const pendingActions: TimelineActionItem[] = [];
-      const history: TimelineActionItem[] = [];
-
-      for (const intent of activeIntents || []) {
-        pendingActions.push({
-          key: `intent-${intent._id}`,
-          title: `${formatGameLabel(intent.game)} booking payment`,
-          subtitle: `Seat hold for ${intent.side} side • Rs ${Math.round(intent.pricing?.totalCost || 0)}`,
-          status: intent.status === "approved_pending_payment" ? "Pending Payment" : formatStatusLabel(intent.status),
-          cta: "Open booking status",
-          onPress: () => router.push(`/matchrooms/book/status/${intent._id}` as any),
-        });
-      }
-
-      for (const notification of inboxPending || []) {
-        const title = notification.title || formatStatusLabel(notification.type);
-        const body = notification.body || "You have a pending action waiting in Inbox.";
-        pendingActions.push({
-          key: `notification-${notification._id}`,
-          title,
-          subtitle: body,
-          status: "Pending",
-          cta: "Open inbox",
-          onPress: () => router.push("/(player)/inbox" as any),
-        });
-      }
-
-      for (const report of reports || []) {
-        const unresolved = report.status !== "resolved";
-        const item: TimelineActionItem = {
-          key: `report-${report._id}`,
-          title: report.reason,
-          subtitle: unresolved
-            ? "Your report is still in progress. Open it to review the moderation timeline."
-            : "This report is resolved and saved in your report history.",
-          status: getReportStatusLabel(report.status),
-          cta: unresolved ? "Open report" : "View report",
-          onPress: () => router.push(`/(player)/report/${report._id}` as any),
-        };
-
-        if (unresolved) pendingActions.push(item);
-        else history.push(item);
-      }
-
-      setActionItems(pendingActions);
-      setHistoryItems(history);
+      const result = await getUserScheduleMatchroomsPage({
+        uid: user._id,
+        tab: activeTab,
+        limit: PAGE_SIZE,
+        cursor: reset ? null : nextCursor,
+        filters: {
+          game: filters.game,
+          dateRange: mapDateFilterToQuery(filters.date),
+          venue: filters.venue.toLowerCase(),
+          paymentStatus: filters.payment.toLowerCase(),
+          searchText: searchQuery.trim(),
+          statusGroup: mapStatusFilterToQuery(filters.status),
+        },
+      });
+      if (!result.ok || !result.data) throw new Error(result.message);
+      setRooms((current) => reset ? result.data!.page : dedupeRooms([...current, ...result.data!.page]));
+      setIntents([]);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+      setTabCounts((current) => ({ ...current, [activeTab]: result.data?.total || 0 }));
     } catch (error) {
-      Logger.error("Schedule", "Failed to fetch player timeline", error);
+      Logger.error("Schedule", "Failed to fetch player schedule", error);
       setRooms([]);
       setIntents([]);
-      setActionItems([]);
-      setHistoryItems([]);
+      setCursor(null);
+      setIsDone(true);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [router, user?._id]);
+  }, [activeTab, filters, searchQuery, user?._id]);
 
   useFocusEffect(useCallback(() => {
-    fetchTimeline();
-  }, [fetchTimeline]));
-
-  const categorizedRooms = useMemo(() => {
-    const now = Date.now();
-    const upcoming: ScheduleRoomItem[] = [];
-    const pending: ScheduleRoomItem[] = [];
-    const previous: ScheduleRoomItem[] = [];
-
-    rooms.forEach((room) => {
-      const start = getRoomStartDate(room);
-      const intent = getRoomIntent(room, intents);
-      const state = getRoomScheduleState(room, user?._id, intent);
-      const item: ScheduleRoomItem = { key: getRoomId(room), room, intent, ...state };
-
-      if (room.status === "completed" || room.status === "cancelled") {
-        previous.push(item);
-        return;
-      }
-      if (!start) {
-        pending.push(item);
-        return;
-      }
-      if (start.getTime() < now - 15 * 60 * 1000) {
-        previous.push(item);
-        return;
-      }
-      if (state.status === "Confirmed") upcoming.push(item);
-      else pending.push(item);
-    });
-
-    upcoming.sort((a, b) => (getRoomStartDate(a.room)?.getTime() || 0) - (getRoomStartDate(b.room)?.getTime() || 0));
-    pending.sort((a, b) => (getRoomStartDate(a.room)?.getTime() || 0) - (getRoomStartDate(b.room)?.getTime() || 0));
-    previous.sort((a, b) => (getRoomStartDate(b.room)?.getTime() || 0) - (getRoomStartDate(a.room)?.getTime() || 0));
-
-    return { upcoming, pending, previous };
-  }, [intents, rooms, user?._id]);
+    fetchSchedule(true);
+  }, [fetchSchedule]));
 
   const activeFilterCount = getActiveFilterCount(filters);
-  const filterRoomItems = useCallback(
-    (items: ScheduleRoomItem[]) => {
-      const query = searchQuery.trim().toLowerCase();
-      return items.filter((item) => {
-        const room = item.room;
-        const haystack = [
-          room.title,
-          room.game,
-          room.location,
-          room.scheduledDate,
-          room.scheduledTime,
-          item.status,
-          item.reason,
-        ].filter(Boolean).join(" ").toLowerCase();
-        if (query && !haystack.includes(query)) return false;
-        if (filters.game !== "all" && String(room.game || "").toLowerCase() !== filters.game) return false;
-        if (!matchesDateFilter(room, filters.date)) return false;
-        if (filters.status !== "Any" && getStatusFilterGroup(item.status) !== filters.status) return false;
-        if (filters.venue !== "Any" && (isZoneRoom(room) ? "Zone" : "Broadcast") !== filters.venue) return false;
-        if (filters.payment !== "Any") {
-          const paymentStatus = item.intent?.paymentStatus || room.paymentStatus || "unpaid";
-          if (filters.payment === "Paid" && paymentStatus !== "paid") return false;
-          if (filters.payment === "Unpaid" && paymentStatus === "paid") return false;
-        }
-        return true;
-      });
+
+  const visibleRooms = useMemo<ScheduleRoomItem[]>(() => {
+    return rooms.map((room) => {
+      const intent = getRoomIntent(room, intents);
+      const state = getBackendScheduleState(room) || getRoomScheduleState(room, user?._id, intent);
+      return { key: getRoomId(room), room, intent, ...state };
+    });
+  }, [intents, rooms, user?._id]);
+
+  const rawTabCount = tabCounts[activeTab] ?? visibleRooms.length;
+
+  const handleOpenRoom = useCallback(
+    (roomId: string) => {
+      router.push(`/matchrooms/${roomId}` as any);
     },
-    [filters, searchQuery],
+    [router],
+  );
+  const handleOpenBookingStatus = useCallback(
+    (intentId: string) => {
+      router.push(`/matchrooms/book/status/${intentId}` as any);
+    },
+    [router],
   );
 
-  const visibleRooms =
-    activeTab === "upcoming"
-      ? filterRoomItems(categorizedRooms.upcoming)
-      : activeTab === "actions"
-        ? filterRoomItems(categorizedRooms.pending)
-        : filterRoomItems(categorizedRooms.previous);
-  const visibleActions = activeTab === "actions" ? actionItems : historyItems;
-  const filteredActions = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return visibleActions;
-    return visibleActions.filter((item) =>
-      [item.title, item.subtitle, item.status].join(" ").toLowerCase().includes(query),
-    );
-  }, [searchQuery, visibleActions]);
+  const listData = useMemo(() => visibleRooms, [visibleRooms]);
 
-  // Raw vs filtered counts let us tell "this tab has no items at all" apart from
-  // "this tab has items but the current filters/search hide them all".
-  const rawTabRoomCount =
-    activeTab === "upcoming"
-      ? categorizedRooms.upcoming.length
-      : activeTab === "actions"
-        ? categorizedRooms.pending.length
-        : categorizedRooms.previous.length;
-  const rawTabCount = rawTabRoomCount + visibleActions.length;
-  const visibleTabCount = visibleRooms.length + filteredActions.length;
+  const renderListItem = useCallback(
+    ({ item }: { item: ScheduleRoomItem }) => (
+      <ScheduleRoomCard
+        item={item}
+        onOpenRoom={handleOpenRoom}
+        onOpenBookingStatus={handleOpenBookingStatus}
+      />
+    ),
+    [handleOpenRoom, handleOpenBookingStatus],
+  );
 
   return (
     <Screen style={styles.screen} scroll={false}>
@@ -432,7 +392,7 @@ export default function ScheduleScreen() {
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder={`Search ${activeTab === "actions" ? "pending" : activeTab} matches`}
+            placeholder={`Search ${activeTab} matches`}
             placeholderTextColor={COLORS.textSecondary}
             style={styles.searchInput}
             autoCapitalize="none"
@@ -454,9 +414,9 @@ export default function ScheduleScreen() {
 
       <SegmentedTabs
         items={[
-          { key: "upcoming", label: "Upcoming", badge: categorizedRooms.upcoming.length },
-          { key: "actions", label: "Pending", badge: categorizedRooms.pending.length + actionItems.length },
-          { key: "history", label: "History", badge: categorizedRooms.previous.length + historyItems.length },
+          { key: "upcoming", label: "Upcoming", badge: tabCounts.upcoming },
+          { key: "waiting", label: "Waiting", badge: tabCounts.waiting },
+          { key: "history", label: "History", badge: tabCounts.history },
         ]}
         value={activeTab}
         onChange={(value) => setActiveTab(value as ScheduleTab)}
@@ -468,53 +428,23 @@ export default function ScheduleScreen() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {visibleRooms.map((item) => (
-            <Pressable key={item.key} onPress={() => router.push(`/matchrooms/${getRoomId(item.room)}` as any)}>
-              <AppCard style={styles.timelineCard}>
-                <View style={styles.timelineTopRow}>
-                  <Text style={styles.timelineTitle}>{item.room.title}</Text>
-                  <StatusPill tone={item.tone} label={item.status} />
-                </View>
-                <Text style={styles.timelineSubtitle}>
-                  {formatGameLabel(item.room.game)} • {item.reason}
-                </Text>
-                <Text style={styles.timelineMeta}>
-                  {item.room.scheduledDate || "Date TBA"} {item.room.scheduledTime || ""} • {isZoneRoom(item.room) ? "Zone" : "Broadcast"}
-                </Text>
-                <View style={styles.cardActions}>
-                  <Text style={styles.timelineCta}>Open lobby</Text>
-                  {getIntentId(item.intent) ? (
-                    <Pressable
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        router.push(`/matchrooms/book/status/${getIntentId(item.intent)}` as any);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Text style={styles.timelineCta}>Booking status</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </AppCard>
-            </Pressable>
-          ))}
-
-          {filteredActions.map((item) => (
-            <Pressable key={item.key} onPress={item.onPress}>
-              <AppCard style={styles.timelineCard}>
-                <View style={styles.timelineTopRow}>
-                  <Text style={styles.timelineTitle}>{item.title}</Text>
-                  <StatusPill tone={getTimelineTone(item.status)} label={item.status} />
-                </View>
-                <Text style={styles.timelineSubtitle}>{item.subtitle}</Text>
-                <Text style={styles.timelineCta}>{item.cta}</Text>
-              </AppCard>
-            </Pressable>
-          ))}
-
-          {visibleTabCount === 0 ? (
-            rawTabCount === 0 ? (
+        <FlatList
+          data={listData}
+          keyExtractor={(item) => item.key}
+          renderItem={renderListItem}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          onEndReached={() => {
+            if (!loading && !loadingMore && !isDone) fetchSchedule(false, cursor);
+          }}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loadingMore ? (
+            <View style={styles.loaderWrap}>
+              <ActivityIndicator color={COLORS.accent} />
+            </View>
+          ) : null}
+          ListEmptyComponent={
+            rawTabCount === 0 && !searchQuery.trim() && activeFilterCount === 0 ? (
               activeTab === "upcoming" ? (
                 <AppCard variant="empty" style={styles.emptyCard}>
                   <Text style={styles.emptyTitle}>No upcoming confirmed matches</Text>
@@ -522,11 +452,11 @@ export default function ScheduleScreen() {
                     Confirmed, full, venue-approved matchrooms appear here.
                   </Text>
                 </AppCard>
-              ) : activeTab === "actions" ? (
+              ) : activeTab === "waiting" ? (
                 <AppCard variant="empty" style={styles.emptyCard}>
-                  <Text style={styles.emptyTitle}>Nothing is pending</Text>
+                  <Text style={styles.emptyTitle}>No matchrooms waiting</Text>
                   <Text style={styles.emptyText}>
-                    Unpaid seats, lobby-fill waits, captain approvals, and venue approvals will surface here.
+                    Lobby fill, payment, captain approval, and venue approval matchrooms appear here.
                   </Text>
                 </AppCard>
               ) : (
@@ -543,8 +473,11 @@ export default function ScheduleScreen() {
                 <Text style={styles.emptyText}>Reset filters to view all schedule items.</Text>
               </AppCard>
             )
-          ) : null}
-        </ScrollView>
+          }
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <ScheduleFilterDrawer

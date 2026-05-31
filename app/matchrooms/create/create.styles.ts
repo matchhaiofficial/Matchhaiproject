@@ -890,6 +890,10 @@ export default StyleSheet.create({
         lineHeight: 16,
         textAlign: 'center',
     },
+    paymentStatusFooterNote: {
+        flex: 1,
+        paddingVertical: SPACING.sm,
+    },
     phoneFooter: {
         paddingHorizontal: SPACING.xl,
     },

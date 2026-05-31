@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AdminInfoLine } from "../../../src/components/AdminSurface";
@@ -10,6 +10,7 @@ import {
   addSupportTicketInternalNote,
   assignSupportTicket,
   getSupportTicketById,
+  processAccountDeletion,
   replyToSupportTicketUser,
   resolveSupportTicket,
   type SuperAdminSupportTicket,
@@ -157,6 +158,32 @@ export default function SuperAdminSupportTicketDetail() {
     }
   };
 
+  const processDeletion = () => {
+    if (!ticket) return;
+    Alert.alert(
+      "Process Account Deletion",
+      `This will anonymize ${ticket.userDisplayName || "the user"}'s personal data (name, photo, phone) and suspend their account. Financial and KYC records are retained for legal compliance. This cannot be undone.\n\nProceed?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: async () => {
+            setBusyAction("delete");
+            const result = await processAccountDeletion(ticket.id);
+            setBusyAction(null);
+            if (result.ok) {
+              showToast({ type: "success", title: "Account deleted", message: "User data anonymized and account suspended." });
+              await loadTicket();
+            } else {
+              showToast({ type: "error", title: "Deletion failed", message: result.message });
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const knownDetails = useMemo(() => {
     const details = ticket?.metadataSummary?.knownNonSensitiveDetails || {};
     return Object.entries(details).filter(([, value]) => value !== undefined && value !== null && value !== "");
@@ -266,20 +293,27 @@ export default function SuperAdminSupportTicketDetail() {
               </Pressable>
             ) : null}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.contextLabel}>Reply to user</Text>
-              <TextInput
-                value={replyText}
-                onChangeText={setReplyText}
-                placeholder="Write a user-facing support reply"
-                placeholderTextColor={COLORS.textSecondary}
-                multiline
-                style={styles.textArea}
-              />
-              <Pressable style={[styles.primaryButton, !replyText.trim() && styles.disabledButton]} onPress={submitReply} disabled={!replyText.trim() || busyAction !== null || busyStatus !== null}>
-                {busyAction === "reply" ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send Reply</Text>}
-              </Pressable>
-            </View>
+            {ticket.conversationId ? (
+              <View style={styles.inputGroup}>
+                <Text style={styles.contextLabel}>Reply to user</Text>
+                <TextInput
+                  value={replyText}
+                  onChangeText={setReplyText}
+                  placeholder="Write a user-facing support reply"
+                  placeholderTextColor={COLORS.textSecondary}
+                  multiline
+                  style={styles.textArea}
+                />
+                <Pressable style={[styles.primaryButton, !replyText.trim() && styles.disabledButton]} onPress={submitReply} disabled={!replyText.trim() || busyAction !== null || busyStatus !== null}>
+                  {busyAction === "reply" ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send Reply</Text>}
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.inputGroup}>
+                <Text style={styles.contextLabel}>Reply to user</Text>
+                <Text style={styles.helperText}>This ticket has no linked support conversation. Use internal notes or resolve the ticket directly.</Text>
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={styles.contextLabel}>Internal note</Text>
@@ -322,6 +356,22 @@ export default function SuperAdminSupportTicketDetail() {
                 {busyAction === "resolve" ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Resolve With Summary</Text>}
               </Pressable>
             </View>
+
+            {ticket.category === "account_deletion" && ticket.status !== "resolved" ? (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.contextLabel, { color: COLORS.error }]}>Account Deletion</Text>
+                <Text style={styles.helperText}>
+                  Permanently anonymizes the user's name, photo, and phone number, and suspends their account. Wallet, payment, and KYC records are retained for legal compliance. This cannot be undone.
+                </Text>
+                <Pressable
+                  style={[styles.dangerButton, (busyAction !== null || busyStatus !== null) && styles.disabledButton]}
+                  onPress={processDeletion}
+                  disabled={busyAction !== null || busyStatus !== null}
+                >
+                  {busyAction === "delete" ? <ActivityIndicator color="#fff" /> : <Text style={styles.dangerButtonText}>Process Account Deletion</Text>}
+                </Pressable>
+              </View>
+            ) : null}
 
             <View style={styles.actionRow}>
               {ticket.status !== "in_review" ? (
@@ -389,4 +439,6 @@ const styles = StyleSheet.create({
   secondaryButton: { minHeight: 44, minWidth: 124, paddingHorizontal: SPACING.lg, borderRadius: RADII.lg, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.overlayLight, alignItems: "center", justifyContent: "center" },
   secondaryButtonText: { color: COLORS.text, fontFamily: FONTS.interSemiBold, fontSize: 14 },
   disabledButton: { opacity: 0.45 },
+  dangerButton: { minHeight: 44, paddingHorizontal: SPACING.lg, borderRadius: RADII.lg, backgroundColor: COLORS.error, alignItems: "center", justifyContent: "center" },
+  dangerButtonText: { color: "#fff", fontFamily: FONTS.interSemiBold, fontSize: 14 },
 });

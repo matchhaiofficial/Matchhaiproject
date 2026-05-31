@@ -216,7 +216,7 @@ export default function BookingStatusScreen() {
             isCancelled ? "Booking Cancelled" :
                 isExpired ? "Booking Expired" :
             isRejected ? "Booking Rejected" :
-                isGatewayFailed ? "Payment Not Completed" :
+                isGatewayFailed ? "Payment not completed" :
                     isPaidAwaitingBooking ? "Payment Received" :
                         isGatewayPending ? "Payment Processing" :
                     isApproved ? "Ready for Payment" : "Waiting for Approval";

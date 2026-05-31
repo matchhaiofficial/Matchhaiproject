@@ -68,6 +68,13 @@ export default function AuthProvider({ children }: { children: any }) {
     try {
       const profile = await convex.query(api.users.getByAuthId, { authId });
       if (profile) {
+        // Account was deleted by admin — sign out immediately so the user is
+        // not left on the dashboard with an anonymized "Deleted User" profile.
+        if (profile.suspensionReason === "account_deletion_processed") {
+          try { await authClient.signOut(); } catch {}
+          clearAuthState(true);
+          return;
+        }
         setUser(profile);
         setUserId(profile._id);
       } else {
@@ -75,11 +82,11 @@ export default function AuthProvider({ children }: { children: any }) {
         setUserId(null);
       }
     } catch (error) {
-      console.error("[AuthContext] Failed to fetch user profile:", error);
+      console.warn("[AuthContext] Failed to fetch user profile:", error);
       setUser(null);
       setUserId(null);
     }
-  }, []);
+  }, [clearAuthState]);
 
   const recheckBeforeClearing = useCallback(async () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -154,7 +161,7 @@ export default function AuthProvider({ children }: { children: any }) {
       clearAuthState();
       return false;
     } catch (error) {
-      console.error("[AuthContext] refreshSession failed:", error);
+      console.warn("[AuthContext] refreshSession failed:", error);
       // Never clear on error -- a network hiccup should never log the user out
       return existingSession?.user ? true : false;
     }

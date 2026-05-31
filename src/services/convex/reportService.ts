@@ -6,7 +6,14 @@ import Logger from "../../utils/logger";
 import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 export type ReportStatus = "pending" | "reviewed" | "resolved";
-export type ReportType = "matchroom_complaint" | "user_report" | "zone_complaint";
+export type ReportType =
+  | "matchroom_complaint"
+  | "user_report"
+  | "zone_complaint"
+  | "friend_chat_message_report"
+  | "matchroom_chat_message_report"
+  | "team_challenge_chat_message_report"
+  | "team_report";
 
 export interface AppReport {
   id: string;
@@ -22,6 +29,14 @@ export interface AppReport {
   zoneName?: string | null;
   branchId?: string | null;
   branchLabel?: string | null;
+  chatroomId?: string | null;
+  chatMessageId?: string | null;
+  teamChallengeChatId?: string | null;
+  teamChallengeChatMessageId?: string | null;
+  source?: string | null;
+  targetType?: string | null;
+  targetReference?: string | null;
+  messagePreview?: string | null;
   game?: string;
   reason: string;
   description?: string;
@@ -55,6 +70,27 @@ export interface ZoneComplaintInput {
   description?: string;
 }
 
+export interface FriendChatMessageReportInput {
+  chatroomId: string;
+  chatMessageId: string;
+  reason: string;
+  description?: string;
+}
+
+export interface MatchroomChatMessageReportInput {
+  chatroomId?: string;
+  chatMessageId: string;
+  reason: string;
+  description?: string;
+}
+
+export interface TeamChallengeChatMessageReportInput {
+  chatId: string;
+  messageId: string;
+  reason: string;
+  description?: string;
+}
+
 type Result<T> = { ok: true; data: T; message?: string } | { ok: false; message: string };
 
 const toAppReport = (value: any): AppReport => ({
@@ -71,6 +107,14 @@ const toAppReport = (value: any): AppReport => ({
   zoneName: value.zoneName,
   branchId: value.branchId,
   branchLabel: value.branchLabel,
+  chatroomId: value.chatroomId,
+  chatMessageId: value.chatMessageId,
+  teamChallengeChatId: value.teamChallengeChatId,
+  teamChallengeChatMessageId: value.teamChallengeChatMessageId,
+  source: value.source,
+  targetType: value.targetType,
+  targetReference: value.targetReference,
+  messagePreview: value.messagePreview,
   game: value.game,
   reason: value.reason,
   description: value.description,
@@ -184,6 +228,66 @@ export async function submitZoneComplaint(
   }
 }
 
+export async function submitFriendChatMessageReport(
+  input: FriendChatMessageReportInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation((api as any).reports.createFriendChatMessageReport, {
+      chatroomId: input.chatroomId as Id<"chatrooms">,
+      chatMessageId: input.chatMessageId as Id<"chatMessages">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return { ok: true, data: { reportId: result.reportId, created: Boolean(result.created) }, message: result.message };
+  } catch (error: any) {
+    Logger.error("reportService", "submitFriendChatMessageReport failed", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
+  }
+}
+
+export async function submitMatchroomChatMessageReport(
+  input: MatchroomChatMessageReportInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation((api as any).reports.createMatchroomChatMessageReport, {
+      chatroomId: input.chatroomId as Id<"chatrooms"> | undefined,
+      chatMessageId: input.chatMessageId as Id<"chatMessages">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return { ok: true, data: { reportId: result.reportId, created: Boolean(result.created) }, message: result.message };
+  } catch (error: any) {
+    Logger.error("reportService", "submitMatchroomChatMessageReport failed", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
+  }
+}
+
+export async function submitTeamChallengeChatMessageReport(
+  input: TeamChallengeChatMessageReportInput,
+): Promise<Result<{ reportId: string; created: boolean }>> {
+  try {
+    const reporterUid = await getReporterUid();
+    const result: any = await convex.mutation((api as any).reports.createTeamChallengeChatMessageReport, {
+      chatId: input.chatId,
+      messageId: input.messageId as Id<"teamChallengeChatMessages">,
+      reason: input.reason,
+      description: input.description,
+      reporterUid,
+    });
+
+    return { ok: true, data: { reportId: result.reportId, created: Boolean(result.created) }, message: result.message };
+  } catch (error: any) {
+    Logger.error("reportService", "submitTeamChallengeChatMessageReport failed", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to submit report.") };
+  }
+}
+
 export async function getMyReports(status?: ReportStatus): Promise<Result<AppReport[]>> {
   try {
     const rows = await getMyReportRows();
@@ -194,6 +298,39 @@ export async function getMyReports(status?: ReportStatus): Promise<Result<AppRep
     return { ok: true, data: filtered.map(toAppReport) };
   } catch (error: any) {
     Logger.error("reportService", "getMyReports failed", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load reports.") };
+  }
+}
+
+export type MyReportsPageResult = {
+  page: AppReport[];
+  isDone: boolean;
+  continueCursor: string | null;
+  total?: number;
+};
+
+export async function getMyReportsPage(input: {
+  status?: ReportStatus;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<Result<MyReportsPageResult>> {
+  try {
+    const result: any = await convex.query((api as any).reports.listMineByStatusPage, {
+      status: input.status,
+      limit: input.limit || 25,
+      cursor: input.cursor ?? null,
+    });
+    return {
+      ok: true,
+      data: {
+        page: ((result?.page || []) as any[]).map(toAppReport),
+        isDone: Boolean(result?.isDone),
+        continueCursor: result?.continueCursor ?? null,
+        total: Number(result?.total || 0),
+      },
+    };
+  } catch (error: any) {
+    Logger.error("reportService", "getMyReportsPage failed", error);
     return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load reports.") };
   }
 }

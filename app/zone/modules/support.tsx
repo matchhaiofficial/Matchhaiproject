@@ -2,9 +2,9 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Pressable,
   RefreshControl,
-  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -34,6 +34,51 @@ const formatType = (value: string) =>
   String(value || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const ReportRow = React.memo(function ReportRow({
+  report,
+  onPress,
+}: {
+  report: AppReport;
+  onPress: (report: AppReport) => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [pressed && styles.cardPressed]}
+      onPress={() => onPress(report)}
+    >
+      <AppCard style={styles.reportCard}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.reason}>{report.reason}</Text>
+          <StatusPill
+            tone={
+              report.status === "resolved"
+                ? "success"
+                : report.status === "reviewed"
+                  ? "info"
+                  : "warning"
+            }
+            label={getReportStatusLabel(report.status)}
+          />
+        </View>
+
+        <Text style={styles.meta}>
+          {formatType(report.type)} • {formatDate(report.createdAt)}
+        </Text>
+        {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
+        {report.branchLabel ? <Text style={styles.meta}>Branch: {report.branchLabel}</Text> : null}
+        {report.matchroomTitle ? (
+          <Text style={styles.meta}>Matchroom: {report.matchroomTitle}</Text>
+        ) : report.matchroomId ? (
+          <Text style={styles.meta}>Matchroom: {report.matchroomId}</Text>
+        ) : null}
+        {report.description ? <Text style={styles.description}>{report.description}</Text> : null}
+        {report.reviewerNote ? <Text style={styles.meta}>Review Note: {report.reviewerNote}</Text> : null}
+        <Text style={styles.linkHint}>Open report details</Text>
+      </AppCard>
+    </Pressable>
+  );
+});
 
 export default function ZoneSupportModule() {
   const router = useRouter();
@@ -90,8 +135,14 @@ export default function ZoneSupportModule() {
           <ActivityIndicator color={COLORS.accent} />
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={reports}
+          keyExtractor={(report) => report.id}
           contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          initialNumToRender={8}
+          windowSize={11}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -99,78 +150,47 @@ export default function ZoneSupportModule() {
               tintColor={COLORS.accent}
             />
           }
-          showsVerticalScrollIndicator={false}
-        >
-          <Pressable
-            style={({ pressed }) => [pressed && styles.cardPressed]}
-            onPress={() => router.push("/zone/modules/ai-support" as any)}
-          >
-            <AppCard>
-              <Text style={styles.infoTitle}>Help & Support AI</Text>
-              <Text style={styles.infoText}>
-                Ask MatchHai support questions about accounts, bookings, payments, reports, notifications, or zone admin usage.
-              </Text>
-              <Text style={styles.linkHint}>Open support chat</Text>
-            </AppCard>
-          </Pressable>
+          ListHeaderComponent={
+            <>
+              <Pressable
+                style={({ pressed }) => [pressed && styles.cardPressed]}
+                onPress={() => router.push("/zone/modules/ai-support" as any)}
+              >
+                <AppCard>
+                  <Text style={styles.infoTitle}>Help & Support AI</Text>
+                  <Text style={styles.infoText}>
+                    Ask MatchHai support questions about accounts, bookings, payments, reports, notifications, or zone admin usage.
+                  </Text>
+                  <Text style={styles.linkHint}>Open support chat</Text>
+                </AppCard>
+              </Pressable>
 
-          <AppCard>
-            <Text style={styles.infoTitle}>Zone Review Scope</Text>
-            <Text style={styles.infoText}>{footerHint}</Text>
-          </AppCard>
-
-          {reports.length === 0 ? (
+              <AppCard>
+                <Text style={styles.infoTitle}>Zone Review Scope</Text>
+                <Text style={styles.infoText}>{footerHint}</Text>
+              </AppCard>
+            </>
+          }
+          ListEmptyComponent={
             <AppCard variant="empty">
               <Text style={styles.emptyTitle}>No reports in this queue</Text>
               <Text style={styles.emptyText}>
                 Reports linked to your zone will appear here as players submit them.
               </Text>
             </AppCard>
-          ) : null}
-
-          {reports.map((report) => (
-            <Pressable
-              key={report.id}
-              style={({ pressed }) => [pressed && styles.cardPressed]}
-              onPress={() =>
+          }
+          renderItem={({ item: report }) => (
+            <ReportRow
+              report={report}
+              onPress={(target) =>
                 router.push({
                   pathname: "/zone/report/[id]",
-                  params: { id: report.id },
+                  params: { id: target.id },
                 })
               }
-            >
-              <AppCard style={styles.reportCard}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.reason}>{report.reason}</Text>
-                  <StatusPill
-                    tone={
-                      report.status === "resolved"
-                        ? "success"
-                        : report.status === "reviewed"
-                          ? "info"
-                          : "warning"
-                    }
-                    label={getReportStatusLabel(report.status)}
-                  />
-                </View>
-
-                <Text style={styles.meta}>
-                  {formatType(report.type)} • {formatDate(report.createdAt)}
-                </Text>
-                {report.game ? <Text style={styles.meta}>Game: {report.game.toUpperCase()}</Text> : null}
-                {report.branchLabel ? <Text style={styles.meta}>Branch: {report.branchLabel}</Text> : null}
-                {report.matchroomTitle ? (
-                  <Text style={styles.meta}>Matchroom: {report.matchroomTitle}</Text>
-                ) : report.matchroomId ? (
-                  <Text style={styles.meta}>Matchroom: {report.matchroomId}</Text>
-                ) : null}
-                {report.description ? <Text style={styles.description}>{report.description}</Text> : null}
-                {report.reviewerNote ? <Text style={styles.meta}>Review Note: {report.reviewerNote}</Text> : null}
-                <Text style={styles.linkHint}>Open report details</Text>
-              </AppCard>
-            </Pressable>
-          ))}
-        </ScrollView>
+            />
+          )}
+        />
       )}
     </Screen>
   );

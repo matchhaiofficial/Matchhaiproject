@@ -504,7 +504,7 @@ export function AppDrawer({
           keyboardVerticalOffset={keyboardVerticalOffset}
           style={styles.drawerKeyboardAvoiding}
         >
-          <Animated.View style={entrance.animatedStyle}>
+          <Animated.View style={[keyboardAware && styles.drawerAnimatedFill, entrance.animatedStyle]}>
             <View style={[styles.drawerPanel, drawerStyle]}>
               {contentSafeAreaEdges ? (
                 <SafeAreaView

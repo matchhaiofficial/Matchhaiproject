@@ -9,6 +9,7 @@ import { Alert, View, Text } from "react-native";
 
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
+import ReportIssueModal from "../../../src/components/ReportIssueModal";
 import ChatThread from "../../../src/features/chat/ChatThread";
 import type { ChatThreadMessage } from "../../../src/features/chat/types";
 import { formatVoiceDuration } from "../../../src/features/chat/utils";
@@ -17,6 +18,7 @@ import { useChatTyping } from "../../../src/hooks/useChatTyping";
 import { usePresenceHeartbeat } from "../../../src/hooks/usePresenceHeartbeat";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
+import { submitMatchroomChatMessageReport } from "../../../src/services/convex/reportService";
 import { uploadFileToConvex } from "../../../src/services/convex/storageService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -33,6 +35,8 @@ const GAME_LABELS: Record<string, string> = {
     // padel: "Padel",
     // pickleball: "Pickleball",
 };
+
+const CHAT_REPORT_REASONS = ["Harassment or abuse", "Hate speech", "Scam or spam", "Threats or unsafe behavior", "Other"];
 
 function formatTimeToken(value?: string | null) {
     const text = String(value || "").trim();
@@ -79,6 +83,10 @@ export default function MatchroomChatScreen() {
     const [sending, setSending] = useState(false);
     const [replyTo, setReplyTo] = useState<ChatThreadMessage | null>(null);
     const [editingMessage, setEditingMessage] = useState<ChatThreadMessage | null>(null);
+    const [reportMessage, setReportMessage] = useState<ChatThreadMessage | null>(null);
+    const [reportReason, setReportReason] = useState("");
+    const [reportDescription, setReportDescription] = useState("");
+    const [submittingReport, setSubmittingReport] = useState(false);
     const [uploadingVoice, setUploadingVoice] = useState(false);
     const [uploadingAttachment, setUploadingAttachment] = useState(false);
     useRouteLogger("MatchroomChatScreen", { matchroomKey: id, userId: user?._id });
@@ -547,6 +555,17 @@ export default function MatchroomChatScreen() {
                         text: "Pin",
                         onPress: () => void handlePinMessage(message.id),
                     },
+                !isMine
+                    ? {
+                        text: "Report",
+                        style: "destructive",
+                        onPress: () => {
+                            setReportMessage(message);
+                            setReportReason("");
+                            setReportDescription("");
+                        },
+                    }
+                    : undefined,
                 {
                     text: "Delete for me",
                     style: "destructive",
@@ -563,6 +582,35 @@ export default function MatchroomChatScreen() {
                 { text: "Cancel", style: "cancel" },
             ].filter(Boolean) as any
         );
+    };
+
+    const closeReportModal = () => {
+        if (submittingReport) return;
+        setReportMessage(null);
+        setReportReason("");
+        setReportDescription("");
+    };
+
+    const submitReport = async () => {
+        if (!reportMessage || !reportReason) return;
+        setSubmittingReport(true);
+        const result = await submitMatchroomChatMessageReport({
+            chatroomId: chatroom?._id ? String(chatroom._id) : undefined,
+            chatMessageId: reportMessage.id,
+            reason: reportReason,
+            description: reportDescription,
+        });
+        setSubmittingReport(false);
+        if (result.ok) {
+            showToast({
+                type: "success",
+                title: result.data.created ? "Report submitted" : "Report already exists",
+                message: result.message || "Our moderation team will review this message.",
+            });
+            closeReportModal();
+        } else {
+            showToast({ type: "error", title: "Report failed", message: result.message });
+        }
     };
 
     const title = roomMeta?.title || "Matchroom Chat";
@@ -651,6 +699,7 @@ export default function MatchroomChatScreen() {
     }
 
     return (
+        <>
         <ChatThread
             title={title}
             subtitle={subtitle}
@@ -689,6 +738,21 @@ export default function MatchroomChatScreen() {
             onUnpinMessage={handleUnpinMessage}
             canUnpin
         />
+        <ReportIssueModal
+            visible={Boolean(reportMessage)}
+            title="Report Message"
+            subtitle="Send this matchroom chat message to MatchHai moderation."
+            reasons={CHAT_REPORT_REASONS}
+            reason={reportReason}
+            description={reportDescription}
+            onChangeReason={setReportReason}
+            onChangeDescription={setReportDescription}
+            onSubmit={submitReport}
+            onClose={closeReportModal}
+            loading={submittingReport}
+            descriptionPlaceholder="Add context for why this message should be reviewed."
+        />
+        </>
     );
 }
 

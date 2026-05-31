@@ -2,6 +2,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./auth";
+import { requireCurrentUser } from "./authz";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 
 const notificationStatus = v.union(
@@ -527,6 +528,38 @@ async function enforceAuthGate(ctx: any, type: string) {
   assertKycAccessAllowed(profile, KYC_VERIFICATION_REQUIRED_MESSAGE);
 }
 
+async function requireNotificationOwner(ctx: any, notificationId: any) {
+  const actor = await requireCurrentUser(ctx);
+  const notification = await ctx.db.get(notificationId);
+  if (!notification || String(notification.toUid) !== String(actor.user._id)) {
+    throw new Error("Notification not found");
+  }
+  return { actor, notification };
+}
+
+async function requireActorCanReadMatchroomNotifications(ctx: any, matchroomId: any) {
+  const actor = await requireCurrentUser(ctx);
+  const room = await ctx.db.get(matchroomId);
+  if (!room) throw new Error("Matchroom not found");
+  const actorId = String(actor.user._id);
+  const isHost = String(room.hostUid || "") === actorId;
+  const isCaptain = String(room.captainUidA || "") === actorId || String(room.captainUidB || "") === actorId;
+  const isPlayer = Array.isArray(room.playerUids) && room.playerUids.map(String).includes(actorId);
+  let isZoneOwner = false;
+  if (room.zoneId) {
+    try {
+      const zone = await ctx.db.get(room.zoneId);
+      isZoneOwner = String(zone?.ownerUid || "") === actorId;
+    } catch {
+      isZoneOwner = false;
+    }
+  }
+  if (!isHost && !isCaptain && !isPlayer && !isZoneOwner) {
+    throw new Error("Not authorized");
+  }
+  return actor;
+}
+
 async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuthGate = false) {
   const now = Date.now();
   const type = canonicalizeType(String(input.type || ""));
@@ -660,7 +693,10 @@ export const resolveCanonicalRoute = query({
 
 export const getById = query({
   args: { notificationId: v.id("notifications") },
-  handler: async (ctx, args) => serializeNotification(await ctx.db.get(args.notificationId)),
+  handler: async (ctx, args) => {
+    const { notification } = await requireNotificationOwner(ctx, args.notificationId);
+    return serializeNotification(notification);
+  },
 });
 
 export const listForUser = query({
@@ -670,7 +706,8 @@ export const listForUser = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const notifications = await listNotificationsForUserBase(ctx, args);
+    const actor = await requireCurrentUser(ctx);
+    const notifications = await listNotificationsForUserBase(ctx, { ...args, userId: actor.user._id });
     return notifications.filter(isNotificationActive).map(serializeNotification);
   },
 });
@@ -681,9 +718,10 @@ export const listUnreadForUser = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const notifications = await listUnreadNotificationsForUser(
       ctx,
-      args.userId,
+      actor.user._id,
       args.limit || DEFAULT_LIMIT
     );
     return notifications.filter(isNotificationActive).map(serializeNotification);
@@ -697,10 +735,11 @@ export const listInboxPage = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const baseLimit = args.limit || DEFAULT_INBOX_LIMIT;
     const recent = await ctx.db
       .query("notifications")
-      .withIndex("by_toUid", (q: any) => q.eq("toUid", args.userId))
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", actor.user._id))
       .order("desc")
       .take(baseLimit * 4);
 
@@ -724,10 +763,11 @@ export const listInboxPage = query({
 export const countPendingFast = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_toUid_status_createdAt", (q: any) =>
-        q.eq("toUid", args.userId).eq("status", "pending")
+        q.eq("toUid", actor.user._id).eq("status", "pending")
       )
       .collect();
     return collapsePendingMatchJoinDuplicates(
@@ -741,10 +781,11 @@ export const countPending = countPendingFast;
 export const countUnreadFast = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const unread = await ctx.db
       .query("notifications")
       .withIndex("by_toUid_isRead_createdAt", (q: any) =>
-        q.eq("toUid", args.userId).eq("isRead", false)
+        q.eq("toUid", actor.user._id).eq("isRead", false)
       )
       .collect();
     return collapsePendingMatchJoinDuplicates(
@@ -770,8 +811,10 @@ export const listByFromUidAndType = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const limit = args.limit || DEFAULT_LIMIT;
     const canonicalType = canonicalizeType(args.type);
+    if (String(args.fromUid) !== String(actor.user._id)) throw new Error("Not authorized");
     const notifications = args.status
       ? await ctx.db
           .query("notifications")
@@ -800,11 +843,12 @@ export const listOutgoingMatchroomJoinRequests = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const limit = args.limit || DEFAULT_LIMIT;
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_fromUid_type_status", (q: any) =>
-        q.eq("fromUid", args.fromUid).eq("type", "match.join_request").eq("status", "pending")
+        q.eq("fromUid", actor.user._id).eq("type", "match.join_request").eq("status", "pending")
       )
       .order("desc")
       .take(limit * 3);
@@ -829,6 +873,8 @@ export const listByFromUid = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (String(args.fromUid) !== String(actor.user._id)) throw new Error("Not authorized");
     let notifications = await ctx.db
       .query("notifications")
       .withIndex("by_fromUid", (q: any) => q.eq("fromUid", args.fromUid))
@@ -858,6 +904,8 @@ export const checkPendingFriendRequest = query({
     toUid: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (String(args.fromUid) !== String(actor.user._id)) throw new Error("Not authorized");
     const dedupeKey = `social.friend_request:${args.fromUid}:${args.toUid}`;
     const existing = await findActiveNotificationByDedupeKey(ctx, dedupeKey);
     if (existing && existing.status === "pending") {
@@ -875,6 +923,7 @@ export const listMatchroomRequests = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireActorCanReadMatchroomNotifications(ctx, args.matchroomId);
     const limit = args.limit || DEFAULT_LIMIT;
     const canonicalType = canonicalizeType(args.type || "match.join_request");
     const notifications = await ctx.db
@@ -898,6 +947,7 @@ export const listMatchroomJoinRequests = query({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireActorCanReadMatchroomNotifications(ctx, args.matchroomId);
     const room = await ctx.db.get(args.matchroomId);
     const joinedUids = new Set(
       ((room as any)?.playerUids || []).map((uid: unknown) => String(uid)),
@@ -930,6 +980,8 @@ export const listTeamJoinRequests = query({
     teamId: v.id("teams"),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (String(args.captainUid) !== String(actor.user._id)) throw new Error("Not authorized");
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_toUid_status_createdAt", (q: any) =>
@@ -981,7 +1033,11 @@ export const createCanonical = mutation({
     expiresAt: v.optional(v.number()),
     isRead: v.optional(v.boolean()),
   },
-  handler: async (ctx, args) => createCanonicalInternal(ctx, args),
+  handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (args.fromUid && String(args.fromUid) !== String(actor.user._id)) throw new Error("Not authorized");
+    return createCanonicalInternal(ctx, { ...args, fromUid: args.fromUid || actor.user._id });
+  },
 });
 
 // Internal version for server-to-server calls (skips auth gate since caller already authenticated)
@@ -1029,8 +1085,11 @@ export const create = mutation({
     expiresAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (args.fromUid && String(args.fromUid) !== String(actor.user._id)) throw new Error("Not authorized");
     const result = await createCanonicalInternal(ctx, {
       ...args,
+      fromUid: args.fromUid || actor.user._id,
       dedupeKey: args.entityKey,
     });
     return result.notificationId;
@@ -1043,6 +1102,7 @@ export const updateStatus = mutation({
     status: notificationStatus,
   },
   handler: async (ctx, args) => {
+    await requireNotificationOwner(ctx, args.notificationId);
     const now = Date.now();
     await ctx.db.patch(args.notificationId, {
       status: args.status,
@@ -1057,6 +1117,7 @@ export const updateStatus = mutation({
 export const markAsRead = mutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, args) => {
+    await requireNotificationOwner(ctx, args.notificationId);
     const now = Date.now();
     await ctx.db.patch(args.notificationId, {
       isRead: true,
@@ -1074,7 +1135,8 @@ export const markManyAsRead = mutation({
     let updated = 0;
     for (const notificationId of args.notificationIds) {
       const notification = await ctx.db.get(notificationId);
-      if (!notification || notification.isRead === true) continue;
+      const actor = await requireCurrentUser(ctx);
+      if (!notification || notification.isRead === true || String(notification.toUid) !== String(actor.user._id)) continue;
       await ctx.db.patch(notificationId, {
         isRead: true,
         readAt: now,
@@ -1089,10 +1151,11 @@ export const markManyAsRead = mutation({
 export const markAllAsReadFast = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_toUid_isRead_createdAt", (q: any) =>
-        q.eq("toUid", args.userId).eq("isRead", false)
+        q.eq("toUid", actor.user._id).eq("isRead", false)
       )
       .collect();
     const now = Date.now();
@@ -1114,7 +1177,10 @@ export const markAllAsRead = markAllAsReadFast;
 
 export const archive = mutation({
   args: { notificationId: v.id("notifications") },
-  handler: async (ctx, args) => archiveNotificationById(ctx, args.notificationId, Date.now()),
+  handler: async (ctx, args) => {
+    await requireNotificationOwner(ctx, args.notificationId);
+    return archiveNotificationById(ctx, args.notificationId, Date.now());
+  },
 });
 
 export const archiveMany = mutation({
@@ -1123,6 +1189,7 @@ export const archiveMany = mutation({
     const now = Date.now();
     let archived = 0;
     for (const notificationId of args.notificationIds) {
+      await requireNotificationOwner(ctx, notificationId);
       if (await archiveNotificationById(ctx, notificationId, now)) {
         archived += 1;
       }
@@ -1134,6 +1201,7 @@ export const archiveMany = mutation({
 export const remove = mutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, args) => {
+    await requireNotificationOwner(ctx, args.notificationId);
     await ctx.db.delete(args.notificationId);
     return true;
   },
@@ -1145,7 +1213,8 @@ export const removeMany = mutation({
     let removed = 0;
     for (const notificationId of args.notificationIds) {
       const notification = await ctx.db.get(notificationId);
-      if (!notification) continue;
+      const actor = await requireCurrentUser(ctx);
+      if (!notification || String(notification.toUid) !== String(actor.user._id)) continue;
       await ctx.db.delete(notificationId);
       removed += 1;
     }
@@ -1156,9 +1225,10 @@ export const removeMany = mutation({
 export const removeAllForUserFast = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
     const notifications = await ctx.db
       .query("notifications")
-      .withIndex("by_toUid", (q: any) => q.eq("toUid", args.userId))
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", actor.user._id))
       .collect();
     const now = Date.now();
     let archived = 0;

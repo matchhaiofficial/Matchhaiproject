@@ -197,9 +197,28 @@ export function useMatchroomDetailActions({
     decision: "accept" | "reject",
   ) => {
     if (!user) return;
-    setProcessingRequestId(req.id);
+    const notificationId = req?._id || req?.notificationId || req?.id || null;
+    if (!notificationId) {
+      Logger.error(
+        "MatchroomDetails",
+        "Respond aborted: missing notificationId on request",
+        { req },
+      );
+      showToast({
+        message: "Could not update this request. Please refresh and try again.",
+        title: "Update failed",
+        type: "error",
+      });
+      return;
+    }
+    const processingKey = `${notificationId}:${decision}`;
+    setProcessingRequestId(processingKey);
     try {
-      const res = await respondToMatchJoinRequest(req.id, decision, user._id);
+      const res = await respondToMatchJoinRequest(
+        String(notificationId),
+        decision,
+        user._id,
+      );
       if (res.ok) {
         showToast({
           message: res.message || "Request updated.",
@@ -208,8 +227,19 @@ export function useMatchroomDetailActions({
         });
         await fetchRoom();
       } else {
+        const raw = res.message || "";
+        const isValidationError = /ArgumentValidationError|missing the required field|validator/i.test(raw);
+        if (isValidationError) {
+          Logger.error("MatchroomDetails", "Respond validation error", {
+            notificationId,
+            decision,
+            raw,
+          });
+        }
         showToast({
-          message: res.message || "Failed to update the request.",
+          message: isValidationError
+            ? "Could not update this request. Please refresh and try again."
+            : raw || "Failed to update the request.",
           title: "Update failed",
           type: "error",
         });
@@ -217,7 +247,7 @@ export function useMatchroomDetailActions({
     } catch (e) {
       Logger.error("MatchroomDetails", "Respond error", e);
       showToast({
-        message: "An unexpected error occurred.",
+        message: "Could not update this request. Please refresh and try again.",
         title: "Update failed",
         type: "error",
       });

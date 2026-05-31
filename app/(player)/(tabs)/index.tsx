@@ -314,7 +314,7 @@ const formatKycBannerMessage = (status?: string | null, reason?: string | null) 
 export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
-  const { user, authUser, refreshSession } = useAuth();
+  const { user, authUser, refreshSession, refreshUser } = useAuth();
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
@@ -463,20 +463,26 @@ export default function PlayerDashboard() {
   }, [showToast, startDiditKyc]);
 
   const handleRefreshVerification = useCallback(async () => {
-    if (!currentKyc?._id) {
-      await refreshSession();
-      return;
-    }
     setRefreshingKyc(true);
     try {
-      await refreshDiditStatus({ verificationId: currentKyc._id });
+      if (currentKyc?._id) {
+        await refreshDiditStatus({ verificationId: currentKyc._id });
+      }
       await refreshSession();
+      await refreshUser();
     } catch (error: any) {
       Logger.error("Dashboard", "Could not refresh KYC", error?.message || error);
+      // Best-effort: re-fetch profile from Convex even if Better Auth session call failed.
+      try { await refreshUser(); } catch {}
+      showToast({
+        type: "info",
+        title: "Could not refresh",
+        message: "Could not refresh right now. Please check your connection and try again.",
+      });
     } finally {
       setRefreshingKyc(false);
     }
-  }, [currentKyc?._id, refreshDiditStatus, refreshSession]);
+  }, [currentKyc?._id, refreshDiditStatus, refreshSession, refreshUser, showToast]);
 
   return (
     <Screen
@@ -499,23 +505,6 @@ export default function PlayerDashboard() {
           <View style={styles.headerActionsRow}>
             <Pressable
               style={[
-                styles.friendBell,
-                !kycAccessAllowed && styles.headerActionDisabled,
-              ]}
-              onPress={kycAccessAllowed ? () => router.push("/(player)/friends" as any) : undefined}
-              disabled={!kycAccessAllowed}
-            >
-              <AppIcon name="players" size={22} color={COLORS.text} />
-              {friendCount > 0 ? (
-                <View style={styles.friendBadge}>
-                  <Text style={styles.friendBadgeText}>
-                    {friendCount > 9 ? "9+" : friendCount}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-            <Pressable
-              style={[
                 styles.notificationBell,
                 !kycAccessAllowed && styles.headerActionDisabled,
               ]}
@@ -530,9 +519,6 @@ export default function PlayerDashboard() {
                   </Text>
                 </View>
               ) : null}
-            </Pressable>
-            <Pressable style={styles.notificationBell} onPress={handleLogout}>
-              <AppIcon name="logout" size={22} color={COLORS.error} />
             </Pressable>
           </View>
         }
@@ -600,6 +586,11 @@ export default function PlayerDashboard() {
                   label: "My Reports",
                   icon: "reports" as const,
                   onPress: () => router.push("/(player)/reports" as any),
+                },
+                {
+                  label: "Logout",
+                  icon: "logout" as const,
+                  onPress: handleLogout,
                 },
               ]
             : [
@@ -721,20 +712,45 @@ export default function PlayerDashboard() {
               </AppCard>
             </View>
 
+            <View style={styles.uspCardWrap}>
+              <AppCard style={styles.uspCard}>
+                <Text style={styles.uspTagline}>Khelo bina scene ke.</Text>
+                <Text style={styles.uspSubtitle}>
+                  Find players, book gaming zones, and confirm your match in minutes.
+                </Text>
+                <View style={styles.uspStepsRow}>
+                  <View style={styles.uspStep}>
+                    <View style={styles.uspStepIconWrap}>
+                      <AppIcon name="players" size={16} color={COLORS.accent} />
+                    </View>
+                    <Text style={styles.uspStepLabel} numberOfLines={1}>Find Players</Text>
+                  </View>
+                  <View style={styles.uspStepDivider} />
+                  <View style={styles.uspStep}>
+                    <View style={styles.uspStepIconWrap}>
+                      <AppIcon name="business" size={16} color={COLORS.accent} />
+                    </View>
+                    <Text style={styles.uspStepLabel} numberOfLines={1}>Book Venue</Text>
+                  </View>
+                  <View style={styles.uspStepDivider} />
+                  <View style={styles.uspStep}>
+                    <View style={styles.uspStepIconWrap}>
+                      <AppIcon name="matchroom" size={16} color={COLORS.accent} />
+                    </View>
+                    <Text style={styles.uspStepLabel} numberOfLines={1}>Play Match</Text>
+                  </View>
+                </View>
+              </AppCard>
+            </View>
+
             <View style={styles.section}>
               <PlayerSectionHeader title="Quick Actions" />
               <View style={styles.quickActionsGrid}>
                 <DashboardQuickActionTile
                   icon="add-circle"
-                  label="Create Room"
+                  label="Create"
                   color={COLORS.accent}
                   onPress={() => router.push("/matchrooms/create" as any)}
-                />
-                <DashboardQuickActionTile
-                  icon="event"
-                  label="My Schedule"
-                  color={COLORS.successBright}
-                  onPress={() => router.push("/(player)/schedule" as any)}
                 />
                 <DashboardQuickActionTile
                   icon="search"
@@ -748,10 +764,21 @@ export default function PlayerDashboard() {
                   }
                 />
                 <DashboardQuickActionTile
-                  icon="inbox"
-                  label="Inbox"
+                  icon="business"
+                  label="Venues"
+                  color={COLORS.successBright}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(player)/(tabs)/discover",
+                      params: { segment: "zones", t: Date.now().toString() },
+                    } as any)
+                  }
+                />
+                <DashboardQuickActionTile
+                  icon="chat"
+                  label="Chat"
                   color="#26A69A"
-                  onPress={() => router.push("/(player)/inbox" as any)}
+                  onPress={() => router.push("/(player)/friends" as any)}
                 />
               </View>
             </View>
@@ -782,6 +809,41 @@ export default function PlayerDashboard() {
 
             <View style={styles.section}>
               <PlayerSectionHeader
+                title="Nearby Venues"
+                actionLabel="See All"
+                onPress={() =>
+                  router.push({
+                    pathname: "/(player)/(tabs)/discover",
+                    params: { segment: "zones", t: Date.now().toString() },
+                  } as any)
+                }
+              />
+              {nearbyZones.length > 0 ? (
+                nearbyZones.map((zone) => {
+                  const statusLabel = getZoneStatusLabel(zone.status);
+
+                  return (
+                    <DashboardVenueCard
+                      key={zone.id}
+                      typeLabel={getZoneTypeLabel(zone.type)}
+                      statusLabel={statusLabel}
+                      statusTone={getZoneStatusTone(statusLabel)}
+                      title={zone.venueBrandName}
+                      location={getZoneLocationLabel(zone)}
+                      gameLabels={getZoneGameLabels(zone)}
+                      capacityLabel={getZoneCapacityLabel(zone)}
+                      rateLabel={getZoneRateLabel(zone)}
+                      onPress={() => router.push(`/(player)/zones/${zone.id}` as any)}
+                    />
+                  );
+                })
+              ) : (
+                <PlayerEmptyStateCard title="No active venues found." />
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <PlayerSectionHeader
                 title="Upcoming Matches"
                 actionLabel="View All"
                 onPress={() => router.push("/(player)/schedule" as any)}
@@ -793,24 +855,6 @@ export default function PlayerDashboard() {
                   title="No upcoming matches found."
                   description="Create one from Discover or Quick Actions."
                 />
-              )}
-            </View>
-
-            <View style={styles.section}>
-              <PlayerSectionHeader
-                title="For You"
-                actionLabel="Browse"
-                onPress={() =>
-                  router.push({
-                    pathname: "/(player)/(tabs)/discover",
-                    params: { segment: "matchrooms", t: Date.now().toString() },
-                  } as any)
-                }
-              />
-              {recommendedRooms.length > 0 ? (
-                recommendedRooms.map((room) => <MatchroomCard key={room.id} room={room} />)
-              ) : (
-                <PlayerEmptyStateCard title="No recommendations available yet." />
               )}
             </View>
 
@@ -861,36 +905,29 @@ export default function PlayerDashboard() {
 
             <View style={styles.section}>
               <PlayerSectionHeader
-                title="Nearby Venues"
-                actionLabel="See All"
+                title="For You"
+                actionLabel="Browse"
                 onPress={() =>
                   router.push({
                     pathname: "/(player)/(tabs)/discover",
-                    params: { segment: "zones", t: Date.now().toString() },
+                    params: { segment: "matchrooms", t: Date.now().toString() },
                   } as any)
                 }
               />
-              {nearbyZones.length > 0 ? (
-                nearbyZones.map((zone) => {
-                  const statusLabel = getZoneStatusLabel(zone.status);
-
-                  return (
-                    <DashboardVenueCard
-                      key={zone.id}
-                      typeLabel={getZoneTypeLabel(zone.type)}
-                      statusLabel={statusLabel}
-                      statusTone={getZoneStatusTone(statusLabel)}
-                      title={zone.venueBrandName}
-                      location={getZoneLocationLabel(zone)}
-                      gameLabels={getZoneGameLabels(zone)}
-                      capacityLabel={getZoneCapacityLabel(zone)}
-                      rateLabel={getZoneRateLabel(zone)}
-                      onPress={() => router.push(`/(player)/zones/${zone.id}` as any)}
-                    />
-                  );
-                })
+              {recommendedRooms.length > 0 ? (
+                recommendedRooms.map((room) => <MatchroomCard key={room.id} room={room} />)
               ) : (
-                <PlayerEmptyStateCard title="No active venues found." />
+                <PlayerEmptyStateCard
+                  title="No scene yet."
+                  description="Create a matchroom or find players near you."
+                  actionLabel="Find Match"
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(player)/(tabs)/discover",
+                      params: { segment: "matchrooms", t: Date.now().toString() },
+                    } as any)
+                  }
+                />
               )}
             </View>
 

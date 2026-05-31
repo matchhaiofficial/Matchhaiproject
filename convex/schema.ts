@@ -5,6 +5,11 @@ import { v } from "convex/values";
 const skillScoreValidator = v.object({
   rating: v.number(),
   tier: v.string(),
+  // Dynamic, server-authoritative MatchHai ELO (1000-based). Additive field:
+  // `rating` (0-100) remains the UI projection for backward compatibility while
+  // `elo` is the source of truth updated by verified match results. Optional so
+  // pre-existing scores (rating/tier only) keep validating; seeded on first use.
+  elo: v.optional(v.number()),
   matchesPlayed: v.number(),
   wins: v.number(),
   losses: v.number(),
@@ -429,8 +434,11 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"])
+    .index("by_userId_and_status_and_createdAt", ["userId", "status", "createdAt"])
     .index("by_type", ["type"])
     .index("by_type_and_status", ["type", "status"])
+    .index("by_type_and_status_and_createdAt", ["type", "status", "createdAt"])
     .index("by_reference", ["reference"]),
 
   phoneVerifications: defineTable({
@@ -492,12 +500,17 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_userId_and_status", ["userId", "status"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"])
+    .index("by_userId_and_status_and_createdAt", ["userId", "status", "createdAt"])
     .index("by_orderRefNum", ["orderRefNum"])
     .index("by_checkoutToken", ["checkoutToken"])
     .index("by_bookingIntentId", ["bookingIntentId"])
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"])
-    .index("by_status_and_createdAt", ["status", "createdAt"]),
+    .index("by_status_and_createdAt", ["status", "createdAt"])
+    .index("by_provider_and_createdAt", ["provider", "createdAt"])
+    .index("by_provider_and_status_and_createdAt", ["provider", "status", "createdAt"])
+    .index("by_provider_and_kind_and_createdAt", ["provider", "kind", "createdAt"]),
 
   // ============================================
   // MATCHROOMS
@@ -638,6 +651,7 @@ export default defineSchema({
     paymentAmount: v.optional(v.number()),
     paymentReservedSlots: v.optional(v.number()),
     paymentCurrency: v.optional(v.string()),
+    sourcePaymentOrderRefNum: v.optional(v.string()),
     merchantSettlementStatus: v.optional(v.union(v.literal("pending"), v.literal("captured"))),
     merchantSettlementAt: v.optional(v.number()),
     merchantSettlementAmount: v.optional(v.number()),
@@ -686,18 +700,51 @@ export default defineSchema({
     // Walk-in data
     walkIn: v.optional(v.any()),
 
+    // Skill rating application markers (idempotency for ELO updates).
+    // Set once when a finalized verified result applies player/team ELO so the
+    // same match can never be processed twice.
+    skillRatingAppliedAt: v.optional(v.number()),
+    skillRatingAppliedBy: v.optional(v.string()),
+    skillRatingVersion: v.optional(v.number()),
+
     // Timestamps
     createdAt: v.number(),
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })
     .index("by_hostUid", ["hostUid"])
+    .index("by_hostUid_and_scheduledStartAt", ["hostUid", "scheduledStartAt"])
+    .index("by_hostUid_and_createdAt", ["hostUid", "createdAt"])
     .index("by_status", ["status"])
     .index("by_game", ["game"])
     .index("by_status_and_game", ["status", "game"])
+    .index("by_status_and_game_and_scheduledStartAt", ["status", "game", "scheduledStartAt"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_zoneId_and_createdAt", ["zoneId", "createdAt"])
+    .index("by_zoneId_and_status_and_createdAt", ["zoneId", "status", "createdAt"])
+    .index("by_zoneId_and_bookingSource_and_createdAt", ["zoneId", "bookingSource", "createdAt"])
     .index("by_matchCode", ["matchCode"])
+    .index("by_sourcePaymentOrderRefNum", ["sourcePaymentOrderRefNum"])
     .index("by_createdAt", ["createdAt"]),
+
+  // ============================================
+  // MATCHROOM MEMBERS (player-scoped index)
+  // ============================================
+  // Join table enabling correct, scalable "rooms this user is in" queries.
+  // Convex cannot index array membership (matchrooms.playerUids), so user-scoped
+  // lists previously scanned the global newest-200 rooms and silently dropped a
+  // user's older rooms at scale. Maintained on membership add; reads post-filter
+  // against the live matchrooms.playerUids so stale rows can never cause wrong
+  // results. `uid` mirrors the value stored in matchrooms.playerUids.
+  matchroomMembers: defineTable({
+    matchroomId: v.id("matchrooms"),
+    uid: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_uid", ["uid"])
+    .index("by_uid_and_createdAt", ["uid", "createdAt"])
+    .index("by_matchroomId", ["matchroomId"])
+    .index("by_matchroomId_and_uid", ["matchroomId", "uid"]),
 
   // ============================================
   // BOOKING INTENTS
@@ -783,6 +830,7 @@ export default defineSchema({
     .index("by_matchroomId", ["matchroomId"])
     .index("by_createdByUid", ["createdByUid"])
     .index("by_createdByUid_matchroomId", ["createdByUid", "matchroomId"])
+    .index("by_createdByUid_status_updatedAt", ["createdByUid", "status", "updatedAt"])
     .index("by_status", ["status"])
     .index("by_sourceNotificationId", ["sourceNotificationId"]),
 
@@ -855,6 +903,9 @@ export default defineSchema({
     .index("by_matchroomId", ["matchroomId"])
     .index("by_status", ["status"])
     .index("by_gameKey", ["gameKey"])
+    .index("by_zoneId_and_status", ["zoneId", "status"])
+    .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])
+    .index("by_zoneId_and_requestKind_and_status_and_updatedAt", ["zoneId", "requestKind", "status", "updatedAt"])
     .index("by_zoneId_and_requestKind_and_updatedAt", ["zoneId", "requestKind", "updatedAt"]),
 
   // ============================================
@@ -911,7 +962,9 @@ export default defineSchema({
   })
     .index("by_requestId", ["requestId"])
     .index("by_zoneId", ["zoneId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])
+    .index("by_zoneId_and_status_and_expiresAt", ["zoneId", "status", "expiresAt"]),
 
   // ============================================
   // TEAMS
@@ -943,6 +996,12 @@ export default defineSchema({
         matchesPlayed: v.number(),
       })
     ),
+
+    // Per-game team ELO (1000-based), updated only by verified team-vs-team
+    // challenge results. Keyed by canonical game key. Additive/optional so
+    // existing teams keep validating; seeded from active-lineup average on first
+    // rated match.
+    eloByGame: v.optional(v.record(v.string(), v.number())),
 
     // Description
     description: v.optional(v.string()),
@@ -1063,7 +1122,45 @@ export default defineSchema({
   })
     .index("by_challengerTeamId", ["challengerTeamId"])
     .index("by_opponentTeamId", ["opponentTeamId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_matchroomId", ["matchroomId"]),
+
+  // ============================================
+  // RATING HISTORY (ELO LEDGER)
+  // ============================================
+  // Append-only audit trail of every ELO change applied by a verified,
+  // finalized match result. Serves as the source of truth for "what happened"
+  // and complements the per-matchroom idempotency marker. One row per
+  // subject (player or team) per finalized match.
+  ratingHistory: defineTable({
+    matchroomId: v.id("matchrooms"),
+    game: v.string(),
+    subjectType: v.union(v.literal("player"), v.literal("team")),
+    userId: v.optional(v.id("users")),
+    teamId: v.optional(v.id("teams")),
+    teamSide: v.optional(v.union(v.literal("team1"), v.literal("team2"))),
+    oldElo: v.number(),
+    newElo: v.number(),
+    delta: v.number(),
+    teamAverageElo: v.number(),
+    opponentAverageElo: v.number(),
+    matchroomAverageElo: v.optional(v.number()),
+    expectedScore: v.number(),
+    actualScore: v.number(),
+    kFactor: v.number(),
+    adjustmentFactors: v.optional(
+      v.object({
+        individual: v.optional(v.number()),
+        matchroom: v.optional(v.number()),
+      })
+    ),
+    resultSource: v.string(),
+    appliedAt: v.number(),
+  })
+    .index("by_matchroomId", ["matchroomId"])
+    .index("by_userId", ["userId"])
+    .index("by_teamId", ["teamId"])
+    .index("by_matchroom_and_user", ["matchroomId", "userId"]),
 
   // ============================================
   // TEAM CHALLENGE CHAT MESSAGES
@@ -1563,7 +1660,11 @@ export default defineSchema({
     type: v.union(
       v.literal("matchroom_complaint"),
       v.literal("user_report"),
-      v.literal("zone_complaint")
+      v.literal("zone_complaint"),
+      v.literal("friend_chat_message_report"),
+      v.literal("matchroom_chat_message_report"),
+      v.literal("team_challenge_chat_message_report"),
+      v.literal("team_report")
     ),
     status: v.union(
       v.literal("pending"),
@@ -1577,6 +1678,16 @@ export default defineSchema({
     zoneId: v.optional(v.id("zones")),
     branchId: v.optional(v.string()),
     branchLabel: v.optional(v.string()),
+    chatroomId: v.optional(v.id("chatrooms")),
+    chatMessageId: v.optional(v.id("chatMessages")),
+    teamChallengeChatId: v.optional(v.string()),
+    teamChallengeChatMessageId: v.optional(v.id("teamChallengeChatMessages")),
+    supportConversationId: v.optional(v.id("supportConversations")),
+    supportTicketId: v.optional(v.id("supportTickets")),
+    source: v.optional(v.string()),
+    targetType: v.optional(v.string()),
+    targetReference: v.optional(v.string()),
+    messagePreview: v.optional(v.string()),
 
     // Details
     game: v.optional(v.string()),
@@ -1590,15 +1701,37 @@ export default defineSchema({
     resolvedAt: v.optional(v.number()),
     resolutionSummary: v.optional(v.string()),
 
+    // Append-only internal moderation trail (super-admin only). Each entry records
+    // a free-text note and, when relevant, the moderation action it accompanied.
+    moderationNotes: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          note: v.string(),
+          action: v.optional(v.string()),
+          authorUid: v.optional(v.id("users")),
+          authorName: v.optional(v.string()),
+          createdAt: v.number(),
+        })
+      )
+    ),
+    // Set when an admin flags the linked venue/matchroom for follow-up review.
+    flaggedForReview: v.optional(v.boolean()),
+    flaggedAt: v.optional(v.number()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_reporterUid", ["reporterUid"])
+    .index("by_reporterUid_and_updatedAt", ["reporterUid", "updatedAt"])
+    .index("by_reporterUid_and_status_and_updatedAt", ["reporterUid", "status", "updatedAt"])
     .index("by_status", ["status"])
     .index("by_type", ["type"])
     .index("by_dedupeKey", ["dedupeKey"])
     .index("by_matchroomId", ["matchroomId"])
+    .index("by_matchroomId_and_updatedAt", ["matchroomId", "updatedAt"])
     .index("by_zoneId", ["zoneId"])
+    .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])
     .index("by_zoneId_branchId", ["zoneId", "branchId"])
     .index("by_reportedUserId", ["reportedUserId"])
     .index("by_updatedAt", ["updatedAt"])
@@ -1657,7 +1790,9 @@ export default defineSchema({
     .index("by_conversationId", ["conversationId"])
     .index("by_conversationId_createdAt", ["conversationId", "createdAt"])
     .index("by_assignedAdminId", ["assignedAdminId"])
-    .index("by_status_createdAt", ["status", "createdAt"]),
+    .index("by_status_createdAt", ["status", "createdAt"])
+    .index("by_priority_createdAt", ["priority", "createdAt"])
+    .index("by_assignedAdminId_createdAt", ["assignedAdminId", "createdAt"]),
 
   supportConversations: defineTable({
     userId: v.id("users"),
@@ -1817,6 +1952,7 @@ export default defineSchema({
     .index("by_superAdminUserId_createdAt", ["superAdminUserId", "createdAt"])
     .index("by_action_createdAt", ["action", "createdAt"])
     .index("by_module_createdAt", ["module", "createdAt"])
+    .index("by_status_createdAt", ["status", "createdAt"])
     .index("by_targetType_targetId", ["targetType", "targetId"]),
 
   // ============================================

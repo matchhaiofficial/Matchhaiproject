@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -14,7 +14,7 @@ import Screen from "../../src/components/Screen";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
-import { getSuperAdminMatchrooms, SuperAdminMatchroom } from "../../src/services/convex/superAdminService";
+import { getSuperAdminMatchroomsPage, SuperAdminMatchroom } from "../../src/services/convex/superAdminService";
 import { COLORS, SPACING } from "../../src/theme";
 
 type MatchroomFilter = "Any" | SuperAdminMatchroom["lifecycleStatus"];
@@ -55,6 +55,7 @@ function formatDateTime(room: SuperAdminMatchroom) {
 }
 
 const ALL = "All";
+const PAGE_SIZE = 50;
 
 type DateRangeKey = "Any" | "Today" | "Last 7 Days" | "Last 30 Days";
 const DATE_RANGE_OPTIONS: { key: DateRangeKey; label: string }[] = [
@@ -107,12 +108,38 @@ function formatLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const MatchroomRow = React.memo(function MatchroomRow({
+  room,
+  onPress,
+}: {
+  room: SuperAdminMatchroom;
+  onPress: (id: string) => void;
+}) {
+  return (
+    <AdminListCard
+      title={room.title || "Untitled matchroom"}
+      subtitle={`${String(room.game || "Match").toUpperCase()} | ${formatDateTime(room)}`}
+      statusLabel={lifecycleLabel(room.lifecycleStatus)}
+      statusTone={lifecycleTone(room.lifecycleStatus)}
+      onPress={() => onPress(room.id)}
+    >
+      <View style={styles.cardBody}>
+        <AdminInfoLine label="Location" value={room.location || "N/A"} />
+        <AdminInfoLine label="Players" value={`${room.currentPlayers || 0}/${room.maxPlayers || 0}`} />
+      </View>
+    </AdminListCard>
+  );
+});
+
 export default function SuperAdminMatchroomsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [rooms, setRooms] = useState<SuperAdminMatchroom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<MatchroomFilter>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -123,15 +150,30 @@ export default function SuperAdminMatchroomsScreen() {
   const [zoneFilter, setZoneFilter] = useState<string>(ALL);
   const [resultFilter, setResultFilter] = useState<string>(ALL);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeRooms = useCallback((current: SuperAdminMatchroom[], next: SuperAdminMatchroom[]) => {
+    const seen = new Set(current.map((room) => room.id));
+    return [...current, ...next.filter((room) => !seen.has(room.id))];
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
-    const result = await getSuperAdminMatchrooms();
-    if (result.ok) setRooms(result.data);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+    const result = await getSuperAdminMatchroomsPage({
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
+    if (result.ok) {
+      setRooms((previous) => mode === "more" ? mergeRooms(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    }
     else showToast({ type: "error", title: "Matchrooms failed", message: result.message });
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeRooms, showToast]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -205,6 +247,33 @@ export default function SuperAdminMatchroomsScreen() {
     setResultFilter(ALL);
   }, []);
 
+  const handleOpenRoom = useCallback((id: string) => {
+    router.push(`/super-admin/matchroom/${id}` as any);
+  }, []);
+
+  const renderRoom = useCallback(
+    ({ item }: { item: SuperAdminMatchroom }) => <MatchroomRow room={item} onPress={handleOpenRoom} />,
+    [handleOpenRoom],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      rooms.length === 0 ? (
+        <AdminEmptyStateCard
+          title="No matchrooms found"
+          description="Matchrooms will appear here once created."
+          icon="matchroom"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No matchrooms match these filters."
+          description="Reset filters to view all matchrooms."
+          icon="matchroom"
+        />
+      ),
+    [rooms.length],
+  );
+
   return (
     <Screen style={styles.screen} scroll={false}>
       <AdminPageHeader title="Matchrooms" onBack={() => router.back()} inlineTitle />
@@ -220,42 +289,25 @@ export default function SuperAdminMatchroomsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRooms}
+          keyExtractor={(room) => room.id}
+          renderItem={renderRoom}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
-        >
-          {visibleRooms.map((room) => (
-            <AdminListCard
-              key={room.id}
-              title={room.title || "Untitled matchroom"}
-              subtitle={`${String(room.game || "Match").toUpperCase()} | ${formatDateTime(room)}`}
-              statusLabel={lifecycleLabel(room.lifecycleStatus)}
-              statusTone={lifecycleTone(room.lifecycleStatus)}
-              onPress={() => router.push(`/super-admin/matchroom/${room.id}` as any)}
-            >
-              <View style={styles.cardBody}>
-                <AdminInfoLine label="Location" value={room.location || "N/A"} />
-                <AdminInfoLine label="Players" value={`${room.currentPlayers || 0}/${room.maxPlayers || 0}`} />
-              </View>
-            </AdminListCard>
-          ))}
-          {visibleRooms.length === 0 ? (
-            rooms.length === 0 ? (
-              <AdminEmptyStateCard
-                title="No matchrooms found"
-                description="Matchrooms will appear here once created."
-                icon="matchroom"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No matchrooms match these filters."
-                description="Reset filters to view all matchrooms."
-                icon="matchroom"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View>
+            ) : null
+          }
+        />
       )}
 
       <AdminFilterDrawer
@@ -293,6 +345,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   cardBody: { gap: SPACING.sm },
 });

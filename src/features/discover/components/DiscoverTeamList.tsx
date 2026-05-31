@@ -120,6 +120,9 @@ interface DiscoverTeamListProps {
   bottomPadding?: number;
 }
 
+const PAGE_SIZE = 40;
+const MAX_DISCOVER_LIMIT = 1000;
+
 export default function DiscoverTeamList({
   filters,
   searchQuery,
@@ -132,20 +135,25 @@ export default function DiscoverTeamList({
   const [publicTeams, setPublicTeams] = useState<Team[]>([]);
   const [myTeams, setMyTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(true);
 
-  const fetchTeams = useCallback(async () => {
+  const fetchTeams = useCallback(async (nextLimit = PAGE_SIZE, silent = false) => {
     if (!user) {
       setPublicTeams([]);
       setMyTeams([]);
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
+      setHasMore(false);
       return;
     }
 
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const rows = await convex.query(api.discover.listDiscoverTeams, {
         viewerUserId: user._id as any,
         mode: filters.mode,
@@ -155,7 +163,7 @@ export default function DiscoverTeamList({
         selectedTeamSize: filters.teamSize,
         selectedArea: filters.area,
         selectedCompetitiveIntent: filters.competitiveIntent,
-        limit: 200,
+        limit: nextLimit,
       });
       const activeRows = (rows as Team[]).filter(isActiveTeam);
 
@@ -165,6 +173,8 @@ export default function DiscoverTeamList({
         setPublicTeams(activeRows);
       }
 
+      setLimit(nextLimit);
+      setHasMore(activeRows.length >= nextLimit && nextLimit < MAX_DISCOVER_LIMIT);
       recordPayloadMetric("discover.teams_payload", activeRows, {
         game: filters.game,
         mode: filters.mode,
@@ -174,6 +184,7 @@ export default function DiscoverTeamList({
       Logger.error("DiscoverTeams", "Error fetching teams", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [filters, searchQuery, user]);
@@ -190,8 +201,16 @@ export default function DiscoverTeamList({
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchTeams();
+    fetchTeams(PAGE_SIZE);
   }, [fetchTeams]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || refreshing || !hasMore) return;
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_DISCOVER_LIMIT);
+    if (nextLimit <= limit) return;
+    setLoadingMore(true);
+    fetchTeams(nextLimit, true);
+  }, [fetchTeams, hasMore, limit, loading, loadingMore, refreshing]);
 
   const handleRequestToJoin = useCallback(
     async (teamId: string) => {
@@ -310,6 +329,8 @@ export default function DiscoverTeamList({
         initialNumToRender={6}
         maxToRenderPerBatch={8}
         windowSize={7}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -328,6 +349,13 @@ export default function DiscoverTeamList({
                 : "No public teams match your search or filters."
             }
           />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 16 }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            </View>
+          ) : null
         }
       />
     </View>

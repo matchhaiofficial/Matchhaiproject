@@ -8,6 +8,7 @@ import { authComponent } from "./auth";
 import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 import { notifyKycStatusUpdated } from "./kycNotifications";
 import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
+import { performAdminCancel } from "./matchrooms";
 
 // Backend authorization email source. Prefer a SERVER-ONLY env var
 // (SUPER_ADMIN_EMAIL) so the super-admin identity is not shipped in the public
@@ -462,8 +463,193 @@ function serializeAdminZoneWithdrawal(row: any) {
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
     ownerName: metadata.ownerName || null,
+    ownerEmail: metadata.ownerEmail || null,
     adminDecision: metadata.adminDecision || null,
     decidedAt: metadata.decidedAt || null,
+    rejectionReason: metadata.rejectionReasonSafe || null,
+  };
+}
+
+// Enriched serializer used by the paginated Super Admin withdrawal query.
+// Accepts pre-fetched user/zone maps to avoid N+1 reads.
+// Only called from Super Admin queries; never exposed on Zone Admin paths.
+function serializeAdminZoneWithdrawalEnriched(
+  row: any,
+  userMap: Map<string, any>,
+  zoneMap: Map<string, any>,
+) {
+  const metadata = row.metadata || {};
+  const user = userMap.get(String(row.userId ?? "")) ?? null;
+  const zoneId = metadata.zoneId;
+  const zone = zoneId ? (zoneMap.get(String(zoneId)) ?? null) : null;
+
+  return {
+    id: String(row._id),
+    _id: row._id,
+    userId: String(row.userId),
+    amount: Number(row.amount || 0),
+    status: row.status,
+    reference: row.reference || null,
+    createdAt: row.createdAt,
+    branchId: metadata.branchId || null,
+    branchName: metadata.branchName || null,
+    // Prefer zone's official name; fall back to metadata value stored at request time
+    venueName: zone?.venueBrandName || metadata.venueName || null,
+    bankName: metadata.bankName || null,
+    accountNumberMasked: metadata.accountNumberMasked || null,
+    accountNumberLast4: metadata.accountNumberLast4 || null,
+    // Owner identity — metadata stored at request time, verified from user record
+    ownerName: metadata.ownerName || user?.fullName || user?.username || null,
+    ownerEmail: metadata.ownerEmail || user?.email || null,
+    // Safe masked phone; never expose raw phone
+    ownerPhone: user?.phoneNumberMasked || null,
+    ownerCity: user?.city || null,
+    ownerKycStatus: user?.kycVerificationStatus || null,
+    ownerAccountStatus: user?.accountStatus || null,
+    // Current wallet balance at query time (pre-deduction for pending)
+    availableBalance: typeof user?.walletBalance === "number" ? user.walletBalance : null,
+    // Zone context
+    zoneStatus: zone?.status || null,
+    zoneCity: zone?.city || null,
+    zoneName: zone?.venueBrandName || zone?.name || metadata.venueName || null,
+    // Admin decision fields
+    adminDecision: metadata.adminDecision || null,
+    decidedAt: metadata.decidedAt || null,
+    rejectionReason: metadata.rejectionReasonSafe || null,
+  };
+}
+
+const KARACHI_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+function getKarachiPeriodStarts(now = Date.now()) {
+  const local = new Date(now + KARACHI_OFFSET_MS);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth();
+  const date = local.getUTCDate();
+  const startOfToday = Date.UTC(year, month, date) - KARACHI_OFFSET_MS;
+  const day = local.getUTCDay();
+  const mondayOffset = day === 0 ? 6 : day - 1;
+  const startOfWeek = Date.UTC(year, month, date - mondayOffset) - KARACHI_OFFSET_MS;
+  const startOfMonth = Date.UTC(year, month, 1) - KARACHI_OFFSET_MS;
+  return { startOfToday, startOfWeek, startOfMonth };
+}
+
+function addToZoneFinanceBucket(
+  buckets: Map<string, any>,
+  key: string,
+  seed: Partial<{
+    zoneId: string | null;
+    zoneName: string | null;
+    zoneAdminId: string | null;
+    zoneAdminName: string | null;
+    zoneAdminEmail: string | null;
+    availableBalance: number | null;
+  }>,
+) {
+  const existing = buckets.get(key);
+  if (existing) {
+    Object.assign(existing, Object.fromEntries(Object.entries(seed).filter(([, value]) => value !== undefined && value !== null)));
+    return existing;
+  }
+  const next = {
+    id: key,
+    zoneId: seed.zoneId || null,
+    zoneName: seed.zoneName || "Unknown zone",
+    zoneAdminId: seed.zoneAdminId || null,
+    zoneAdminName: seed.zoneAdminName || "Unknown admin",
+    zoneAdminEmail: seed.zoneAdminEmail || null,
+    earnedToday: 0,
+    earnedThisWeek: 0,
+    earnedThisMonth: 0,
+    withdrawnToday: 0,
+    withdrawnThisWeek: 0,
+    withdrawnThisMonth: 0,
+    pendingWithdrawalAmount: 0,
+    availableBalance: seed.availableBalance ?? null,
+    lastWithdrawalAt: null as number | null,
+  };
+  buckets.set(key, next);
+  return next;
+}
+
+function previewFromReportMessage(report: any, message: any, textField: "content" | "text" = "content") {
+  if (report?.messagePreview) return String(report.messagePreview).slice(0, 300);
+  if (!message) return null;
+  const type = String(message.type || "text");
+  if (type === "voice") return "Voice message";
+  if (type === "image") return "Photo";
+  if (type === "file") return message.attachment?.fileName ? `File: ${String(message.attachment.fileName).slice(0, 120)}` : "File";
+  return String(message[textField] || "").trim().slice(0, 300) || null;
+}
+
+async function enrichAdminReport(ctx: any, report: any, includeDetail = false) {
+  const [
+    reporter,
+    reportedUser,
+    zone,
+    matchroom,
+    reviewedBy,
+    resolvedBy,
+    chatroom,
+    chatMessage,
+    teamChallengeMessage,
+    supportTicket,
+  ] = await Promise.all([
+    ctx.db.get(report.reporterUid),
+    report.reportedUserId ? ctx.db.get(report.reportedUserId) : Promise.resolve(null),
+    report.zoneId ? ctx.db.get(report.zoneId) : Promise.resolve(null),
+    report.matchroomId ? ctx.db.get(report.matchroomId) : Promise.resolve(null),
+    includeDetail && report.reviewedByUid ? ctx.db.get(report.reviewedByUid) : Promise.resolve(null),
+    includeDetail && report.resolvedByUid ? ctx.db.get(report.resolvedByUid) : Promise.resolve(null),
+    report.chatroomId ? ctx.db.get(report.chatroomId) : Promise.resolve(null),
+    includeDetail && report.chatMessageId ? ctx.db.get(report.chatMessageId) : Promise.resolve(null),
+    includeDetail && report.teamChallengeChatMessageId ? ctx.db.get(report.teamChallengeChatMessageId) : Promise.resolve(null),
+    report.supportTicketId ? ctx.db.get(report.supportTicketId) : Promise.resolve(null),
+  ]);
+
+  let chatContextLabel: string | null = null;
+  if (report.type === "friend_chat_message_report") chatContextLabel = "Friend chat message";
+  if (report.type === "matchroom_chat_message_report") chatContextLabel = "Matchroom chat message";
+  if (report.type === "team_challenge_chat_message_report") chatContextLabel = "Team challenge chat message";
+  if (report.source === "support_chatbot_moderation_report") chatContextLabel = "Support chatbot moderation report";
+
+  const targetMissing = Boolean(
+    (report.chatMessageId && includeDetail && !chatMessage)
+    || (report.teamChallengeChatMessageId && includeDetail && !teamChallengeMessage)
+    || (report.matchroomId && !matchroom)
+    || (report.zoneId && !zone)
+    || (report.reportedUserId && !reportedUser)
+    || (report.supportTicketId && !supportTicket)
+  );
+
+  return {
+    id: report._id,
+    ...report,
+    chatroomId: report.chatroomId ? String(report.chatroomId) : null,
+    chatMessageId: report.chatMessageId ? String(report.chatMessageId) : null,
+    teamChallengeChatId: report.teamChallengeChatId ? String(report.teamChallengeChatId) : null,
+    teamChallengeChatMessageId: report.teamChallengeChatMessageId ? String(report.teamChallengeChatMessageId) : null,
+    supportConversationId: report.supportConversationId ? String(report.supportConversationId) : null,
+    supportTicketId: report.supportTicketId ? String(report.supportTicketId) : null,
+    source: report.source || null,
+    targetType: report.targetType || null,
+    targetReference: report.targetReference || null,
+    chatContextLabel,
+    messagePreview: previewFromReportMessage(
+      report,
+      chatMessage || teamChallengeMessage,
+      teamChallengeMessage ? "text" : "content",
+    ),
+    targetMissing,
+    reporterName: reporter?.fullName || reporter?.username || "Unknown user",
+    reportedUserName: reportedUser?.fullName || reportedUser?.username || null,
+    reportedUserStatus: reportedUser?.accountStatus || (reportedUser ? "active" : null),
+    zoneName: zone?.venueBrandName || zone?.name || null,
+    zoneStatus: zone?.status || null,
+    matchroomTitle: matchroom?.title || null,
+    matchroomStatus: matchroom?.status || null,
+    reviewedByName: reviewedBy?.fullName || reviewedBy?.username || null,
+    resolvedByName: resolvedBy?.fullName || resolvedBy?.username || null,
   };
 }
 
@@ -1047,6 +1233,29 @@ export const listSuperAdminMatchrooms = query({
   },
 });
 
+export const listSuperAdminMatchroomsPage = query({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map(mapAdminMatchroom);
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
+  },
+});
+
 export const getSuperAdminMatchroomById = query({
   args: {
     sessionToken: v.string(),
@@ -1198,6 +1407,7 @@ export const getPaymentDetailByOrderRefNum = query({
       : null;
 
     const providerDescription = truncateAdminProviderText(payment.providerDescription || null);
+    const providerAnomaly = payment.providerPayload?.anomaly || null;
     const paymentIsPaid = payment.status === "paid";
     const walletTxExists = Boolean(walletTransaction);
     const bookingIntentMissing = payment.kind === "booking_intent" && Boolean(payment.bookingIntentId) && !bookingIntent;
@@ -1212,6 +1422,12 @@ export const getPaymentDetailByOrderRefNum = query({
         : null,
       bookingIntentMissing ? "Payment points to a booking intent that was not found." : null,
       matchroomMissing ? "Booking intent points to a matchroom that was not found." : null,
+      providerAnomaly?.reason === "provider_amount_mismatch"
+        ? "Provider amount does not match the expected payment amount."
+        : null,
+      providerAnomaly?.reason === "provider_order_reference_mismatch"
+        ? "Provider order reference does not match this payment transaction."
+        : null,
     ].filter(Boolean) as string[];
 
     return {
@@ -1240,6 +1456,17 @@ export const getPaymentDetailByOrderRefNum = query({
         flow: payment.providerPayload?.flow || null,
         lastSyncAt: payment.providerPayload?.lastSyncAt || null,
         lastProviderStatus: payment.providerPayload?.lastProviderStatus || null,
+        anomaly: providerAnomaly
+          ? {
+              reason: providerAnomaly.reason || null,
+              source: providerAnomaly.source || null,
+              expectedOrderRefNum: providerAnomaly.expectedOrderRefNum || null,
+              providerOrderRef: providerAnomaly.providerOrderRef || null,
+              expectedAmount: typeof providerAnomaly.expectedAmount === "number" ? providerAnomaly.expectedAmount : null,
+              providerAmount: typeof providerAnomaly.providerAmount === "number" ? providerAnomaly.providerAmount : null,
+              detectedAt: typeof providerAnomaly.detectedAt === "number" ? providerAnomaly.detectedAt : null,
+            }
+          : null,
       },
       linkedWalletTransaction: walletTransaction
         ? {
@@ -1451,6 +1678,115 @@ export const listPaymentsV2 = query({
   },
 });
 
+export const listPaymentsPageV2 = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(
+      v.literal("created"),
+      v.literal("redirected"),
+      v.literal("token_received"),
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("expired"),
+      v.literal("cancelled"),
+    )),
+    kind: v.optional(v.union(v.literal("booking_intent"), v.literal("wallet_topup"))),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    amountMin: v.optional(v.number()),
+    amountMax: v.optional(v.number()),
+    search: v.optional(v.string()),
+    includeReconciliation: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 5, limit), 1000);
+    const searchNeedle = String(args.search || "").trim().toLowerCase();
+    const rows = args.status
+      ? await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_status_and_createdAt", (q: any) => {
+            let r = q.eq("status", args.status);
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_createdAt", (q: any) => {
+            let r = q;
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit);
+
+    const filtered = rows.filter((row) => {
+      if (row.provider !== "easypaisa") return false;
+      if (args.kind && row.kind !== args.kind) return false;
+      const amount = Number(row.amount || 0);
+      if (args.amountMin !== undefined && amount < args.amountMin) return false;
+      if (args.amountMax !== undefined && amount > args.amountMax) return false;
+      if (searchNeedle) {
+        const haystack = `${row.orderRefNum || ""} ${row.providerReference || ""}`.toLowerCase();
+        if (!haystack.includes(searchNeedle)) return false;
+      }
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(
+      pageRows.map(async (row) => {
+        const owner: any = await ctx.db.get(row.userId);
+        const providerDescription = truncateAdminProviderText(row.providerDescription || null);
+        return {
+          id: row._id,
+          _id: row._id,
+          paymentTransactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          kind: row.kind,
+          status: row.status,
+          amount: row.amount,
+          currency: row.currency,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          processedAt: row.processedAt || null,
+          expiresAt: row.expiresAt || null,
+          providerStatus: row.providerStatus || null,
+          providerReference: row.providerReference || null,
+          providerDescription: providerDescription.text,
+          accountOwnerName: owner?.fullName || owner?.username || "Unknown user",
+          bookingIntentId: row.bookingIntentId ? String(row.bookingIntentId) : null,
+          lastError: row.lastError || null,
+          callbackCount: row.callbackCount || 0,
+          providerPayload: {
+            lastProviderStatus: row.providerPayload?.lastProviderStatus || null,
+            lastSyncAt: row.providerPayload?.lastSyncAt || null,
+            flow: row.providerPayload?.flow || null,
+          },
+          reconciliation: null,
+        };
+      }),
+    );
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
 export const listZones = query({
   args: {
     sessionToken: v.string(),
@@ -1482,6 +1818,47 @@ export const listZones = query({
         id: zone._id,
         ...zone,
       }));
+  },
+});
+
+export const listZonesPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(
+        v.literal("pending-review"),
+        v.literal("approved_pending_migration"),
+        v.literal("active"),
+        v.literal("rejected"),
+        v.literal("suspended")
+      )
+    ),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.status
+      ? await ctx.db
+          .query("zones")
+          .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("zones").withIndex("by_updatedAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map((zone) => ({
+      id: zone._id,
+      ...zone,
+    }));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
   },
 });
 
@@ -1527,6 +1904,39 @@ export const listUsers = query({
   },
 });
 
+export const listUsersPage = query({
+  args: {
+    sessionToken: v.string(),
+    accountType: v.optional(v.union(v.literal("player"), v.literal("zone"))),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.accountType
+      ? await ctx.db
+          .query("users")
+          .withIndex("by_accountType_updatedAt", (q) => q.eq("accountType", args.accountType!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("users").withIndex("by_updatedAt").order("desc").take(takeLimit);
+    const page = docs.slice(offset, offset + limit).map((user) => ({
+      id: user._id,
+      ...user,
+    }));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
+  },
+});
+
 export const listReports = query({
   args: {
     sessionToken: v.string(),
@@ -1547,23 +1957,76 @@ export const listReports = query({
           .take(limit)
       : await ctx.db.query("reports").withIndex("by_updatedAt").order("desc").take(limit);
 
-    return await Promise.all(
-      docs.map(async (report) => {
-        const [reporter, reportedUser, zone] = await Promise.all([
-          ctx.db.get(report.reporterUid),
-          report.reportedUserId ? ctx.db.get(report.reportedUserId) : Promise.resolve(null),
-          report.zoneId ? ctx.db.get(report.zoneId) : Promise.resolve(null),
-        ]);
+    return await Promise.all(docs.map((report) => enrichAdminReport(ctx, report, false)));
+  },
+});
 
-        return {
-          id: report._id,
-          ...report,
-          reporterName: reporter?.fullName || reporter?.username || "Unknown user",
-          reportedUserName: reportedUser?.fullName || reportedUser?.username || null,
-          zoneName: zone?.venueBrandName || zone?.name || null,
-        };
-      })
-    );
+export const listReportsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved"))),
+    typeGroup: v.optional(v.string()),
+    game: v.optional(v.string()),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit), 1000);
+    const needle = String(args.search || "").trim().toLowerCase();
+    const docs = args.status
+      ? await ctx.db
+          .query("reports")
+          .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db.query("reports").withIndex("by_updatedAt").order("desc").take(scanLimit);
+    const filtered = docs.filter((report: any) => {
+      if (args.game && args.game !== "All" && String(report.game || "") !== args.game) return false;
+      const createdAt = Number(report.createdAt || 0);
+      if (args.dateFrom !== undefined && createdAt < args.dateFrom) return false;
+      if (args.dateTo !== undefined && createdAt > args.dateTo) return false;
+      if (args.typeGroup && args.typeGroup !== "Any") {
+        const source = String(report.source || "");
+        const type = String(report.type || "");
+        const group =
+          source === "support_chatbot_moderation_report" ? "support"
+          : type.includes("chat_message_report") ? "chat"
+          : type === "zone_complaint" ? "zone"
+          : type === "matchroom_complaint" ? "matchroom"
+          : "player";
+        if (group !== args.typeGroup) return false;
+      }
+      if (needle) {
+        const haystack = [
+          report.reason,
+          report.description,
+          report.game,
+          report.type,
+          report.source,
+          report.targetType,
+          report.targetReference,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(pageRows.map((report) => enrichAdminReport(ctx, report, false)));
+    const nextOffset = offset + page.length;
+    const capped = docs.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
   },
 });
 
@@ -1580,25 +2043,7 @@ export const getReportById = query({
       return null;
     }
 
-    const [reporter, reportedUser, zone, matchroom, reviewedBy, resolvedBy] = await Promise.all([
-      ctx.db.get(report.reporterUid),
-      report.reportedUserId ? ctx.db.get(report.reportedUserId) : Promise.resolve(null),
-      report.zoneId ? ctx.db.get(report.zoneId) : Promise.resolve(null),
-      report.matchroomId ? ctx.db.get(report.matchroomId) : Promise.resolve(null),
-      report.reviewedByUid ? ctx.db.get(report.reviewedByUid) : Promise.resolve(null),
-      report.resolvedByUid ? ctx.db.get(report.resolvedByUid) : Promise.resolve(null),
-    ]);
-
-    return {
-      id: report._id,
-      ...report,
-      reporterName: reporter?.fullName || reporter?.username || "Unknown user",
-      reportedUserName: reportedUser?.fullName || reportedUser?.username || null,
-      zoneName: zone?.venueBrandName || zone?.name || null,
-      matchroomTitle: matchroom?.title || null,
-      reviewedByName: reviewedBy?.fullName || reviewedBy?.username || null,
-      resolvedByName: resolvedBy?.fullName || resolvedBy?.username || null,
-    };
+    return await enrichAdminReport(ctx, report, true);
   },
 });
 
@@ -1623,6 +2068,204 @@ export const listSupportTickets = query({
       : await ctx.db.query("supportTickets").order("desc").take(limit);
 
     return await Promise.all(docs.map((ticket) => serializeSupportTicket(ctx, ticket, false)));
+  },
+});
+
+export const listSupportTicketsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(
+      v.union(v.literal("open"), v.literal("in_review"), v.literal("resolved"))
+    ),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const takeLimit = offset + limit;
+    const docs = args.status
+      ? await ctx.db
+          .query("supportTickets")
+          .withIndex("by_status_createdAt", (q) => q.eq("status", args.status!))
+          .order("desc")
+          .take(takeLimit)
+      : await ctx.db.query("supportTickets").order("desc").take(takeLimit);
+    const pageRows = docs.slice(offset, offset + limit);
+    const page = await Promise.all(pageRows.map((ticket) => serializeSupportTicket(ctx, ticket, false)));
+    const nextOffset = offset + page.length;
+    return {
+      page,
+      isDone: docs.length < takeLimit || page.length < limit,
+      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      total: docs.length,
+    };
+  },
+});
+
+export const listSuperAdminAuditLogsPage = query({
+  args: {
+    sessionToken: v.string(),
+    superAdminEmail: v.optional(v.string()),
+    action: v.optional(v.string()),
+    module: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("success"), v.literal("failed"), v.literal("denied"))),
+    targetId: v.optional(v.string()),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit * 4), 1000);
+    const rows = await ctx.db
+      .query("superAdminAuditLogs")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(scanLimit);
+    const normalizedEmailFilter = args.superAdminEmail ? normalizeEmail(args.superAdminEmail) : undefined;
+    const filtered = rows.filter((row) => {
+      if (normalizedEmailFilter && row.superAdminEmail !== normalizedEmailFilter) return false;
+      if (args.action && row.action !== args.action) return false;
+      if (args.module && row.module !== args.module) return false;
+      if (args.status && row.status !== args.status) return false;
+      if (args.targetId && !String(row.targetId || "").toLowerCase().includes(args.targetId.toLowerCase())) return false;
+      if (args.from && row.createdAt < args.from) return false;
+      if (args.to && row.createdAt > args.to) return false;
+      return true;
+    });
+    const pageRows = filtered.slice(offset, offset + limit).map((row) => ({
+      id: row._id,
+      superAdminUserId: row.superAdminUserId || null,
+      superAdminAuthId: row.superAdminAuthId || null,
+      superAdminName: row.superAdminName,
+      superAdminEmail: row.superAdminEmail,
+      action: row.action,
+      module: row.module,
+      targetType: row.targetType || null,
+      targetId: row.targetId || null,
+      status: row.status,
+      reason: row.reason || null,
+      metadataSafe: row.metadataSafe || null,
+      createdAt: row.createdAt,
+    }));
+    const nextOffset = offset + pageRows.length;
+    const capped = rows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page: pageRows,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
+export const listIdentityVerificationsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.string()),
+    role: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 3, limit * 3), 600);
+    const pendingLikeStatuses = new Set(["not_started", "pending", "in_progress", "in_review"]);
+    const baseRows = args.status === "pending"
+      ? (await ctx.db
+          .query("identityVerifications")
+          .order("desc")
+          .take(scanLimit))
+          .filter((row) => pendingLikeStatuses.has(row.status))
+      : args.status
+        ? await ctx.db
+            .query("identityVerifications")
+            .withIndex("by_status_and_submittedAt", (q) => q.eq("status", args.status as any))
+            .order("desc")
+            .take(scanLimit)
+        : await ctx.db.query("identityVerifications").order("desc").take(scanLimit);
+    const filtered = args.role ? baseRows.filter((row) => row.role === args.role) : baseRows;
+    const pageDocs = filtered.slice(offset, offset + limit);
+    const page = await Promise.all(
+      pageDocs.map(async (row) => {
+        const user = await ctx.db.get(row.userId);
+        return {
+          id: row._id,
+          userId: row.userId,
+          userName: user?.fullName || user?.username || "Unknown user",
+          userEmail: user?.email || null,
+          role: row.role,
+          provider: row.provider,
+          workflowId: row.workflowId,
+          status: row.status,
+          submittedAt: row.submittedAt,
+          verifiedAt: row.verifiedAt || null,
+          rejectedAt: row.rejectedAt || null,
+          rejectionReason: row.rejectionReason || null,
+          emailVerificationStatus: row.emailVerificationStatus || null,
+          idVerificationStatus: row.idVerificationStatus || null,
+          livenessStatus: row.livenessStatus || null,
+          faceMatchStatus: row.faceMatchStatus || null,
+          amlStatus: row.amlStatus || null,
+          ipAnalysisStatus: row.ipAnalysisStatus || null,
+        };
+      }),
+    );
+    const nextOffset = offset + page.length;
+    const capped = baseRows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
+export const listMyNotificationsPage = query({
+  args: {
+    sessionToken: v.string(),
+    tab: v.union(v.literal("unread"), v.literal("read")),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 4, limit * 4), 800);
+    const rows = await ctx.db
+      .query("notifications")
+      .withIndex("by_toUid", (q: any) => q.eq("toUid", admin.profile._id))
+      .order("desc")
+      .take(scanLimit);
+    const filtered = rows
+      .filter((notification: any) => notification.isArchived !== true)
+      .filter((notification: any) => !notification.recipientRole || notification.recipientRole === "super_admin")
+      .filter((notification: any) => (args.tab === "read" ? notification.isRead === true : notification.isRead !== true));
+    const pageDocs = filtered.slice(offset, offset + limit);
+    const page = pageDocs.map(serializeAdminNotification);
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    const isDone = nextOffset >= filtered.length && !capped;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
   },
 });
 
@@ -1653,6 +2296,237 @@ export const listZoneWithdrawalRequests = query({
       .filter((row) => status === "any" || row.status === status)
       .slice(0, limit)
       .map(serializeAdminZoneWithdrawal);
+  },
+});
+
+export const listZoneWithdrawalRequestsPage = query({
+  args: {
+    sessionToken: v.string(),
+    status: v.optional(v.union(
+      v.literal("any"),
+      v.literal("pending"),
+      v.literal("completed"),
+      v.literal("failed"),
+    )),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+    amountMin: v.optional(v.number()),
+    amountMax: v.optional(v.number()),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const scanLimit = Math.min(Math.max((offset + limit) * 8, limit), 1000);
+    const status = args.status || "pending";
+    const rows = status !== "any"
+      ? await ctx.db
+          .query("walletTransactions")
+          .withIndex("by_type_and_status_and_createdAt", (q: any) => {
+            let r = q.eq("type", "withdrawal").eq("status", status);
+            if (args.dateFrom !== undefined) r = r.gte("createdAt", args.dateFrom);
+            if (args.dateTo !== undefined) r = r.lte("createdAt", args.dateTo);
+            return r;
+          })
+          .order("desc")
+          .take(scanLimit)
+      : await ctx.db
+          .query("walletTransactions")
+          .withIndex("by_type", (q) => q.eq("type", "withdrawal"))
+          .order("desc")
+          .take(scanLimit);
+    const needle = String(args.search || "").trim().toLowerCase();
+    const filtered = rows
+      .filter(isZoneWithdrawalRequest)
+      .filter((row) => {
+        const createdAt = Number(row.createdAt || 0);
+        if (args.dateFrom !== undefined && createdAt < args.dateFrom) return false;
+        if (args.dateTo !== undefined && createdAt > args.dateTo) return false;
+        const amount = Number(row.amount || 0);
+        if (args.amountMin !== undefined && amount < args.amountMin) return false;
+        if (args.amountMax !== undefined && amount > args.amountMax) return false;
+        if (needle) {
+          const metadata = row.metadata || {};
+          const haystack = [
+            row.reference,
+            metadata.ownerName,
+            metadata.ownerEmail,
+            metadata.venueName,
+            metadata.branchName,
+            metadata.bankName,
+            metadata.accountNumberMasked,
+            String(row.amount || ""),
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(needle)) return false;
+        }
+        return true;
+      });
+    const pageRows = filtered.slice(offset, offset + limit);
+
+    // Batch-fetch users and zones for enriched context (deduplicated, O(unique_ids) reads)
+    const uniqueUserIds = [...new Set(pageRows.map((r: any) => String(r.userId || "")).filter(Boolean))];
+    const uniqueZoneIds = [...new Set(
+      pageRows.map((r: any) => r.metadata?.zoneId ? String(r.metadata.zoneId) : "").filter(Boolean)
+    )];
+    const [userDocs, zoneDocs] = await Promise.all([
+      Promise.all(uniqueUserIds.map((id: any) => ctx.db.get(id).catch(() => null))),
+      Promise.all(uniqueZoneIds.map((id: any) => ctx.db.get(id).catch(() => null))),
+    ]);
+    const userMap = new Map<string, any>();
+    for (const u of userDocs) { if (u) userMap.set(String(u._id), u); }
+    const zoneMap = new Map<string, any>();
+    for (const z of zoneDocs) { if (z) zoneMap.set(String(z._id), z); }
+
+    const page = pageRows.map((row: any) => serializeAdminZoneWithdrawalEnriched(row, userMap, zoneMap));
+    const nextOffset = offset + page.length;
+    const capped = rows.length >= scanLimit;
+    return {
+      page,
+      isDone: nextOffset >= filtered.length && !capped,
+      continueCursor: nextOffset >= filtered.length && !capped ? null : String(nextOffset),
+      total: filtered.length,
+      capped,
+    };
+  },
+});
+
+export const listZoneFinanceSummaries = query({
+  args: {
+    sessionToken: v.string(),
+    limit: v.optional(v.number()),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const limit = Math.max(1, Math.min(args.limit || 50, 100));
+    const scanLimit = 1000;
+    const { startOfToday, startOfWeek, startOfMonth } = getKarachiPeriodStarts();
+
+    const [payoutRows, completedWithdrawalRows, pendingWithdrawalRows] = await Promise.all([
+      ctx.db
+        .query("walletTransactions")
+        .withIndex("by_type_and_status_and_createdAt", (q: any) =>
+          q.eq("type", "deposit").eq("status", "completed").gte("createdAt", startOfMonth)
+        )
+        .take(scanLimit),
+      ctx.db
+        .query("walletTransactions")
+        .withIndex("by_type_and_status_and_createdAt", (q: any) =>
+          q.eq("type", "withdrawal").eq("status", "completed").gte("createdAt", startOfMonth)
+        )
+        .take(scanLimit),
+      ctx.db
+        .query("walletTransactions")
+        .withIndex("by_type_and_status", (q: any) => q.eq("type", "withdrawal").eq("status", "pending"))
+        .take(scanLimit),
+    ]);
+
+    const buckets = new Map<string, any>();
+    const userCache = new Map<string, any>();
+    const zoneCache = new Map<string, any>();
+    const getUser = async (userId: any) => {
+      const key = String(userId || "");
+      if (!key) return null;
+      if (!userCache.has(key)) userCache.set(key, await ctx.db.get(userId));
+      return userCache.get(key);
+    };
+    const getZone = async (zoneId: any) => {
+      const key = String(zoneId || "");
+      if (!key) return null;
+      if (!zoneCache.has(key)) {
+        try {
+          zoneCache.set(key, await ctx.db.get(zoneId));
+        } catch {
+          zoneCache.set(key, null);
+        }
+      }
+      return zoneCache.get(key);
+    };
+
+    for (const row of payoutRows) {
+      const metadata = row.metadata || {};
+      if (metadata.source !== "matchroom_completion_payout") continue;
+      let zoneId = metadata.zoneId || null;
+      let zone: any = null;
+      if (!zoneId && metadata.matchroomId) {
+        try {
+          const matchroom = await ctx.db.get(metadata.matchroomId as Id<"matchrooms">);
+          zoneId = matchroom?.zoneId || null;
+        } catch {
+          zoneId = null;
+        }
+      }
+      if (zoneId) zone = await getZone(zoneId);
+      const owner = zone?.ownerUid ? await getUser(zone.ownerUid) : await getUser(row.userId);
+      const key = zoneId ? `zone:${String(zoneId)}` : `owner:${String(row.userId)}`;
+      const bucket = addToZoneFinanceBucket(buckets, key, {
+        zoneId: zoneId ? String(zoneId) : null,
+        zoneName: zone?.venueBrandName || zone?.name || metadata.venueName || null,
+        zoneAdminId: owner?._id ? String(owner._id) : String(row.userId),
+        zoneAdminName: owner?.fullName || owner?.username || null,
+        zoneAdminEmail: owner?.email || null,
+        availableBalance: Number(owner?.walletBalance || 0),
+      });
+      const amount = Number(row.amount || 0);
+      const createdAt = Number(row.createdAt || 0);
+      if (createdAt >= startOfToday) bucket.earnedToday += amount;
+      if (createdAt >= startOfWeek) bucket.earnedThisWeek += amount;
+      if (createdAt >= startOfMonth) bucket.earnedThisMonth += amount;
+    }
+
+    for (const row of [...completedWithdrawalRows, ...pendingWithdrawalRows]) {
+      if (!isZoneWithdrawalRequest(row)) continue;
+      const metadata = row.metadata || {};
+      const zoneId = metadata.zoneId || null;
+      const zone = zoneId ? await getZone(zoneId) : null;
+      const owner = await getUser(row.userId);
+      const key = zoneId ? `zone:${String(zoneId)}` : `owner:${String(row.userId)}`;
+      const bucket = addToZoneFinanceBucket(buckets, key, {
+        zoneId: zoneId ? String(zoneId) : null,
+        zoneName: zone?.venueBrandName || zone?.name || metadata.venueName || null,
+        zoneAdminId: owner?._id ? String(owner._id) : String(row.userId),
+        zoneAdminName: owner?.fullName || owner?.username || metadata.ownerName || null,
+        zoneAdminEmail: owner?.email || metadata.ownerEmail || null,
+        availableBalance: Number(owner?.walletBalance || 0),
+      });
+      const amount = Number(row.amount || 0);
+      const createdAt = Number(row.createdAt || 0);
+      if (row.status === "pending") {
+        bucket.pendingWithdrawalAmount += amount;
+      } else if (row.status === "completed") {
+        if (createdAt >= startOfToday) bucket.withdrawnToday += amount;
+        if (createdAt >= startOfWeek) bucket.withdrawnThisWeek += amount;
+        if (createdAt >= startOfMonth) bucket.withdrawnThisMonth += amount;
+        bucket.lastWithdrawalAt = Math.max(Number(bucket.lastWithdrawalAt || 0), createdAt) || null;
+      }
+    }
+
+    const needle = String(args.search || "").trim().toLowerCase();
+    const rows = Array.from(buckets.values())
+      .filter((row) => {
+        if (!needle) return true;
+        return [
+          row.zoneName,
+          row.zoneAdminName,
+          row.zoneAdminEmail,
+          row.zoneId,
+          row.zoneAdminId,
+        ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+      })
+      .sort((a, b) =>
+        Number(b.pendingWithdrawalAmount || 0) - Number(a.pendingWithdrawalAmount || 0)
+        || Number(b.earnedThisMonth || 0) - Number(a.earnedThisMonth || 0)
+        || String(a.zoneName || "").localeCompare(String(b.zoneName || ""))
+      );
+
+    return {
+      rows: rows.slice(0, limit),
+      capped: payoutRows.length >= scanLimit || completedWithdrawalRows.length >= scanLimit || pendingWithdrawalRows.length >= scanLimit,
+      periodStarts: { today: startOfToday, week: startOfWeek, month: startOfMonth, timezone: "Asia/Karachi", weekStartsOn: "Monday" },
+    };
   },
 });
 
@@ -1805,6 +2679,7 @@ export const approveZoneWithdrawal = mutation({
       withdrawalId: args.withdrawalId,
       zoneAdminUserId: withdrawal.userId,
       decision: "approved",
+      amount,
     });
 
     await insertSuperAdminAuditLog(ctx, admin, {
@@ -1877,6 +2752,7 @@ export const rejectZoneWithdrawal = mutation({
       withdrawalId: args.withdrawalId,
       zoneAdminUserId: withdrawal.userId,
       decision: "rejected",
+      amount: Number(withdrawal.amount || 0),
     });
 
     await insertSuperAdminAuditLog(ctx, admin, {
@@ -2283,6 +3159,567 @@ export const setReportStatus = mutation({
   },
 });
 
+// ============================================
+// REPORT MODERATION ACTIONS (super-admin only)
+// ============================================
+
+const MODERATION_NOTE_MAX_LENGTH = 1000;
+
+function makeModerationNote(
+  admin: { authUser?: any; profile?: any },
+  note: string,
+  action: string,
+) {
+  const identity = resolveSuperAdminAuditIdentity(admin.authUser, admin.profile);
+  return {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    note: String(note || "").trim().slice(0, MODERATION_NOTE_MAX_LENGTH),
+    action,
+    authorUid: admin.profile?._id,
+    authorName: identity.superAdminName,
+    createdAt: Date.now(),
+  };
+}
+
+function appendModerationNote(report: any, entry: ReturnType<typeof makeModerationNote>) {
+  const existing = Array.isArray(report.moderationNotes) ? report.moderationNotes : [];
+  return [...existing, entry];
+}
+
+// Promote a still-pending report to "reviewed" when a concrete moderation action is
+// taken, so it leaves the triage queue and the timeline reflects the action.
+function reportReviewedStamp(report: any, admin: { profile?: any }, now: number) {
+  if (report.status !== "pending") return {};
+  return {
+    status: "reviewed" as const,
+    reviewedByUid: report.reviewedByUid || admin.profile._id,
+    reviewedAt: report.reviewedAt || now,
+  };
+}
+
+async function requireReportForAdmin(ctx: any, reportId: Id<"reports">) {
+  const report = await ctx.db.get(reportId);
+  if (!report) {
+    throw new Error("Report not found.");
+  }
+  return report;
+}
+
+export const addReportModerationNote = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const note = args.note.trim();
+    if (!note) {
+      throw new Error("A note is required.");
+    }
+
+    const entry = makeModerationNote(admin, note, "note");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      updatedAt: Date.now(),
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "add_report_moderation_note",
+      module: "reports",
+      targetType: report.type,
+      targetId: String(args.reportId),
+      status: "success",
+      metadataSafe: { reportType: report.type },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const warnReportedUser = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const offenderId = report.reportedUserId as Id<"users"> | undefined;
+    if (!offenderId) {
+      throw new Error("This report has no reported user to warn.");
+    }
+
+    const now = Date.now();
+    const noteText = args.note.trim();
+    if (!noteText) {
+      throw new Error("A warning message is required.");
+    }
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "moderation.account_warning",
+      toUid: offenderId,
+      status: "pending",
+      dedupeKey: `moderation.account_warning:${String(args.reportId)}:${String(offenderId)}`,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      route: "/profile",
+      entity: { kind: "user", id: String(offenderId) },
+      entityId: String(offenderId),
+      title: "Account warning",
+      body: "A report involving your account was reviewed. Please follow MatchHai community rules.",
+      data: { userId: String(offenderId), reportId: String(args.reportId), href: "/profile" },
+    });
+
+    const entry = makeModerationNote(admin, noteText, "warn_user");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "warn_reported_user",
+      module: "reports",
+      targetType: "user",
+      targetId: String(offenderId),
+      status: "success",
+      reason: noteText,
+      metadataSafe: { reportId: String(args.reportId), reportType: report.type },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const warnReportedZoneAdmin = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const zoneId = report.zoneId as Id<"zones"> | undefined;
+    if (!zoneId) {
+      throw new Error("This report has no linked zone to warn.");
+    }
+    const zone = await ctx.db.get(zoneId);
+    if (!zone) {
+      throw new Error("Zone not found.");
+    }
+    const noteText = args.note.trim();
+    if (!noteText) {
+      throw new Error("A warning message is required.");
+    }
+
+    const now = Date.now();
+    if (!zone.ownerUid) {
+      throw new Error("This zone has no owner account to warn.");
+    }
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "moderation.account_warning",
+      toUid: zone.ownerUid,
+      recipientRole: "zone_admin",
+      status: "pending",
+      dedupeKey: `moderation.account_warning:${String(args.reportId)}:zone:${String(zoneId)}`,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      route: "/zone/(tabs)/profile",
+      entity: { kind: "zone", id: String(zoneId) },
+      entityId: String(zoneId),
+      title: "Zone warning",
+      body: "A report involving your zone was reviewed. Please review MatchHai rules and improve your venue experience.",
+      data: { zoneId: String(zoneId), reportId: String(args.reportId), href: "/zone/(tabs)/profile" },
+    });
+
+    const entry = makeModerationNote(admin, noteText, "warn_zone_admin");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "warn_reported_zone_admin",
+      module: "reports",
+      targetType: "zone",
+      targetId: String(zoneId),
+      status: "success",
+      reason: noteText,
+      metadataSafe: { reportId: String(args.reportId) },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const suspendReportedUser = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    mode: v.union(v.literal("temporary"), v.literal("permanent")),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const offenderId = report.reportedUserId as Id<"users"> | undefined;
+    if (!offenderId) {
+      throw new Error("This report has no reported user to suspend.");
+    }
+    const reason = args.reason.trim();
+    if (!reason) {
+      throw new Error("A reason is required to suspend a user.");
+    }
+
+    const now = Date.now();
+    const suspendedUntil = args.mode === "temporary" ? now + 7 * 24 * 60 * 60 * 1000 : null;
+
+    await applyUserSuspension(ctx, admin, {
+      userId: offenderId,
+      status: "suspended",
+      reason,
+      suspendedUntil,
+      auditAction: "suspend_reported_user",
+      auditMetadataExtra: {
+        reportId: String(args.reportId),
+        mode: args.mode,
+        durationDays: args.mode === "temporary" ? 7 : null,
+        reportType: report.type,
+      },
+    });
+
+    const noteLabel = args.mode === "temporary" ? "7-day suspension" : "Permanent suspension";
+    const entry = makeModerationNote(admin, `${noteLabel}: ${reason}`, "suspend_user");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    return { ok: true };
+  },
+});
+
+export const reactivateReportedUser = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const offenderId = report.reportedUserId as Id<"users"> | undefined;
+    if (!offenderId) {
+      throw new Error("This report has no reported user to reactivate.");
+    }
+
+    const now = Date.now();
+    await applyUserSuspension(ctx, admin, {
+      userId: offenderId,
+      status: "active",
+      auditAction: "reactivate_reported_user",
+      auditMetadataExtra: { reportId: String(args.reportId), reportType: report.type },
+    });
+
+    const entry = makeModerationNote(admin, "Account reactivated from report review.", "reactivate_user");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      updatedAt: now,
+    });
+
+    return { ok: true };
+  },
+});
+
+export const flagReportedZone = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const zoneId = report.zoneId as Id<"zones"> | undefined;
+    if (!zoneId) {
+      throw new Error("This report has no linked zone to flag.");
+    }
+    const zone = await ctx.db.get(zoneId);
+    if (!zone) {
+      throw new Error("Zone not found.");
+    }
+
+    const now = Date.now();
+    const noteText = args.note?.trim() || "Zone flagged for review.";
+    const entry = makeModerationNote(admin, noteText, "flag_zone");
+
+    await ctx.db.patch(args.reportId, {
+      flaggedForReview: true,
+      flaggedAt: now,
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    if (zone.ownerUid) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "moderation.report_updated",
+        toUid: zone.ownerUid,
+        recipientRole: "zone_admin",
+        status: "pending",
+        dedupeKey: `moderation.report_updated:${String(args.reportId)}:zone_flagged`,
+        dedupePolicy: "replace_active",
+        pushPolicy: "eligible",
+        route: `/zone/modules/support?reportId=${String(args.reportId)}`,
+        entity: { kind: "report", id: String(args.reportId) },
+        entityId: String(args.reportId),
+        title: "Zone review update",
+        body: "A report involving your zone has been reviewed. Please check your zone dashboard for updates.",
+        data: { reportId: String(args.reportId), zoneId: String(zoneId), href: `/zone/modules/support?reportId=${String(args.reportId)}` },
+      });
+    }
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "flag_reported_zone",
+      module: "reports",
+      targetType: "zone",
+      targetId: String(zoneId),
+      status: "success",
+      reason: noteText,
+      metadataSafe: { reportId: String(args.reportId) },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const suspendReportedZone = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const zoneId = report.zoneId as Id<"zones"> | undefined;
+    if (!zoneId) {
+      throw new Error("This report has no linked zone to suspend.");
+    }
+    const reason = args.reason.trim();
+    if (!reason) {
+      throw new Error("A reason is required to suspend a zone.");
+    }
+    const zone = await ctx.db.get(zoneId);
+    if (!zone) {
+      throw new Error("Zone not found.");
+    }
+    if (zone.status === "suspended") {
+      throw new Error("This zone is already suspended.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(zoneId, { status: "suspended", updatedAt: now });
+
+    if (zone.ownerUid) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "zone.status_updated",
+        toUid: zone.ownerUid,
+        recipientRole: "zone_admin",
+        status: "rejected",
+        dedupeKey: `zone.status_updated:${String(zoneId)}:suspended`,
+        dedupePolicy: "replace_active",
+        route: "/zone/(tabs)/profile",
+        entity: { kind: "zone", id: String(zoneId) },
+        entityId: String(zoneId),
+        title: "Zone status updated",
+        body: "Your zone status has been updated after report review.",
+        data: { zoneId: String(zoneId), status: "suspended", href: "/zone/(tabs)/profile" },
+      });
+    }
+
+    const entry = makeModerationNote(admin, `Zone suspended: ${reason}`, "suspend_zone");
+    await ctx.db.patch(args.reportId, {
+      flaggedForReview: true,
+      flaggedAt: now,
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "suspend_reported_zone",
+      module: "reports",
+      targetType: "zone",
+      targetId: String(zoneId),
+      status: "success",
+      reason,
+      metadataSafe: { reportId: String(args.reportId), previousStatus: zone.status },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const reactivateReportedZone = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const zoneId = report.zoneId as Id<"zones"> | undefined;
+    if (!zoneId) {
+      throw new Error("This report has no linked zone to reactivate.");
+    }
+    const zone = await ctx.db.get(zoneId);
+    if (!zone) {
+      throw new Error("Zone not found.");
+    }
+    if (zone.status !== "suspended") {
+      throw new Error("This zone is not suspended.");
+    }
+
+    const now = Date.now();
+    // Minimal reactivation: a previously-suspended zone was already approved/migrated,
+    // so we only restore the active status (no migration re-run).
+    await ctx.db.patch(zoneId, { status: "active", updatedAt: now });
+
+    if (zone.ownerUid) {
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "zone.status_updated",
+        toUid: zone.ownerUid,
+        recipientRole: "zone_admin",
+        status: "accepted",
+        dedupeKey: `zone.status_updated:${String(zoneId)}:active`,
+        dedupePolicy: "replace_active",
+        route: "/zone/(tabs)/profile",
+        entity: { kind: "zone", id: String(zoneId) },
+        entityId: String(zoneId),
+        title: "Zone status updated",
+        body: "Your zone status has been updated after report review.",
+        data: { zoneId: String(zoneId), status: "active", href: "/zone/(tabs)/profile" },
+      });
+    }
+
+    const entry = makeModerationNote(admin, "Zone reactivated from report review.", "reactivate_zone");
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "reactivate_reported_zone",
+      module: "reports",
+      targetType: "zone",
+      targetId: String(zoneId),
+      status: "success",
+      metadataSafe: { reportId: String(args.reportId) },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const markReportedMatchroomForReview = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const matchroomId = report.matchroomId as Id<"matchrooms"> | undefined;
+    if (!matchroomId) {
+      throw new Error("This report has no linked matchroom.");
+    }
+
+    const now = Date.now();
+    const noteText = args.note?.trim() || "Matchroom flagged for admin review.";
+    const entry = makeModerationNote(admin, noteText, "flag_matchroom");
+
+    await ctx.db.patch(args.reportId, {
+      flaggedForReview: true,
+      flaggedAt: now,
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "flag_reported_matchroom",
+      module: "reports",
+      targetType: "matchroom",
+      targetId: String(matchroomId),
+      status: "success",
+      reason: noteText,
+      metadataSafe: { reportId: String(args.reportId) },
+    });
+
+    return { ok: true };
+  },
+});
+
+export const cancelReportedMatchroom = mutation({
+  args: {
+    sessionToken: v.string(),
+    reportId: v.id("reports"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const report = await requireReportForAdmin(ctx, args.reportId);
+    const matchroomId = report.matchroomId as Id<"matchrooms"> | undefined;
+    if (!matchroomId) {
+      throw new Error("This report has no linked matchroom to cancel.");
+    }
+    const reason = args.reason.trim();
+    if (!reason) {
+      throw new Error("A reason is required to cancel a matchroom.");
+    }
+
+    const now = Date.now();
+    const adminUid = String(admin.profile?.authId || admin.profile._id);
+    const result = await performAdminCancel(ctx, {
+      matchroomId,
+      adminUid,
+      reason,
+      note: `Cancelled from report ${String(args.reportId)} review.`,
+    });
+
+    const entry = makeModerationNote(
+      admin,
+      result.alreadyCancelled ? `Matchroom already cancelled. ${reason}` : `Matchroom cancelled: ${reason}`,
+      "cancel_matchroom",
+    );
+    await ctx.db.patch(args.reportId, {
+      moderationNotes: appendModerationNote(report, entry),
+      ...reportReviewedStamp(report, admin, now),
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "cancel_reported_matchroom",
+      module: "reports",
+      targetType: "matchroom",
+      targetId: String(matchroomId),
+      status: "success",
+      reason,
+      metadataSafe: { reportId: String(args.reportId), alreadyCancelled: result.alreadyCancelled },
+    });
+
+    return { ok: true, alreadyCancelled: result.alreadyCancelled };
+  },
+});
+
 export const updateSupportTicketStatus = mutation({
   args: {
     sessionToken: v.string(),
@@ -2534,6 +3971,145 @@ export const resolveSupportTicket = mutation({
   },
 });
 
+// Shared core for account deletion. Anonymizes PII in both the Convex users table
+// and the Better Auth auth record, then revokes all active sessions.
+// Financial/KYC/audit records are intentionally retained for legal compliance.
+async function applyAccountDeletion(ctx: any, user: any, now: number) {
+  const shortId = String(user._id).slice(-8);
+  const anonEmail = `deleted_${shortId}@deleted.matchhai.internal`;
+
+  // 1. Anonymize Convex user record.
+  await ctx.db.patch(user._id, {
+    fullName: "Deleted User",
+    username: `deleted_${shortId}`,
+    usernameLower: `deleted_${shortId}`,
+    email: anonEmail,
+    photoURL: undefined,
+    phone: undefined,
+    bio: undefined,
+    // Platform URLs and external IDs
+    steamProfileUrl: undefined,
+    faceitProfileUrl: undefined,
+    steamId: undefined,
+    steamPersonaName: undefined,
+    steamCs2Hours: undefined,
+    faceitId: undefined,
+    faceitNickname: undefined,
+    faceitElo: undefined,
+    faceitSkillLevel: undefined,
+    faceitGame: undefined,
+    faceitStats: undefined,
+    psnAccountId: undefined,
+    psnOnlineId: undefined,
+    psnStats: undefined,
+    steamStats: undefined,
+    accountStatus: "suspended",
+    suspendedAt: now,
+    suspensionReason: "account_deletion_processed",
+    updatedAt: now,
+  });
+
+  // 2. Anonymize Better Auth auth record and revoke all sessions.
+  // Wrapped in try/catch so Convex changes persist even if auth ops fail.
+  if (user.authId) {
+    try {
+      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+        input: {
+          model: "user",
+          where: [{ field: "_id", operator: "eq", value: user.authId }],
+          update: { email: anonEmail, name: "Deleted User", updatedAt: now },
+        },
+      });
+    } catch {}
+
+    try {
+      await ctx.runMutation(components.betterAuth.adapter.deleteMany, {
+        input: {
+          model: "session",
+          where: [{ field: "userId", operator: "eq", value: user.authId }],
+        },
+        paginationOpts: { cursor: null, numItems: 500 },
+      });
+    } catch {}
+  }
+
+  return { shortId, anonEmail };
+}
+
+// Processes an account deletion ticket submitted via the in-app deletion flow.
+// Call this from the support ticket detail screen.
+export const processAccountDeletion = mutation({
+  args: {
+    sessionToken: v.string(),
+    ticketId: v.id("supportTickets"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const ticket = await ctx.db.get(args.ticketId);
+    if (!ticket) throw new Error("Support ticket not found.");
+    if (ticket.category !== "account_deletion") {
+      throw new Error("This is not an account deletion ticket.");
+    }
+    if (ticket.status === "resolved") {
+      throw new Error("This deletion request has already been processed.");
+    }
+
+    const user = await ctx.db.get(ticket.userId);
+    if (!user) throw new Error("User not found — account may already be deleted.");
+
+    const now = Date.now();
+    const { shortId } = await applyAccountDeletion(ctx, user, now);
+
+    await ctx.db.patch(args.ticketId, {
+      status: "resolved",
+      assignedAdminId: ticket.assignedAdminId || admin.profile._id,
+      resolutionSummary: `Account deletion processed by ${admin.profile.fullName || admin.profile.username || "super admin"}. PII anonymized, auth email cleared, sessions revoked. Financial and KYC records retained.`,
+      updatedAt: now,
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "process_account_deletion",
+      module: "users",
+      targetType: "user",
+      targetId: String(user._id),
+      status: "success",
+      metadataSafe: { reference: ticket.reference, ticketId: String(args.ticketId), anonymizedUsername: `deleted_${shortId}` },
+    });
+
+    return { ok: true };
+  },
+});
+
+// Directly deletes a user account from the Users admin screen (no ticket required).
+// Use this when the ticket is already resolved or no ticket exists.
+export const deleteUserAccount = mutation({
+  args: {
+    sessionToken: v.string(),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found.");
+    // Allow re-running on already-deleted accounts so stale deletions (run before
+    // auth-email anonymization was added) can have their Better Auth record cleaned up.
+
+    const now = Date.now();
+    const { shortId } = await applyAccountDeletion(ctx, user, now);
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "delete_user_account",
+      module: "users",
+      targetType: "user",
+      targetId: String(user._id),
+      status: "success",
+      metadataSafe: { anonymizedUsername: `deleted_${shortId}` },
+    });
+
+    return { ok: true };
+  },
+});
+
 export const setUserRole = mutation({
   args: {
     sessionToken: v.string(),
@@ -2596,6 +4172,96 @@ export const setUserRole = mutation({
   },
 });
 
+// Shared user suspend/reactivate logic. Caller MUST have already authenticated the
+// super admin via getAuthenticatedAdmin. Patches the user, fires the account-status
+// notification, and writes the audit log. Returns the prior status so callers can
+// record richer context (e.g. a report moderation trail).
+async function applyUserSuspension(
+  ctx: any,
+  admin: { authUser?: any; profile?: any },
+  args: {
+    userId: Id<"users">;
+    status: "active" | "suspended";
+    reason?: string | null;
+    suspendedUntil?: number | null;
+    auditAction?: string;
+    auditMetadataExtra?: Record<string, unknown>;
+  },
+) {
+  const target = await ctx.db.get(args.userId);
+  if (!target) {
+    throw new Error("User not found.");
+  }
+
+  if (String(admin.profile._id) === String(args.userId) && args.status === "suspended") {
+    throw new Error("You cannot suspend your own Super Admin account.");
+  }
+
+  const now = Date.now();
+  const reason = args.reason?.trim();
+  const patch: Record<string, unknown> = {
+    accountStatus: args.status,
+    updatedAt: now,
+  };
+
+  if (args.status === "suspended") {
+    patch.suspendedAt = now;
+    patch.suspendedUntil = args.suspendedUntil ?? null;
+    patch.suspensionReason = reason || "Suspended by Super Admin";
+    patch.suspendedByAdminUserId = admin.profile._id;
+  } else {
+    patch.suspendedAt = undefined;
+    patch.suspendedUntil = null;
+    patch.suspensionReason = null;
+    patch.suspendedByAdminUserId = undefined;
+  }
+
+  await ctx.db.patch(args.userId, patch);
+
+  const isTemporarySuspension = args.status === "suspended" && (args.suspendedUntil ?? null) !== null;
+  const suspensionBody = isTemporarySuspension
+    ? "Your MatchHai account has been suspended for 7 days. Please review community rules."
+    : "Your MatchHai account has been suspended. Contact support if you believe this was a mistake.";
+
+  await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+    type: "account.status_updated",
+    toUid: args.userId,
+    status: args.status === "suspended" ? "rejected" : "accepted",
+    dedupeKey: `account.status_updated:${String(args.userId)}:${args.status}`,
+    dedupePolicy: "replace_active",
+    route: "/profile",
+    entity: { kind: "user", id: String(args.userId) },
+    entityId: String(args.userId),
+    title: args.status === "suspended" ? "Account suspended" : "Account reactivated",
+    body: args.status === "suspended"
+      ? suspensionBody
+      : "Your MatchHai account has been reactivated.",
+    data: {
+      userId: String(args.userId),
+      status: args.status,
+      href: "/profile",
+    },
+  });
+
+  await insertSuperAdminAuditLog(ctx, admin, {
+    action: args.auditAction || (args.status === "suspended" ? "suspend_user" : "reactivate_user"),
+    module: "users",
+    targetType: "user",
+    targetId: String(args.userId),
+    status: "success",
+    reason: reason || undefined,
+    metadataSafe: {
+      previousStatus: target.accountStatus || "active",
+      status: args.status,
+      hasReason: Boolean(reason),
+      suspendedUntil: args.suspendedUntil ?? null,
+      ...(args.auditMetadataExtra || {}),
+    },
+  });
+
+  return { target, previousStatus: target.accountStatus || "active" };
+}
+
 export const setUserSuspension = mutation({
   args: {
     sessionToken: v.string(),
@@ -2606,70 +4272,12 @@ export const setUserSuspension = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
-    const target = await ctx.db.get(args.userId);
-    if (!target) {
-      throw new Error("User not found.");
-    }
-
-    if (admin.profile._id === args.userId && args.status === "suspended") {
-      throw new Error("You cannot suspend your own Super Admin account.");
-    }
-
-    const now = Date.now();
-    const reason = args.reason?.trim();
-    const patch: Record<string, unknown> = {
-      accountStatus: args.status,
-      updatedAt: now,
-    };
-
-    if (args.status === "suspended") {
-      patch.suspendedAt = now;
-      patch.suspendedUntil = args.suspendedUntil ?? null;
-      patch.suspensionReason = reason || "Suspended by Super Admin";
-      patch.suspendedByAdminUserId = admin.profile._id;
-    } else {
-      patch.suspendedAt = undefined;
-      patch.suspendedUntil = null;
-      patch.suspensionReason = null;
-      patch.suspendedByAdminUserId = undefined;
-    }
-
-    await ctx.db.patch(args.userId, patch);
-
-    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-      type: "account.status_updated",
-      toUid: args.userId,
-      status: args.status === "suspended" ? "rejected" : "accepted",
-      dedupeKey: `account.status_updated:${String(args.userId)}:${args.status}`,
-      dedupePolicy: "replace_active",
-      route: "/profile",
-      entity: { kind: "user", id: String(args.userId) },
-      entityId: String(args.userId),
-      title: args.status === "suspended" ? "Account suspended" : "Account reactivated",
-      body: args.status === "suspended"
-        ? "Your MatchHai account has been suspended. Contact support if you believe this is a mistake."
-        : "Your MatchHai account has been reactivated.",
-      data: {
-        userId: String(args.userId),
-        status: args.status,
-        href: "/profile",
-      },
+    await applyUserSuspension(ctx, admin, {
+      userId: args.userId,
+      status: args.status,
+      reason: args.reason,
+      suspendedUntil: args.suspendedUntil ?? null,
     });
-
-    await insertSuperAdminAuditLog(ctx, admin, {
-      action: args.status === "suspended" ? "suspend_user" : "reactivate_user",
-      module: "users",
-      targetType: "user",
-      targetId: String(args.userId),
-      status: "success",
-      metadataSafe: {
-        previousStatus: target.accountStatus || "active",
-        status: args.status,
-        hasReason: Boolean(reason),
-        suspendedUntil: args.suspendedUntil ?? null,
-      },
-    });
-
     return { ok: true };
   },
 });

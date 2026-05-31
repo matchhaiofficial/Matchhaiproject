@@ -56,16 +56,34 @@ export async function requireKycVerified(
   ctx: ActionCtx | MutationCtx,
   message = KYC_VERIFICATION_REQUIRED_MESSAGE,
 ) {
-  // getAuthUser throws ConvexError("Unauthenticated") when there is no valid
-  // identity/session, so reaching this point means the request is authenticated.
-  const authUser = await authComponent.getAuthUser(ctx);
+  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
+  try {
+    authUser = await authComponent.getAuthUser(ctx);
+  } catch {
+    authUser = null;
+  }
 
   // Better Auth's user document carries both the auth record id (`_id`) and an
   // optional linked app user id (`userId`). `userId` is null for accounts that
-  // were never explicitly linked, so resolve the profile by trying both — the
-  // same strategy proven in chatAuth.getStrictAuthenticatedUserId. Our `users`
-  // table stores the auth record id in `authId` (see auth.linkAuthToUser).
-  const candidateAuthIds = [authUser?.userId, authUser?._id]
+  // were never explicitly linked, so resolve the profile by trying both.
+  const rawIds: Array<string | null | undefined> = [authUser?.userId, authUser?._id];
+
+  // Convex JWT identity fallback: works in both actions and mutations via ctx.auth.
+  // Required when authComponent.getAuthUser returns null/empty (e.g. the mobile
+  // Convex token is valid but Better Auth session lookup returns no userId/_id).
+  if (!rawIds.some((id) => typeof id === "string" && id.trim())) {
+    try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (identity) {
+        rawIds.push(identity.subject, identity.tokenIdentifier);
+        for (const raw of [identity.subject, identity.tokenIdentifier]) {
+          if (raw?.includes("|")) rawIds.push(raw.split("|").pop());
+        }
+      }
+    } catch {}
+  }
+
+  const candidateAuthIds = rawIds
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
 
@@ -79,7 +97,7 @@ export async function requireKycVerified(
     if (profile) break;
   }
 
-  assertKycAccessAllowed(profile, message);
+  assertKycAccessAllowed(profile as any, message);
 
   return { authUser, profile };
 }

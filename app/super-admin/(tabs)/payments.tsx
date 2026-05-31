@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -19,7 +19,7 @@ import {
   AdminPaymentListItem,
   AdminPaymentReconciliation,
   AdminPaymentStatus,
-  getAdminPayments,
+  getAdminPaymentsPage,
 } from "../../../src/services/convex/superAdminService";
 import { COLORS, SPACING } from "../../../src/theme";
 
@@ -120,12 +120,80 @@ function kindLabel(kind?: string | null) {
   return kind === "wallet_topup" ? "Wallet Top-up" : "Booking Payment";
 }
 
+const PaymentRow = React.memo(function PaymentRow({
+  item,
+  expanded,
+  onToggle,
+  onViewDetail,
+}: {
+  item: AdminPaymentListItem;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+  onViewDetail: (orderRefNum: string) => void;
+}) {
+  const flags = item.reconciliation
+    ? RECON_OPTIONS.filter((opt) => opt.key !== "all" && item.reconciliation?.[opt.key as keyof AdminPaymentReconciliation])
+    : [];
+  return (
+    <AdminListCard
+      title={kindLabel(item.kind)}
+      subtitle={item.accountOwnerName || "Unknown user"}
+      statusLabel={item.status}
+      statusTone={statusTone(item.status)}
+      onPress={() => onToggle(item.id)}
+      actions={
+        <AppButton
+          size="sm"
+          variant="secondary"
+          leadingIcon="visibility"
+          onPress={(event) => {
+            event.stopPropagation();
+            onViewDetail(item.orderRefNum);
+          }}
+        >
+          View detail
+        </AppButton>
+      }
+    >
+      <View style={styles.cardBody}>
+        <AdminInfoLine label="Created" value={`${formatDateTime(item.createdAt)} | ${item.currency} ${Math.round(item.amount).toLocaleString("en-US")}`} />
+        <AdminInfoLine label="Reference" value={item.orderRefNum} />
+        {flags.length > 0 ? (
+          <View style={styles.flagRow}>
+            {flags.map((f) => (
+              <StatusPill key={f.key} tone="danger" label={f.label} />
+            ))}
+          </View>
+        ) : null}
+        {expanded ? (
+          <View style={styles.details}>
+            <AdminInfoLine label="Provider status" value={item.providerStatus || "N/A"} />
+            <AdminInfoLine label="Provider description" value={item.providerDescription || "N/A"} />
+            <AdminInfoLine label="Provider reference" value={item.providerReference || "N/A"} />
+            <AdminInfoLine label="Processed" value={formatDateTime(item.processedAt)} />
+            <AdminInfoLine label="Expires" value={formatDateTime(item.expiresAt)} />
+            <AdminInfoLine label="Updated" value={formatDateTime(item.updatedAt)} />
+            <AdminInfoLine label="Callbacks" value={String(item.callbackCount || 0)} />
+            <AdminInfoLine label="Last sync" value={formatDateTime(item.providerPayload?.lastSyncAt)} />
+            <AdminInfoLine label="Flow" value={item.providerPayload?.flow || "N/A"} />
+            <AdminInfoLine label="Last error" value={item.lastError || "None"} />
+          </View>
+        ) : null}
+      </View>
+    </AdminListCard>
+  );
+});
+
 export default function SuperAdminPaymentsTab() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { showToast } = useToast();
   const [transactions, setTransactions] = useState<AdminPaymentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<KindFilter>("Any");
   const [status, setStatus] = useState<StatusFilter>("Any");
@@ -136,25 +204,41 @@ export default function SuperAdminPaymentsTab() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Server-driven filters. reconFilter only toggles the opt-in (page-scoped) reconciliation compute.
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeRows = useCallback((current: AdminPaymentListItem[], next: AdminPaymentListItem[]) => {
+    const byId = new Map<string, AdminPaymentListItem>();
+    [...current, ...next].forEach((item) => byId.set(String(item.id), item));
+    return Array.from(byId.values());
+  }, []);
+
+  // Server-driven filters. Reconciliation flags remain page-scoped.
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
+    else if (mode === "more") setLoadingMore(true);
     else setRefreshing(true);
     const bounds = amountRangeToBounds(amountFilter);
-    const result = await getAdminPayments({
+    const result = await getAdminPaymentsPage({
       kind: kind === "Any" ? undefined : kind,
       status: status === "Any" ? undefined : status,
       dateFrom: dateRangeToFrom(dateFilter),
       amountMin: bounds.amountMin,
       amountMax: bounds.amountMax,
       includeReconciliation: reconFilter !== "all",
+      search: search.trim() || undefined,
       limit: 50,
+      cursor: mode === "more" ? cursor : null,
     });
-    if (result.ok) setTransactions(result.data);
+    if (result.ok) {
+      setTransactions((current) => mode === "more" ? mergeRows(current, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+      setTotal(result.data.total || result.data.page.length);
+    }
     else showToast({ type: "error", title: "Payments failed", message: result.message });
     if (mode === "initial") setLoading(false);
+    else if (mode === "more") setLoadingMore(false);
     else setRefreshing(false);
-  }, [showToast, kind, status, dateFilter, amountFilter, reconFilter]);
+  }, [amountFilter, cursor, dateFilter, isDone, kind, loadingMore, mergeRows, reconFilter, search, showToast, status]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -207,6 +291,44 @@ export default function SuperAdminPaymentsTab() {
 
   const anyFilterActive = activeCount > 0 || search.trim().length > 0;
 
+  const handleToggle = useCallback((id: string) => {
+    setExpandedId((current) => (current === id ? null : id));
+  }, []);
+
+  const handleViewDetail = useCallback((orderRefNum: string) => {
+    router.push(`/super-admin/payment/${encodeURIComponent(orderRefNum)}` as any);
+  }, []);
+
+  const renderPayment = useCallback(
+    ({ item }: { item: AdminPaymentListItem }) => (
+      <PaymentRow
+        item={item}
+        expanded={expandedId === item.id}
+        onToggle={handleToggle}
+        onViewDetail={handleViewDetail}
+      />
+    ),
+    [expandedId, handleToggle, handleViewDetail],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      anyFilterActive ? (
+        <AdminEmptyStateCard
+          title="No payments match these filters."
+          description="Reset filters to view all payments."
+          icon="paymentWallet"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No payments found"
+          description="Payments will appear here as they are created."
+          icon="paymentWallet"
+        />
+      ),
+    [anyFilterActive],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Payments" subtitle="Auto-refreshes while focused. Pull down to refresh immediately." inlineTitle />
@@ -222,82 +344,21 @@ export default function SuperAdminPaymentsTab() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visible}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPayment}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          ListFooterComponent={loadingMore ? <ActivityIndicator color={COLORS.accent} /> : null}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
-        >
-          {visible.map((item) => {
-            const expanded = expandedId === item.id;
-            const flags = item.reconciliation
-              ? RECON_OPTIONS.filter((opt) => opt.key !== "all" && item.reconciliation?.[opt.key as keyof AdminPaymentReconciliation])
-              : [];
-            return (
-              <AdminListCard
-                key={item.id}
-                title={kindLabel(item.kind)}
-                subtitle={item.accountOwnerName || "Unknown user"}
-                statusLabel={item.status}
-                statusTone={statusTone(item.status)}
-                onPress={() => setExpandedId(expanded ? null : item.id)}
-                actions={
-                  <AppButton
-                    size="sm"
-                    variant="secondary"
-                    leadingIcon="visibility"
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      router.push(`/super-admin/payment/${encodeURIComponent(item.orderRefNum)}` as any);
-                    }}
-                  >
-                    View detail
-                  </AppButton>
-                }
-              >
-                <View style={styles.cardBody}>
-                  <AdminInfoLine label="Created" value={`${formatDateTime(item.createdAt)} | ${item.currency} ${Math.round(item.amount).toLocaleString("en-US")}`} />
-                  <AdminInfoLine label="Reference" value={item.orderRefNum} />
-                  {flags.length > 0 ? (
-                    <View style={styles.flagRow}>
-                      {flags.map((f) => (
-                        <StatusPill key={f.key} tone="danger" label={f.label} />
-                      ))}
-                    </View>
-                  ) : null}
-                  {expanded ? (
-                    <View style={styles.details}>
-                      <AdminInfoLine label="Provider status" value={item.providerStatus || "N/A"} />
-                      <AdminInfoLine label="Provider description" value={item.providerDescription || "N/A"} />
-                      <AdminInfoLine label="Provider reference" value={item.providerReference || "N/A"} />
-                      <AdminInfoLine label="Processed" value={formatDateTime(item.processedAt)} />
-                      <AdminInfoLine label="Expires" value={formatDateTime(item.expiresAt)} />
-                      <AdminInfoLine label="Updated" value={formatDateTime(item.updatedAt)} />
-                      <AdminInfoLine label="Callbacks" value={String(item.callbackCount || 0)} />
-                      <AdminInfoLine label="Last sync" value={formatDateTime(item.providerPayload?.lastSyncAt)} />
-                      <AdminInfoLine label="Flow" value={item.providerPayload?.flow || "N/A"} />
-                      <AdminInfoLine label="Last error" value={item.lastError || "None"} />
-                    </View>
-                  ) : null}
-                </View>
-              </AdminListCard>
-            );
-          })}
-          {visible.length === 0 ? (
-            anyFilterActive ? (
-              <AdminEmptyStateCard
-                title="No payments match these filters."
-                description="Reset filters to view all payments."
-                icon="paymentWallet"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No payments found"
-                description="Payments will appear here as they are created."
-                icon="paymentWallet"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer

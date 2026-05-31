@@ -449,13 +449,38 @@ async function verifyDiditSignature(request: Request, rawBody: string, payload: 
 export const getCurrentUserKyc = query({
   args: {},
   handler: async (ctx) => {
-    const authUser = await authComponent.getAuthUser(ctx);
-    if (!authUser?.userId) return null;
-    const authId = authUser.userId;
-    const profile = await ctx.db
-      .query("users")
-      .withIndex("by_authId", (q) => q.eq("authId", authId))
-      .unique();
+    // Prefer Better Auth session; fall back to Convex JWT identity (mirrors wallet.ts pattern).
+    const candidateAuthIds: string[] = [];
+
+    try {
+      const authUser = await authComponent.getAuthUser(ctx);
+      if (authUser?.userId) candidateAuthIds.push(authUser.userId);
+    } catch {}
+
+    if (candidateAuthIds.length === 0) {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) return null;
+      for (const raw of [identity.subject, identity.tokenIdentifier]) {
+        if (!raw) continue;
+        candidateAuthIds.push(raw);
+        if (raw.includes("|")) {
+          const suffix = raw.split("|").pop();
+          if (suffix) candidateAuthIds.push(suffix);
+        }
+      }
+    }
+
+    if (candidateAuthIds.length === 0) return null;
+
+    let profile: any = null;
+    for (const authId of candidateAuthIds) {
+      profile = await ctx.db
+        .query("users")
+        .withIndex("by_authId", (q) => q.eq("authId", authId))
+        .unique();
+      if (profile) break;
+    }
+
     if (!profile?.identityVerificationId) return null;
     try {
       return await ctx.db.get(profile.identityVerificationId as Id<"identityVerifications">);

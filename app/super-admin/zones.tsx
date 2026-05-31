@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { AdminEmptyStateCard, AdminFilterDrawer, AdminListCard, AdminPageHeader, AdminSearchFilterBar } from "../../src/components/AdminSurface";
 import Screen from "../../src/components/Screen";
@@ -8,7 +8,7 @@ import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
-import { getZones } from "../../src/services/convex/superAdminService";
+import { getZonesPage } from "../../src/services/convex/superAdminService";
 import type { Zone } from "../../src/services/convex/zoneService";
 import { COLORS, FONTS, SPACING } from "../../src/theme";
 import { getZoneStatusTone } from "../../src/utils/statusLabels";
@@ -27,6 +27,7 @@ function statusTitle(status: ZoneReviewStatus) {
 }
 
 const ALL = "All";
+const PAGE_SIZE = 50;
 
 type PilotStatusKey = "all" | "active" | "ended" | "none";
 const PILOT_STATUS_OPTIONS: { key: PilotStatusKey; label: string }[] = [
@@ -114,7 +115,10 @@ export default function SuperAdminZonesScreen() {
   const [tab, setTab] = useState<ZoneReviewStatus>("pending-review");
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [cityFilter, setCityFilter] = useState<string>(ALL);
@@ -122,20 +126,34 @@ export default function SuperAdminZonesScreen() {
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [pilotFilter, setPilotFilter] = useState<PilotStatusKey>("all");
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+  const mergeZones = useCallback((current: Zone[], next: Zone[]) => {
+    const seen = new Set(current.map((zone) => zone.id));
+    return [...current, ...next.filter((zone) => !seen.has(zone.id))];
+  }, []);
 
-    const result = await getZones(tab, { forceRefresh: true });
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "initial") setLoading(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+
+    const result = await getZonesPage({
+      status: tab,
+      limit: PAGE_SIZE,
+      cursor: mode === "more" ? cursor : null,
+    });
     if (result.ok) {
-      setZones(result.data);
+      setZones((previous) => mode === "more" ? mergeZones(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
     } else {
       showToast({ type: "error", title: "Zones failed", message: result.message });
     }
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [showToast, tab]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeZones, showToast, tab]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -212,23 +230,36 @@ export default function SuperAdminZonesScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleZones}
+          keyExtractor={(zone) => zone.id}
+          renderItem={({ item }) => <ZoneReviewCard zone={item} />}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryText}>{visibleZones.length} {statusTitle(tab).toLowerCase()}</Text>
-          </View>
-          {visibleZones.map((zone) => <ZoneReviewCard key={zone.id} zone={zone} />)}
-          {visibleZones.length === 0 ? (
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+          ListHeaderComponent={
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryText}>{visibleZones.length} {statusTitle(tab).toLowerCase()}</Text>
+            </View>
+          }
+          ListEmptyComponent={
             zones.length === 0 ? (
               <AdminEmptyStateCard title={`No ${statusTitle(tab).toLowerCase()} zones`} description="Zone registration requests in this state will appear here." icon="business" />
             ) : (
               <AdminEmptyStateCard title="No zones match these filters." description="Reset filters to view all zones." icon="business" />
             )
-          ) : null}
-        </ScrollView>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View>
+            ) : null
+          }
+        />
       )}
 
       <AdminFilterDrawer
@@ -257,6 +288,7 @@ const styles = StyleSheet.create({
   searchBar: { marginBottom: SPACING.md },
   tabs: { marginBottom: SPACING.md },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   summaryRow: {
     minHeight: 32,

@@ -9,6 +9,7 @@ import { Alert, Text } from "react-native";
 
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import ReportIssueModal from "../../src/components/ReportIssueModal";
 import ChatThread from "../../src/features/chat/ChatThread";
 import type { ChatThreadMessage } from "../../src/features/chat/types";
 import { formatChatPresenceLabel, formatVoiceDuration, useRelativeNow } from "../../src/features/chat/utils";
@@ -17,9 +18,12 @@ import { useChatTyping } from "../../src/hooks/useChatTyping";
 import { usePresenceHeartbeat } from "../../src/hooks/usePresenceHeartbeat";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
+import { submitTeamChallengeChatMessageReport } from "../../src/services/convex/reportService";
 import { uploadFileToConvex } from "../../src/services/convex/storageService";
 import { COLORS } from "../../src/theme";
 import Logger from "../../src/utils/logger";
+
+const CHAT_REPORT_REASONS = ["Harassment or abuse", "Hate speech", "Scam or spam", "Threats or unsafe behavior", "Other"];
 
 export default function TeamChallengeChatScreen() {
     const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -32,6 +36,10 @@ export default function TeamChallengeChatScreen() {
     const [sending, setSending] = useState(false);
     const [replyTo, setReplyTo] = useState<ChatThreadMessage | null>(null);
     const [editingMessage, setEditingMessage] = useState<ChatThreadMessage | null>(null);
+    const [reportMessage, setReportMessage] = useState<ChatThreadMessage | null>(null);
+    const [reportReason, setReportReason] = useState("");
+    const [reportDescription, setReportDescription] = useState("");
+    const [submittingReport, setSubmittingReport] = useState(false);
     const [uploadingVoice, setUploadingVoice] = useState(false);
     const [uploadingAttachment, setUploadingAttachment] = useState(false);
     useRouteLogger("TeamChallengeChatScreen", { chatId, userId: user?._id });
@@ -476,9 +484,49 @@ export default function TeamChallengeChatScreen() {
                             onPress: () => void handlePinMessage(message.id),
                         }
                     : undefined,
+                !isMine
+                    ? {
+                        text: "Report",
+                        style: "destructive",
+                        onPress: () => {
+                            setReportMessage(message);
+                            setReportReason("");
+                            setReportDescription("");
+                        },
+                    }
+                    : undefined,
                 { text: "Cancel", style: "cancel" },
             ].filter(Boolean) as any
         );
+    };
+
+    const closeReportModal = () => {
+        if (submittingReport) return;
+        setReportMessage(null);
+        setReportReason("");
+        setReportDescription("");
+    };
+
+    const submitReport = async () => {
+        if (!reportMessage || !chatId || !reportReason) return;
+        setSubmittingReport(true);
+        const result = await submitTeamChallengeChatMessageReport({
+            chatId,
+            messageId: reportMessage.id,
+            reason: reportReason,
+            description: reportDescription,
+        });
+        setSubmittingReport(false);
+        if (result.ok) {
+            showToast({
+                type: "success",
+                title: result.data.created ? "Report submitted" : "Report already exists",
+                message: result.message || "Our moderation team will review this message.",
+            });
+            closeReportModal();
+        } else {
+            showToast({ type: "error", title: "Report failed", message: result.message });
+        }
     };
 
     const contextCard = (
@@ -578,6 +626,7 @@ export default function TeamChallengeChatScreen() {
     }
 
     return (
+        <>
         <ChatThread
             title={
                 challengeData?.challengerTeamName && challengeData?.opponentTeamName
@@ -621,5 +670,20 @@ export default function TeamChallengeChatScreen() {
             canUnpin={isCaptain}
             presenceLabel={presenceLabel}
         />
+        <ReportIssueModal
+            visible={Boolean(reportMessage)}
+            title="Report Message"
+            subtitle="Send this team challenge chat message to MatchHai moderation."
+            reasons={CHAT_REPORT_REASONS}
+            reason={reportReason}
+            description={reportDescription}
+            onChangeReason={setReportReason}
+            onChangeDescription={setReportDescription}
+            onSubmit={submitReport}
+            onClose={closeReportModal}
+            loading={submittingReport}
+            descriptionPlaceholder="Add context for why this message should be reviewed."
+        />
+        </>
     );
 }

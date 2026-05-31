@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -15,7 +15,7 @@ import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
   getSuperAdminAllowlistConfig,
-  getSuperAdminAuditLogs,
+  getSuperAdminAuditLogsPage,
   type SuperAdminAllowlistEntry,
   type SuperAdminAuditLog,
 } from "../../src/services/convex/superAdminService";
@@ -86,7 +86,7 @@ function dateRangeToFrom(range: DateRangeKey): number | undefined {
   return Date.now() - days * 24 * 60 * 60 * 1000;
 }
 
-function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
+const AuditLogCard = React.memo(function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
   const metadataEntries = item.metadataSafe && typeof item.metadataSafe === "object"
     ? Object.entries(item.metadataSafe).slice(0, 6)
     : [];
@@ -129,7 +129,7 @@ function AuditLogCard({ item }: { item: SuperAdminAuditLog }) {
       ) : null}
     </AdminListCard>
   );
-}
+});
 
 export default function SuperAdminAuditLogsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -144,27 +144,45 @@ export default function SuperAdminAuditLogsScreen() {
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const mergeRows = useCallback((current: SuperAdminAuditLog[], next: SuperAdminAuditLog[]) => {
+    const seen = new Set(current.map((row) => row.id));
+    return [...current, ...next.filter((row) => !seen.has(row.id))];
+  }, []);
+
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
     if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
 
-    const result = await getSuperAdminAuditLogs({
+    const result = await getSuperAdminAuditLogsPage({
       status: statusFilter === "all" ? undefined : statusFilter,
       module: moduleFilter === "all" ? undefined : moduleFilter,
       action: actionFilter === "all" ? undefined : actionFilter,
       superAdminEmail: adminFilter === "all" ? undefined : adminFilter,
       targetId: search.trim() || undefined,
       from: dateRangeToFrom(dateFilter),
+      limit: 50,
+      cursor: mode === "more" ? cursor : null,
     });
 
-    if (result.ok) setRows(result.data);
-    else showToast({ type: "error", title: "Audit logs failed", message: result.message });
+    if (result.ok) {
+      setRows((previous) => mode === "more" ? mergeRows(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    } else {
+      showToast({ type: "error", title: "Audit logs failed", message: result.message });
+    }
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [actionFilter, adminFilter, dateFilter, moduleFilter, search, showToast, statusFilter]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [actionFilter, adminFilter, cursor, dateFilter, isDone, loadingMore, mergeRows, moduleFilter, search, showToast, statusFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -203,6 +221,22 @@ export default function SuperAdminAuditLogsScreen() {
     );
   }, [rows, search]);
 
+  const renderAuditLog = useCallback(
+    ({ item }: { item: SuperAdminAuditLog }) => <AuditLogCard item={item} />,
+    [],
+  );
+
+  const renderEmpty = useCallback(
+    () => (
+      <AdminEmptyStateCard
+        title="No audit logs found"
+        description="Super Admin access and actions will appear here."
+        icon="reports"
+      />
+    ),
+    [],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader
@@ -224,20 +258,21 @@ export default function SuperAdminAuditLogsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRows}
+          keyExtractor={(item) => item.id}
+          renderItem={renderAuditLog}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View> : null}
           showsVerticalScrollIndicator={false}
-        >
-          {visibleRows.map((item) => <AuditLogCard key={item.id} item={item} />)}
-          {visibleRows.length === 0 ? (
-            <AdminEmptyStateCard
-              title="No audit logs found"
-              description="Super Admin access and actions will appear here."
-              icon="reports"
-            />
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer
@@ -297,6 +332,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  footerLoader: { paddingVertical: SPACING.md, alignItems: "center" },
   content: { gap: SPACING.md },
   adminBox: {
     borderRadius: RADII.md,

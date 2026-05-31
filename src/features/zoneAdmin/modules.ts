@@ -68,5 +68,13 @@ export const ZONE_ADMIN_MODULES: ZoneAdminModule[] = [
     route: "/zone/modules/notifications",
     icon: "notifications",
   },
+  {
+    id: "wallet",
+    title: "Wallet",
+    description: "Earnings, matchroom payouts, and withdrawal requests",
+    route: "/zone/wallet",
+    icon: "wallet",
+    tag: "Finance",
+  },
 ];
 

@@ -129,6 +129,15 @@ export default StyleSheet.create({
     fullBanner: {
         backgroundColor: COLORS.accent,
     },
+    successBanner: {
+        backgroundColor: COLORS.successBright,
+    },
+    infoBanner: {
+        backgroundColor: COLORS.accent,
+    },
+    actionBanner: {
+        backgroundColor: '#F57C00',
+    },
     qrCard: {
         backgroundColor: COLORS.cardDark,
         borderRadius: 16,

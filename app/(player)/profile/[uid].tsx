@@ -258,18 +258,8 @@ export default function PlayerProfile() {
                 });
                 setIsPending(outgoing.exists);
 
-                // Check for incoming request (they sent to me)
-                const incoming = await convex.query(api.notifications.checkPendingFriendRequest, {
-                    fromUid: uid as Id<"users">,
-                    toUid: user._id as Id<"users">,
-                });
-                if (incoming.exists) {
-                    setHasIncomingRequest(true);
-                    setIncomingRequestId(incoming.notificationId);
-                } else {
-                    setHasIncomingRequest(false);
-                    setIncomingRequestId(null);
-                }
+                setHasIncomingRequest(false);
+                setIncomingRequestId(null);
             }
         } catch (error) {
             Logger.error("PlayerProfile", "Error checking friend status", error);

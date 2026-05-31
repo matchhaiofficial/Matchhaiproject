@@ -30,6 +30,21 @@ export default StyleSheet.create({
     segmentTabs: {
         marginTop: SPACING.md,
     },
+    tabsFilterRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        marginTop: SPACING.md,
+    },
+    tabsInRow: {
+        flex: 1,
+        minWidth: 0,
+    },
+    filterSummaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: SPACING.sm,
+    },
     contentWrap: {
         flex: 1,
     },

@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, Dimensions, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppIcon } from "../../../../src/components/AppIcon";
@@ -64,6 +64,8 @@ type Props = {
   onSearchQueryChange: (query: string) => void;
   onResetFilters: () => void;
   filteredQueue: ZoneBookingQueueItem[];
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   pendingOffers?: any[];
   selectedRequestId: string | null;
   processingAction: ProcessingAction;
@@ -73,6 +75,112 @@ type Props = {
   onReject: () => void;
   buildRequestMatchroom: (item: ZoneBookingQueueItem) => Matchroom;
 };
+
+const RequestRow = React.memo(function RequestRow({
+  item,
+  mode,
+  selected,
+  offer,
+  processingAction,
+  onSelectRequest,
+  onOpenCounterModal,
+  onAccept,
+  onReject,
+  buildRequestMatchroom,
+}: {
+  item: ZoneBookingQueueItem;
+  mode: "requests" | "pending";
+  selected: boolean;
+  offer: any;
+  processingAction: ProcessingAction;
+  onSelectRequest: (requestId: string | null) => void;
+  onOpenCounterModal: (item?: ZoneBookingQueueItem) => void;
+  onAccept: (item?: ZoneBookingQueueItem) => void;
+  onReject: () => void;
+  buildRequestMatchroom: (item: ZoneBookingQueueItem) => Matchroom;
+}) {
+  const integrated = selected || (mode === "pending" && !!offer);
+
+  return (
+    <View style={integrated ? styles.requestExpandedCard : undefined}>
+      <MatchroomCard
+        room={buildRequestMatchroom(item)}
+        onAcceptPress={() => {
+          onSelectRequest(item.id);
+          onAccept(item);
+        }}
+        onPress={() => onSelectRequest(selected ? null : item.id)}
+        acceptLabel="Accept"
+        containerStyle={integrated ? styles.requestEmbeddedMatchroomCard : undefined}
+      />
+      {mode === "pending" && offer ? (
+        <View style={styles.pendingOfferPanel}>
+          <Text style={styles.pendingOfferTitle}>Waiting for response</Text>
+          <Text style={styles.pendingOfferText}>
+            Original: {item.preferredTime || "Requested time"}
+          </Text>
+          <Text style={styles.pendingOfferText}>
+            Suggested: {offer.scheduleOptions?.[0]?.time || offer.proposedTime || "--"}
+            {offer.scheduleOptions?.[0]?.endTime ? ` - ${offer.scheduleOptions[0].endTime}` : ""}
+          </Text>
+          {offer.expiresAt ? (
+            <Text style={styles.pendingOfferExpiry}>
+              Expires {new Date(offer.expiresAt).toLocaleString()}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+      {selected && mode === "requests" ? (
+        <View style={styles.inlineActionsCard}>
+          <View style={styles.actionsRow}>
+            <Pressable
+              style={[styles.actionButton, styles.counterButton]}
+              onPress={() => onOpenCounterModal(item)}
+              disabled={processingAction !== null}
+            >
+              <AppIcon name="edit" size="sm" color="#FFF" />
+              <Text numberOfLines={1} style={styles.actionText}>
+                Alternative
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.actionButton, styles.acceptButton]}
+              onPress={() => onAccept()}
+              disabled={processingAction !== null}
+            >
+              {processingAction === "accept" ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <AppIcon name="check" size="sm" color="#FFF" />
+                  <Text numberOfLines={1} style={styles.actionText}>
+                    Accept
+                  </Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable
+              style={[styles.actionButton, styles.rejectButton]}
+              onPress={onReject}
+              disabled={processingAction !== null}
+            >
+              {processingAction === "reject" ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <AppIcon name="close" size="sm" color="#FFF" />
+                  <Text numberOfLines={1} style={styles.actionText}>
+                    Reject
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+});
 
 export function ZoneBookingsRequestsSection({
   mode = "requests",
@@ -85,6 +193,8 @@ export function ZoneBookingsRequestsSection({
   onSearchQueryChange,
   onResetFilters,
   filteredQueue,
+  loadingMore = false,
+  onLoadMore,
   pendingOffers = [],
   selectedRequestId,
   processingAction,
@@ -97,8 +207,8 @@ export function ZoneBookingsRequestsSection({
   const insets = useSafeAreaInsets();
   const offerByRequestId = new Map(pendingOffers.map((offer) => [String(offer.requestId), offer]));
 
-  return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  const header = (
+    <>
       {mode === "requests" ? (
         <View style={styles.searchRow}>
           <View style={styles.searchBar}>
@@ -169,108 +279,60 @@ export function ZoneBookingsRequestsSection({
           </AppModalFooter>
         </View>
       </AppDrawer>
+    </>
+  );
 
-      {loadingQueue ? (
-        <ActivityIndicator size="small" color={COLORS.accent} />
-      ) : filteredQueue.length === 0 ? (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>
-            {mode === "pending" ? "No pending alternatives" : "No requests found"}
-          </Text>
-          <Text style={styles.emptyText}>
-            {mode === "pending"
-              ? "Alternative time requests waiting for captain response will appear here."
-              : "No requests found for selected filters."}
-          </Text>
-        </View>
-      ) : (
-        filteredQueue.map((item) => {
-          const selected = selectedRequestId === item.id;
-          const offer = offerByRequestId.get(String(item.id));
-
-          const integrated = selected || (mode === "pending" && !!offer);
-
-          return (
-            <View key={item.id} style={integrated ? styles.requestExpandedCard : undefined}>
-              <MatchroomCard
-                room={buildRequestMatchroom(item)}
-                onAcceptPress={() => {
-                  onSelectRequest(item.id);
-                onAccept(item);
-                }}
-                onPress={() => onSelectRequest(selected ? null : item.id)}
-                acceptLabel="Accept"
-                containerStyle={integrated ? styles.requestEmbeddedMatchroomCard : undefined}
-              />
-              {mode === "pending" && offer ? (
-                <View style={styles.pendingOfferPanel}>
-                  <Text style={styles.pendingOfferTitle}>Waiting for response</Text>
-                  <Text style={styles.pendingOfferText}>
-                    Original: {item.preferredTime || "Requested time"}
-                  </Text>
-                  <Text style={styles.pendingOfferText}>
-                    Suggested: {offer.scheduleOptions?.[0]?.time || offer.proposedTime || "--"}
-                    {offer.scheduleOptions?.[0]?.endTime ? ` - ${offer.scheduleOptions[0].endTime}` : ""}
-                  </Text>
-                  {offer.expiresAt ? (
-                    <Text style={styles.pendingOfferExpiry}>
-                      Expires {new Date(offer.expiresAt).toLocaleString()}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
-              {selected && mode === "requests" ? (
-                <View style={styles.inlineActionsCard}>
-                  <View style={styles.actionsRow}>
-                    <Pressable
-                      style={[styles.actionButton, styles.counterButton]}
-                      onPress={() => onOpenCounterModal(item)}
-                      disabled={processingAction !== null}
-                    >
-                      <AppIcon name="edit" size="sm" color="#FFF" />
-                      <Text numberOfLines={1} style={styles.actionText}>
-                        Alternative
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.actionButton, styles.acceptButton]}
-                      onPress={() => onAccept()}
-                      disabled={processingAction !== null}
-                    >
-                      {processingAction === "accept" ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <>
-                          <AppIcon name="check" size="sm" color="#FFF" />
-                          <Text numberOfLines={1} style={styles.actionText}>
-                            Accept
-                          </Text>
-                        </>
-                      )}
-                    </Pressable>
-                    <Pressable
-                      style={[styles.actionButton, styles.rejectButton]}
-                      onPress={onReject}
-                      disabled={processingAction !== null}
-                    >
-                      {processingAction === "reject" ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <>
-                          <AppIcon name="close" size="sm" color="#FFF" />
-                          <Text numberOfLines={1} style={styles.actionText}>
-                            Reject
-                          </Text>
-                        </>
-                      )}
-                    </Pressable>
-                  </View>
-                </View>
-              ) : null}
-            </View>
-          );
-        })
+  return (
+    <FlatList
+      data={loadingQueue ? [] : filteredQueue}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews
+      initialNumToRender={8}
+      windowSize={11}
+      keyboardShouldPersistTaps="handled"
+      extraData={`${selectedRequestId ?? ""}|${processingAction ?? ""}`}
+      ListHeaderComponent={header}
+      ListEmptyComponent={
+        loadingQueue ? (
+          <ActivityIndicator size="small" color={COLORS.accent} />
+        ) : (
+          <View style={styles.emptyStateCard}>
+            <Text style={styles.emptyStateTitle}>
+              {mode === "pending" ? "No pending alternatives" : "No requests found"}
+            </Text>
+            <Text style={styles.emptyText}>
+              {mode === "pending"
+                ? "Alternative time requests waiting for captain response will appear here."
+                : "No requests found for selected filters."}
+            </Text>
+          </View>
+        )
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.listFooterLoader}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+          </View>
+        ) : null
+      }
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.4}
+      renderItem={({ item }) => (
+        <RequestRow
+          item={item}
+          mode={mode}
+          selected={selectedRequestId === item.id}
+          offer={offerByRequestId.get(String(item.id))}
+          processingAction={processingAction}
+          onSelectRequest={onSelectRequest}
+          onOpenCounterModal={onOpenCounterModal}
+          onAccept={onAccept}
+          onReject={onReject}
+          buildRequestMatchroom={buildRequestMatchroom}
+        />
       )}
-    </ScrollView>
+    />
   );
 }

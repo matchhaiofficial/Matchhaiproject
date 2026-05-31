@@ -258,6 +258,9 @@ interface DiscoverPlayerListProps {
   bottomPadding?: number;
 }
 
+const PAGE_SIZE = 50;
+const MAX_DISCOVER_LIMIT = 1000;
+
 export default function DiscoverPlayerList({
   filters,
   searchQuery,
@@ -268,18 +271,23 @@ export default function DiscoverPlayerList({
   const { showToast } = useToast();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [hasMore, setHasMore] = useState(true);
 
   // Tracks the last fetch params so silent refocus fetches are skipped
   // when nothing has actually changed.
   const lastFetchKey = useRef<string>("");
 
-  const fetchPlayers = useCallback(async (silent = false) => {
+  const fetchPlayers = useCallback(async (silent = false, nextLimit = PAGE_SIZE) => {
     if (!user) {
       setPlayers([]);
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
+      setHasMore(false);
       return;
     }
 
@@ -298,9 +306,11 @@ export default function DiscoverPlayerList({
         selectedArea: filters.area,
         selectedPlatform: filters.platform,
         selectedCompetitiveIntent: filters.competitiveIntent,
-        limit: 200,
+        limit: nextLimit,
       });
       setPlayers(playerDocs as Player[]);
+      setLimit(nextLimit);
+      setHasMore(playerDocs.length >= nextLimit && nextLimit < MAX_DISCOVER_LIMIT);
       recordPayloadMetric("discover.players_payload", playerDocs, {
         game: filters.game,
         query: searchQuery,
@@ -309,6 +319,7 @@ export default function DiscoverPlayerList({
       Logger.error("DiscoverPlayers", "Error fetching players", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [filters, searchQuery, user]);
@@ -326,8 +337,16 @@ export default function DiscoverPlayerList({
   );
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchPlayers();
+    fetchPlayers(false, PAGE_SIZE);
   }, [fetchPlayers]);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || refreshing || !hasMore) return;
+    const nextLimit = Math.min(limit + PAGE_SIZE, MAX_DISCOVER_LIMIT);
+    if (nextLimit <= limit) return;
+    setLoadingMore(true);
+    fetchPlayers(true, nextLimit);
+  }, [fetchPlayers, hasMore, limit, loading, loadingMore, refreshing]);
 
   const handleAddFriend = useCallback(
     async (targetUid: string) => {
@@ -421,6 +440,8 @@ export default function DiscoverPlayerList({
         initialNumToRender={8}
         maxToRenderPerBatch={10}
         windowSize={7}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -434,6 +455,13 @@ export default function DiscoverPlayerList({
             title="No Players Found"
             description="Try adjusting your search or filters to find more players."
           />
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: 16 }}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            </View>
+          ) : null
         }
       />
     </View>

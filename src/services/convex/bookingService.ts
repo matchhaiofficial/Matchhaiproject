@@ -235,6 +235,12 @@ export async function updateIntentPaymentStatus(
   paymentStatus: "unpaid" | "paid"
 ): Promise<Result> {
   try {
+    if (paymentStatus === "paid") {
+      return {
+        ok: false,
+        message: "Payment can only be confirmed after the payment provider verifies it.",
+      };
+    }
     await convex.mutation(api.bookings.updateIntentPaymentStatus, {
       intentId: intentId as Id<"bookingIntents">,
       paymentStatus,

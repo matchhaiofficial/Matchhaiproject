@@ -66,6 +66,7 @@ const DASHBOARD_MODULE_IDS = new Set([
     "resources",
     "pricing_promotions",
     "insights_security",
+    "wallet",
 ]);
 
 const SIDEBAR_MODULE_IDS = new Set([
@@ -378,7 +379,7 @@ export default function ZoneDashboardHome() {
                         icon: module.icon,
                         onPress: () => router.push(module.route as any),
                     })),
-                    { label: "Withdraw Request", icon: "wallet" as const, onPress: () => router.push({ pathname: "/zone/(tabs)/profile", params: { withdraw: "1" } } as any) },
+                    { label: "Wallet", icon: "wallet" as const, onPress: () => router.push("/zone/wallet" as any) },
                     { label: "Logout", icon: "logout" as const, onPress: handleLogout },
                 ]
                 : [
@@ -458,12 +459,6 @@ export default function ZoneDashboardHome() {
                         <Text style={styles.notificationBadgeText}>{notificationCount > 9 ? "9+" : notificationCount}</Text>
                     </View>
                 ) : null}
-            </Pressable>
-            <Pressable
-                onPress={handleLogout}
-                style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-            >
-                <AppIcon name="logout" size={22} tone="danger" />
             </Pressable>
         </View>
     );

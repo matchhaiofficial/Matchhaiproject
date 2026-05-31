@@ -164,6 +164,14 @@ export default StyleSheet.create({
     flexShrink: 1,
     minHeight: 0,
   },
+  // When keyboardAware=true the KAV introduces a column context. Without flex:1
+  // the Animated.View is content-sized, causing the panel (flex:1 flexBasis:0)
+  // to collapse to height 0 and clip all content behind overflow:hidden.
+  // Adding flex:1 here lets the Animated.View fill the KAV's definite height
+  // (which is the full screen height via alignSelf:stretch in the row parent).
+  drawerAnimatedFill: {
+    flex: 1,
+  },
   drawerSafeArea: {
     flex: 1,
   },

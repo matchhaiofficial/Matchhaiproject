@@ -7,6 +7,7 @@ import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../hooks/useToast";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../theme";
+import { getUserFacingErrorMessage } from "../utils/userFacingErrors";
 import { AppButton } from "./AppPrimitives";
 import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from "./AppModalPrimitives";
 import { AppIcon } from "./AppIcon";
@@ -81,7 +82,7 @@ export default function MatchResultGate() {
       showToast({
         type: "error",
         title: "Submit failed",
-        message: error?.message || "Could not submit the match result.",
+        message: getUserFacingErrorMessage(error, "Could not submit the match result."),
       });
     } finally {
       setSubmitting(false);

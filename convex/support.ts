@@ -1129,6 +1129,15 @@ async function createModerationReportFromAgent(
   const type = normalizeModerationReportType(payload.type || payload.reportType || payload.targetType);
   const reason = safeContextText(payload.reason || payload.issueSummary || payload.summary || "Reported via MatchHai support chat").slice(0, 180);
   const description = safeContextText(payload.description || payload.details || payload.conversationSummary || reason).slice(0, 1000);
+  let supportTicketId: Id<"supportTickets"> | undefined;
+  if (payload.supportTicketId) {
+    try {
+      const ticket = await ctx.db.get(payload.supportTicketId as Id<"supportTickets">);
+      if (ticket && String(ticket.userId) === String(identity.userId)) supportTicketId = ticket._id;
+    } catch {
+      supportTicketId = undefined;
+    }
+  }
   const dedupeKey = buildSupportReportDedupeKey({
     reporterUid: identity.userId,
     type,
@@ -1152,16 +1161,49 @@ async function createModerationReportFromAgent(
   }
 
   const now = Date.now();
-  const reportId = await ctx.db.insert("reports", {
+  const reportId = await (ctx.db as any).insert("reports", {
     reporterUid: identity.userId,
     type,
     status: "pending",
     reason,
     dedupeKey,
     description,
+    source: "support_chatbot_moderation_report",
+    targetType: String(payload.targetType || payload.reportTargetType || type).slice(0, 80),
+    supportConversationId: identity.conversationId,
+    supportTicketId,
+    targetReference: payload.targetReference ? safeContextText(payload.targetReference).slice(0, 160) : undefined,
+    messagePreview: payload.messagePreview ? safeContextText(payload.messagePreview).slice(0, 300) : undefined,
     createdAt: now,
     updatedAt: now,
   });
+
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .take(50);
+  for (const admin of superAdmins) {
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "moderation.review_needed",
+      toUid: admin._id,
+      recipientRole: "super_admin",
+      status: "pending",
+      dedupeKey: `moderation.review_needed:${String(reportId)}:${String(admin._id)}`,
+      dedupePolicy: "upsert_active",
+      route: `/super-admin/report/${String(reportId)}`,
+      entity: { kind: "report", id: String(reportId) },
+      entityId: String(reportId),
+      title: "New support moderation report",
+      body: "A support chatbot moderation report needs review.",
+      data: {
+        reportId: String(reportId),
+        reportType: type,
+        source: "support_chatbot_moderation_report",
+        href: `/super-admin/report/${String(reportId)}`,
+      },
+    });
+  }
+
   await insertAuditLog(ctx, {
     requestId,
     userId: identity.userId,

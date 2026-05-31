@@ -183,6 +183,18 @@ export default function SuperAdminPaymentDetailScreen() {
             <AdminInfoLine label="Flow" value={detail.providerContext.flow || "N/A"} />
             <AdminInfoLine label="Last sync" value={formatDate(detail.providerContext.lastSyncAt)} />
             <AdminInfoLine label="Last provider status" value={detail.providerContext.lastProviderStatus || "N/A"} />
+            {detail.providerContext.anomaly ? (
+              <>
+                <View style={styles.divider} />
+                <AdminInfoLine label="Anomaly" value={formatValue(detail.providerContext.anomaly.reason || "provider_mismatch")} />
+                <AdminInfoLine label="Source" value={detail.providerContext.anomaly.source || "N/A"} />
+                <AdminInfoLine label="Expected order" value={detail.providerContext.anomaly.expectedOrderRefNum || "N/A"} />
+                <AdminInfoLine label="Provider order" value={detail.providerContext.anomaly.providerOrderRef || "N/A"} />
+                <AdminInfoLine label="Expected amount" value={formatMoney(detail.providerContext.anomaly.expectedAmount, payment.currency)} />
+                <AdminInfoLine label="Provider amount" value={formatMoney(detail.providerContext.anomaly.providerAmount, payment.currency)} />
+                <AdminInfoLine label="Detected" value={formatDate(detail.providerContext.anomaly.detectedAt)} />
+              </>
+            ) : null}
           </SectionCard>
 
           <SectionCard title="Wallet Link" subtitle="Matched by walletTransactions.reference">

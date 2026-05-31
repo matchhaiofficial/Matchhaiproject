@@ -1,14 +1,22 @@
 import { v } from "convex/values";
 
-import { authComponent } from "./auth";
 import { internal } from "./_generated/api";
 import { query, mutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { requireCurrentUser, requireSuperAdmin } from "./authz";
 
 const DUPLICATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_DESCRIPTION_LENGTH = 1000;
 
 type ReportStatus = "pending" | "reviewed" | "resolved";
+type ReportType =
+  | "matchroom_complaint"
+  | "user_report"
+  | "zone_complaint"
+  | "friend_chat_message_report"
+  | "matchroom_chat_message_report"
+  | "team_challenge_chat_message_report"
+  | "team_report";
 
 function normalizeReason(value: string) {
   return String(value || "").trim();
@@ -27,13 +35,19 @@ function normalizeOptionalString(value?: string | null) {
 
 function buildReportDedupeKey(args: {
   reporterUid: Id<"users">;
-  type: "matchroom_complaint" | "user_report" | "zone_complaint";
+  type: ReportType;
   reason: string;
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
   branchId?: string;
   branchLabel?: string;
+  chatroomId?: Id<"chatrooms">;
+  chatMessageId?: Id<"chatMessages">;
+  teamChallengeChatId?: string;
+  teamChallengeChatMessageId?: Id<"teamChallengeChatMessages">;
+  supportConversationId?: Id<"supportConversations">;
+  supportTicketId?: Id<"supportTickets">;
 }) {
   return [
     String(args.reporterUid),
@@ -45,6 +59,12 @@ function buildReportDedupeKey(args: {
     args.zoneId && (args.branchId || args.branchLabel)
       ? `branch:${String(args.branchId || args.branchLabel).trim().toLowerCase()}`
       : "",
+    args.chatroomId ? `chatroom:${String(args.chatroomId)}` : "",
+    args.chatMessageId ? `chatMessage:${String(args.chatMessageId)}` : "",
+    args.teamChallengeChatId ? `teamChallengeChat:${String(args.teamChallengeChatId)}` : "",
+    args.teamChallengeChatMessageId ? `teamChallengeChatMessage:${String(args.teamChallengeChatMessageId)}` : "",
+    args.supportConversationId ? `supportConversation:${String(args.supportConversationId)}` : "",
+    args.supportTicketId ? `supportTicket:${String(args.supportTicketId)}` : "",
   ]
     .filter(Boolean)
     .join("|");
@@ -67,33 +87,12 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
 }
 
 async function getAuthenticatedConvexUser(ctx: any, expectedUid?: string | null) {
-  let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
-  try {
-    authUser = await authComponent.getAuthUser(ctx);
-  } catch {
-    authUser = null;
-  }
-
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
-
-  if (authUser?.userId) {
-    const user = await resolveUserByAnyId(ctx, authUser.userId);
-    if (!user) {
-      throw new Error("User profile not found");
-    }
-
-    if (expectedUser && String(expectedUser._id) !== String(user._id)) {
-      throw new Error("You can only perform this action for your own account.");
-    }
-
-    return { authUser, user };
+  const actor = await requireCurrentUser(ctx);
+  if (expectedUser && String(expectedUser._id) !== String(actor.user._id)) {
+    throw new Error("You can only perform this action for your own account.");
   }
-
-  if (expectedUser) {
-    return { authUser: null, user: expectedUser };
-  }
-
-  throw new Error("Not authenticated");
+  return { authUser: actor.authUser, user: actor.user };
 }
 
 async function getOwnedZone(ctx: any, ownerUid: Id<"users">) {
@@ -112,13 +111,19 @@ async function listSuperAdminUsers(ctx: any) {
 
 async function findRecentDuplicate(ctx: any, args: {
   reporterUid: Id<"users">;
-  type: "matchroom_complaint" | "user_report" | "zone_complaint";
+  type: ReportType;
   reason: string;
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
   branchId?: string;
   branchLabel?: string;
+  chatroomId?: Id<"chatrooms">;
+  chatMessageId?: Id<"chatMessages">;
+  teamChallengeChatId?: string;
+  teamChallengeChatMessageId?: Id<"teamChallengeChatMessages">;
+  supportConversationId?: Id<"supportConversations">;
+  supportTicketId?: Id<"supportTickets">;
 }) {
   const dedupeKey = buildReportDedupeKey(args);
   const duplicateCandidates = await ctx.db
@@ -143,6 +148,12 @@ async function findRecentDuplicate(ctx: any, args: {
     if (args.matchroomId && String(report.matchroomId || "") !== String(args.matchroomId)) return false;
     if (args.reportedUserId && String(report.reportedUserId || "") !== String(args.reportedUserId)) return false;
     if (args.zoneId && String(report.zoneId || "") !== String(args.zoneId)) return false;
+    if (args.chatroomId && String(report.chatroomId || "") !== String(args.chatroomId)) return false;
+    if (args.chatMessageId && String(report.chatMessageId || "") !== String(args.chatMessageId)) return false;
+    if (args.teamChallengeChatId && String(report.teamChallengeChatId || "") !== String(args.teamChallengeChatId)) return false;
+    if (args.teamChallengeChatMessageId && String(report.teamChallengeChatMessageId || "") !== String(args.teamChallengeChatMessageId)) return false;
+    if (args.supportConversationId && String(report.supportConversationId || "") !== String(args.supportConversationId)) return false;
+    if (args.supportTicketId && String(report.supportTicketId || "") !== String(args.supportTicketId)) return false;
     if (args.zoneId) {
       const expectedBranch = String(args.branchId || args.branchLabel || "").trim().toLowerCase();
       const reportBranch = String(report.branchId || report.branchLabel || "").trim().toLowerCase();
@@ -154,7 +165,7 @@ async function findRecentDuplicate(ctx: any, args: {
 
 async function insertReport(ctx: any, args: {
   reporterUid: Id<"users">;
-  type: "matchroom_complaint" | "user_report" | "zone_complaint";
+  type: ReportType;
   matchroomId?: Id<"matchrooms">;
   reportedUserId?: Id<"users">;
   zoneId?: Id<"zones">;
@@ -163,6 +174,16 @@ async function insertReport(ctx: any, args: {
   game?: string;
   reason: string;
   description?: string;
+  source?: string;
+  targetType?: string;
+  chatroomId?: Id<"chatrooms">;
+  chatMessageId?: Id<"chatMessages">;
+  teamChallengeChatId?: string;
+  teamChallengeChatMessageId?: Id<"teamChallengeChatMessages">;
+  supportConversationId?: Id<"supportConversations">;
+  supportTicketId?: Id<"supportTickets">;
+  messagePreview?: string;
+  targetReference?: string;
 }) {
   const duplicate = await findRecentDuplicate(ctx, args);
   if (duplicate) {
@@ -174,7 +195,7 @@ async function insertReport(ctx: any, args: {
   }
 
   const now = Date.now();
-  const reportId = await ctx.db.insert("reports", {
+  const reportId = await (ctx.db as any).insert("reports", {
     reporterUid: args.reporterUid,
     type: args.type,
     status: "pending",
@@ -187,6 +208,16 @@ async function insertReport(ctx: any, args: {
     reason: args.reason,
     dedupeKey: buildReportDedupeKey(args),
     description: args.description,
+    source: args.source,
+    targetType: args.targetType,
+    chatroomId: args.chatroomId,
+    chatMessageId: args.chatMessageId,
+    teamChallengeChatId: args.teamChallengeChatId,
+    teamChallengeChatMessageId: args.teamChallengeChatMessageId,
+    supportConversationId: args.supportConversationId,
+    supportTicketId: args.supportTicketId,
+    messagePreview: args.messagePreview,
+    targetReference: args.targetReference,
     createdAt: now,
     updatedAt: now,
   });
@@ -368,6 +399,117 @@ async function createZoneComplaintInternal(ctx: any, args: {
   });
 }
 
+function messagePreviewFrom(message: any, textField: "content" | "text" = "content") {
+  if (!message) return undefined;
+  const type = String(message.type || "text");
+  if (type === "voice") return "Voice message";
+  if (type === "image") return "Photo";
+  if (type === "file") return message.attachment?.fileName ? `File: ${String(message.attachment.fileName).slice(0, 120)}` : "File";
+  return String(message[textField] || "").trim().slice(0, 300) || "Text message";
+}
+
+function ensureReporterCanSeeChatroom(userId: Id<"users">, chatroom: any) {
+  if (!chatroom || !Array.isArray(chatroom.participantUids)) {
+    throw new Error("Chat not found.");
+  }
+  if (!chatroom.participantUids.map(String).includes(String(userId))) {
+    throw new Error("You can only report messages from chats you can access.");
+  }
+}
+
+async function createChatMessageReportInternal(ctx: any, args: {
+  chatMessageId: Id<"chatMessages">;
+  chatroomId?: Id<"chatrooms">;
+  reason: string;
+  description?: string;
+  reporterUid?: Id<"users">;
+  expectedChatType: "dm" | "matchroom";
+}) {
+  const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
+  const message = await ctx.db.get(args.chatMessageId);
+  if (!message) throw new Error("Message not found.");
+
+  const chatroomId = args.chatroomId || message.chatroomId;
+  const chatroom = await ctx.db.get(chatroomId);
+  ensureReporterCanSeeChatroom(user._id, chatroom);
+  const chatType = String(chatroom.type || "matchroom");
+  if (args.expectedChatType === "dm" && chatType !== "dm") throw new Error("This is not a friend chat message.");
+  if (args.expectedChatType === "matchroom" && chatType === "dm") throw new Error("This is not a matchroom chat message.");
+  if (String(message.chatroomId) !== String(chatroomId)) throw new Error("Message does not belong to this chat.");
+  if (String(message.senderUid) === String(user._id)) throw new Error("You cannot report your own message.");
+
+  const reason = normalizeReason(args.reason);
+  if (!reason) throw new Error("Reason is required.");
+
+  let zoneId: Id<"zones"> | undefined;
+  let game: string | undefined;
+  if (chatroom.matchroomId) {
+    const room = await ctx.db.get(chatroom.matchroomId);
+    zoneId = room?.zoneId as Id<"zones"> | undefined;
+    game = String(room?.game || "").trim() || undefined;
+  }
+
+  return await insertReport(ctx, {
+    reporterUid: user._id,
+    type: args.expectedChatType === "dm" ? "friend_chat_message_report" : "matchroom_chat_message_report",
+    reportedUserId: message.senderUid,
+    matchroomId: chatroom.matchroomId,
+    zoneId,
+    game,
+    reason,
+    description: normalizeDescription(args.description),
+    source: "chat_message_report",
+    targetType: args.expectedChatType === "dm" ? "friend_chat" : "matchroom_chat",
+    chatroomId,
+    chatMessageId: args.chatMessageId,
+    messagePreview: messagePreviewFrom(message),
+    targetReference: `${args.expectedChatType === "dm" ? "Friend chat" : "Matchroom chat"} message ${String(args.chatMessageId)}`,
+  });
+}
+
+async function createTeamChallengeChatMessageReportInternal(ctx: any, args: {
+  chatId: string;
+  messageId: Id<"teamChallengeChatMessages">;
+  reason: string;
+  description?: string;
+  reporterUid?: Id<"users">;
+}) {
+  const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
+  const message = await ctx.db.get(args.messageId);
+  if (!message || String(message.chatId) !== String(args.chatId)) throw new Error("Message not found.");
+
+  const chat = await ctx.db
+    .query("teamChallengeChats")
+    .withIndex("by_chatId", (q: any) => q.eq("chatId", args.chatId))
+    .unique();
+  const challengeId = chat?.challengeId || (args.chatId as Id<"teamChallenges">);
+  const challenge = challengeId ? await ctx.db.get(challengeId) : null;
+  const participants = (chat?.participantUids || [challenge?.captainAUid, challenge?.captainBUid].filter(Boolean)).map(String);
+  if (!participants.includes(String(user._id))) {
+    throw new Error("You can only report messages from chats you can access.");
+  }
+  if (String(message.senderUid) === String(user._id)) throw new Error("You cannot report your own message.");
+
+  const reason = normalizeReason(args.reason);
+  if (!reason) throw new Error("Reason is required.");
+  const reportedUser = await resolveUserByAnyId(ctx, message.senderUid);
+
+  return await insertReport(ctx, {
+    reporterUid: user._id,
+    type: "team_challenge_chat_message_report",
+    reportedUserId: reportedUser?._id,
+    game: String(challenge?.game || "").trim() || undefined,
+    reason,
+    description: normalizeDescription(args.description),
+    source: "chat_message_report",
+    targetType: "team_challenge_chat",
+    teamChallengeChatId: args.chatId,
+    teamChallengeChatMessageId: args.messageId,
+    messagePreview: messagePreviewFrom(message, "text"),
+    targetReference: `Team challenge chat ${args.chatId}`,
+  });
+}
+
 async function requireOwnedZoneForReport(ctx: any, reportId: Id<"reports">) {
   const { user } = await getAuthenticatedConvexUser(ctx);
   const zone = await getOwnedZone(ctx, user._id);
@@ -423,6 +565,7 @@ async function sanitizeZoneVisibleReport(ctx: any, report: any) {
 export const getById = query({
   args: { reportId: v.id("reports") },
   handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
     return await ctx.db.get(args.reportId);
   },
 });
@@ -450,9 +593,10 @@ export const getForMyZoneById = query({
 export const listByReporter = query({
   args: { reporterUid: v.id("users") },
   handler: async (ctx, args) => {
+    const { user } = await getAuthenticatedConvexUser(ctx, args.reporterUid);
     const reports = await ctx.db
       .query("reports")
-      .withIndex("by_reporterUid", (q) => q.eq("reporterUid", args.reporterUid))
+      .withIndex("by_reporterUid", (q) => q.eq("reporterUid", user._id))
       .order("desc")
       .collect();
 
@@ -474,11 +618,41 @@ export const listMine = query({
   },
 });
 
+export const listMineByStatusPage = query({
+  args: {
+    status: v.optional(v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved"))),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const { user } = await getAuthenticatedConvexUser(ctx);
+    const limit = Math.max(1, Math.min(args.limit || 25, 100));
+    const offset = Math.max(0, Number(args.cursor || 0) || 0);
+    const reports = await ctx.db
+      .query("reports")
+      .withIndex("by_reporterUid", (q: any) => q.eq("reporterUid", user._id))
+      .collect();
+    const filtered = args.status ? reports.filter((report: any) => report.status === args.status) : reports;
+    const sorted = sortReportsDesc(filtered);
+    const pageDocs = sorted.slice(offset, offset + limit);
+    const page = await Promise.all(pageDocs.map((report) => enrichReportForReporter(ctx, report)));
+    const nextOffset = offset + page.length;
+    const isDone = nextOffset >= sorted.length;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
+      total: sorted.length,
+    };
+  },
+});
+
 export const listByStatus = query({
   args: {
     status: v.union(v.literal("pending"), v.literal("reviewed"), v.literal("resolved")),
   },
   handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx);
     return await ctx.db
       .query("reports")
       .withIndex("by_status", (q) => q.eq("status", args.status))
@@ -490,6 +664,7 @@ export const listByStatus = query({
 export const listPending = query({
   args: {},
   handler: async (ctx) => {
+    await requireSuperAdmin(ctx);
     return await ctx.db
       .query("reports")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
@@ -552,6 +727,59 @@ export const createZoneComplaint = mutation({
   },
   handler: async (ctx, args) => {
     return await createZoneComplaintInternal(ctx, args);
+  },
+});
+
+export const createFriendChatMessageReport = mutation({
+  args: {
+    chatroomId: v.id("chatrooms"),
+    chatMessageId: v.id("chatMessages"),
+    reason: v.string(),
+    description: v.optional(v.string()),
+    reporterUid: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    return await createChatMessageReportInternal(ctx, {
+      chatroomId: args.chatroomId,
+      chatMessageId: args.chatMessageId,
+      reason: args.reason,
+      description: args.description,
+      reporterUid: args.reporterUid,
+      expectedChatType: "dm",
+    });
+  },
+});
+
+export const createMatchroomChatMessageReport = mutation({
+  args: {
+    chatroomId: v.optional(v.id("chatrooms")),
+    chatMessageId: v.id("chatMessages"),
+    reason: v.string(),
+    description: v.optional(v.string()),
+    reporterUid: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    return await createChatMessageReportInternal(ctx, {
+      chatroomId: args.chatroomId,
+      chatMessageId: args.chatMessageId,
+      reason: args.reason,
+      description: args.description,
+      reporterUid: args.reporterUid,
+      expectedChatType: "matchroom",
+    });
+  },
+});
+
+export const createTeamChallengeChatMessageReport = mutation({
+  args: {
+    chatId: v.string(),
+    messageId: v.id("teamChallengeChatMessages"),
+    reason: v.string(),
+    description: v.optional(v.string()),
+    reporterUid: v.optional(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    return await createTeamChallengeChatMessageReportInternal(ctx, args);
   },
 });
 

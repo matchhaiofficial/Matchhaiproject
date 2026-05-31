@@ -2,7 +2,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 
 const SUPER_ADMIN_WITHDRAWAL_ROUTE = "/super-admin/withdrawals";
-const ZONE_ADMIN_WITHDRAWAL_ROUTE = "/zone/profile";
+const ZONE_ADMIN_WITHDRAWAL_ROUTE = "/zone/wallet";
 
 export async function notifySuperAdminsWithdrawalReviewNeeded(ctx: any, input: {
   withdrawalId: Id<"walletTransactions">;
@@ -83,12 +83,16 @@ export async function notifyZoneAdminWithdrawalDecision(ctx: any, input: {
   withdrawalId: Id<"walletTransactions">;
   zoneAdminUserId: Id<"users">;
   decision: "approved" | "rejected";
+  amount?: number;
 }) {
   const type = input.decision === "approved" ? "withdrawal.approved" : "withdrawal.rejected";
   const title = input.decision === "approved" ? "Withdrawal approved" : "Withdrawal rejected";
+  const amountStr = typeof input.amount === "number" && input.amount > 0
+    ? `PKR ${Math.round(input.amount).toLocaleString()}`
+    : "your withdrawal";
   const body = input.decision === "approved"
-    ? "Your withdrawal request has been approved."
-    : "Your withdrawal request was not approved. Review your wallet status.";
+    ? `Your withdrawal request for ${amountStr} has been approved.`
+    : `Your withdrawal request for ${amountStr} was not approved. Check your wallet for details.`;
 
   try {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {

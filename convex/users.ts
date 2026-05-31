@@ -3,6 +3,105 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
+import { getCurrentUser, publicUser, requireCurrentUser, requireSelf, requireSelfOrSuperAdmin } from "./authz";
+
+// ============================================
+// RATING / PROFILE SECURITY HELPERS
+// ============================================
+
+/**
+ * Ensures the authenticated caller owns `userId`. Returns the caller's user doc.
+ * Used to lock self-only profile/skill mutations so no client can write another
+ * user's record. Direct service calls carry the signed-in token via the shared
+ * client proxy (see src/lib/convex.ts), so legitimate self-updates still work.
+ */
+async function requireProfileOwner(ctx: any, userId: Id<"users">) {
+  return (await requireSelf(ctx, userId)).user;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+// Server-side 0-100 tier mapping (kept consistent with the client UI helper so
+// display behavior is unchanged). The dynamic 1000-based `elo` is the internal
+// source of truth and is NEVER writable through these client mutations.
+function tierFromRating(rating: number): string {
+  if (rating <= 30) return "Beginner";
+  if (rating <= 50) return "Casual";
+  if (rating <= 70) return "Intermediate";
+  if (rating <= 85) return "Advanced";
+  if (rating <= 95) return "Pro";
+  return "Elite";
+}
+
+// Fields a client may never set through the generic profile mutations
+// (privilege escalation / trust manipulation guards).
+const PROTECTED_USER_FIELDS = new Set<string>([
+  "role",
+  "authId",
+  "kycStatus",
+  "kycVerified",
+  "kycVerifiedAt",
+  "isBanned",
+  "banned",
+  "isSuspended",
+  "suspended",
+  "trustScore",
+  "_id",
+  "_creationTime",
+]);
+
+function stripProtectedUserFields(updates: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(updates || {})) {
+    if (PROTECTED_USER_FIELDS.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Sanitize a single incoming skill-score object from a client:
+ * - clamp `rating` to 0-100 and recompute `tier` server-side,
+ * - preserve the server-managed `elo`, wins/losses/matchesPlayed and
+ *   lastMatchDate from the existing record (so a self re-assessment can never
+ *   wipe match-earned ELO/stats nor forge an arbitrary `elo`),
+ * - keep client-provided calibration metadata (initialSource/initialRating).
+ */
+function sanitizeIncomingSkillScore(incoming: any, existing: any): any {
+  const rating = clampNumber(Number(incoming?.rating ?? existing?.rating ?? 0), 0, 100);
+  return {
+    rating,
+    tier: tierFromRating(rating),
+    // elo is server-only: always inherit the existing value, never the client's.
+    ...(existing?.elo !== undefined ? { elo: existing.elo } : {}),
+    matchesPlayed: Number(existing?.matchesPlayed ?? incoming?.matchesPlayed ?? 0),
+    wins: Number(existing?.wins ?? incoming?.wins ?? 0),
+    losses: Number(existing?.losses ?? incoming?.losses ?? 0),
+    initialSource: incoming?.initialSource ?? existing?.initialSource,
+    initialRating:
+      incoming?.initialRating !== undefined
+        ? clampNumber(Number(incoming.initialRating), 0, 100)
+        : existing?.initialRating,
+    lastMatchDate: existing?.lastMatchDate ?? incoming?.lastMatchDate ?? null,
+    lastUpdated: Date.now(),
+  };
+}
+
+function sanitizeSkillScoresUpdate(
+  existingScores: Record<string, any> | undefined,
+  incomingScores: Record<string, any> | undefined,
+): Record<string, any> {
+  const base = (existingScores || {}) as Record<string, any>;
+  if (!incomingScores || typeof incomingScores !== "object") return base;
+  const merged: Record<string, any> = { ...base };
+  for (const [game, score] of Object.entries(incomingScores)) {
+    merged[game] = sanitizeIncomingSkillScore(score, base[game]);
+  }
+  return merged;
+}
 
 function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
@@ -47,8 +146,12 @@ async function sha256(value: string) {
 // Get user by ID
 export const getById = query({
   args: { userId: v.id("users") },
-  handler: async (ctx, args) => {
-    return await ctx.db.get(args.userId);
+  handler: async (ctx, args): Promise<any> => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) return null;
+    const actor = await getCurrentUser(ctx);
+    if (actor.user && String(actor.user._id) === String(user._id)) return user;
+    return publicUser(user);
   },
 });
 
@@ -58,85 +161,117 @@ export const getPublicById = query({
     userId: v.id("users"),
     viewerUserId: v.optional(v.id("users")),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
     const target = await ctx.db.get(args.userId);
     if (!target) return null;
 
-    const viewer = args.viewerUserId ? await ctx.db.get(args.viewerUserId) : null;
+    const actor = await getCurrentUser(ctx);
+    const viewer = actor.user || null;
     if (!canViewerAccessPublicUser(viewer, target)) {
       return null;
     }
 
-    return target;
+    if (viewer && String(viewer._id) === String(target._id)) return target;
+    return publicUser(target);
   },
 });
 
 // Get user by email
 export const getByEmail = query({
   args: { email: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args): Promise<any> => {
+    const existing = await ctx.db
       .query("users")
       .withIndex("by_email", (q) => q.eq("email", normalizeEmail(args.email)))
       .unique();
+    if (!existing) return null;
+    const actor = await getCurrentUser(ctx);
+    if (actor.user && String(actor.user._id) === String(existing._id)) return existing;
+    return {
+      _id: existing._id,
+      email: existing.email,
+      accountType: existing.accountType,
+      accountStatus: existing.accountStatus,
+      suspendedAt: existing.suspendedAt,
+      suspendedUntil: existing.suspendedUntil,
+    };
   },
 });
 
 // Get user by username
 export const getByUsername = query({
   args: { username: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args): Promise<any> => {
+    const user = await ctx.db
       .query("users")
       .withIndex("by_usernameLower", (q) =>
         q.eq("usernameLower", normalizeUsername(args.username))
       )
       .unique();
+    return publicUser(user);
   },
 });
 
 // Get user by phone
 export const getByPhone = query({
   args: { phone: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
     const normalized = normalizePhone(args.phone);
-    return await ctx.db
+    const existing = await ctx.db
       .query("users")
       .withIndex("by_phone", (q) => q.eq("phone", normalized))
       .unique();
+    if (!existing) return null;
+    const actor = await getCurrentUser(ctx);
+    if (actor.user && String(actor.user._id) === String(existing._id)) return existing;
+    return {
+      _id: existing._id,
+      email: existing.email,
+      accountType: existing.accountType,
+      accountStatus: existing.accountStatus,
+      suspendedAt: existing.suspendedAt,
+      suspendedUntil: existing.suspendedUntil,
+    };
   },
 });
 
 // Get user by Steam ID
 export const getBySteamId = query({
   args: { steamId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args): Promise<any> => {
+    const user = await ctx.db
       .query("users")
       .withIndex("by_steamId", (q) => q.eq("steamId", args.steamId))
       .unique();
+    return publicUser(user);
   },
 });
 
 // Get user by PSN Account ID
 export const getByPsnAccountId = query({
   args: { psnAccountId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args): Promise<any> => {
+    const user = await ctx.db
       .query("users")
       .withIndex("by_psnAccountId", (q) => q.eq("psnAccountId", args.psnAccountId))
       .unique();
+    return publicUser(user);
   },
 });
 
 // Get user by Better Auth ID
 export const getByAuthId = query({
   args: { authId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  handler: async (ctx, args): Promise<any> => {
+    const user = await ctx.db
       .query("users")
       .withIndex("by_authId", (q) => q.eq("authId", args.authId))
       .unique();
+    if (!user) return null;
+    const actor = await getCurrentUser(ctx);
+    if (actor.user && String(actor.user._id) === String(user._id)) return user;
+    if (actor.candidateAuthIds.includes(args.authId)) return user;
+    return publicUser(user);
   },
 });
 
@@ -541,7 +676,7 @@ export const updateProfile = mutation({
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
     const now = Date.now();
-    const user = await ctx.db.get(userId);
+    const user = await requireProfileOwner(ctx, userId);
     if (!user) throw new Error("User not found");
 
     const updateData: Record<string, unknown> = { updatedAt: now };
@@ -600,6 +735,7 @@ export const updatePlatformLinks = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
+    await requireProfileOwner(ctx, userId);
     const now = Date.now();
 
     const updateData: Record<string, unknown> = { updatedAt: now };
@@ -640,6 +776,8 @@ export const refreshExternalStats = action({
     errors: Array<{ platform: string; message: string }>;
     updates: Record<string, unknown>;
   }> => {
+    const actor: any = await ctx.runQuery(api.users.getById, { userId: args.userId });
+    if (!actor || String(actor._id) !== String(args.userId)) throw new Error("User not found");
     const user = await ctx.runQuery(api.users.getById, { userId: args.userId });
     if (!user) throw new Error("User not found");
 
@@ -770,13 +908,15 @@ export const updateSkillScores = mutation({
     }),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("User not found");
+    // Self-only: a client can never write another user's skill rating.
+    const user = await requireProfileOwner(ctx, args.userId);
 
-    const currentScores = user.skillScores || {};
+    const currentScores = (user.skillScores || {}) as Record<string, any>;
+    // Server-side validation/clamping; preserves server-managed elo + W/L.
+    const sanitized = sanitizeIncomingSkillScore(args.skillScore, currentScores[args.game]);
     const updatedScores = {
       ...currentScores,
-      [args.game]: args.skillScore,
+      [args.game]: sanitized,
     };
 
     await ctx.db.patch(args.userId, {
@@ -788,64 +928,18 @@ export const updateSkillScores = mutation({
   },
 });
 
-// Batch update skill scores for multiple users after a match result
-export const applyMatchSkillUpdates = mutation({
-  args: {
-    updates: v.array(
-      v.object({
-        userId: v.id("users"),
-        game: v.string(),
-        skillScore: v.object({
-          rating: v.number(),
-          tier: v.string(),
-          matchesPlayed: v.number(),
-          wins: v.number(),
-          losses: v.number(),
-          initialSource: v.optional(v.string()),
-          initialRating: v.optional(v.number()),
-          lastMatchDate: v.optional(v.union(v.number(), v.null())),
-          lastUpdated: v.number(),
-        }),
-      })
-    ),
-    matchroomId: v.optional(v.id("matchrooms")),
-  },
-  handler: async (ctx, args) => {
-    // Apply each user's skill update
-    for (const update of args.updates) {
-      const user = await ctx.db.get(update.userId);
-      if (!user) continue;
-
-      const currentScores = (user.skillScores || {}) as Record<string, unknown>;
-      const updatedScores = {
-        ...currentScores,
-        [update.game]: update.skillScore,
-      };
-
-      await ctx.db.patch(update.userId, {
-        skillScores: updatedScores,
-        updatedAt: Date.now(),
-      });
-    }
-
-    // Mark match as processed if matchroomId provided
-    if (args.matchroomId) {
-      const match = await ctx.db.get(args.matchroomId);
-      if (match) {
-        await ctx.db.patch(args.matchroomId, {
-          updatedAt: Date.now(),
-        });
-      }
-    }
-
-    return true;
-  },
-});
+// NOTE: The former client-callable `applyMatchSkillUpdates` batch mutation was
+// removed. It allowed any client to set any user's rating with no auth, no
+// validation and no idempotency. Match-result ELO is now computed and applied
+// entirely server-side inside convex/matchrooms.ts `finalizeMatchroomResult`
+// (see applyRatingsForFinalizedMatch) using convex/ratingEngine.ts, guarded by a
+// per-matchroom idempotency marker and recorded in the `ratingHistory` ledger.
 
 // Mark onboarding as completed
 export const completeOnboarding = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    await requireProfileOwner(ctx, args.userId);
     await ctx.db.patch(args.userId, {
       onboardingCompleted: true,
       onboardingStep: 4,
@@ -862,6 +956,7 @@ export const updateOnlineStatus = mutation({
     isOnline: v.boolean(),
   },
   handler: async (ctx, args) => {
+    await requireProfileOwner(ctx, args.userId);
     await ctx.db.patch(args.userId, {
       isOnline: args.isOnline,
       updatedAt: Date.now(),
@@ -873,12 +968,7 @@ export const updateOnlineStatus = mutation({
 export const touchPresence = mutation({
   args: {},
   handler: async (ctx) => {
-    const userId = await ctx.auth.getUserIdentity();
-    if (!userId) return;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_authId", (q: any) => q.eq("authId", userId.subject))
-      .unique();
+    const { user } = await requireCurrentUser(ctx);
     if (!user) return;
     const now = Date.now();
     await ctx.db.patch(user._id, { lastActiveAt: now, isOnline: true });
@@ -888,12 +978,7 @@ export const touchPresence = mutation({
 export const goOffline = mutation({
   args: {},
   handler: async (ctx) => {
-    const userId = await ctx.auth.getUserIdentity();
-    if (!userId) return;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_authId", (q: any) => q.eq("authId", userId.subject))
-      .unique();
+    const { user } = await requireCurrentUser(ctx);
     if (!user) return;
     await ctx.db.patch(user._id, { isOnline: false });
   },
@@ -929,6 +1014,7 @@ export const saveOnboardingStep2 = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, ...prefs } = args;
+    await requireProfileOwner(ctx, userId);
 
     // Build update object, converting null to undefined for schema compatibility
     const updateData: Record<string, unknown> = {
@@ -994,6 +1080,7 @@ export const saveOnboardingStep3 = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, steamProfile, faceitProfile, psnProfile, ...urls } = args;
+    await requireProfileOwner(ctx, userId);
 
     const updateData: Record<string, unknown> = {
       onboardingStep: 3,
@@ -1064,11 +1151,19 @@ export const updateGamePreferences = mutation({
     updates: v.any(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("User not found");
+    // Self-only + privilege-field denylist + skill-score sanitization.
+    const user = await requireProfileOwner(ctx, args.userId);
+
+    const safeUpdates = stripProtectedUserFields(args.updates || {});
+    if (safeUpdates.skillScores !== undefined) {
+      safeUpdates.skillScores = sanitizeSkillScoresUpdate(
+        (user.skillScores || {}) as Record<string, any>,
+        safeUpdates.skillScores,
+      );
+    }
 
     await ctx.db.patch(args.userId, {
-      ...args.updates,
+      ...safeUpdates,
       updatedAt: Date.now(),
     });
 
@@ -1083,11 +1178,19 @@ export const updateFullProfile = mutation({
     updates: v.any(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("User not found");
+    // Self-only + privilege-field denylist + skill-score sanitization.
+    const user = await requireProfileOwner(ctx, args.userId);
+
+    const safeUpdates = stripProtectedUserFields(args.updates || {});
+    if (safeUpdates.skillScores !== undefined) {
+      safeUpdates.skillScores = sanitizeSkillScoresUpdate(
+        (user.skillScores || {}) as Record<string, any>,
+        safeUpdates.skillScores,
+      );
+    }
 
     await ctx.db.patch(args.userId, {
-      ...args.updates,
+      ...safeUpdates,
       updatedAt: Date.now(),
     });
 

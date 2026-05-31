@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   AdminEmptyStateCard,
@@ -15,7 +15,7 @@ import { DiscoverFilterRow } from "../../src/features/discover/components/Discov
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
-  getIdentityVerifications,
+  getIdentityVerificationsPage,
   manuallyVerifyIdentityVerification,
   type SuperAdminIdentityVerification,
 } from "../../src/services/convex/superAdminService";
@@ -88,7 +88,7 @@ function CheckStatusRow({ label, value }: { label: string; value?: string | null
   );
 }
 
-function VerificationCard({
+const VerificationCard = React.memo(function VerificationCard({
   item,
   reason,
   onReasonChange,
@@ -164,7 +164,7 @@ function VerificationCard({
       ) : null}
     </AppCard>
   );
-}
+});
 
 export default function SuperAdminIdentityVerificationsScreen() {
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
@@ -173,27 +173,45 @@ export default function SuperAdminIdentityVerificationsScreen() {
   const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]["key"]>("all");
   const [rows, setRows] = useState<SuperAdminIdentityVerification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState<DateRangeKey>("Any");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [manualReasons, setManualReasons] = useState<Record<string, string>>({});
   const [manualVerifyingId, setManualVerifyingId] = useState<string | null>(null);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
+  const mergeRows = useCallback((current: SuperAdminIdentityVerification[], next: SuperAdminIdentityVerification[]) => {
+    const seen = new Set(current.map((row) => row.id));
+    return [...current, ...next.filter((row) => !seen.has(row.id))];
+  }, []);
 
-    const result = await getIdentityVerifications({
+  const load = useCallback(async (mode: "initial" | "refresh" | "more" = "initial") => {
+    if (mode === "more" && (loadingMore || isDone)) return;
+    if (mode === "initial") setLoading(true);
+    else if (mode === "refresh") setRefreshing(true);
+    else setLoadingMore(true);
+
+    const result = await getIdentityVerificationsPage({
       status: statusFilter === "all" ? undefined : statusFilter,
       role: roleFilter === "all" ? undefined : roleFilter,
+      limit: 50,
+      cursor: mode === "more" ? cursor : null,
     });
-    if (result.ok) setRows(result.data);
-    else showToast({ type: "error", title: "Verifications failed", message: result.message });
+    if (result.ok) {
+      setRows((previous) => mode === "more" ? mergeRows(previous, result.data.page) : result.data.page);
+      setCursor(result.data.continueCursor);
+      setIsDone(result.data.isDone);
+    } else {
+      showToast({ type: "error", title: "Verifications failed", message: result.message });
+    }
 
     if (mode === "initial") setLoading(false);
-    else setRefreshing(false);
-  }, [roleFilter, showToast, statusFilter]);
+    else if (mode === "refresh") setRefreshing(false);
+    else setLoadingMore(false);
+  }, [cursor, isDone, loadingMore, mergeRows, roleFilter, showToast, statusFilter]);
 
   useFocusEffect(useCallback(() => {
     void load("initial");
@@ -241,6 +259,41 @@ export default function SuperAdminIdentityVerificationsScreen() {
     });
   }, [rows, search, statusFilter, dateFilter]);
 
+  const handleReasonChange = useCallback((id: string, value: string) => {
+    setManualReasons((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const renderVerification = useCallback(
+    ({ item }: { item: SuperAdminIdentityVerification }) => (
+      <VerificationCard
+        item={item}
+        reason={manualReasons[item.id] || ""}
+        onReasonChange={(value) => handleReasonChange(item.id, value)}
+        onManualVerify={() => handleManualVerify(item)}
+        verifying={manualVerifyingId === item.id}
+      />
+    ),
+    [manualReasons, manualVerifyingId, handleReasonChange, handleManualVerify],
+  );
+
+  const renderEmpty = useCallback(
+    () =>
+      rows.length === 0 ? (
+        <AdminEmptyStateCard
+          title="No verifications found"
+          description="Didit KYC sessions will appear here after users start verification."
+          icon="verified-user"
+        />
+      ) : (
+        <AdminEmptyStateCard
+          title="No verifications match these filters."
+          description="Reset filters to view all verifications."
+          icon="verified-user"
+        />
+      ),
+    [rows.length],
+  );
+
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]} keyboardAvoiding>
       <AdminPageHeader
@@ -262,38 +315,22 @@ export default function SuperAdminIdentityVerificationsScreen() {
       {loading ? (
         <View style={styles.loaderWrap}><ActivityIndicator color={COLORS.accent} /></View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleRows}
+          keyExtractor={(item) => item.id}
+          renderItem={renderVerification}
+          ListEmptyComponent={renderEmpty}
           contentContainerStyle={[styles.content, { paddingBottom: bottomContentPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={COLORS.accent} />}
+          onEndReached={() => load("more")}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator color={COLORS.accent} /></View> : null}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-        >
-          {visibleRows.map((item) => (
-            <VerificationCard
-              key={item.id}
-              item={item}
-              reason={manualReasons[item.id] || ""}
-              onReasonChange={(value) => setManualReasons((current) => ({ ...current, [item.id]: value }))}
-              onManualVerify={() => handleManualVerify(item)}
-              verifying={manualVerifyingId === item.id}
-            />
-          ))}
-          {visibleRows.length === 0 ? (
-            rows.length === 0 ? (
-              <AdminEmptyStateCard
-                title="No verifications found"
-                description="Didit KYC sessions will appear here after users start verification."
-                icon="verified-user"
-              />
-            ) : (
-              <AdminEmptyStateCard
-                title="No verifications match these filters."
-                description="Reset filters to view all verifications."
-                icon="verified-user"
-              />
-            )
-          ) : null}
-        </ScrollView>
+          removeClippedSubviews
+          initialNumToRender={10}
+          windowSize={11}
+        />
       )}
 
       <AdminFilterDrawer
@@ -347,6 +384,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  footerLoader: {
+    paddingVertical: SPACING.md,
+    alignItems: "center",
   },
   content: {
     gap: SPACING.md,
