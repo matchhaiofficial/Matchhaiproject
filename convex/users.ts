@@ -1207,3 +1207,22 @@ export const internalGetByAuthId = internalQuery({
       .unique();
   },
 });
+
+// Clears the forced-password-change flag for the SIGNED-IN user only. Call this
+// after the auth provider (Better Auth changePassword / reset) has actually
+// changed the password — it does not change the password itself, only lifts the
+// in-app gate. Self-only: a caller can never clear another user's flag.
+export const completeForcedPasswordChange = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireCurrentUser(ctx);
+    if (!user) throw new Error("User profile not found");
+    const now = Date.now();
+    await ctx.db.patch(user._id, {
+      mustChangePassword: false,
+      passwordChangedAt: now,
+      updatedAt: now,
+    });
+    return { ok: true };
+  },
+});

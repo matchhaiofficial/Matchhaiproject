@@ -1,9 +1,6 @@
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
-
-function normalizeEmail(email?: string | null) {
-  return String(email || "").trim().toLowerCase();
-}
+import { isAuthorizedSuperAdmin } from "./superAdminAccess";
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(
@@ -11,24 +8,11 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   );
 }
 
+// Delegates to the centralized resolver (./superAdminAccess) so this identity
+// gate authorizes identically to the session-token gate in convex/admin.ts,
+// including the SUPER_ADMIN_ALLOWLIST_JSON path it previously ignored.
 export function isSuperAdminProfile(profile: any, email?: string | null) {
-  const role = String(profile?.role || "").trim();
-  const allowlist = uniqueStrings([
-    process.env.SUPER_ADMIN_EMAIL,
-    process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL,
-    process.env.SUPER_ADMIN_EMAIL_JUNAID,
-    process.env.SUPER_ADMIN_EMAIL_EHTESHAN,
-    process.env.SUPER_ADMIN_EMAIL_ZEERAK,
-    process.env.SUPER_ADMIN_EMAIL_MUBEEN,
-    process.env.SUPER_ADMIN_EMAIL_SAAD,
-    process.env.SUPER_ADMIN_EMAIL_OVAIS,
-  ]).map(normalizeEmail);
-  const normalizedEmail = normalizeEmail(email || profile?.email);
-  return (
-    role === "super_admin" ||
-    role === "super-admin" ||
-    (!!normalizedEmail && allowlist.includes(normalizedEmail))
-  );
+  return isAuthorizedSuperAdmin(profile, email);
 }
 
 export async function getCurrentUser(ctx: any) {

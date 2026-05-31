@@ -47,6 +47,13 @@ export default function SuperAdminLayout() {
         return <Redirect href="/auth/login" />;
     }
 
+    // Force first-login password change (e.g. provisioned partner Super Admins)
+    // before any Super Admin surface is reachable. Backend authz is unaffected;
+    // this is an additional in-app gate keyed on the per-user flag.
+    if (user.mustChangePassword === true) {
+        return <Redirect href="/auth/change-password" />;
+    }
+
     return (
         <Stack
             screenOptions={{

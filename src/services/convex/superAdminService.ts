@@ -894,6 +894,146 @@ export async function getSuperAdminAllowlistConfig(): Promise<Result<SuperAdminA
   }
 }
 
+export type SuperAdminDbRoleAccount = {
+  userId: string;
+  fullName: string;
+  email: string | null;
+  role: string | null;
+  isCanonicalRole: boolean;
+  isLegacyRole: boolean;
+  accountType: string | null;
+  accountStatus: string;
+  createdAt: number | null;
+  lastActiveAt: number | null;
+  source: "db_role" | "env_allowlist" | "both";
+  mustChangePassword: boolean;
+  passwordChangedAt: number | null;
+};
+
+export type PartnerSuperAdminBootstrapResult = {
+  ok: true;
+  passwordSetupMethod: "forgot_password_reset_link";
+  results: Array<{
+    email: string;
+    status: "already_super_admin" | "granted" | "linked" | "created" | "must_register";
+    hasSuperAdmin: boolean;
+    mustChangePassword: boolean;
+  }>;
+};
+
+export type SuperAdminEnvAllowlistAccount = {
+  displayName: string;
+  email: string;
+  role: "super_admin";
+  source: "env_allowlist";
+  hasMatchingAccount: boolean;
+  userId: string | null;
+  accountStatus: string | null;
+  lastActiveAt: number | null;
+};
+
+export type SuperAdminAccessOverview = {
+  dbRoleAdmins: SuperAdminDbRoleAccount[];
+  envAllowlistAdmins: SuperAdminEnvAllowlistAccount[];
+  summary: {
+    dbRoleCount: number;
+    canonicalRoleCount: number;
+    legacyRoleCount: number;
+    envAllowlistCount: number;
+    envAllowlistOnlyCount: number;
+  };
+};
+
+// Read-only overview of who currently has Super Admin access (DB role + env
+// allowlist) and via which source. Use to confirm Ovais/partner access.
+export async function getSuperAdminAccessOverview(
+  options?: { forceRefresh?: boolean },
+): Promise<Result<SuperAdminAccessOverview>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const data = await getCachedOrLoad(
+      `superAdminAccessOverview:${sessionToken}`,
+      () => convex.query(api.admin.listSuperAdminAccess, { sessionToken }),
+      options,
+    );
+    return { ok: true, data: data as SuperAdminAccessOverview };
+  } catch (error: any) {
+    console.error("[superAdminService] getSuperAdminAccessOverview error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to load Super Admin access overview.") };
+  }
+}
+
+// Grant the canonical "super_admin" DB role to an EXISTING user (by id or email).
+// Caller must already be an authenticated Super Admin; the backend enforces this.
+export async function grantSuperAdmin(input: {
+  targetUserId?: string;
+  targetEmail?: string;
+  reason?: string;
+}): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.grantSuperAdmin, {
+      sessionToken,
+      targetUserId: input.targetUserId ? (input.targetUserId as Id<"users">) : undefined,
+      targetEmail: input.targetEmail,
+      reason: input.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] grantSuperAdmin error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to grant Super Admin access.") };
+  }
+}
+
+// Revoke the DB Super Admin role. Self-revoke and last-admin removal are blocked
+// server-side.
+export async function revokeSuperAdmin(input: {
+  targetUserId?: string;
+  targetEmail?: string;
+  reason?: string;
+}): Promise<BasicResult> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    await convex.mutation(api.admin.revokeSuperAdmin, {
+      sessionToken,
+      targetUserId: input.targetUserId ? (input.targetUserId as Id<"users">) : undefined,
+      targetEmail: input.targetEmail,
+      reason: input.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true };
+  } catch (error: any) {
+    console.error("[superAdminService] revokeSuperAdmin error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to revoke Super Admin access.") };
+  }
+}
+
+// Onboards partner Super Admins (default: the known partner list). By default
+// existing users are granted the role and missing ones are reported; pass
+// createMissing to provision missing accounts (random temp password + reset-link
+// onboarding). Never returns or stores any password.
+export async function bootstrapPartnerSuperAdmins(input?: {
+  emails?: string[];
+  createMissing?: boolean;
+  reason?: string;
+}): Promise<Result<PartnerSuperAdminBootstrapResult>> {
+  try {
+    const sessionToken = await getRequiredSessionToken();
+    const data = await convex.mutation(api.admin.bootstrapPartnerSuperAdmins, {
+      sessionToken,
+      emails: input?.emails,
+      createMissing: input?.createMissing,
+      reason: input?.reason,
+    });
+    clearSuperAdminCache();
+    return { ok: true, data: data as PartnerSuperAdminBootstrapResult };
+  } catch (error: any) {
+    console.error("[superAdminService] bootstrapPartnerSuperAdmins error", error);
+    return { ok: false, message: getUserFacingErrorMessage(error, "Failed to onboard partner Super Admins.") };
+  }
+}
+
 export async function getSuperAdminAuditLogs(input?: {
   superAdminEmail?: string;
   action?: string;

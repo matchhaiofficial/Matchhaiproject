@@ -292,6 +292,14 @@ export default defineSchema({
     // Role for super admin
     role: v.optional(v.string()),
 
+    // Forced password change (e.g. system-provisioned partner Super Admins).
+    // mustChangePassword gates the app until the user sets their own password.
+    // No plaintext password is ever stored here — only these flags/metadata.
+    mustChangePassword: v.optional(v.boolean()),
+    passwordChangedAt: v.optional(v.union(v.number(), v.null())),
+    passwordResetRequestedAt: v.optional(v.number()),
+    createdBySuperAdmin: v.optional(v.string()),
+
     // Team references
     teamsByGame: v.optional(v.any()),
 

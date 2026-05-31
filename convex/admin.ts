@@ -9,43 +9,25 @@ import { migrateZoneBranchesInternal } from "./zoneBranchMigration";
 import { notifyKycStatusUpdated } from "./kycNotifications";
 import { notifyZoneAdminWithdrawalDecision } from "./withdrawalNotifications";
 import { performAdminCancel } from "./matchrooms";
+import {
+  SUPER_ADMIN_ROLE,
+  LEGACY_SUPER_ADMIN_ROLE,
+  SUPER_ADMIN_PRIMARY_EMAIL,
+  getSuperAdminAllowlist,
+  findSuperAdminAllowlistEntry,
+  isAuthorizedSuperAdmin,
+  isSuperAdminRole,
+  resolveSuperAdminAccessSource,
+} from "./superAdminAccess";
 
-// Backend authorization email source. Prefer a SERVER-ONLY env var
-// (SUPER_ADMIN_EMAIL) so the super-admin identity is not shipped in the public
-// client bundle. Falls back to the legacy EXPO_PUBLIC_ var for backwards compat.
-// IMPORTANT: there is NO hardcoded default — if neither env is configured the
-// allowlist is empty and super-admin access fails closed (CR-03).
-const SUPER_ADMIN_EMAIL = (
-  process.env.SUPER_ADMIN_EMAIL ||
-  process.env.EXPO_PUBLIC_SUPER_ADMIN_EMAIL ||
-  ""
-).trim().toLowerCase();
-
-// Canonical super-admin role string. The rest of the app uses "super_admin"
-// (underscore); legacy data may contain "super-admin" (hyphen) which we still
-// accept on read so existing admins are never locked out (CR-05).
-const SUPER_ADMIN_ROLE = "super_admin";
-const LEGACY_SUPER_ADMIN_ROLE = "super-admin";
+// Super Admin role/allowlist resolution is centralized in ./superAdminAccess so
+// every server gate authorizes identically. SUPER_ADMIN_EMAIL below is only the
+// bootstrap mutation's canonical first-admin email; the allowlist itself lives
+// in the shared module.
+const SUPER_ADMIN_EMAIL = SUPER_ADMIN_PRIMARY_EMAIL;
 const ACTIVE_USER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-const SUPER_ADMIN_ALLOWLIST_NAMES = ["Junaid", "Ehteshan", "Zeerak", "Mubeen", "Saad", "Ovais"] as const;
-const SUPER_ADMIN_ALLOWLIST_ENV_KEYS: Record<(typeof SUPER_ADMIN_ALLOWLIST_NAMES)[number], string> = {
-  Junaid: "SUPER_ADMIN_EMAIL_JUNAID",
-  Ehteshan: "SUPER_ADMIN_EMAIL_EHTESHAN",
-  Zeerak: "SUPER_ADMIN_EMAIL_ZEERAK",
-  Mubeen: "SUPER_ADMIN_EMAIL_MUBEEN",
-  Saad: "SUPER_ADMIN_EMAIL_SAAD",
-  Ovais: "SUPER_ADMIN_EMAIL_OVAIS",
-};
 
 type SuperAdminAuditStatus = "success" | "failed" | "denied";
-
-type SuperAdminAllowlistEntry = {
-  displayName: string;
-  email: string;
-  role: "super_admin";
-  permissions?: string[];
-  isActive: boolean;
-};
 
 function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
@@ -75,55 +57,6 @@ function addMonthsClamped(timestamp: number, months: number) {
   const lastDayOfTargetMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
   target.setDate(Math.min(day, lastDayOfTargetMonth));
   return target.getTime();
-}
-
-function parseSuperAdminAllowlistJson(): SuperAdminAllowlistEntry[] {
-  const raw = String(process.env.SUPER_ADMIN_ALLOWLIST_JSON || "").trim();
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((entry: any) => ({
-        displayName: String(entry?.displayName || "").trim(),
-        email: normalizeEmail(entry?.email || ""),
-        role: "super_admin" as const,
-        permissions: Array.isArray(entry?.permissions) ? entry.permissions.map(String) : undefined,
-        isActive: entry?.isActive !== false,
-      }))
-      .filter((entry) => entry.displayName && entry.email);
-  } catch {
-    return [];
-  }
-}
-
-function getSuperAdminAllowlist(): SuperAdminAllowlistEntry[] {
-  const entries: SuperAdminAllowlistEntry[] = [];
-  for (const displayName of SUPER_ADMIN_ALLOWLIST_NAMES) {
-    const email = normalizeEmail(process.env[SUPER_ADMIN_ALLOWLIST_ENV_KEYS[displayName]] || "");
-    if (email) entries.push({ displayName, email, role: "super_admin", isActive: true });
-  }
-  entries.push(...parseSuperAdminAllowlistJson());
-  if (SUPER_ADMIN_EMAIL) {
-    entries.push({ displayName: "MatchHai Super Admin", email: SUPER_ADMIN_EMAIL, role: "super_admin", isActive: true });
-  }
-  const byEmail = new Map<string, SuperAdminAllowlistEntry>();
-  for (const entry of entries) {
-    if (!byEmail.has(entry.email)) byEmail.set(entry.email, entry);
-  }
-  return Array.from(byEmail.values());
-}
-
-function findSuperAdminAllowlistEntry(email?: string | null) {
-  const normalized = normalizeEmail(email || "");
-  if (!normalized) return null;
-  return getSuperAdminAllowlist().find((entry) => entry.email === normalized && entry.isActive) || null;
-}
-
-function isAuthorizedSuperAdmin(profile: any, email: string) {
-  const role = profile?.role;
-  const hasAdminRole = role === SUPER_ADMIN_ROLE || role === LEGACY_SUPER_ADMIN_ROLE;
-  return Boolean(findSuperAdminAllowlistEntry(email) || hasAdminRole);
 }
 
 function resolveSuperAdminAuditIdentity(authUser: any, profile: any) {
@@ -878,7 +811,8 @@ export const getDashboardSummary = query({
         activeSource: activeUsers30d ? "lastActiveAt" : "totalUsersFallback",
         players: accountTypes["player"] || 0,
         zoneAdmins: accountTypes["zone"] || 0,
-        superAdmins: userRoles["super-admin"] || 0,
+        // Count both canonical "super_admin" and legacy "super-admin" (CR-05).
+        superAdmins: allUsers.filter((user) => isSuperAdminRole(user.role)).length,
       },
       zones: {
         pending: pendingZones.length,
@@ -4406,6 +4340,477 @@ export const bootstrapInitialSuperAdmin = mutation({
       email: SUPER_ADMIN_EMAIL,
       userId,
       message: "Super admin created.",
+    };
+  },
+});
+
+// ============================================
+// SUPER ADMIN ACCESS MANAGEMENT
+// ============================================
+// Secure grant/revoke of the canonical "super_admin" DB role. The authenticated
+// caller MUST already be a Super Admin (getAuthenticatedAdmin); the actor is
+// never taken from client input. Partners register normally first, then an
+// existing Super Admin grants the role here — we never create accounts or
+// passwords on this path.
+
+async function resolveSuperAdminTarget(
+  ctx: any,
+  args: { targetUserId?: Id<"users">; targetEmail?: string },
+) {
+  if (args.targetUserId) {
+    return await ctx.db.get(args.targetUserId);
+  }
+  const email = normalizeEmail(args.targetEmail || "");
+  if (!email) return null;
+  return await ctx.db
+    .query("users")
+    .withIndex("by_email", (q: any) => q.eq("email", email))
+    .unique();
+}
+
+export const grantSuperAdmin = mutation({
+  args: {
+    sessionToken: v.string(),
+    targetUserId: v.optional(v.id("users")),
+    targetEmail: v.optional(v.string()),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    if (!args.targetUserId && !args.targetEmail) {
+      throw new Error("Provide a target userId or email.");
+    }
+
+    const target = await resolveSuperAdminTarget(ctx, args);
+    if (!target) throw new Error("Target user not found.");
+
+    const previousRole = target.role ?? null;
+    const alreadyCanonical = previousRole === SUPER_ADMIN_ROLE;
+    const wasSuperAdmin = isSuperAdminRole(previousRole);
+    const now = Date.now();
+
+    if (alreadyCanonical) {
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "grant_super_admin",
+        module: "access",
+        targetType: "user",
+        targetId: String(target._id),
+        status: "success",
+        reason: args.reason,
+        metadataSafe: { targetEmail: target.email || null, previousRole, newRole: SUPER_ADMIN_ROLE, noop: true },
+      });
+      return { ok: true, alreadySuperAdmin: true, normalizedLegacyRole: false };
+    }
+
+    // Promotes a normal user OR normalizes a legacy "super-admin" to canonical.
+    await ctx.db.patch(target._id, { role: SUPER_ADMIN_ROLE, updatedAt: now });
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "account.role_changed",
+      toUid: target._id,
+      status: "pending",
+      dedupeKey: `account.role_changed:${String(target._id)}:super_admin`,
+      dedupePolicy: "replace_active",
+      route: "/profile",
+      entity: { kind: "user", id: String(target._id) },
+      entityId: String(target._id),
+      title: "Super Admin access granted",
+      body: "Your account has been granted Super Admin access.",
+      data: { userId: String(target._id), role: SUPER_ADMIN_ROLE, href: "/profile" },
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: wasSuperAdmin ? "normalize_super_admin_role" : "grant_super_admin",
+      module: "access",
+      targetType: "user",
+      targetId: String(target._id),
+      status: "success",
+      reason: args.reason,
+      metadataSafe: { targetEmail: target.email || null, previousRole, newRole: SUPER_ADMIN_ROLE },
+    });
+
+    return { ok: true, alreadySuperAdmin: false, normalizedLegacyRole: wasSuperAdmin };
+  },
+});
+
+export const revokeSuperAdmin = mutation({
+  args: {
+    sessionToken: v.string(),
+    targetUserId: v.optional(v.id("users")),
+    targetEmail: v.optional(v.string()),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    if (!args.targetUserId && !args.targetEmail) {
+      throw new Error("Provide a target userId or email.");
+    }
+
+    const target = await resolveSuperAdminTarget(ctx, args);
+    if (!target) throw new Error("Target user not found.");
+
+    // Self-revoke is blocked: another Super Admin must do it. Prevents accidental
+    // self-lockout and guarantees a deliberate second actor for de-escalation.
+    if (String(admin.profile._id) === String(target._id)) {
+      throw new Error("You cannot revoke your own Super Admin access. Ask another Super Admin to do it.");
+    }
+
+    if (!isSuperAdminRole(target.role)) {
+      const stillEnvAuthorized = isAuthorizedSuperAdmin({ role: undefined }, target.email);
+      throw new Error(
+        stillEnvAuthorized
+          ? "This user has no DB Super Admin role to revoke; their access comes from the env allowlist. Remove their email from the Convex deployment env to revoke it."
+          : "This user is not a Super Admin.",
+      );
+    }
+
+    // Last-admin lockout protection. After this revoke there must remain at least
+    // one access path (another DB-role admin, or any active env-allowlist entry).
+    const [canonicalAdmins, legacyAdmins] = await Promise.all([
+      ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", SUPER_ADMIN_ROLE)).collect(),
+      ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", LEGACY_SUPER_ADMIN_ROLE)).collect(),
+    ]);
+    const remainingDbAdmins = [...canonicalAdmins, ...legacyAdmins].filter(
+      (user) => String(user._id) !== String(target._id),
+    ).length;
+    const envAllowlistCount = getSuperAdminAllowlist().filter((entry) => entry.isActive).length;
+    if (remainingDbAdmins === 0 && envAllowlistCount === 0) {
+      throw new Error(
+        "Cannot revoke the last Super Admin. Grant another user or configure an env-allowlist admin first.",
+      );
+    }
+
+    const previousRole = target.role ?? null;
+    const now = Date.now();
+    await ctx.db.patch(target._id, { role: undefined, updatedAt: now });
+
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "account.role_changed",
+      toUid: target._id,
+      status: "pending",
+      dedupeKey: `account.role_changed:${String(target._id)}:revoked`,
+      dedupePolicy: "replace_active",
+      route: "/profile",
+      entity: { kind: "user", id: String(target._id) },
+      entityId: String(target._id),
+      title: "Super Admin access removed",
+      body: "Your Super Admin access has been removed.",
+      data: { userId: String(target._id), role: null, href: "/profile" },
+    });
+
+    await insertSuperAdminAuditLog(ctx, admin, {
+      action: "revoke_super_admin",
+      module: "access",
+      targetType: "user",
+      targetId: String(target._id),
+      status: "success",
+      reason: args.reason,
+      metadataSafe: { targetEmail: target.email || null, previousRole, remainingDbAdmins, envAllowlistCount },
+    });
+
+    return { ok: true, remainingDbAdmins, envAllowlistCount };
+  },
+});
+
+// Read-only overview of who currently has Super Admin access and via which
+// mechanism. Returns safe fields only — never password hashes, tokens or
+// secrets. Use it to confirm whether Ovais/partners hold a DB role.
+export const listSuperAdminAccess = query({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await getAuthenticatedAdmin(ctx, args.sessionToken);
+
+    const [canonicalAdmins, legacyAdmins] = await Promise.all([
+      ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", SUPER_ADMIN_ROLE)).collect(),
+      ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", LEGACY_SUPER_ADMIN_ROLE)).collect(),
+    ]);
+    const dbAdmins = [...canonicalAdmins, ...legacyAdmins];
+    const dbEmails = new Set(dbAdmins.map((user) => normalizeEmail(user.email || "")));
+
+    const dbRoleAdmins = dbAdmins.map((user) => ({
+      userId: String(user._id),
+      fullName: user.fullName || user.username || "Unknown user",
+      email: user.email || null,
+      role: user.role || null,
+      isCanonicalRole: user.role === SUPER_ADMIN_ROLE,
+      isLegacyRole: user.role === LEGACY_SUPER_ADMIN_ROLE,
+      accountType: user.accountType || null,
+      accountStatus: user.accountStatus || "active",
+      createdAt: user.createdAt ?? null,
+      lastActiveAt: user.lastActiveAt ?? null,
+      source: resolveSuperAdminAccessSource(user, user.email) || "db_role",
+      mustChangePassword: user.mustChangePassword === true,
+      passwordChangedAt: user.passwordChangedAt ?? null,
+    }));
+
+    const allowlist = getSuperAdminAllowlist();
+    const envAllowlistAdmins = await Promise.all(
+      allowlist
+        .filter((entry) => entry.isActive && !dbEmails.has(entry.email))
+        .map(async (entry) => {
+          const user = await ctx.db
+            .query("users")
+            .withIndex("by_email", (q) => q.eq("email", entry.email))
+            .unique();
+          return {
+            displayName: entry.displayName,
+            email: entry.email,
+            role: SUPER_ADMIN_ROLE,
+            source: "env_allowlist" as const,
+            // Whether a normal account already exists for this allowlisted email,
+            // so an admin can decide to migrate it to a DB role. No PII beyond
+            // email (already an access identifier) is returned.
+            hasMatchingAccount: Boolean(user),
+            userId: user ? String(user._id) : null,
+            accountStatus: user?.accountStatus || null,
+            lastActiveAt: user?.lastActiveAt ?? null,
+          };
+        }),
+    );
+
+    return {
+      dbRoleAdmins,
+      envAllowlistAdmins,
+      summary: {
+        dbRoleCount: dbRoleAdmins.length,
+        canonicalRoleCount: dbRoleAdmins.filter((entry) => entry.isCanonicalRole).length,
+        legacyRoleCount: dbRoleAdmins.filter((entry) => entry.isLegacyRole).length,
+        envAllowlistCount: allowlist.filter((entry) => entry.isActive).length,
+        envAllowlistOnlyCount: envAllowlistAdmins.length,
+      },
+    };
+  },
+});
+
+// Partner Super Admin onboarding. Emails are NOT secret (already named in the
+// allowlist config); passwords are never accepted, returned, logged or stored
+// in plaintext here. Missing users are created only when `createMissing` is
+// explicitly true, each with a UNIQUE cryptographically-random temp password
+// that NO ONE sees — the partner then sets their own password via the existing
+// Forgot Password reset link, and the mustChangePassword gate enforces a change.
+const PARTNER_SUPER_ADMIN_EMAILS = [
+  "zeerak@matchhai.com",
+  "junaid@matchhai.com",
+  "saad@matchhai.com",
+  "ehteshan@matchhai.com",
+  "mubeen@matchhai.com",
+] as const;
+
+// Cryptographically-random password meeting the app's complexity rules. Used
+// only so a created Better Auth credential account is never left with a weak or
+// shared secret; it is intentionally NOT returned to any caller.
+function generateRandomTempPassword() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const special = "!@#$%^&*()-_=+";
+  const all = upper + lower + digits + special;
+  const pick = (set: string, byte: number) => set[byte % set.length];
+  // Guarantee one of each class, then fill the rest from the full set.
+  const chars = [
+    pick(upper, bytes[0]),
+    pick(lower, bytes[1]),
+    pick(digits, bytes[2]),
+    pick(special, bytes[3]),
+  ];
+  for (let i = 4; i < bytes.length; i += 1) chars.push(pick(all, bytes[i]));
+  // Fisher-Yates shuffle using fresh randomness so class chars aren't positional.
+  const shuffle = new Uint8Array(chars.length);
+  crypto.getRandomValues(shuffle);
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = shuffle[i] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+async function createProvisionedSuperAdminUser(
+  ctx: any,
+  args: { email: string; actorEmail: string },
+) {
+  const now = Date.now();
+  // Random, never-revealed temp password. The partner replaces it via the reset
+  // link before they can ever sign in (they don't know this value).
+  const tempPassword = generateRandomTempPassword();
+  const authPassword = await hashPassword(tempPassword);
+  const username = normalizeUsername(args.email.split("@")[0] || "partner");
+
+  const authUser = await ctx.runMutation(components.betterAuth.adapter.create, {
+    input: {
+      model: "user",
+      data: {
+        email: args.email,
+        name: args.email.split("@")[0] || "Partner Super Admin",
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  });
+  const authUserId = String((authUser as any).id || (authUser as any)?._id || "");
+  if (!authUserId) throw new Error("Failed to create Better Auth user.");
+
+  await ctx.runMutation(components.betterAuth.adapter.create, {
+    input: {
+      model: "account",
+      data: {
+        accountId: authUserId,
+        providerId: "credential",
+        password: authPassword,
+        userId: authUserId,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  });
+
+  const userId = await ctx.db.insert("users", {
+    authId: authUserId,
+    email: args.email,
+    fullName: args.email.split("@")[0] || "Partner Super Admin",
+    username,
+    usernameLower: username,
+    accountType: "player",
+    isOnline: false,
+    onboardingCompleted: true,
+    onboardingStep: 4,
+    role: SUPER_ADMIN_ROLE,
+    mustChangePassword: true,
+    passwordChangedAt: null,
+    createdBySuperAdmin: args.actorEmail,
+    phoneValidated: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return userId;
+}
+
+export const bootstrapPartnerSuperAdmins = mutation({
+  args: {
+    sessionToken: v.string(),
+    // Defaults to the known partner list; callers may pass a custom set.
+    emails: v.optional(v.array(v.string())),
+    // Off by default: existing users are upgraded/granted, missing users are
+    // only REPORTED. Pass true to provision missing accounts (random temp
+    // password + reset-link onboarding).
+    createMissing: v.optional(v.boolean()),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const actorEmail = normalizeEmail(admin.authUser?.email || admin.profile?.email || "");
+
+    const inputEmails = (args.emails && args.emails.length > 0
+      ? args.emails
+      : [...PARTNER_SUPER_ADMIN_EMAILS]
+    ).map(normalizeEmail).filter(Boolean);
+    const emails = Array.from(new Set(inputEmails));
+
+    const results: Array<{
+      email: string;
+      status: "already_super_admin" | "granted" | "linked" | "created" | "must_register";
+      hasSuperAdmin: boolean;
+      mustChangePassword: boolean;
+    }> = [];
+
+    for (const email of emails) {
+      const profile = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .unique();
+
+      if (profile) {
+        if (isSuperAdminRole(profile.role) && profile.role === SUPER_ADMIN_ROLE) {
+          results.push({ email, status: "already_super_admin", hasSuperAdmin: true, mustChangePassword: profile.mustChangePassword === true });
+          await insertSuperAdminAuditLog(ctx, admin, {
+            action: "bootstrap_partner_super_admin",
+            module: "access",
+            targetType: "user",
+            targetId: String(profile._id),
+            status: "success",
+            reason: args.reason,
+            metadataSafe: { targetEmail: email, outcome: "already_super_admin" },
+          });
+          continue;
+        }
+        await ctx.db.patch(profile._id, { role: SUPER_ADMIN_ROLE, updatedAt: Date.now() });
+        await insertSuperAdminAuditLog(ctx, admin, {
+          action: "bootstrap_partner_super_admin",
+          module: "access",
+          targetType: "user",
+          targetId: String(profile._id),
+          status: "success",
+          reason: args.reason,
+          metadataSafe: { targetEmail: email, outcome: "granted", previousRole: profile.role ?? null },
+        });
+        results.push({ email, status: "granted", hasSuperAdmin: true, mustChangePassword: profile.mustChangePassword === true });
+        continue;
+      }
+
+      // No profile row. Check whether a Better Auth user already exists.
+      const authUser = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+        model: "user",
+        where: [{ field: "email", operator: "eq", value: email }],
+      });
+
+      if (authUser) {
+        const authUserId = String((authUser as any)._id || (authUser as any).id || "");
+        const userId = await ctx.db.insert("users", {
+          authId: authUserId,
+          email,
+          fullName: (authUser as any).name || email.split("@")[0] || "Partner Super Admin",
+          username: normalizeUsername(email.split("@")[0] || "partner"),
+          usernameLower: normalizeUsername(email.split("@")[0] || "partner"),
+          accountType: "player",
+          isOnline: false,
+          onboardingCompleted: true,
+          onboardingStep: 4,
+          role: SUPER_ADMIN_ROLE,
+          createdBySuperAdmin: actorEmail,
+          phoneValidated: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await insertSuperAdminAuditLog(ctx, admin, {
+          action: "bootstrap_partner_super_admin",
+          module: "access",
+          targetType: "user",
+          targetId: String(userId),
+          status: "success",
+          reason: args.reason,
+          metadataSafe: { targetEmail: email, outcome: "linked" },
+        });
+        results.push({ email, status: "linked", hasSuperAdmin: true, mustChangePassword: false });
+        continue;
+      }
+
+      if (!args.createMissing) {
+        results.push({ email, status: "must_register", hasSuperAdmin: false, mustChangePassword: false });
+        continue;
+      }
+
+      const userId = await createProvisionedSuperAdminUser(ctx, { email, actorEmail });
+      await insertSuperAdminAuditLog(ctx, admin, {
+        action: "bootstrap_partner_super_admin",
+        module: "access",
+        targetType: "user",
+        targetId: String(userId),
+        status: "success",
+        reason: args.reason,
+        metadataSafe: { targetEmail: email, outcome: "created", mustChangePassword: true },
+      });
+      results.push({ email, status: "created", hasSuperAdmin: true, mustChangePassword: true });
+    }
+
+    return {
+      ok: true,
+      // Created partners must set their own password via the Forgot Password
+      // reset link; no temporary password is ever returned.
+      passwordSetupMethod: "forgot_password_reset_link" as const,
+      results,
     };
   },
 });

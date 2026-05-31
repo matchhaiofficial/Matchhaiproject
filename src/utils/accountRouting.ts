@@ -20,11 +20,17 @@ const SUPER_ADMIN_EMAILS = [
 
 export function isSuperAdminProfile(user: Pick<UserProfile, "_id" | "email" | "role"> | null | undefined) {
   if (!user) return false;
-  // Accept canonical "super_admin" and legacy "super-admin" (CR-05).
+  // PRIMARY signal: the DB role from the user's profile (loaded server-side via
+  // users.getByAuthId). Canonical "super_admin" + legacy "super-admin" (CR-05).
+  // A DB-role Super Admin routes correctly even when NO EXPO_PUBLIC env is set,
+  // so partners onboarded via admin.grantSuperAdmin need no app rebuild.
   const role = String(user.role || "");
   const hasAdminRole = role === "super_admin" || role === "super-admin";
-  return hasAdminRole
-    || SUPER_ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())
+  if (hasAdminRole) return true;
+  // FALLBACK only: public-env email/id hints for env-allowlist admins. These are
+  // routing hints, never the security boundary — the backend re-checks every
+  // Super Admin call (convex/admin.ts getAuthenticatedAdmin / requireSuperAdmin).
+  return SUPER_ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())
     || (Boolean(LEGACY_SUPER_ADMIN_ID) && String(user._id || "") === LEGACY_SUPER_ADMIN_ID);
 }
 
