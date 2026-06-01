@@ -835,7 +835,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         );
         return true;
       } else {
-        notify({
+        setSubmitFeedback(null);
+        showToast({
           message: result.message || "Failed to create matchroom.",
           title: "Create failed",
           type: "error",
@@ -844,7 +845,8 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       }
     } catch (error) {
       Logger.error("CreateMatchroom", "Error creating matchroom", error);
-      notify({
+      setSubmitFeedback(null);
+      showToast({
         message: "Something went wrong. Please try again.",
         title: "Create failed",
         type: "error",
