@@ -1098,6 +1098,49 @@ export default defineSchema({
     teamBPaymentStatus: v.optional(v.union(v.literal("unpaid"), v.literal("pending"), v.literal("paid"))),
     teamAPaymentAmount: v.optional(v.number()),
     teamBPaymentAmount: v.optional(v.number()),
+
+    // ============================================
+    // REBUILT CAPTAIN-PAID PAYMENT STATE MACHINE (server-owned)
+    // ============================================
+    // Only the captain of each team pays the full team amount. Funds are HELD
+    // (escrow) on create/accept, CAPTURED when the challenge becomes valid/final,
+    // or RELEASED back to the captain's wallet on any failure. State is owned by
+    // the server; clients can only start payment or read status.
+    paymentMode: v.optional(v.union(v.literal("free"), v.literal("paid"))),
+    teamAPaymentState: v.optional(v.union(
+      v.literal("unpaid"),
+      v.literal("payment_required"),
+      v.literal("held"),
+      v.literal("captured"),
+      v.literal("released"),
+      v.literal("refunded"),
+      v.literal("failed"),
+      v.literal("expired"),
+    )),
+    teamBPaymentState: v.optional(v.union(
+      v.literal("unpaid"),
+      v.literal("payment_required"),
+      v.literal("held"),
+      v.literal("captured"),
+      v.literal("released"),
+      v.literal("refunded"),
+      v.literal("failed"),
+      v.literal("expired"),
+    )),
+    teamAPayerUid: v.optional(v.id("users")),
+    teamBPayerUid: v.optional(v.id("users")),
+    teamAAmountDue: v.optional(v.number()),
+    teamBAmountDue: v.optional(v.number()),
+    teamAHoldReference: v.optional(v.string()),
+    teamBHoldReference: v.optional(v.string()),
+    teamAProviderOrderRef: v.optional(v.string()),
+    teamBProviderOrderRef: v.optional(v.string()),
+    teamAHeldAt: v.optional(v.number()),
+    teamBHeldAt: v.optional(v.number()),
+    teamACapturedAt: v.optional(v.number()),
+    teamBCapturedAt: v.optional(v.number()),
+    teamAReleasedAt: v.optional(v.number()),
+    teamBReleasedAt: v.optional(v.number()),
     commonAreas: v.optional(v.array(v.string())),
     proposedVenueByCaptainA: v.optional(
       v.object({

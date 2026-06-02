@@ -527,7 +527,6 @@ export default function TeamChallengeCreateScreen() {
         }
 
         setSubmitting(true);
-        const walletReference = `team_challenge:create:${challengerTeam.id}:${Date.now()}`;
         const challengeArgs: Parameters<typeof sendTeamMatchChallenge>[0] = {
             challengerTeamId: challengerTeam.id!,
             opponentTeamId: opponentTeam.id!,
@@ -547,54 +546,27 @@ export default function TeamChallengeCreateScreen() {
             },
             maxPlayers: estimatedPlayers,
         };
-        // Paid team-challenge flow is disabled for launch: skip the payment step
-        // entirely and create the challenge as free/social. No wallet deduction,
-        // no Easypaisa top-up. (The backend also coerces payment status to unpaid.)
-        if (TEAM_CHALLENGE_PAYMENTS_ENABLED) {
-            const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
-                Alert.alert(
-                    "Team payment required",
-                    `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
-                    [
-                        { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-                        { text: "Pay Now", onPress: () => resolve("pay_now") },
-                        { text: "Pay with Wallet", onPress: () => resolve("wallet") },
-                    ],
-                );
-            });
-            if (paymentChoice === "cancel") {
-                setSubmitting(false);
-                return;
-            }
-            if (paymentChoice === "pay_now") {
-                setSubmitting(false);
-                setPendingCreateAfterPayment({
-                    captainPaymentAmount,
-                    walletReference,
-                    challengeArgs,
-                    challengerTeamName: challengerTeam.name,
-                    opponentTeamName: opponentTeam.name,
-                });
-                setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
-                setEasypaisaModalVisible(true);
-                return;
-            }
-            const walletPayment = await payTeamChallengeWithWallet({
-                amount: captainPaymentAmount,
-                side: "teamA",
-                reference: walletReference,
-            });
-            if (!walletPayment.ok) {
-                setSubmitting(false);
-                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-                return;
-            }
-        }
+        // Create the challenge first (no money moves at create). For PAID
+        // challenges the challenging captain (Team A) then pays their team's full
+        // amount as a server-side escrow hold on the challenge detail screen
+        // (wallet or Easypaisa). This avoids charging before a challenge exists and
+        // keeps payment state server-owned.
         const result = await sendTeamMatchChallenge(challengeArgs);
         setSubmitting(false);
 
         if (!result.ok) {
             showToast({ type: "error", title: "Challenge failed", message: result.message || "Unable to send challenge." });
+            return;
+        }
+
+        const newChallengeId = (result as any).challengeId ? String((result as any).challengeId) : null;
+        if (TEAM_CHALLENGE_PAYMENTS_ENABLED && pricePerPlayer > 0 && newChallengeId) {
+            showToast({
+                type: "success",
+                title: "Challenge created",
+                message: `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} to hold your team's spot.`,
+            });
+            router.replace(`/teams/challenge?id=${newChallengeId}` as any);
             return;
         }
 

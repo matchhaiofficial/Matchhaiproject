@@ -2558,6 +2558,34 @@ export const applyProviderUpdate = internalMutation({
         }
       }
 
+      // Team Challenge captain payment: the wallet was topped up by addFunds
+      // above; now move that exact amount into an escrow hold for the captain's
+      // team side. holdSideFromProvider is defensive (never throws on a
+      // recoverable condition) so the credited top-up is preserved as wallet
+      // credit if the hold cannot be placed.
+      const teamChallengeHold = row.kind === "wallet_topup"
+        ? row.providerPayload?.checkoutContext?.teamChallengeHold
+        : null;
+      if (teamChallengeHold?.challengeId && (teamChallengeHold?.side === "teamA" || teamChallengeHold?.side === "teamB")) {
+        const holdResult: any = await ctx.runMutation(internal.teamChallenges.holdSideFromProvider, {
+          challengeId: teamChallengeHold.challengeId,
+          side: teamChallengeHold.side,
+          userId: row.userId,
+          amount: row.amount,
+          orderRefNum: row.orderRefNum,
+        });
+        if (holdResult?.held) {
+          sourcePayload = {
+            ...sourcePayload,
+            teamChallengeHold: {
+              heldAt: now,
+              challengeId: String(teamChallengeHold.challengeId),
+              side: teamChallengeHold.side,
+            },
+          };
+        }
+      }
+
       await ctx.db.patch(row._id, {
         ...callbackPatch,
         providerPayload: row.kind === "booking_intent"

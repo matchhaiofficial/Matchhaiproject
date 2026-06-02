@@ -462,44 +462,38 @@ export const acceptTeamMatchChallenge = async (input: {
     }
 };
 
-// Team Challenge paid flow is disabled for launch. Flip this to true only once
-// the safe hold/escrow model (server-verified payment, release/credit on
-// expiry/cancel) is rebuilt. See TEMP_MATCHHAI_PAYMENT_HOLD_WALLET_CREDIT_POLICY.md.
-export const TEAM_CHALLENGE_PAYMENTS_ENABLED = false;
+// Team Challenge paid flow is ENABLED on the rebuilt safe model: captain-paid
+// server-side escrow holds (wallet + Easypaisa), capture on completion, and
+// release/credit-to-wallet on cancel/expiry/zone-reject. Payment state is
+// server-owned (teamA/BPaymentState); the client never asserts paid status.
+// See TEMP_MATCHHAI_TEAM_CHALLENGE_PAYMENT_REBUILD.md.
+export const TEAM_CHALLENGE_PAYMENTS_ENABLED = true;
 export const TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY =
     "Team Challenge payments are temporarily disabled. You can create free/social challenges for now.";
 
 export const payTeamChallengeWithWallet = async (input: {
-    amount: number;
+    amount?: number;
     challengeId?: string | null;
-    side: "teamA" | "teamB";
+    side?: "teamA" | "teamB";
     reference?: string;
 }): Promise<ServerResponse> => {
     try {
-        // Hard stop: never deduct wallet funds for team challenges while the paid
-        // flow is disabled, regardless of any caller. Returns ok so the (free)
-        // challenge create/accept flow can still proceed without moving money.
         if (!TEAM_CHALLENGE_PAYMENTS_ENABLED) {
             return { ok: true, amount: 0 };
         }
         const me = await getCurrentUserInfo();
         if (!me) return { ok: false, message: "Not authenticated." };
-        const amount = Math.ceil(Number(input.amount || 0));
-        if (!Number.isFinite(amount) || amount <= 0) {
-            return { ok: false, message: "Payment amount is missing." };
+        if (!input.challengeId) {
+            return { ok: false, message: "Challenge is required." };
         }
-        await convex.mutation(api.wallet.deductFunds, {
-            amount,
-            userId: me.convexId,
-            source: "team_challenge",
-            reference: input.reference || `team_challenge:${input.side}:${input.challengeId || Date.now()}`,
-            metadata: {
-                flow: "team_challenge",
-                challengeId: input.challengeId || null,
-                side: input.side,
-            },
+        // Server-owned escrow hold: the backend recomputes the captain's full-team
+        // amount, verifies the caller is the side's captain, and places a wallet
+        // hold (idempotent). Replaces the old bare deductFunds.
+        const result: any = await convex.mutation(api.teamChallenges.payTeamChallengeSideFromWallet, {
+            challengeId: input.challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
         });
-        return { ok: true, amount };
+        return { ok: true, amount: Number(result?.amount || 0), state: result?.state };
     } catch (error: any) {
         const rawMessage = String(error?.message || error || "");
         if (rawMessage.includes("Insufficient wallet balance")) {
@@ -507,6 +501,63 @@ export const payTeamChallengeWithWallet = async (input: {
         }
         Logger.error("teamMatchService", "payTeamChallengeWithWallet failed", error);
         return { ok: false, message: rawMessage || "Failed to pay from wallet." };
+    }
+};
+
+// Per-side payment summary for the challenge UI (captain-gated).
+export const getTeamChallengePaymentSummary = async (challengeId: string) => {
+    try {
+        const me = await getCurrentUserInfo();
+        if (!me) return null;
+        return await convex.query(api.teamChallenges.getChallengePaymentSummary, {
+            challengeId: challengeId as Id<"teamChallenges">,
+            actorUid: me.convexId,
+        });
+    } catch (error: any) {
+        Logger.error("teamMatchService", "getTeamChallengePaymentSummary failed", error);
+        return null;
+    }
+};
+
+// Start an Easypaisa checkout that funds the captain's team hold. The backend
+// tops up the wallet on provider-verified payment, then moves that amount into
+// the team-challenge escrow hold (see applyProviderUpdate → holdSideFromProvider).
+export const startTeamChallengeEasypaisaCheckout = async (input: {
+    challengeId: string;
+    side: "teamA" | "teamB";
+    amount: number;
+    phone?: string;
+    flow?: "rest" | "hosted";
+    transactionType?: "MA" | "OTC";
+}): Promise<ServerResponse> => {
+    try {
+        if (!TEAM_CHALLENGE_PAYMENTS_ENABLED) {
+            return { ok: false, message: TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY };
+        }
+        const me = await getCurrentUserInfo();
+        if (!me) return { ok: false, message: "Not authenticated." };
+        const amount = Math.ceil(Number(input.amount || 0));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return { ok: false, message: "Payment amount is missing." };
+        }
+        const result: any = await convex.action(api.easypaisa.startCheckout, {
+            kind: "wallet_topup",
+            amount,
+            userId: me.convexId,
+            phone: input.phone,
+            flow: input.flow,
+            transactionType: input.transactionType,
+            teamChallengeHold: {
+                challengeId: input.challengeId,
+                side: input.side,
+                captainUid: me.convexId,
+                amount,
+            },
+        });
+        return { ok: true, ...result };
+    } catch (error: any) {
+        Logger.error("teamMatchService", "startTeamChallengeEasypaisaCheckout failed", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to start Easypaisa checkout.") };
     }
 };
 
@@ -657,6 +708,24 @@ export const proposeTeamChallengeVenue = async (input: {
             if (!latest) {
                 return { ok: false, message: "Challenge not found after venue confirmation." };
             }
+
+            // Paid team challenges: the SERVER creates the linked, zone-owned
+            // matchroom (with captain escrow held) and enters the zone-admin
+            // pipeline once both captains have paid + the venue is confirmed.
+            // The client must NOT create the room for paid challenges (it would
+            // produce a duplicate, unpaid, zoneOwner-less room).
+            const isPaidChallenge =
+                TEAM_CHALLENGE_PAYMENTS_ENABLED &&
+                (String((latest as any).paymentMode || "") === "paid" ||
+                    Number(latest.pricePerPlayer || 0) > 0);
+            if (latest.matchroomId) {
+                return { ok: true, matchroomId: String(latest.matchroomId) };
+            }
+            if (isPaidChallenge) {
+                // Room will be created server-side when both captains' funds are held.
+                return { ok: true, pendingServerMatchroom: true } as any;
+            }
+
             const [teamAData, teamBData] = await Promise.all([
                 getTeamData(String(latest.challengerTeamId)),
                 getTeamData(String(latest.opponentTeamId)),

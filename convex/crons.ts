@@ -28,4 +28,15 @@ crons.interval(
   { batchSize: 15 },
 );
 
+// Expire Team Challenges that never reached a linked matchroom (e.g. paid-but-
+// unaccepted, or past their scheduled time) and release any held captain funds
+// back to their wallets. Linked-matchroom challenges are handled by the matchroom
+// lifecycle sweep instead.
+crons.interval(
+  "team challenge expiry sweep",
+  { minutes: 30 },
+  (internal as any).teamChallenges.expireStaleChallenges,
+  { batchSize: 25 },
+);
+
 export default crons;

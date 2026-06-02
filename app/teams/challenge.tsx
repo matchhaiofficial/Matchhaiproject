@@ -41,6 +41,19 @@ const formatStatusLabel = (value?: string | null) =>
         .replace(/_/g, " ")
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const paymentStateLabel = (state?: string | null) => {
+    switch (String(state || "unpaid")) {
+        case "held": return "Held";
+        case "captured": return "Confirmed";
+        case "released": return "Returned to wallet";
+        case "refunded": return "Refunded";
+        case "payment_required": return "Payment required";
+        case "failed": return "Failed";
+        case "expired": return "Expired";
+        default: return "Unpaid";
+    }
+};
+
 const getEasypaisaStatus = (value: any) => String(value?.status || "").trim().toLowerCase();
 const isEasypaisaPaid = (value: any) => getEasypaisaStatus(value) === "paid";
 const isEasypaisaStopped = (value: any) => ["failed", "cancelled", "expired"].includes(getEasypaisaStatus(value));
@@ -63,10 +76,9 @@ export default function TeamMatchChallengeDetails() {
     const [startingEasypaisa, setStartingEasypaisa] = useState(false);
     const [finishingEasypaisa, setFinishingEasypaisa] = useState(false);
     const [activeEasypaisaOrderRef, setActiveEasypaisaOrderRef] = useState<string | null>(null);
-    const [pendingAcceptAfterPayment, setPendingAcceptAfterPayment] = useState<{
-        paymentAmount: number;
-        walletReference: string;
-        lineupB?: string[];
+    const [easypaisaPay, setEasypaisaPay] = useState<{
+        side: "teamA" | "teamB";
+        amount: number;
     } | null>(null);
     const resumedOrderRef = useRef<string | null>(null);
 
@@ -93,6 +105,13 @@ export default function TeamMatchChallengeDetails() {
             ? { teamId: challenge.opponentTeamId as Id<"teams"> }
             : "skip",
     );
+
+    const paymentSummary = useQuery(
+        api.teamChallenges.getChallengePaymentSummary,
+        challengeId && user?._id
+            ? { challengeId: challengeId as Id<"teamChallenges">, actorUid: user._id as Id<"users"> }
+            : "skip",
+    ) as any;
 
     useEffect(() => {
         if (!challengeId || !user?._id) return;
@@ -125,6 +144,25 @@ export default function TeamMatchChallengeDetails() {
     const canAcceptNow = !!(isPending && !isAdminPending && isCaptain && ((hasAlternative && isCaptainA) || (!hasAlternative && isCaptainB)));
     const canRejectNow = !!(isPending && !isAdminPending && isCaptain);
     const canProposeVenue = !!(isAcceptedFlow && isCaptain && !challenge?.matchroomId);
+
+    // ---- Captain-paid payment state (server-owned, read via summary) ----
+    const mySide: "teamA" | "teamB" | null = isCaptainA ? "teamA" : isCaptainB ? "teamB" : null;
+    const isPaidChallenge =
+        String(paymentSummary?.paymentMode || (Number(challenge?.pricePerPlayer || 0) > 0 ? "paid" : "free")) === "paid";
+    const mySidePaymentState = mySide && paymentSummary ? String(paymentSummary[mySide]?.state || "unpaid") : "unpaid";
+    const myAmountDue = Number(paymentSummary?.amountDuePerCaptain || 0);
+    const challengeActiveForPay = !!challenge && !["rejected", "expired", "completed"].includes(normalizedStatus);
+    // Team B can only pay after the challenge is accepted; Team A can pay any time
+    // the challenge is active.
+    const mySideCanPayNow = mySide === "teamA" ? isPending || isAcceptedFlow : isAcceptedFlow;
+    const needsMyPayment =
+        TEAM_CHALLENGE_PAYMENTS_ENABLED &&
+        !!mySide &&
+        isPaidChallenge &&
+        challengeActiveForPay &&
+        mySideCanPayNow &&
+        myAmountDue > 0 &&
+        ["unpaid", "payment_required", "failed"].includes(mySidePaymentState);
 
     const opponentMembers = useMemo(() => {
         const members = Array.isArray(opponentTeamWithMembers?.members) ? opponentTeamWithMembers.members : [];
@@ -208,61 +246,43 @@ export default function TeamMatchChallengeDetails() {
             return;
         }
         setSubmitting(true);
-        const paymentAmount = Math.max(0, Math.ceil(Number(challenge?.pricePerPlayer || 0) * activeLineupSize));
-        // Paid team-challenge flow disabled for launch: skip payment and accept as
-        // free/social. No wallet deduction / Easypaisa top-up. Backend coerces unpaid.
-        if (TEAM_CHALLENGE_PAYMENTS_ENABLED && isCaptainB && paymentAmount > 0 && challenge?.teamBPaymentStatus !== "paid") {
-            const walletReference = `team_challenge:accept:${challengeId}:${Date.now()}`;
-            const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
-                Alert.alert(
-                    "Team payment required",
-                    `Pay PKR ${paymentAmount} for your team (${activeLineupSize} players) before accepting this challenge.`,
-                    [
-                        { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-                        { text: "Pay Now", onPress: () => resolve("pay_now") },
-                        { text: "Pay with Wallet", onPress: () => resolve("wallet") },
-                    ],
-                );
-            });
-            if (paymentChoice === "cancel") {
-                setSubmitting(false);
-                return;
-            }
-            if (paymentChoice === "pay_now") {
-                setSubmitting(false);
-                setPendingAcceptAfterPayment({
-                    paymentAmount,
-                    walletReference,
-                    lineupB: lineupForAccept,
-                });
-                setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
-                setEasypaisaModalVisible(true);
-                return;
-            }
-            const walletPayment = await payTeamChallengeWithWallet({
-                amount: paymentAmount,
-                challengeId,
-                side: "teamB",
-                reference: walletReference,
-            });
-            if (!walletPayment.ok) {
-                setSubmitting(false);
-                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-                return;
-            }
-        }
-        const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept, teamBPaymentAmount: paymentAmount });
+        // Accept first. Payment is a separate, explicit captain step (the server
+        // requires Team B to be accepted before it can pay/hold). Captains pay via
+        // the "Pay your team" section below.
+        const result = await acceptTeamMatchChallenge({ challengeId, lineupB: lineupForAccept });
         setSubmitting(false);
         if (!result.ok) {
             showToast({ type: "error", title: "Accept failed", message: result.message || "Failed to accept challenge." });
             return;
         }
-        if ((result as any).matchroomId) {
-            showToast({ type: "success", title: "Accepted", message: "Challenge accepted and matchroom created." });
-            router.push(`/matchrooms/${(result as any).matchroomId}` as any);
+        if (TEAM_CHALLENGE_PAYMENTS_ENABLED && isPaidChallenge) {
+            showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Pay your team's amount to confirm." });
             return;
         }
         showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Continue with venue confirmation." });
+    };
+
+    const handlePayMyTeamWallet = async () => {
+        if (!challengeId || !mySide) return;
+        setSubmitting(true);
+        const res = await payTeamChallengeWithWallet({ challengeId });
+        setSubmitting(false);
+        if (!res.ok) {
+            showToast({ type: "error", title: "Payment failed", message: res.message || "Unable to pay from wallet." });
+            return;
+        }
+        showToast({
+            type: "success",
+            title: "Payment held",
+            message: "Your team's payment is held. It is charged only once the challenge is confirmed, and returned to your wallet if it is cancelled or expires.",
+        });
+    };
+
+    const handlePayMyTeamEasypaisa = () => {
+        if (!mySide || myAmountDue <= 0) return;
+        setEasypaisaPay({ side: mySide, amount: myAmountDue });
+        setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
+        setEasypaisaModalVisible(true);
     };
 
     const handleStoppedEasypaisaPayment = React.useCallback((statusLike: any) => {
@@ -279,66 +299,27 @@ export default function TeamMatchChallengeDetails() {
     }, [showToast]);
 
     const finishAfterEasypaisaPayment = React.useCallback(async (orderRefNum: string) => {
-        if (!pendingAcceptAfterPayment || !challengeId) return;
+        if (!easypaisaPay || !challengeId) return;
         if (resumedOrderRef.current === orderRefNum) return;
         resumedOrderRef.current = orderRefNum;
         setFinishingEasypaisa(true);
-
         try {
-            const walletPayment = await payTeamChallengeWithWallet({
-                amount: pendingAcceptAfterPayment.paymentAmount,
-                challengeId,
-                side: "teamB",
-                reference: pendingAcceptAfterPayment.walletReference,
-            });
-            if (!walletPayment.ok) {
-                setActiveEasypaisaOrderRef(null);
-                setEasypaisaModalVisible(false);
-                setPendingAcceptAfterPayment(null);
-                showToast({
-                    type: "warning",
-                    title: "Payment received",
-                    message: walletPayment.message || "Funds were added to your wallet, but MatchHai could not accept the challenge automatically. Try again using Wallet.",
-                });
-                return;
-            }
-
-            const result = await acceptTeamMatchChallenge({
-                challengeId,
-                lineupB: pendingAcceptAfterPayment.lineupB,
-                teamBPaymentAmount: pendingAcceptAfterPayment.paymentAmount,
-            });
-            if (!result.ok) {
-                setActiveEasypaisaOrderRef(null);
-                setEasypaisaModalVisible(false);
-                setPendingAcceptAfterPayment(null);
-                showToast({ type: "error", title: "Accept failed", message: result.message || "Failed to accept challenge." });
-                return;
-            }
-
+            // The captain's escrow hold is placed SERVER-SIDE by the provider flow
+            // (applyProviderUpdate -> holdSideFromProvider) once Easypaisa confirms
+            // payment. There is nothing more to charge here — just close the modal;
+            // the challenge/payment-summary queries refresh reactively.
             setEasypaisaModalVisible(false);
-            setPendingAcceptAfterPayment(null);
+            setEasypaisaPay(null);
             setActiveEasypaisaOrderRef(null);
-
-            if ((result as any).matchroomId) {
-                showToast({ type: "success", title: "Accepted", message: "Challenge accepted and matchroom created." });
-                router.push(`/matchrooms/${(result as any).matchroomId}` as any);
-                return;
-            }
-            showToast({ type: "success", title: "Accepted", message: "Challenge accepted. Continue with venue confirmation." });
-        } catch (error: any) {
-            setActiveEasypaisaOrderRef(null);
-            setEasypaisaModalVisible(false);
-            setPendingAcceptAfterPayment(null);
             showToast({
-                type: "warning",
-                title: "Payment received",
-                message: error?.message || "Funds were added to your wallet, but MatchHai could not finish accepting the challenge automatically.",
+                type: "success",
+                title: "Payment held",
+                message: "Your Easypaisa payment is held for your team.",
             });
         } finally {
             setFinishingEasypaisa(false);
         }
-    }, [challengeId, pendingAcceptAfterPayment, router, showToast]);
+    }, [challengeId, easypaisaPay, showToast]);
 
     const refreshEasypaisaPaymentStatus = React.useCallback(async (orderRefNum: string) => {
         if (!user?._id || !orderRefNum) return;
@@ -357,8 +338,8 @@ export default function TeamMatchChallengeDetails() {
     }, [finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, syncCheckoutStatus, user?._id]);
 
     const handleStartEasypaisaTopup = async () => {
-        if (!user?._id || !pendingAcceptAfterPayment) return;
-        const amount = Math.max(0, Math.ceil(Number(pendingAcceptAfterPayment.paymentAmount || 0)));
+        if (!user?._id || !easypaisaPay || !challengeId) return;
+        const amount = Math.max(0, Math.ceil(Number(easypaisaPay.amount || 0)));
         if (amount <= 0) return;
         if (!isValidPakistaniPhone(easypaisaCheckoutPhone)) {
             showToast({ type: "warning", title: "Invalid number", message: "Enter a valid Pakistani mobile number for Easypaisa." });
@@ -368,6 +349,15 @@ export default function TeamMatchChallengeDetails() {
         setStartingEasypaisa(true);
         try {
             const normalized = normalizePakistaniPhone(easypaisaCheckoutPhone);
+            // Carry the team-challenge hold context so the backend, on confirmed
+            // payment, tops up the wallet AND moves it into the captain's team
+            // escrow hold (see applyProviderUpdate -> holdSideFromProvider).
+            const teamChallengeHold = {
+                challengeId,
+                side: easypaisaPay.side,
+                captainUid: String(user._id),
+                amount,
+            };
             let checkout: any;
             try {
                 checkout = await startCheckout({
@@ -376,6 +366,7 @@ export default function TeamMatchChallengeDetails() {
                     userId: user._id as Id<"users">,
                     phone: normalized.phoneE164 || easypaisaCheckoutPhone,
                     transactionType: "MA",
+                    teamChallengeHold,
                 });
             } catch (error: any) {
                 const message = String(error?.message || error || "");
@@ -388,6 +379,7 @@ export default function TeamMatchChallengeDetails() {
                     userId: user._id as Id<"users">,
                     phone: normalized.phoneE164 || easypaisaCheckoutPhone,
                     transactionType: "OTC",
+                    teamChallengeHold,
                 });
             }
 
@@ -421,7 +413,7 @@ export default function TeamMatchChallengeDetails() {
     };
 
     useEffect(() => {
-        if (!activeEasypaisaOrderRef || !checkoutStatus || !pendingAcceptAfterPayment || !challengeId) return;
+        if (!activeEasypaisaOrderRef || !checkoutStatus || !easypaisaPay || !challengeId) return;
         if (isEasypaisaPaid(checkoutStatus)) {
             void finishAfterEasypaisaPayment(activeEasypaisaOrderRef);
             return;
@@ -429,7 +421,7 @@ export default function TeamMatchChallengeDetails() {
         if (isEasypaisaStopped(checkoutStatus)) {
             handleStoppedEasypaisaPayment(checkoutStatus);
         }
-    }, [activeEasypaisaOrderRef, checkoutStatus, challengeId, finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, pendingAcceptAfterPayment]);
+    }, [activeEasypaisaOrderRef, checkoutStatus, challengeId, finishAfterEasypaisaPayment, handleStoppedEasypaisaPayment, easypaisaPay]);
 
     useEffect(() => {
         if (!activeEasypaisaOrderRef || !user?._id) return;
@@ -451,7 +443,7 @@ export default function TeamMatchChallengeDetails() {
 
     const easypaisaStatusMessage = activeEasypaisaOrderRef
         ? finishingEasypaisa || isEasypaisaPaid(checkoutStatus)
-            ? "Payment confirmed. Accepting challenge..."
+            ? "Payment confirmed. Holding your team's payment..."
             : "Waiting for payment confirmation..."
         : null;
 
@@ -535,7 +527,7 @@ export default function TeamMatchChallengeDetails() {
             >
                 <AppModalHeader
                     title="Confirm Easypaisa Number"
-                    subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(pendingAcceptAfterPayment?.paymentAmount || 0)))} then MatchHai will accept the challenge automatically.`}
+                    subtitle={`Pay PKR ${Math.max(0, Math.ceil(Number(easypaisaPay?.amount || 0)))} — your team's payment will be held until the challenge is confirmed.`}
                     onClose={() => !startingEasypaisa && !finishingEasypaisa && setEasypaisaModalVisible(false)}
                     closeDisabled={startingEasypaisa || finishingEasypaisa}
                 />
@@ -640,14 +632,62 @@ export default function TeamMatchChallengeDetails() {
                     <Text style={styles.meta}>Time: {challenge.scheduledTime || "TBD"}</Text>
                     <Text style={styles.meta}>Price per player: {challenge.pricePerPlayer ? `PKR ${challenge.pricePerPlayer}` : "TBD"}</Text>
                     {challenge.zoneRateLabel ? <Text style={styles.meta}>Resource type: {challenge.zoneRateLabel}</Text> : null}
-                    <Text style={styles.meta}>Team A payment: {challenge.teamAPaymentStatus === "paid" ? "Paid" : "Unpaid"}{challenge.teamAPaymentAmount ? ` (PKR ${challenge.teamAPaymentAmount})` : ""}</Text>
-                    <Text style={styles.meta}>Team B payment: {challenge.teamBPaymentStatus === "paid" ? "Paid" : "Pending"}{challenge.teamBPaymentAmount ? ` (PKR ${challenge.teamBPaymentAmount})` : ""}</Text>
+                    <Text style={styles.meta}>Team A payment: {paymentStateLabel(paymentSummary?.teamA?.state)}</Text>
+                    <Text style={styles.meta}>Team B payment: {paymentStateLabel(paymentSummary?.teamB?.state)}</Text>
                     <Text style={styles.meta}>Team A proposed venue: {proposalFromA?.venueName || "Not selected"}</Text>
                     {proposalFromA?.areaLabel ? <Text style={styles.meta}>Area: {proposalFromA.areaLabel}</Text> : null}
                     {alternativeFromB?.venueName ? (
                         <Text style={styles.meta}>Team B alternative: {alternativeFromB.venueName}{alternativeFromB.areaLabel ? ` (${alternativeFromB.areaLabel})` : ""}</Text>
                     ) : null}
                 </DetailSectionCard>
+
+                {TEAM_CHALLENGE_PAYMENTS_ENABLED && isPaidChallenge && isCaptain ? (
+                    <DetailSectionCard
+                        title="Team Payment"
+                        subtitle="Captain pays for the full team"
+                        accessory={
+                            <StatusPill
+                                tone={mySidePaymentState === "held" || mySidePaymentState === "captured" ? "success" : "info"}
+                                label={paymentStateLabel(mySidePaymentState)}
+                            />
+                        }
+                    >
+                        <Text style={styles.meta}>Your team amount: PKR {myAmountDue}</Text>
+                        <Text style={styles.meta}>Team A: {paymentStateLabel(paymentSummary?.teamA?.state)}</Text>
+                        <Text style={styles.meta}>Team B: {paymentStateLabel(paymentSummary?.teamB?.state)}</Text>
+                        {needsMyPayment ? (
+                            <>
+                                <Text style={[styles.meta, { marginTop: 6 }]}>
+                                    Your team&apos;s payment is held until the challenge is confirmed, and returned to your MatchHai wallet if it is cancelled or expires.
+                                </Text>
+                                <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                                    <AppButton
+                                        style={{ flex: 1 }}
+                                        onPress={handlePayMyTeamWallet}
+                                        loading={submitting}
+                                        disabled={submitting}
+                                    >
+                                        Pay with Wallet
+                                    </AppButton>
+                                    <AppButton
+                                        variant="secondary"
+                                        style={{ flex: 1 }}
+                                        onPress={handlePayMyTeamEasypaisa}
+                                        disabled={submitting}
+                                    >
+                                        Pay with Easypaisa
+                                    </AppButton>
+                                </View>
+                            </>
+                        ) : mySidePaymentState === "held" ? (
+                            <Text style={[styles.meta, { marginTop: 6 }]}>Your team&apos;s payment is held.</Text>
+                        ) : mySidePaymentState === "captured" ? (
+                            <Text style={[styles.meta, { marginTop: 6 }]}>Your team&apos;s payment is confirmed.</Text>
+                        ) : mySide === "teamB" && !isAcceptedFlow ? (
+                            <Text style={[styles.meta, { marginTop: 6 }]}>Accept the challenge to pay your team&apos;s amount.</Text>
+                        ) : null}
+                    </DetailSectionCard>
+                ) : null}
 
                 {isAdminPending && (
                     <DetailSectionCard

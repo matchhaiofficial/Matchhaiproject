@@ -1461,6 +1461,12 @@ async function expireMatchroomForInvalidLifecycle(
   await expirePendingMatchroomNotifications(ctx, matchroomId, reason);
   await releaseHeldBookingIntentsForMatchroom(ctx, matchroomId, reason);
   await refundCapturedBookingIntentsForMatchroom(ctx, matchroomId, reason);
+  // Team Challenge: return both captains' held funds to their wallets.
+  await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+    matchroomId,
+    action: "release",
+    reason,
+  });
   return { changed: true, reason };
 }
 
@@ -3598,6 +3604,13 @@ export const updateStatus = mutation({
     if (args.status === "completed") {
       const completedRoom = await ctx.db.get(args.matchroomId);
       await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
+      // Team Challenge: capture both captains' held funds on completion (no-op
+      // for non-challenge rooms). Zone payout below is shared with solo rooms.
+      await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+        matchroomId: args.matchroomId,
+        action: "capture",
+        reason: "matchroom_completed",
+      });
       await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
     }
     if (args.status === "cancelled" || args.status === "expired") {
@@ -3605,6 +3618,12 @@ export const updateStatus = mutation({
       await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
       await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
+      // Team Challenge: return both captains' held funds to their wallets.
+      await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+        matchroomId: args.matchroomId,
+        action: "release",
+        reason: `matchroom_${args.status}`,
+      });
     }
     return true;
   },
@@ -3957,6 +3976,12 @@ export async function performAdminCancel(
   await expirePendingMatchroomNotifications(ctx, args.matchroomId, "admin_cancel");
   await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
   await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
+  // Team Challenge: return both captains' held funds to their wallets.
+  await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+    matchroomId: args.matchroomId,
+    action: "release",
+    reason: "admin_cancel",
+  });
 
   // Create notifications for all players
   for (const uid of room.playerUids) {
@@ -5488,7 +5513,14 @@ export const releaseHoldsForMatchroom = internalMutation({
     reason: v.string(),
   },
   handler: async (ctx, args) => {
-    return await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    const result = await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    // Team Challenge: also return both captains' held funds (zone-reject path).
+    await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+      matchroomId: args.matchroomId,
+      action: "release",
+      reason: args.reason,
+    });
+    return result;
   },
 });
 
