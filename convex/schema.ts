@@ -1645,10 +1645,13 @@ export default defineSchema({
   // CHATROOMS (for matchrooms + friend DMs)
   // ============================================
   chatrooms: defineTable({
-    // "matchroom" (default/legacy) or "dm" for friend direct messages
-    type: v.optional(v.union(v.literal("matchroom"), v.literal("dm"))),
+    // "matchroom" (default/legacy), "dm" for friend direct messages, or "team"
+    // for the private team member-only chatroom.
+    type: v.optional(v.union(v.literal("matchroom"), v.literal("dm"), v.literal("team"))),
     // Matchroom-specific (optional for DMs)
     matchroomId: v.optional(v.id("matchrooms")),
+    // Team-specific: the owning team for a private team chat (type === "team").
+    teamId: v.optional(v.id("teams")),
     // DM-specific: sorted pair of user IDs for dedup lookup (e.g. "id1_id2")
     dmPairKey: v.optional(v.string()),
     // Stored as strings for compatibility with existing matchroom/chatroom records.
@@ -1669,7 +1672,8 @@ export default defineSchema({
     updatedAt: v.optional(v.number()),
   })
     .index("by_matchroomId", ["matchroomId"])
-    .index("by_dmPairKey", ["dmPairKey"]),
+    .index("by_dmPairKey", ["dmPairKey"])
+    .index("by_teamId", ["teamId"]),
 
   chatroomMembers: defineTable({
     chatroomId: v.id("chatrooms"),

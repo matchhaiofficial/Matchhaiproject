@@ -686,6 +686,19 @@ export default function TeamDetails() {
                 style={styles.pageHeader}
                 rightAction={(
                     <View style={styles.headerActions}>
+                        {!isDeleted && isMember && (
+                            <HeaderIconButton
+                                icon="chat"
+                                color={COLORS.accent}
+                                onPress={() =>
+                                    router.push({
+                                        pathname: "/teams/team-chat",
+                                        params: { teamId: String(id) },
+                                    } as any)
+                                }
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            />
+                        )}
                         {isCaptain && (
                             <HeaderIconButton
                                 icon="delete-outline"
@@ -825,11 +838,13 @@ export default function TeamDetails() {
                                 )}
                             </View>
 
-                            {/* Member Badge */}
+                            {/* Role Badge — captain is also a member, so branch
+                                on captaincy first to avoid showing "Member" to
+                                the team captain. */}
                             {isMember && (
                                 <StatusPill
-                                    tone="success"
-                                    label="Member"
+                                    tone={isCaptain ? "warning" : "success"}
+                                    label={isCaptain ? "Captain" : "Member"}
                                     caps={false}
                                     style={styles.memberPill}
                                     textStyle={styles.memberPillText}

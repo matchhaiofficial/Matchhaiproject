@@ -7,6 +7,7 @@ import { v } from "convex/values";
 import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
+import { isUserHiddenFromPublic } from "./userVisibility";
 
 function doesUserPlayGame(user: any, game: string): boolean {
   switch (game) {
@@ -747,6 +748,13 @@ export const inviteToTeam = mutation({
     const team = await ctx.db.get(args.teamId);
     assertActiveTeam(team);
     if (team.captainUid !== args.fromUid) throw new Error("Only captain can invite members");
+
+    // Block inviting soft-deleted / admin-hidden accounts server-side (the UI
+    // also filters them out, but never rely on UI hiding alone).
+    const invitee = await ctx.db.get(args.toUid);
+    if (!invitee || isUserHiddenFromPublic(invitee)) {
+      throw new Error("This player is no longer available.");
+    }
 
     // Check if already a member
     if (team.memberUids.includes(args.toUid)) {

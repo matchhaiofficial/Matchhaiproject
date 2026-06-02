@@ -49,6 +49,7 @@ import type * as supportEmail from "../supportEmail.js";
 import type * as supportKnowledge from "../supportKnowledge.js";
 import type * as teamChallengeChat from "../teamChallengeChat.js";
 import type * as teamChallenges from "../teamChallenges.js";
+import type * as teamChat from "../teamChat.js";
 import type * as teams from "../teams.js";
 import type * as timing from "../timing.js";
 import type * as userVisibility from "../userVisibility.js";
@@ -112,6 +113,7 @@ declare const fullApi: ApiFromModules<{
   supportKnowledge: typeof supportKnowledge;
   teamChallengeChat: typeof teamChallengeChat;
   teamChallenges: typeof teamChallenges;
+  teamChat: typeof teamChat;
   teams: typeof teams;
   timing: typeof timing;
   userVisibility: typeof userVisibility;

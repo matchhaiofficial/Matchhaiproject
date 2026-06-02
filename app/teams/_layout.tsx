@@ -46,6 +46,7 @@ export default function TeamsLayout() {
             <Stack.Screen name="challenge" />
             <Stack.Screen name="challenge-chat" />
             <Stack.Screen name="challenge-create" />
+            <Stack.Screen name="team-chat" />
         </Stack>
     );
 }

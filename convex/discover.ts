@@ -2,6 +2,7 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { isUserHiddenFromPublic } from "./userVisibility";
 import { requireCurrentUser } from "./authz";
+import { MATCHROOM_LOCK_BEFORE_START_MS } from "./timing";
 
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
 const ACTIVE_TEAM_JOIN_REQUEST_TYPES = new Set(["team_join_request", "team.join_request"]);
@@ -135,16 +136,20 @@ function isRoomExpired(room: any) {
 
   const now = Date.now();
 
-  // Time-based expiry: if the scheduled start has passed and the roster is not
-  // full, the room is no longer joinable even if the lifecycle sweep has not
-  // yet stamped `status = "expired"`.
+  // Time-based expiry: joins close at lockAt (24h before start). If the roster
+  // is not full once the join-lock (or, as a fallback, the scheduled start) has
+  // passed, the room can never fill and is no longer discoverable — even if the
+  // lifecycle sweep has not yet stamped `status = "expired"`.
   const scheduledStartAt = parseRoomStartAt(room);
-  if (
-    scheduledStartAt != null &&
-    scheduledStartAt <= now &&
-    !isRosterFullForDiscover(room)
-  ) {
-    return true;
+  if (scheduledStartAt != null && !isRosterFullForDiscover(room)) {
+    const explicitLockAt = Number(room?.lockAt || 0);
+    const lockAt =
+      Number.isFinite(explicitLockAt) && explicitLockAt > 0
+        ? explicitLockAt
+        : scheduledStartAt - MATCHROOM_LOCK_BEFORE_START_MS;
+    if (lockAt <= now || scheduledStartAt <= now) {
+      return true;
+    }
   }
 
   // Explicit expiry field

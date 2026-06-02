@@ -54,9 +54,17 @@ type MatchroomTeamSectionProps = {
   onReportPlayer?: (playerUid: string, playerName: string) => void;
 };
 
-function EmptySlotLabel({ slot, styles }: { slot: any; styles: any }) {
+function EmptySlotLabel({ slot, styles, canInvite }: { slot: any; styles: any; canInvite?: boolean }) {
   const isBookedPlaceholder =
     slot.status === "reserved" || slot.status === "confirmed";
+  const isOpen = slot.status === "open";
+  // When the viewer can fill this open slot by inviting a friend, label it as an
+  // actionable invite slot instead of a passive "Available Slot".
+  const label = isBookedPlaceholder
+    ? "Booked Seat"
+    : isOpen && canInvite
+      ? "Invite a friend"
+      : "Available Slot";
 
   return (
     <View
@@ -72,7 +80,7 @@ function EmptySlotLabel({ slot, styles }: { slot: any; styles: any }) {
         style={{ marginRight: 6, opacity: 0.5 }}
       />
       <Text style={styles.emptySlotName}>
-        {isBookedPlaceholder ? "Booked Seat" : "Available Slot"}
+        {label}
       </Text>
     </View>
   );
@@ -378,7 +386,7 @@ export default function MatchroomTeamSection({
                 </View>
                 </Animated.View>
               ) : (
-                <EmptySlotLabel slot={slot} styles={styles} />
+                <EmptySlotLabel slot={slot} styles={styles} canInvite={canInvite} />
               )}
             </AnimatedPressable>
             {!slot.user && slot.status === "open" ? (

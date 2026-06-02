@@ -79,6 +79,9 @@ const localStyles = StyleSheet.create({
     expiryBadgeDefault: {
         backgroundColor: COLORS.overlayMedium,
     },
+    statusBadgeCompleted: {
+        backgroundColor: COLORS.success,
+    },
     titleActionsRow: {
         flexDirection: "row",
         gap: 8,
@@ -94,6 +97,9 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
 
     // "Locked" is time-based (within 24h of start, or zone-confirmed) and is
     // independent of "full". A full room is not locked until the 24h window.
+    const statusLower = String((room as any).status || "").toLowerCase();
+    const isCompleted = statusLower === "completed";
+    const isCancelled = statusLower === "cancelled";
     const isLocked = isLeaveLocked(room);
     const isFull = isRoomFull(room);
     const isExpired = isRoomExpired(room);
@@ -112,6 +118,9 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const expiresAt = getRoomExpiresAt(room);
     const lockAt = getRoomLockAt(room);
     const expiryLabel = (() => {
+        // Terminal states win over time-based lock/expiry/full labels so a
+        // finished room never reads "FULL" / "LOCKED".
+        if (isCompleted || isCancelled) return null;
         if (isExpired) return "EXPIRED";
         if (isLocked) return "LOCKED";
         if (isFull) {
@@ -146,7 +155,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         router.push({ pathname: "/matchrooms/[id]" as any, params: { id: room.id! } });
     };
 
-    const timeDisplay = useMemo(() => {
+    const scheduleDisplay = useMemo(() => {
         const getStartDate = () => {
             const startTime = toValidDate(room.startTime);
             if (startTime) return startTime;
@@ -168,7 +177,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
         };
 
         const startDate = getStartDate();
-        if (!startDate) return "Time not set";
+        if (!startDate) return { dateLabel: null as string | null, timeLabel: "Time not set" };
 
         const durationMinutes = Number(
             room.durationMinutes ||
@@ -185,15 +194,25 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
             hour12: true,
         });
 
-        if (!endDate) return startLabel;
+        const endLabel = endDate
+            ? endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })
+            : null;
 
-        const endLabel = endDate.toLocaleTimeString([], {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-        });
+        // Compact date label with Today/Tomorrow shortcuts (device-local, which
+        // matches Asia/Karachi for this app's users).
+        const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const dayDiff = Math.round((startOfDay(startDate) - startOfDay(new Date())) / (24 * 60 * 60 * 1000));
+        const dateLabel =
+            dayDiff === 0
+                ? "Today"
+                : dayDiff === 1
+                ? "Tomorrow"
+                : startDate.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
-        return `${startLabel} - ${endLabel}`;
+        return {
+            dateLabel,
+            timeLabel: endLabel ? `${startLabel} - ${endLabel}` : startLabel,
+        };
     }, [room.durationHours, room.durationMinutes, room.scheduledDate, room.scheduledStartAt, room.scheduledTime, room.startTime]);
 
     // Format Location (Mock distance for now, or use location name)
@@ -217,7 +236,12 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                     ) : null}
                 </View>
                 <View style={localStyles.badgeRow}>
-                    {isFull && (
+                    {(isCompleted || isCancelled) && (
+                        <View style={[styles.lockBadge, isCancelled ? localStyles.expiryBadgeExpired : localStyles.statusBadgeCompleted]}>
+                            <Text style={styles.lockBadgeText}>{isCancelled ? "CANCELLED" : "COMPLETED"}</Text>
+                        </View>
+                    )}
+                    {!isCompleted && !isCancelled && isFull && (
                         <View style={styles.lockBadge}>
                             <AppIcon name="people" size={10} color="#FFF" />
                             <Text style={styles.lockBadgeText}>FULL</Text>
@@ -299,7 +323,11 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                 </View>
                 <View style={styles.nearbyTime}>
                     <AppIcon name="schedule" size={12} color={COLORS.textSecondary} />
-                    <Text style={styles.nearbyTimeText}>{timeDisplay}</Text>
+                    <Text style={styles.nearbyTimeText} numberOfLines={1}>
+                        {scheduleDisplay.dateLabel
+                            ? `${scheduleDisplay.dateLabel} · ${scheduleDisplay.timeLabel}`
+                            : scheduleDisplay.timeLabel}
+                    </Text>
                 </View>
             </View>
 

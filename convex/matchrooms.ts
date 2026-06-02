@@ -101,9 +101,19 @@ function getScheduleRoomStartMs(room: any): number | null {
 function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
   if (!room) return false;
   if (!["open", "locked"].includes(String(room.status || ""))) return false;
+  if (isRosterFull(room)) return false;
+  // Joins close at lockAt (24h before start). An open/locked room that is not
+  // full once its join-lock has passed can never fill, so it is dead and must
+  // expire (releasing any held funds via the standard lifecycle path) rather
+  // than linger as "locked" until the scheduled kickoff. This is what keeps a
+  // 1/10 room from showing "locked" for 24h before disappearing.
+  const lockAt = getRoomLockAtMs(room);
+  if (typeof lockAt === "number" && lockAt > 0 && lockAt <= now) return true;
+  // Fallback for legacy rooms missing a lock/start time: expire once the
+  // scheduled start has passed without a full roster.
   const scheduledStartAt = Number(room.scheduledStartAt || room.startTime || 0);
   if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= 0) return false;
-  return scheduledStartAt <= now && !isRosterFull(room);
+  return scheduledStartAt <= now;
 }
 
 function shouldExpireInProgressRoom(room: any, now = Date.now()): boolean {
@@ -4096,14 +4106,19 @@ export const inviteToMatchroom = mutation({
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
     if (isJoinLocked(room)) throw new Error("This matchroom is locked.");
 
-    // Verify captain
+    // Verify inviter: the team's captain may invite to their own team, and the
+    // host may invite to either team's open slots (Team B frequently has no
+    // captain assigned yet, but the host still needs to be able to fill it).
     const captainUid = args.team === "A"
       ? (room.captainUidA || room.hostUid)
       : room.captainUidB;
     const captain = await resolveUserByAnyId(ctx, captainUid);
     const actor = await resolveUserByAnyId(ctx, args.fromUid);
-    if (!captain || !actor || captain._id !== actor._id) {
-      throw new Error(`Only the captain of Team ${args.team} can send invitations for this team.`);
+    const host = await resolveUserByAnyId(ctx, room.hostUid);
+    const actorIsHost = !!actor && !!host && String(actor._id) === String(host._id);
+    const actorIsTeamCaptain = !!actor && !!captain && String(captain._id) === String(actor._id);
+    if (!actor || (!actorIsHost && !actorIsTeamCaptain)) {
+      throw new Error(`Only the captain of Team ${args.team} or the host can send invitations for this team.`);
     }
 
     // Not already in room
@@ -5380,6 +5395,33 @@ export const runLifecycleSweep = internalMutation({
 
         if (room.status === "open" || room.status === "locked") {
           await maybeSendMatchroomReminders(ctx, room, now);
+
+          // Auto-start full rooms whose kickoff is due so they don't linger in
+          // "locked"/"full" forever when no privileged user re-opens the room
+          // (the QA "completed match still shows Lobby Full" case). Mirrors the
+          // start transition in `syncLifecycleIfDue`. Money-safe: fund capture
+          // and venue payout only happen at COMPLETION, which stays gated to the
+          // captain/admin result flow and is never auto-triggered here. Rooms
+          // still awaiting a venue are skipped so we never start an
+          // unconfirmed booking.
+          const awaitingVenue =
+            room.locationMode === "broadcast"
+              ? !(room.venueConfirmedAt || room.confirmedZoneId)
+              : Boolean(room.zoneId) &&
+                !(room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true);
+          if (!awaitingVenue && canStartMatchroom(room, now).ok) {
+            await ctx.db.patch(room._id, {
+              status: "in-progress",
+              startTime: room.startTime || room.scheduledStartAt,
+              startedAt: now,
+              startedWithFullRoster: true,
+              startedPlayerCount: getConfirmedPlayerCount(room),
+              captainUidA: room.captainUidA || room.hostUid,
+              updatedAt: now,
+            });
+            changedRooms += 1;
+            continue;
+          }
         }
 
         if (room.status === "in-progress") {

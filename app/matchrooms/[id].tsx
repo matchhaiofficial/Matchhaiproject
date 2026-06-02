@@ -261,8 +261,17 @@ export default function MatchroomDetails() {
   // QR + check-in code visibility. The backend (getById) returns a zone-scoped,
   // authoritative `canViewCheckIn` flag and strips the real matchCode for
   // outsiders; host/joined are added as a safe client-side fallback only.
+  // Check-in QR is only meaningful while the match can still be played. Once the
+  // room is completed/cancelled/expired the code is hidden to avoid stale "show
+  // your QR" UI on finished matchrooms.
+  const isTerminalStatus =
+    room?.status === "completed" ||
+    room?.status === "cancelled" ||
+    room?.status === "expired" ||
+    isExpired;
   const canViewCheckIn =
-    Boolean((room as any)?.canViewCheckIn) || isHost || isJoined;
+    !isTerminalStatus &&
+    (Boolean((room as any)?.canViewCheckIn) || isHost || isJoined);
 
   const {
     handleRespondToRequest: handleRespondToRequestAction,

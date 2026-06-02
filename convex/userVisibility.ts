@@ -11,6 +11,7 @@ import { isSuperAdminRole } from "./superAdminAccess";
 //   - isSystemAdminAccount === true (provisioned admin account)
 //   - hiddenFromPublic === true (explicit kill switch)
 //   - isHiddenFromDiscovery === true (legacy/manual hide flag)
+//   - the account has been soft-deleted (anonymized "Deleted User")
 export function isUserHiddenFromPublic(user: any): boolean {
   if (!user) return false;
   return (
@@ -18,8 +19,28 @@ export function isUserHiddenFromPublic(user: any): boolean {
     user.accountType === "super_admin" ||
     user.isSystemAdminAccount === true ||
     user.hiddenFromPublic === true ||
-    user.isHiddenFromDiscovery === true
+    user.isHiddenFromDiscovery === true ||
+    isUserDeleted(user)
   );
+}
+
+// Central authority for "has this account been soft-deleted?". Account deletion
+// anonymizes the user record (see convex/admin.ts applyAccountDeletion):
+// accountStatus -> "suspended" with suspensionReason
+// "account_deletion_processed", username/email rewritten to deleted_<id>, and
+// fullName set to "Deleted User". A deleted account must never be a selectable
+// invite/search/discover target. Historical references may still render a
+// neutral "Deleted User" label, but this gate keeps them out of actionable
+// player-facing lists.
+export function isUserDeleted(user: any): boolean {
+  if (!user) return false;
+  if (user.suspensionReason === "account_deletion_processed") return true;
+  // Defensive fallbacks for any record anonymized by the deletion flow.
+  if (typeof user.username === "string" && user.username.startsWith("deleted_")) {
+    return true;
+  }
+  if (user.fullName === "Deleted User") return true;
+  return false;
 }
 
 export function canViewerAccessPublicUser(viewer: any, target: any): boolean {

@@ -115,8 +115,16 @@ export function isRoomFull(room: any): boolean {
 export function isRoomExpired(room: any, now = new Date()): boolean {
     if (!room) return false;
     if (room.status === "expired" || room.status === "cancelled") return true;
+    // Completed / in-progress rooms are a valid terminal/active lifecycle, never
+    // "expired" regardless of roster.
+    if (room.status === "completed" || room.status === "in-progress") return false;
+    if (isRoomFull(room)) return false;
+    // Joins close at lockAt (24h before start). An unfilled room that has passed
+    // its join-lock can never fill, so it is expired/dead — not merely "locked".
+    const lockAt = getRoomLockAt(room);
+    if (lockAt && lockAt.getTime() <= now.getTime()) return true;
     const expiresAt = getRoomExpiresAt(room);
-    if (!expiresAt || isRoomFull(room)) return false;
+    if (!expiresAt) return false;
     return expiresAt.getTime() <= now.getTime();
 }
 

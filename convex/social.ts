@@ -1,7 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
-import { isUserHiddenFromPublic } from "./userVisibility";
+import { isUserDeleted, isUserHiddenFromPublic } from "./userVisibility";
 
 function doesUserPlayGame(friend: any, game: string) {
   switch (game) {
@@ -48,6 +48,9 @@ export const listFriends = query({
     const friends = await Promise.all(
       friendships.map(async (f) => {
         const friend = await ctx.db.get(f.friendId);
+        // Hide soft-deleted / admin-hidden accounts from friend lists so they
+        // can never be surfaced as invite/search targets.
+        if (friend && isUserHiddenFromPublic(friend)) return null;
         return friend
           ? {
               friendshipId: f._id,
@@ -93,6 +96,8 @@ export const listFriendsForGame = query({
       friendships.map(async (f) => {
         const friend = await ctx.db.get(f.friendId);
         if (!friend || !doesUserPlayGame(friend, args.game)) return null;
+        // Hide soft-deleted / admin-hidden accounts from invite lists.
+        if (isUserHiddenFromPublic(friend)) return null;
 
         // Mark users already in an active team for this game (so we can disable inviting them).
         let inTeam = false;
