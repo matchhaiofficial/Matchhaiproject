@@ -8,6 +8,8 @@ export type {
 } from "./convex/teamMatchService";
 
 export {
+    TEAM_CHALLENGE_PAYMENTS_ENABLED,
+    TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY,
     sendTeamMatchChallenge,
     acceptTeamMatchChallenge,
     payTeamChallengeWithWallet,

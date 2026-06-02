@@ -1212,6 +1212,8 @@ async function releaseBookingIntentHold(ctx: any, intent: any, reason: string) {
     updatedAt: Date.now(),
   });
 
+  await notifyBookingWalletCredit(ctx, { intent, amount, kind: "released", reason });
+
   return { released: true, reference: releaseReference, amount };
 }
 
@@ -1261,6 +1263,8 @@ async function refundCapturedBookingIntentHold(ctx: any, intent: any, reason: st
     updatedAt: Date.now(),
   });
 
+  await notifyBookingWalletCredit(ctx, { intent, amount, kind: "refunded", reason });
+
   return { refunded: true, reference: refundReference, amount };
 }
 
@@ -1277,6 +1281,106 @@ async function refundCapturedBookingIntentsForMatchroom(ctx: any, matchroomId: I
   }
 
   return { refundedCount };
+}
+
+const PLAYER_WALLET_ROUTE = "/(player)/wallet";
+
+// User-facing reason text. Deliberately avoids the word "refund" so it does not
+// read like a bank refund — funds are returned as MatchHai wallet credit.
+function getBookingWalletCreditReasonText(reason: string): string {
+  switch (reason) {
+    case "left_before_lock":
+      return "because you left the matchroom before it locked";
+    case "matchroom_expired":
+    case "expired":
+      return "because the matchroom expired before it became final";
+    case "matchroom_cancelled":
+    case "cancelled":
+      return "because the matchroom was cancelled";
+    case "zone_rejected":
+    case "zone_admin_rejected":
+      return "because the venue could not confirm the booking";
+    case "missing_matchroom":
+      return "because the matchroom is no longer available";
+    default:
+      return "because the matchroom did not become final";
+  }
+}
+
+// Notifies the payer (wallet credited) and super admins (settlement visibility)
+// whenever a held/captured booking amount is returned to a player's MatchHai
+// wallet. Idempotent per intent + kind via deterministic dedupe keys so repeated
+// release/refund attempts or Convex retries never spam.
+async function notifyBookingWalletCredit(
+  ctx: any,
+  input: { intent: any; amount: number; kind: "released" | "refunded"; reason: string },
+) {
+  const { intent, amount, kind, reason } = input;
+  if (!intent) return;
+  const creditAmount = Math.round(Number(amount || 0));
+  if (!Number.isFinite(creditAmount) || creditAmount <= 0) return;
+
+  const intentId = String(intent._id);
+  const matchroomId = intent.matchroomId as Id<"matchrooms">;
+  const playerUid = intent.createdByUid as Id<"users">;
+  const reasonText = getBookingWalletCreditReasonText(reason);
+
+  const playerDedupe = `wallet.booking_credit:${intentId}:${kind}`;
+  if (!(await notificationExistsByDedupeKey(ctx, playerDedupe))) {
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "wallet.booking_credit",
+      toUid: playerUid,
+      recipientRole: "player",
+      status: "accepted",
+      dedupeKey: playerDedupe,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId,
+      route: PLAYER_WALLET_ROUTE,
+      title: "Wallet credited",
+      body: `PKR ${creditAmount} was added back to your MatchHai wallet ${reasonText}. You can use it for your next MatchHai booking.`,
+      data: {
+        intentId,
+        matchroomId: String(matchroomId),
+        amount: creditAmount,
+        reason,
+        kind,
+        href: PLAYER_WALLET_ROUTE,
+      },
+    });
+  }
+
+  const superAdmins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
+    .collect();
+  const adminRoute = "/super-admin";
+  for (const superAdmin of superAdmins) {
+    const adminDedupe = `payments.booking_credit:${intentId}:${kind}:${String(superAdmin._id)}`;
+    if (await notificationExistsByDedupeKey(ctx, adminDedupe)) continue;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "payments.booking_credit",
+      toUid: superAdmin._id,
+      recipientRole: "super_admin",
+      status: "pending",
+      dedupeKey: adminDedupe,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "eligible",
+      matchroomId,
+      route: adminRoute,
+      title: kind === "refunded" ? "Booking payment returned to wallet" : "Booking hold released to wallet",
+      body: `PKR ${creditAmount} was returned to ${intent.createdByUsername || "a player"}'s MatchHai wallet (${reason}).`,
+      data: {
+        intentId,
+        matchroomId: String(matchroomId),
+        playerUid: String(playerUid),
+        amount: creditAmount,
+        reason,
+        kind,
+        href: adminRoute,
+      },
+    });
+  }
 }
 
 async function expireBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"matchrooms">, reason: string) {
@@ -3155,6 +3259,25 @@ export const leave = mutation({
     });
 
     await syncMatchroomMembers(ctx, args.matchroomId, updatedUids);
+
+    // Leaving before lock returns the player's held booking funds to their
+    // MatchHai wallet. releaseBookingIntentHold is idempotent (guards on
+    // heldStatus === "held") and flips the intent to "released" so the
+    // scheduled captureBookingIntentHold later no-ops instead of charging a
+    // player who is no longer in the room. It also notifies the player + super
+    // admins. Hosts who paid at create time have no booking intent, so nothing
+    // is released for them.
+    const leaverIntents = await ctx.db
+      .query("bookingIntents")
+      .withIndex("by_createdByUid_matchroomId", (q: any) =>
+        q.eq("createdByUid", actor.convexUser._id).eq("matchroomId", args.matchroomId),
+      )
+      .collect();
+    for (const intent of leaverIntents) {
+      if (intent.heldStatus === "held") {
+        await releaseBookingIntentHold(ctx, intent, "left_before_lock");
+      }
+    }
 
     // Only when a player actually left (a seat opened), consider urgent replacement.
     if (updatedPlayers.length < room.players.length) {

@@ -471,8 +471,11 @@ export const respond = mutation({
       chatId,
       lineupB: args.accept ? args.lineupB || challenge.lineupB : challenge.lineupB,
       teamAPaymentStatus: !args.accept && refundResult.refunded ? "unpaid" : challenge.teamAPaymentStatus,
-      teamBPaymentStatus: args.accept ? args.teamBPaymentStatus || challenge.teamBPaymentStatus || "paid" : challenge.teamBPaymentStatus,
-      teamBPaymentAmount: args.accept ? args.teamBPaymentAmount ?? challenge.teamBPaymentAmount : challenge.teamBPaymentAmount,
+      // Team Challenge paid flow is disabled for launch: never trust a
+      // client-asserted "paid" status and never persist a payment amount.
+      // (Previously this defaulted to "paid" even when the arg was omitted.)
+      teamBPaymentStatus: args.accept ? "unpaid" : challenge.teamBPaymentStatus,
+      teamBPaymentAmount: args.accept ? undefined : challenge.teamBPaymentAmount,
       updatedAt: Date.now(),
     });
 
@@ -741,6 +744,14 @@ export const createFull = mutation({
       throw new Error("Opponent captain does not match this challenge");
     }
 
+    // Team Challenge paid flow is disabled for launch. The server NEVER trusts a
+    // client-asserted payment status and NEVER persists payment amounts, so a
+    // crafted client cannot create a "paid" challenge or imply money was
+    // collected. Challenges are stored free/social-only until the safe
+    // hold/escrow model is rebuilt (see TEMP_MATCHHAI_PAYMENT_HOLD_WALLET_CREDIT_POLICY.md).
+    const safeTeamAPaymentStatus = "unpaid" as const;
+    const safeTeamBPaymentStatus = "unpaid" as const;
+
     const now = Date.now();
     const scheduledAt = typeof args.scheduledAt === "number" ? args.scheduledAt : undefined;
     validateTeamChallengeScheduledAt(scheduledAt, now);
@@ -787,10 +798,10 @@ export const createFull = mutation({
       zoneRateKey: args.zoneRateKey,
       zoneRateLabel: args.zoneRateLabel,
       zoneRatePrice: args.zoneRatePrice,
-      teamAPaymentStatus: args.teamAPaymentStatus ?? "unpaid",
-      teamBPaymentStatus: args.teamBPaymentStatus ?? "unpaid",
-      teamAPaymentAmount: args.teamAPaymentAmount,
-      teamBPaymentAmount: args.teamBPaymentAmount,
+      teamAPaymentStatus: safeTeamAPaymentStatus,
+      teamBPaymentStatus: safeTeamBPaymentStatus,
+      teamAPaymentAmount: undefined,
+      teamBPaymentAmount: undefined,
       proposedVenueByCaptainA: args.proposedVenueByCaptainA,
       alternativeVenueByCaptainB: args.alternativeVenueByCaptainB,
       captainVenueChoices: args.proposedVenueByCaptainA
@@ -827,8 +838,8 @@ export const createFull = mutation({
         scheduledAt,
         pricePerPlayer: args.pricePerPlayer,
         zoneRateLabel: args.zoneRateLabel,
-        teamAPaymentStatus: args.teamAPaymentStatus ?? "unpaid",
-        teamBPaymentStatus: args.teamBPaymentStatus ?? "unpaid",
+        teamAPaymentStatus: safeTeamAPaymentStatus,
+        teamBPaymentStatus: safeTeamBPaymentStatus,
         seriesType: args.seriesType ?? null,
         proposedVenueByCaptainA: args.proposedVenueByCaptainA,
       },

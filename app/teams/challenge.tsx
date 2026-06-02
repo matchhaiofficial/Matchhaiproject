@@ -14,6 +14,7 @@ import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
 import {
+    TEAM_CHALLENGE_PAYMENTS_ENABLED,
     acceptTeamMatchChallenge,
     payTeamChallengeWithWallet,
     proposeTeamChallengeVenue,
@@ -208,7 +209,9 @@ export default function TeamMatchChallengeDetails() {
         }
         setSubmitting(true);
         const paymentAmount = Math.max(0, Math.ceil(Number(challenge?.pricePerPlayer || 0) * activeLineupSize));
-        if (isCaptainB && paymentAmount > 0 && challenge?.teamBPaymentStatus !== "paid") {
+        // Paid team-challenge flow disabled for launch: skip payment and accept as
+        // free/social. No wallet deduction / Easypaisa top-up. Backend coerces unpaid.
+        if (TEAM_CHALLENGE_PAYMENTS_ENABLED && isCaptainB && paymentAmount > 0 && challenge?.teamBPaymentStatus !== "paid") {
             const walletReference = `team_challenge:accept:${challengeId}:${Date.now()}`;
             const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
                 Alert.alert(

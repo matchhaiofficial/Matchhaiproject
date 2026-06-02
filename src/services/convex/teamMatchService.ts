@@ -384,9 +384,13 @@ export const sendTeamMatchChallenge = async (input: {
             zoneRateKey: input.zoneRateKey || undefined,
             zoneRateLabel: input.zoneRateLabel || undefined,
             zoneRatePrice: toPositiveNumber(input.zoneRatePrice) || undefined,
-            teamAPaymentStatus: "paid",
+            // Paid team-challenge flow disabled: always create as free/unpaid.
+            // The server also coerces these to "unpaid" defensively.
+            teamAPaymentStatus: TEAM_CHALLENGE_PAYMENTS_ENABLED ? "paid" : "unpaid",
             teamBPaymentStatus: "unpaid",
-            teamAPaymentAmount: toPositiveNumber(input.teamAPaymentAmount) || undefined,
+            teamAPaymentAmount: TEAM_CHALLENGE_PAYMENTS_ENABLED
+                ? toPositiveNumber(input.teamAPaymentAmount) || undefined
+                : undefined,
             proposedVenueByCaptainA: input.proposedVenueByCaptainA,
             commonAreas: [],
             lineupA: getDefaultLineup(teamA, teamAMembers),
@@ -435,8 +439,12 @@ export const acceptTeamMatchChallenge = async (input: {
             challengeId: input.challengeId as Id<"teamChallenges">,
             accept: true,
             lineupB,
-            teamBPaymentStatus: "paid",
-            teamBPaymentAmount: toPositiveNumber(input.teamBPaymentAmount) || undefined,
+            // Paid team-challenge flow disabled: accept as free/unpaid. The server
+            // also coerces this to "unpaid" defensively.
+            teamBPaymentStatus: TEAM_CHALLENGE_PAYMENTS_ENABLED ? "paid" : "unpaid",
+            teamBPaymentAmount: TEAM_CHALLENGE_PAYMENTS_ENABLED
+                ? toPositiveNumber(input.teamBPaymentAmount) || undefined
+                : undefined,
             actorUid: me.convexId,
         });
 
@@ -454,6 +462,13 @@ export const acceptTeamMatchChallenge = async (input: {
     }
 };
 
+// Team Challenge paid flow is disabled for launch. Flip this to true only once
+// the safe hold/escrow model (server-verified payment, release/credit on
+// expiry/cancel) is rebuilt. See TEMP_MATCHHAI_PAYMENT_HOLD_WALLET_CREDIT_POLICY.md.
+export const TEAM_CHALLENGE_PAYMENTS_ENABLED = false;
+export const TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY =
+    "Team Challenge payments are temporarily disabled. You can create free/social challenges for now.";
+
 export const payTeamChallengeWithWallet = async (input: {
     amount: number;
     challengeId?: string | null;
@@ -461,6 +476,12 @@ export const payTeamChallengeWithWallet = async (input: {
     reference?: string;
 }): Promise<ServerResponse> => {
     try {
+        // Hard stop: never deduct wallet funds for team challenges while the paid
+        // flow is disabled, regardless of any caller. Returns ok so the (free)
+        // challenge create/accept flow can still proceed without moving money.
+        if (!TEAM_CHALLENGE_PAYMENTS_ENABLED) {
+            return { ok: true, amount: 0 };
+        }
         const me = await getCurrentUserInfo();
         if (!me) return { ok: false, message: "Not authenticated." };
         const amount = Math.ceil(Number(input.amount || 0));

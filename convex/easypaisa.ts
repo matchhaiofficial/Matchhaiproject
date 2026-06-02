@@ -2,7 +2,7 @@ import { v } from "convex/values";
 
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { action, httpAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
 import { EasypaisaTransactionType } from "./easypaisaRest";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
@@ -1792,6 +1792,59 @@ export const startCheckout = action({
   },
 });
 
+// Server-to-server reconcile for a single transaction row: perform the REST
+// inquiry then apply the result via the inquiry-sourced provider update (the
+// only source allowed to resurrect a terminal-not-paid row to paid). Shared by
+// the client-driven sync action and the stale-payment reconciler cron so both
+// go through the identical, audited safe path.
+async function performProviderInquiryAndApply(ctx: any, row: any) {
+  const inquiryResult: any = await ctx.runAction((internal as any).easypaisaNode.inquireRestTransaction, {
+    orderId: row.orderRefNum,
+    storeId: EASYPAISA_STORE_ID,
+  });
+  const inquiryBody = inquiryResult?.body || {};
+  const inquiryDescription =
+    String(inquiryBody?.transactionStatus || "").toUpperCase() === "FAILED"
+      ? inquiryBody?.errorReason || inquiryBody?.responseDesc
+      : inquiryBody?.responseDesc || inquiryBody?.errorReason;
+  const storedTransactionType =
+    row.providerPayload?.rest?.initiate?.request?.transactionType ||
+    row.providerPayload?.rest?.initiate?.response?.paymentMode ||
+    row.paymentMethod ||
+    null;
+  const applyResult: any = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
+    orderRefNum: row.orderRefNum,
+    source: "inquiry",
+    snapshot: {
+      responseCode: inquiryBody?.responseCode || inquiryBody?.errorCode || null,
+      responseDesc: inquiryDescription || null,
+      transactionStatus: inquiryBody?.transactionStatus || null,
+      transactionId: inquiryBody?.transactionId || null,
+      paymentToken: inquiryBody?.paymentToken || null,
+      paymentTokenExpiryDateTime: inquiryBody?.paymentTokenExpiryDateTime || null,
+      transactionDateTime: inquiryBody?.transactionDateTime || null,
+      paymentMode: inquiryBody?.paymentMode || storedTransactionType || null,
+      paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || storedTransactionType || null,
+      providerReference: inquiryBody?.transactionId || inquiryBody?.paymentToken || row.orderRefNum,
+      rawPayload: {
+        rest: {
+          inquiry: {
+            request: inquiryResult?.requestPayload || {
+              orderId: row.orderRefNum,
+              storeId: EASYPAISA_STORE_ID,
+            },
+            response: inquiryBody,
+            httpStatus: inquiryResult?.status,
+            ok: inquiryResult?.ok,
+            lastSyncAt: Date.now(),
+          },
+        },
+      },
+    },
+  });
+  return applyResult;
+}
+
 export const syncTransactionStatus = action({
   args: {
     orderRefNum: v.string(),
@@ -1807,50 +1860,7 @@ export const syncTransactionStatus = action({
       throw new Error("Transaction not found.");
     }
 
-    const inquiryResult: any = await ctx.runAction((internal as any).easypaisaNode.inquireRestTransaction, {
-      orderId: row.orderRefNum,
-      storeId: EASYPAISA_STORE_ID,
-    });
-    const inquiryBody = inquiryResult?.body || {};
-    const inquiryDescription =
-      String(inquiryBody?.transactionStatus || "").toUpperCase() === "FAILED"
-        ? inquiryBody?.errorReason || inquiryBody?.responseDesc
-        : inquiryBody?.responseDesc || inquiryBody?.errorReason;
-    const storedTransactionType =
-      row.providerPayload?.rest?.initiate?.request?.transactionType ||
-      row.providerPayload?.rest?.initiate?.response?.paymentMode ||
-      row.paymentMethod ||
-      null;
-    const applyResult: any = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
-      orderRefNum: row.orderRefNum,
-      source: "inquiry",
-      snapshot: {
-        responseCode: inquiryBody?.responseCode || inquiryBody?.errorCode || null,
-        responseDesc: inquiryDescription || null,
-        transactionStatus: inquiryBody?.transactionStatus || null,
-        transactionId: inquiryBody?.transactionId || null,
-        paymentToken: inquiryBody?.paymentToken || null,
-        paymentTokenExpiryDateTime: inquiryBody?.paymentTokenExpiryDateTime || null,
-        transactionDateTime: inquiryBody?.transactionDateTime || null,
-        paymentMode: inquiryBody?.paymentMode || storedTransactionType || null,
-        paymentMethod: inquiryBody?.paymentMethod || inquiryBody?.paymentMode || storedTransactionType || null,
-        providerReference: inquiryBody?.transactionId || inquiryBody?.paymentToken || row.orderRefNum,
-        rawPayload: {
-          rest: {
-            inquiry: {
-              request: inquiryResult?.requestPayload || {
-                orderId: row.orderRefNum,
-                storeId: EASYPAISA_STORE_ID,
-              },
-              response: inquiryBody,
-              httpStatus: inquiryResult?.status,
-              ok: inquiryResult?.ok,
-              lastSyncAt: Date.now(),
-            },
-          },
-        },
-      },
-    });
+    const applyResult: any = await performProviderInquiryAndApply(ctx, row);
 
     return {
       ok: true,
@@ -1858,6 +1868,108 @@ export const syncTransactionStatus = action({
       shouldRetry: applyResult.shouldRetry,
       message: applyResult.message || null,
     };
+  },
+});
+
+// --- Stuck/abandoned payment reconciler (cron) -----------------------------
+// Reconciliation is otherwise only triggered by the client poll or a provider
+// IPN. If the app is killed after the user paid and the IPN is dropped/delayed,
+// a "provider paid / local pending" transaction would never be reconciled and
+// the wallet never credited. This cron re-inquires stale ACTIVE transactions
+// through the same inquiry+applyProviderUpdate path, which is idempotent
+// (processedAt / status==="paid" short-circuits, reference-keyed wallet ops) and
+// already credits the wallet + notifies the payer & super admins when the
+// provider confirms paid but the booking/create can no longer complete.
+const STALE_PAYMENT_RECONCILE_AFTER_MS = 10 * 60 * 1000; // give the client poll/IPN ~10m first
+const STALE_PAYMENT_RECONCILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // don't re-inquire ancient rows
+const STALE_PAYMENT_RECONCILE_COOLDOWN_MS = 30 * 60 * 1000; // throttle re-inquiry of a row that was recently reconciled
+
+export const listStaleActivePaymentTransactions = internalQuery({
+  args: {
+    olderThanMs: v.number(),
+    maxAgeMs: v.number(),
+    limit: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const cutoff = now - Math.max(0, args.olderThanMs);
+    const floor = now - Math.max(0, args.maxAgeMs);
+    const limit = Math.max(1, Math.min(Math.floor(args.limit), 50));
+    const activeStatuses: PaymentStatus[] = ["created", "redirected", "token_received", "pending"];
+    const out: Array<{ orderRefNum: string }> = [];
+    for (const status of activeStatuses) {
+      if (out.length >= limit) break;
+      const batch = await ctx.db
+        .query("paymentTransactions")
+        .withIndex("by_provider_and_status_and_createdAt", (q: any) =>
+          q
+            .eq("provider", "easypaisa")
+            .eq("status", status)
+            .gte("createdAt", floor)
+            .lte("createdAt", cutoff),
+        )
+        .order("asc")
+        .take(limit);
+      for (const row of batch) {
+        out.push({ orderRefNum: row.orderRefNum });
+        if (out.length >= limit) break;
+      }
+    }
+    return out.slice(0, limit);
+  },
+});
+
+export const reconcileStalePayments = internalAction({
+  args: { batchSize: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    try {
+      ensurePaymentConfig();
+    } catch (error) {
+      logGatewayDebug("reconcile.cron.config_unavailable", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, reason: "payment_config_unavailable", scanned: 0, processed: 0 };
+    }
+
+    const limit = Math.max(1, Math.min(Number(args.batchSize || 15), 50));
+    const staleRows: Array<{ orderRefNum: string }> = await ctx.runQuery(
+      (internal as any).easypaisa.listStaleActivePaymentTransactions,
+      {
+        olderThanMs: STALE_PAYMENT_RECONCILE_AFTER_MS,
+        maxAgeMs: STALE_PAYMENT_RECONCILE_MAX_AGE_MS,
+        limit,
+      },
+    );
+
+    let processed = 0;
+    let paid = 0;
+    let failedOrExpired = 0;
+    let errors = 0;
+    for (const stale of staleRows) {
+      try {
+        const row: any = await ctx.runQuery((internal as any).easypaisa.getTransactionByOrderRef, {
+          orderRefNum: stale.orderRefNum,
+        });
+        if (!row) continue;
+        // Re-check it is still active — a concurrent IPN/poll may have resolved it.
+        if (!["created", "redirected", "token_received", "pending"].includes(String(row.status))) continue;
+        // Throttle: a permanently-stuck row (provider keeps returning pending) is
+        // re-inquired at most once per cooldown window instead of every cron tick.
+        if (row.lastCallbackAt && Date.now() - Number(row.lastCallbackAt) < STALE_PAYMENT_RECONCILE_COOLDOWN_MS) continue;
+        const result: any = await performProviderInquiryAndApply(ctx, row);
+        processed += 1;
+        if (result?.status === "paid") paid += 1;
+        else if (result?.status === "failed" || result?.status === "expired") failedOrExpired += 1;
+      } catch (error) {
+        errors += 1;
+        logGatewayDebug("reconcile.cron.error", {
+          orderRefNum: stale.orderRefNum,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return { ok: true, scanned: staleRows.length, processed, paid, failedOrExpired, errors };
   },
 });
 
@@ -2457,9 +2569,16 @@ export const applyProviderUpdate = internalMutation({
       });
 
       if (row.kind === "wallet_topup") {
+        // A create-paid order whose matchroom could not be finalized keeps the
+        // money as MatchHai wallet credit (addFunds already committed in this
+        // same transaction). Tell the payer it landed in their wallet rather
+        // than the generic "top-up successful" so the policy is honoured.
+        const createWasAttempted = Boolean(matchroomCreateArgs);
+        const createFinalized = Boolean((sourcePayload as any)?.matchroomCreate?.matchroomId);
+        const decision = createWasAttempted && !createFinalized ? "wallet_credit_only" : "paid";
         await notifyPlayerPaymentOutcome(ctx, {
           payment: row,
-          decision: "paid",
+          decision,
           status: "accepted",
         });
       }

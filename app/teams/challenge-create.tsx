@@ -12,7 +12,7 @@ import { AppDialog, AppModalBody, AppModalFooter, AppModalHeader } from "../../s
 import Screen from "../../src/components/Screen";
 import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
-import { getCaptainedTeams, payTeamChallengeWithWallet, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
+import { TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY, TEAM_CHALLENGE_PAYMENTS_ENABLED, getCaptainedTeams, payTeamChallengeWithWallet, sendTeamMatchChallenge } from "../../src/services/teamMatchService";
 import { Team, getTeamById } from "../../src/services/convex/teamService";
 import { deriveZoneRate, type Zone } from "../../src/services/convex/zoneService";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
@@ -547,43 +547,48 @@ export default function TeamChallengeCreateScreen() {
             },
             maxPlayers: estimatedPlayers,
         };
-        const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
-            Alert.alert(
-                "Team payment required",
-                `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
-                [
-                    { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-                    { text: "Pay Now", onPress: () => resolve("pay_now") },
-                    { text: "Pay with Wallet", onPress: () => resolve("wallet") },
-                ],
-            );
-        });
-        if (paymentChoice === "cancel") {
-            setSubmitting(false);
-            return;
-        }
-        if (paymentChoice === "pay_now") {
-            setSubmitting(false);
-            setPendingCreateAfterPayment({
-                captainPaymentAmount,
-                walletReference,
-                challengeArgs,
-                challengerTeamName: challengerTeam.name,
-                opponentTeamName: opponentTeam.name,
+        // Paid team-challenge flow is disabled for launch: skip the payment step
+        // entirely and create the challenge as free/social. No wallet deduction,
+        // no Easypaisa top-up. (The backend also coerces payment status to unpaid.)
+        if (TEAM_CHALLENGE_PAYMENTS_ENABLED) {
+            const paymentChoice = await new Promise<"wallet" | "pay_now" | "cancel">((resolve) => {
+                Alert.alert(
+                    "Team payment required",
+                    `Pay PKR ${captainPaymentAmount} for ${challengerTeam.name} (${challengerActivePlayers} players) before sending this challenge.`,
+                    [
+                        { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+                        { text: "Pay Now", onPress: () => resolve("pay_now") },
+                        { text: "Pay with Wallet", onPress: () => resolve("wallet") },
+                    ],
+                );
             });
-            setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
-            setEasypaisaModalVisible(true);
-            return;
-        }
-        const walletPayment = await payTeamChallengeWithWallet({
-            amount: captainPaymentAmount,
-            side: "teamA",
-            reference: walletReference,
-        });
-        if (!walletPayment.ok) {
-            setSubmitting(false);
-            showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
-            return;
+            if (paymentChoice === "cancel") {
+                setSubmitting(false);
+                return;
+            }
+            if (paymentChoice === "pay_now") {
+                setSubmitting(false);
+                setPendingCreateAfterPayment({
+                    captainPaymentAmount,
+                    walletReference,
+                    challengeArgs,
+                    challengerTeamName: challengerTeam.name,
+                    opponentTeamName: opponentTeam.name,
+                });
+                setEasypaisaCheckoutPhone(formatPakistaniPhone(String(user?.phone || "")));
+                setEasypaisaModalVisible(true);
+                return;
+            }
+            const walletPayment = await payTeamChallengeWithWallet({
+                amount: captainPaymentAmount,
+                side: "teamA",
+                reference: walletReference,
+            });
+            if (!walletPayment.ok) {
+                setSubmitting(false);
+                showToast({ type: "error", title: "Payment failed", message: walletPayment.message || "Unable to pay from wallet." });
+                return;
+            }
         }
         const result = await sendTeamMatchChallenge(challengeArgs);
         setSubmitting(false);
@@ -1033,8 +1038,13 @@ export default function TeamChallengeCreateScreen() {
                             <AppIcon name="lock" size={16} color="#6B7380" style={styles.marginLeft8} />
                         </View>
                         <Text style={styles.helperTextTiny}>
-                            Based on selected zone rate and series duration. Captain pays PKR {captainPaymentAmount} for {challengerActivePlayers} players.
+                            {TEAM_CHALLENGE_PAYMENTS_ENABLED
+                                ? `Based on selected zone rate and series duration. Captain pays PKR ${captainPaymentAmount} for ${challengerActivePlayers} players.`
+                                : "Based on selected zone rate and series duration. Shown for reference only."}
                         </Text>
+                        {!TEAM_CHALLENGE_PAYMENTS_ENABLED ? (
+                            <Text style={styles.submitHintText}>{TEAM_CHALLENGE_PAYMENTS_DISABLED_COPY}</Text>
+                        ) : null}
                         {selectedZoneRate ? (
                             <Text style={styles.helperTextTiny}>
                                 Resource type: {selectedZoneRate.label} at PKR {selectedZoneRate.price}/hr.
