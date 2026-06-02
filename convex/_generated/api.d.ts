@@ -32,6 +32,7 @@ import type * as kyc from "../kyc.js";
 import type * as kycGate from "../kycGate.js";
 import type * as kycNotifications from "../kycNotifications.js";
 import type * as matchroomBroadcast from "../matchroomBroadcast.js";
+import type * as matchroomPricing from "../matchroomPricing.js";
 import type * as matchrooms from "../matchrooms.js";
 import type * as notifications from "../notifications.js";
 import type * as phoneOtp from "../phoneOtp.js";
@@ -94,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   kycGate: typeof kycGate;
   kycNotifications: typeof kycNotifications;
   matchroomBroadcast: typeof matchroomBroadcast;
+  matchroomPricing: typeof matchroomPricing;
   matchrooms: typeof matchrooms;
   notifications: typeof notifications;
   phoneOtp: typeof phoneOtp;

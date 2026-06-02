@@ -106,6 +106,7 @@ type Params = {
   reservedSlots: number;
   duration: number;
   selectedAdminBranch: Branch;
+  selectedBranchId: string | null;
   selectedGame: string | null;
   selectedTeamId: string | null;
   selectedTeamMemberUids: string[];
@@ -186,6 +187,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     reservedSlots,
     duration,
     selectedAdminBranch,
+    selectedBranchId,
     selectedGame,
     selectedTeamId,
     selectedTeamMemberUids,
@@ -239,6 +241,18 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
   const completingEasypaisaOrderRef = useRef<string | null>(null);
   const finalizedEasypaisaOrderRef = useRef<string | null>(null);
   const pendingPaidMatchroomCreateArgsRef = useRef<any | null>(null);
+  // P1 FIX 4: stable per-attempt idempotency key for the direct wallet/free create
+  // path. Generated lazily for a create attempt and persisted across in-attempt
+  // retries (double-tap, network-timeout replay) so the backend returns the same
+  // room instead of creating a duplicate. Cleared after a room is created so the
+  // next genuinely-new attempt gets a fresh key.
+  const createRequestIdRef = useRef<string | null>(null);
+  const getOrCreateClientCreateRequestId = useCallback(() => {
+    if (!createRequestIdRef.current) {
+      createRequestIdRef.current = `mc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+    return createRequestIdRef.current;
+  }, []);
   const checkoutStatus = useQuery(
     api.easypaisa.getCheckoutStatus,
     user?._id && activeEasypaisaOrderRef
@@ -740,8 +754,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         activeProfile: { ...activeProfile, _id: user._id } as UserProfile,
         amountDue,
         assignedTeamMembers,
+        branchId: selectedBranchId,
         broadcastAreas,
         captainSeatNumber: walkInTeamACaptainSeatNumber,
+        clientCreateRequestId: getOrCreateClientCreateRequestId(),
         duration,
         formData,
         gameKey: selectedGame!,
@@ -821,6 +837,10 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         setEasypaisaPaymentPhase("idle");
         setFinalizedEasypaisaMatchroomId(null);
         resumedEasypaisaOrderRef.current = null;
+        // Room created — retire this attempt's idempotency key so a genuinely new
+        // create attempt generates a fresh key (a repeat of THIS attempt would be
+        // deduped server-side and return this same room).
+        createRequestIdRef.current = null;
         Alert.alert(
           "Success!",
           isBroadcastFlow
@@ -861,6 +881,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     captainSeatsPaid,
     effectivePriceValue,
     formData,
+    getOrCreateClientCreateRequestId,
     hostRole,
     hostSkillAnswers,
     hostSkillScore,
@@ -876,6 +897,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     resolvedTeam,
     selectableTeamMembers,
     selectedAdminBranch,
+    selectedBranchId,
     selectedGame,
     selectedTeamId,
     selectedTeamMemberUids,

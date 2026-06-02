@@ -346,8 +346,10 @@ export function buildMatchroomPayload(params: {
   activeProfile: UserProfile;
   amountDue: number;
   assignedTeamMembers: AssignedTeamMember[];
+  branchId: string | null;
   broadcastAreas: string[];
   captainSeatNumber: number | null;
+  clientCreateRequestId: string;
   duration: number;
   formData: MatchroomCreateFormData;
   gameKey: string;
@@ -384,8 +386,10 @@ export function buildMatchroomPayload(params: {
     activeProfile,
     amountDue,
     assignedTeamMembers,
+    branchId,
     broadcastAreas,
     captainSeatNumber,
+    clientCreateRequestId,
     duration,
     formData,
     gameKey,
@@ -443,6 +447,8 @@ export function buildMatchroomPayload(params: {
 
   return sanitizeData({
     assignedTeamMembers,
+    branchId: branchId || undefined,
+    clientCreateRequestId: clientCreateRequestId || undefined,
     battingOrder:
       gameKey === "indoor_cricket" ? formData.battingOrder : null,
     battingStyle:

@@ -368,7 +368,13 @@ export const addFunds = internalMutation({
   args: {
     amount: v.number(),
     userId: v.optional(v.id("users")),
-    reference: v.optional(v.string()),
+    // P1: reference is now REQUIRED for every money-moving credit. addFunds is
+    // only idempotent when a deterministic reference is supplied (dedupe via the
+    // walletTransactions.by_reference index). A missing reference previously fell
+    // back to "manual_topup", which is NOT unique and could double-credit on
+    // retry. Callers must pass a stable, deterministic reference
+    // (e.g. easypaisa:<orderRef>, venue_payout:<matchroomId>).
+    reference: v.string(),
     metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
@@ -376,15 +382,19 @@ export const addFunds = internalMutation({
       throw new Error("Amount must be positive");
     }
 
+    const reference = String(args.reference || "").trim();
+    if (!reference) {
+      throw new Error("addFunds requires a non-empty deterministic reference for idempotency.");
+    }
+
     const user = await getWalletUserRecord(ctx, args.userId, { allowInternalUserId: true });
-    if (args.reference) {
-      const existing = await ctx.db
-        .query("walletTransactions")
-        .withIndex("by_reference", (q) => q.eq("reference", args.reference))
-        .collect();
-      if (existing.length > 0) {
-        return { newBalance: user.walletBalance ?? 0 };
-      }
+    const existing = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_reference", (q) => q.eq("reference", reference))
+      .collect();
+    if (existing.length > 0) {
+      // Idempotent no-op: this credit was already applied under the same reference.
+      return { newBalance: user.walletBalance ?? 0 };
     }
 
     const currentBalance = user.walletBalance ?? 0;
@@ -402,7 +412,7 @@ export const addFunds = internalMutation({
       type: "deposit",
       amount: args.amount,
       status: "completed",
-      reference: args.reference || "manual_topup",
+      reference,
       metadata: args.metadata,
       createdAt: now,
     });

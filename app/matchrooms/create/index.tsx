@@ -1160,6 +1160,8 @@ export default function CreateMatchroom() {
     resolvedTeam,
     reservedSlots,
     selectedAdminBranch,
+    selectedBranchId:
+      walkInBranchId || (typeof params.branchId === "string" ? params.branchId : null),
     selectedGame,
     selectedTeamId,
     selectedTeamMemberUids,

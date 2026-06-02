@@ -674,6 +674,11 @@ export default defineSchema({
     paymentReservedSlots: v.optional(v.number()),
     paymentCurrency: v.optional(v.string()),
     sourcePaymentOrderRefNum: v.optional(v.string()),
+    // P1: per-user idempotency key for the direct wallet/free create path. A
+    // stable key generated once per create attempt lets the server return the
+    // existing room (instead of inserting a duplicate + double-debiting the
+    // wallet) when the same attempt is retried (double-tap, network retry).
+    clientCreateRequestId: v.optional(v.string()),
     merchantSettlementStatus: v.optional(v.union(v.literal("pending"), v.literal("captured"))),
     merchantSettlementAt: v.optional(v.number()),
     merchantSettlementAmount: v.optional(v.number()),
@@ -747,6 +752,7 @@ export default defineSchema({
     .index("by_zoneId_and_bookingSource_and_createdAt", ["zoneId", "bookingSource", "createdAt"])
     .index("by_matchCode", ["matchCode"])
     .index("by_sourcePaymentOrderRefNum", ["sourcePaymentOrderRefNum"])
+    .index("by_hostUid_and_clientCreateRequestId", ["hostUid", "clientCreateRequestId"])
     .index("by_createdAt", ["createdAt"]),
 
   // ============================================

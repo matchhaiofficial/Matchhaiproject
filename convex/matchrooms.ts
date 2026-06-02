@@ -7,6 +7,7 @@ import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kyc
 import { requireCurrentUser, requireSuperAdmin, getCurrentUser, isSuperAdminProfile } from "./authz";
 import { isUserHiddenFromPublic } from "./userVisibility";
 import { deductWalletFunds } from "./wallet";
+import { computeAuthoritativeMatchroomPricing } from "./matchroomPricing";
 import {
   dispatchBroadcastZoneRequestsForMatchroom,
   finalizeBroadcastFailure,
@@ -1541,7 +1542,11 @@ async function maybeMarkMerchantCapturedAfterHoldCapture(ctx: any, matchroomId: 
   return await markMerchantCapturedForMatchroom(ctx, matchroomId, room);
 }
 
-async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: Id<"matchrooms">) {
+async function dispatchZoneAdminRequestForFullMatchroom(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  options?: { force?: boolean },
+) {
   const room = await ctx.db.get(matchroomId);
   if (!room || room.locationMode !== "zone" || !room.zoneId) return null;
 
@@ -1556,12 +1561,17 @@ async function dispatchZoneAdminRequestForFullMatchroom(ctx: any, matchroomId: I
   }
 
   const maxPlayers = Math.max(1, Number(room.maxPlayers || room.currentPlayers || 1));
-  if (Number(room.currentPlayers || 0) < maxPlayers) return null;
+  // Team Challenge rooms are "ready" when BOTH captains have paid (escrow held),
+  // not when every individual seat is confirmed — so the per-seat fullness gates
+  // are skipped when force=true.
+  if (!options?.force) {
+    if (Number(room.currentPlayers || 0) < maxPlayers) return null;
 
-  const confirmedSlotCount = [...(room.slotsA || []), ...(room.slotsB || [])].filter((slot: any) =>
-    slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
-  ).length;
-  if (confirmedSlotCount < maxPlayers) return null;
+    const confirmedSlotCount = [...(room.slotsA || []), ...(room.slotsB || [])].filter((slot: any) =>
+      slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid),
+    ).length;
+    if (confirmedSlotCount < maxPlayers) return null;
+  }
 
   const host = await resolveUserByAnyId(ctx, String(room.hostUid || ""));
   if (!host) return null;
@@ -2807,6 +2817,15 @@ const createMatchroomArgsValidator = {
     requestedResourceSurface: v.optional(v.string()),
     requestedResourceTier: v.optional(v.string()),
     selectedZoneRateKey: v.optional(v.string()),
+    // P1 pricing-validation inputs (used server-side to recompute the
+    // authoritative price; seriesType/overs/branchId/durationHours are NOT stored
+    // on the room, only consumed for validation).
+    branchId: v.optional(v.string()),
+    seriesType: v.optional(v.string()),
+    overs: v.optional(v.union(v.string(), v.number())),
+    durationHours: v.optional(v.number()),
+    // P1 create idempotency key (stored on the room, scoped per host).
+    clientCreateRequestId: v.optional(v.string()),
 
     // Slots
     slotsA: v.array(slotValidator),
@@ -2866,6 +2885,101 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
       .unique();
     if (existing) {
       return existing._id;
+    }
+  }
+
+  // P1 FIX 4: idempotency for the direct wallet/free create path. If the same
+  // host retries the same create attempt (double-tap, network timeout retry — see
+  // matchService.createMatchroom which replays the mutation on auth errors), the
+  // stable clientCreateRequestId lets us return the already-created room instead
+  // of inserting a duplicate. Because the wallet debit reference is
+  // matchroom_create:<matchroomId>, returning the same id also makes the debit a
+  // no-op (deduct is idempotent by reference) — so no duplicate room AND no
+  // double charge. Provider-paid create keeps its sourcePaymentOrderRefNum
+  // idempotency above and is unaffected.
+  const clientCreateRequestId = String(args.clientCreateRequestId || "").trim();
+  if (clientCreateRequestId) {
+    const existingByRequest = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_hostUid_and_clientCreateRequestId", (q: any) =>
+        q.eq("hostUid", actorUid).eq("clientCreateRequestId", clientCreateRequestId),
+      )
+      .first();
+    if (existingByRequest) {
+      return existingByRequest._id;
+    }
+  }
+
+  // P1 FIX 1: server-side authoritative price validation (underpayment guard).
+  // The client supplies pricing.perPlayer / paymentAmount; a modified client
+  // could send a price below the venue's configured rate. We recompute the
+  // authoritative price from the zone/branch pricing buckets + enabled pricing
+  // rules and (a) hard-reject when the client price is below the conservative
+  // legitimate floor, and (b) cap the charge so the server never charges above
+  // the authoritative expected price. Only applies to paid zone rooms; free
+  // rooms, broadcast rooms (zone/price resolved later), and rooms where pricing
+  // cannot be authoritatively resolved are left untouched to avoid false rejects.
+  // Applies to ALL zone rooms (not just paymentStatus==="paid"): legitimate
+  // player create always sends paymentStatus="paid", so this also blocks a
+  // "claim unpaid + perPlayer=0 at a priced venue" free-bypass. Genuinely free
+  // venues resolve floor=0 (or unresolved) below and are left untouched.
+  if (
+    args.locationMode === "zone"
+    && args.zoneId
+    && args.requestedResourceAssetType
+  ) {
+    const clientPerPlayer = Number(args?.pricing?.perPlayer || 0);
+    const paidSlots = Math.max(1, Number(args.paymentReservedSlots || 1));
+    const zoneDoc = await ctx.db.get(args.zoneId as Id<"zones">);
+    if (zoneDoc) {
+      const rules = await ctx.db
+        .query("pricingRules")
+        .withIndex("by_zoneId", (q: any) => q.eq("zoneId", args.zoneId as Id<"zones">))
+        .collect();
+      const pricing = computeAuthoritativeMatchroomPricing({
+        zoneDoc,
+        rules: rules as any,
+        game: args.game,
+        resourceContext: {
+          assetType: args.requestedResourceAssetType,
+          tier: args.requestedResourceTier,
+          surface: args.requestedResourceSurface,
+        },
+        branchId: args.branchId,
+        seriesType: args.seriesType,
+        overs: args.overs,
+        format: args.format,
+        maxPlayers: args.maxPlayers,
+        durationMinutes: args.durationMinutes,
+        durationHours: args.durationHours,
+        scheduledStartAt: args.scheduledStartAt,
+      });
+      if (pricing.resolved) {
+        const TOLERANCE = 1; // PKR rounding headroom
+        if (
+          pricing.floorPerPlayer !== null
+          && clientPerPlayer < pricing.floorPerPlayer - TOLERANCE
+        ) {
+          throw new Error(
+            "This price is below the venue's configured rate. Please refresh pricing and try again.",
+          );
+        }
+        // Server is the source of truth for the charged amount: if the client
+        // claims a unit price above the authoritative expected price, cap it (and
+        // the total) down. Legitimate bookings (client <= expected) are left
+        // byte-identical so nothing about the normal flow changes.
+        if (
+          pricing.expectedPerPlayer !== null
+          && pricing.expectedPerPlayer > 0
+          && clientPerPlayer > pricing.expectedPerPlayer + TOLERANCE
+        ) {
+          const cappedPerPlayer = pricing.expectedPerPlayer;
+          const cappedTotal = Math.ceil(cappedPerPlayer * paidSlots);
+          const clientTotal = Number(args.paymentAmount || 0);
+          args.pricing = { ...args.pricing, perPlayer: cappedPerPlayer };
+          args.paymentAmount = clientTotal > 0 ? Math.min(clientTotal, cappedTotal) : cappedTotal;
+        }
+      }
     }
   }
 
@@ -2963,6 +3077,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     paymentReservedSlots: args.paymentReservedSlots,
     paymentCurrency: args.paymentCurrency,
     sourcePaymentOrderRefNum: sourcePaymentOrderRefNum || undefined,
+    clientCreateRequestId: clientCreateRequestId || undefined,
     zoneAdminApproved: args.zoneAdminApproved,
     createdAt: now,
     updatedAt: now,
@@ -3042,6 +3157,139 @@ export const finalizePaidCreateFromProvider = internalMutation({
       trustedHostUid: true,
       sourcePaymentOrderRefNum: args.orderRefNum,
     });
+    return { ok: true, matchroomId };
+  },
+});
+
+// Team Challenge: server-side creation of the linked, zone-owned matchroom once
+// BOTH captains' funds are held and a venue is confirmed. Idempotent — returns
+// the existing room if already linked. Enters the zone-admin approval pipeline
+// (force-dispatch, since challenge "fullness" = both captains paid, not per-seat
+// confirmation). Never throws on roster skill gates (captain player records are
+// built defensively) so finalization cannot strand held funds.
+export const createTeamChallengeMatchroom = internalMutation({
+  args: { challengeId: v.id("teamChallenges") },
+  handler: async (ctx, args) => {
+    const challenge: any = await ctx.db.get(args.challengeId);
+    if (!challenge) return { ok: false, reason: "challenge_not_found" };
+    if (challenge.matchroomId) {
+      return { ok: true, matchroomId: challenge.matchroomId, alreadyLinked: true };
+    }
+
+    const aHeld = String(challenge.teamAPaymentState || "unpaid") === "held";
+    const bHeld = String(challenge.teamBPaymentState || "unpaid") === "held";
+    if (!aHeld || !bHeld) return { ok: false, reason: "not_both_held" };
+
+    const venue = challenge.confirmedVenue;
+    if (!venue?.zoneId) return { ok: false, reason: "no_confirmed_venue" };
+
+    const zone: any = await ctx.db.get(venue.zoneId as Id<"zones">);
+    if (!zone) return { ok: false, reason: "zone_not_found" };
+    const zoneOwnerUid = zone.ownerUid ? String(zone.ownerUid) : undefined;
+
+    const game = String(challenge.gameKey || challenge.game || "");
+    const teamSize = Math.max(1, Math.floor(Number(challenge.maxPlayers || 0) / 2) || 1);
+    const maxPlayers = Math.max(2, Number(challenge.maxPlayers || teamSize * 2));
+    const perPlayer = Math.max(0, Number(challenge.pricePerPlayer || 0));
+    const now = Date.now();
+    const scheduledStartAt = typeof challenge.scheduledAt === "number" ? challenge.scheduledAt : undefined;
+
+    const buildCaptainPlayer = async (uid: any, name: any) => {
+      const user = uid ? await resolveUserByAnyId(ctx, String(uid)) : null;
+      const resolvedUid = user ? String(user._id) : String(uid || "");
+      const skill = user ? getSkillScoreForGame(user, game) : null;
+      return {
+        uid: resolvedUid,
+        username: String(name || user?.username || user?.fullName || "Captain"),
+        joinedAt: now,
+        role: "Captain",
+        skillTier: typeof skill?.tier === "string" ? skill.tier : undefined,
+      };
+    };
+    const captainA = await buildCaptainPlayer(challenge.captainAUid, challenge.captainAName);
+    const captainB = await buildCaptainPlayer(challenge.captainBUid, challenge.captainBName);
+    const players = [captainA, captainB].filter((p) => p.uid);
+    const playerUids = Array.from(new Set(players.map((p) => p.uid)));
+
+    const buildSlots = (teamLetter: "A" | "B", captain: { uid: string; username: string; skillTier?: string } | null) => {
+      const slots: any[] = [];
+      for (let i = 0; i < teamSize; i++) {
+        const slotId = `${teamLetter}${i + 1}`;
+        if (i === 0 && captain?.uid) {
+          slots.push({
+            slotId,
+            uid: captain.uid,
+            user: { uid: captain.uid, username: captain.username, skillTier: captain.skillTier },
+            status: "confirmed" as const,
+            role: "Captain",
+          });
+        } else {
+          slots.push({ slotId, status: "open" as const });
+        }
+      }
+      return slots;
+    };
+
+    const skillStats = await buildRoomSkillStats(ctx, game, playerUids);
+
+    const matchroomId = await ctx.db.insert("matchrooms", {
+      hostUid: captainA.uid,
+      hostName: captainA.username,
+      game,
+      title: `${challenge.challengerTeamName || "Team A"} vs ${challenge.opponentTeamName || "Team B"}`,
+      status: "open",
+      maxPlayers,
+      currentPlayers: players.length,
+      players,
+      playerUids,
+      location: venue.venueName || zone.name || "Zone",
+      locationMode: "zone" as any,
+      zoneId: String(venue.zoneId),
+      zoneOwnerUid,
+      scheduledDate: challenge.scheduledDate,
+      scheduledTime: challenge.scheduledTime,
+      scheduledStartAt,
+      lockAt: getMatchroomLockAt(scheduledStartAt) || undefined,
+      pricing: { perPlayer, currency: "PKR" },
+      selectedZoneRateKey: challenge.zoneRateKey,
+      slotsA: buildSlots("A", captainA.uid ? captainA : null),
+      slotsB: buildSlots("B", captainB.uid ? captainB : null),
+      captainUidA: captainA.uid,
+      captainUidB: captainB.uid || undefined,
+      format: challenge.format,
+      seriesType: challenge.seriesType,
+      teamMode: "team" as any,
+      teamId: challenge.challengerTeamId ? String(challenge.challengerTeamId) : undefined,
+      teamName: challenge.challengerTeamName,
+      reservedSlots: maxPlayers,
+      bookingSource: "team_challenge",
+      paymentStatus: "paid" as any,
+      // Match the venue gross to the sum of the two captain holds exactly
+      // (each side holds ceil(perPlayer × teamSize)), avoiding a 1-PKR drift
+      // from ceil(perPlayer × maxPlayers) on fractional/odd cases.
+      paymentAmount: 2 * Math.ceil(perPlayer * teamSize),
+      paymentReservedSlots: maxPlayers,
+      paymentCurrency: "PKR",
+      avgSkillScoreLive: skillStats.avgSkillScoreLive,
+      totalSkillSum: skillStats.totalSkillSum,
+      ratedPlayerCount: skillStats.ratedPlayerCount,
+      zoneAdminApproved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await syncMatchroomMembers(ctx, matchroomId, playerUids);
+
+    await ctx.db.patch(args.challengeId, {
+      matchroomId,
+      status: "admin_pending",
+      zoneId: venue.zoneId as Id<"zones">,
+      zoneName: venue.venueName,
+      updatedAt: now,
+    });
+
+    await dispatchZoneAdminRequestForFullMatchroom(ctx, matchroomId, { force: true });
+
     return { ok: true, matchroomId };
   },
 });

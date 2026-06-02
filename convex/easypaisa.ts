@@ -921,6 +921,7 @@ export const getStartCheckoutContext = internalQuery({
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
     matchroomCreateArgs: v.optional(v.any()),
+    teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const user = await getPaymentUserWithFallback(ctx, args.userId);
@@ -1144,8 +1145,9 @@ export const getStartCheckoutContext = internalQuery({
 
     if (
       activeTransaction
-      && args.matchroomCreateArgs
+      && (args.matchroomCreateArgs || args.teamChallengeHold)
       && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+      && !activeTransaction.providerPayload?.checkoutContext?.teamChallengeHold
     ) {
       activeTransaction = null;
     }
@@ -1187,6 +1189,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
     phoneSource: v.optional(v.string()),
     checkoutPhoneMasked: v.optional(v.string()),
     matchroomCreateArgs: v.optional(v.any()),
+    teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1247,10 +1250,11 @@ export const createCheckoutTransactionWithLock = internalMutation({
             throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
           }
           if (
-            args.matchroomCreateArgs
+            (args.matchroomCreateArgs || args.teamChallengeHold)
             && !pointedTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+            && !pointedTransaction.providerPayload?.checkoutContext?.teamChallengeHold
           ) {
-            // Do not bind a matchroom create payment to a generic wallet top-up.
+            // Do not bind a domain-linked payment to a generic wallet top-up.
           } else {
           return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
           }
@@ -1274,8 +1278,9 @@ export const createCheckoutTransactionWithLock = internalMutation({
           throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
         }
         if (
-          args.matchroomCreateArgs
+          (args.matchroomCreateArgs || args.teamChallengeHold)
           && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
+          && !activeTransaction.providerPayload?.checkoutContext?.teamChallengeHold
         ) {
           // Continue below and create a domain-linked checkout.
         } else {
@@ -1308,6 +1313,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
           phoneSource: args.phoneSource || "profile",
           checkoutPhoneMasked: args.checkoutPhoneMasked || null,
           matchroomCreateArgs: args.matchroomCreateArgs || null,
+          teamChallengeHold: args.teamChallengeHold || null,
         },
         checkoutDebug: {
           env: EASYPAISA_ENV,
@@ -1485,6 +1491,7 @@ export const startCheckout = action({
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
     matchroomCreateArgs: v.optional(v.any()),
+    teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args): Promise<any> => {
     ensurePaymentConfig();
@@ -1498,6 +1505,7 @@ export const startCheckout = action({
       phone: args.phone,
       forceNew: args.forceNew,
       matchroomCreateArgs: args.matchroomCreateArgs,
+      teamChallengeHold: args.teamChallengeHold,
     });
     const userId = context.userId as Id<"users">;
     const userPhone = String(context.userPhone || "");
@@ -1573,6 +1581,7 @@ export const startCheckout = action({
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
       matchroomCreateArgs: args.matchroomCreateArgs,
+      teamChallengeHold: args.teamChallengeHold,
     });
     const transaction = checkoutStart.transaction;
     const attempt = String(checkoutStart.attempt || "created") as CheckoutAttempt;
@@ -2819,8 +2828,8 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
     return new Response("Transaction not found.", { status: 404 });
   }
 
-  const status = url.searchParams.get("status") || String(formData?.get?.("status") || "");
-  const desc = url.searchParams.get("desc") || String(formData?.get?.("desc") || "");
+  const inboundStatus = url.searchParams.get("status") || String(formData?.get?.("status") || "");
+  const inboundDesc = url.searchParams.get("desc") || String(formData?.get?.("desc") || "");
   const orderRefNumber =
     url.searchParams.get("orderRefNumber")
     || url.searchParams.get("orderRefNum")
@@ -2831,27 +2840,90 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
     return new Response("Payment reference mismatch.", { status: 400 });
   }
 
-  const result = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
-    orderRefNum: session.transaction.orderRefNum,
-    source: "hosted_finalize",
-    snapshot: {
-      orderRefNumber: session.transaction.orderRefNum,
-      amount: session.transaction.amount,
-      responseCode: status,
-      responseDesc: desc,
-      transactionStatus: status,
-      authToken,
-      paymentMethod: session.transaction.paymentMethod || EASYPAISA_PAYMENT_METHOD || null,
-      providerReference: orderRefNumber,
-      rawPayload: {
-        orderRefNumber,
-        status,
-        desc,
-        requestUrl: request.url,
-        requestMethod: request.method,
+  // P1 SECURITY: never trust the inbound finalize status/body. A party that knows
+  // a still-pending checkout token must not be able to flip the order to "paid"
+  // by POSTing status=SUCCESS. The hosted return is only a TRIGGER to verify with
+  // the provider: resolve the real payment state through the same server-to-server
+  // REST inquiry used by IPN/polling, then apply it via the idempotent
+  // applyProviderUpdate("inquiry") path. The inbound status/desc are retained only
+  // as diagnostics inside rawPayload and never drive the resolved status.
+  let result: any;
+  try {
+    const inquiryResult: any = await ctx.runAction((internal as any).easypaisaNode.inquireRestTransaction, {
+      orderId: session.transaction.orderRefNum,
+      storeId: EASYPAISA_STORE_ID,
+    });
+    const inquiryBody = inquiryResult?.body || {};
+    result = await ctx.runMutation((internal as any).easypaisa.applyProviderUpdate, {
+      orderRefNum: session.transaction.orderRefNum,
+      source: "inquiry",
+      snapshot: {
+        orderRefNumber: session.transaction.orderRefNum,
+        amount: session.transaction.amount,
+        responseCode: inquiryBody?.responseCode || inquiryBody?.errorCode || null,
+        responseDesc: inquiryBody?.responseDesc || inquiryBody?.errorReason || null,
+        transactionStatus: inquiryBody?.transactionStatus || inquiryBody?.status || null,
+        transactionId: inquiryBody?.transactionId || inquiryBody?.txnId || null,
+        paymentToken: inquiryBody?.paymentToken || null,
+        transactionDateTime: inquiryBody?.transactionDateTime || null,
+        paymentMode: inquiryBody?.paymentMode || null,
+        paymentMethod:
+          inquiryBody?.paymentMethod
+          || inquiryBody?.paymentMode
+          || session.transaction.paymentMethod
+          || EASYPAISA_PAYMENT_METHOD
+          || null,
+        authToken: inquiryBody?.auth_token || inquiryBody?.authToken || authToken || null,
+        providerReference:
+          inquiryBody?.transactionId
+          || inquiryBody?.txnId
+          || inquiryBody?.paymentToken
+          || session.transaction.orderRefNum,
+        rawPayload: {
+          rest: {
+            inquiry: {
+              status: inquiryResult?.status || null,
+              response: inquiryBody,
+              request: inquiryResult?.requestPayload || null,
+            },
+          },
+          finalize: {
+            receivedAt: Date.now(),
+            inboundStatus,
+            inboundDesc,
+            requestUrl: request.url,
+            requestMethod: request.method,
+          },
+          token: token || null,
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    // Provider inquiry failed (unreachable / transient). Do NOT credit on the
+    // strength of the inbound status. Leave the transaction in its current state
+    // and show a pending page; the IPN handler and the stuck-pending reconciler
+    // cron will settle it once the provider is reachable.
+    logGatewayDebug("finalize.inquiry_failed", {
+      token,
+      orderRefNumber,
+      inboundStatus,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    const appReturnUrl = String(session.transaction.appReturnUrl || "");
+    const sep = appReturnUrl.includes("?") ? "&" : "?";
+    const pendingReturnUrl = `${appReturnUrl}${sep}gateway=easypaisa&paymentStatus=pending&orderRefNum=${encodeURIComponent(session.transaction.orderRefNum)}`;
+    return new Response(
+      redirectHtml(
+        "Payment pending",
+        "Your payment is being reconciled. MatchHai will reflect the final status shortly.",
+        pendingReturnUrl,
+      ),
+      {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      },
+    );
+  }
 
   if (!result.ok && result.shouldRetry) {
     return new Response(result.message || "Payment reconciliation is pending retry.", { status: 503 });
@@ -2860,8 +2932,7 @@ export const easypaisaFinalizeHandler = httpAction(async (ctx, request) => {
   logGatewayDebug("finalize.received", {
     token,
     orderRefNumber,
-    status,
-    desc,
+    inboundStatus,
     resultStatus: result.status,
     requestMethod: request.method,
   });

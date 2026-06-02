@@ -83,6 +83,8 @@ export interface Matchroom {
   zoneOwnerUid?: string;
   branchId?: string;
   resourceIds?: string[];
+  // P1: per-attempt idempotency key for the direct wallet/free create path.
+  clientCreateRequestId?: string;
 
   // Timing & Pricing
   startTime?: any;
@@ -469,6 +471,14 @@ export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
     requestedResourceSurface: roomData.requestedResourceSurface,
     requestedResourceTier: roomData.requestedResourceTier,
     selectedZoneRateKey: roomData.selectedZoneRateKey,
+    // P1: server-side price-validation inputs (recomputed authoritatively on the
+    // backend; not all are persisted on the room).
+    branchId: roomData.branchId ?? undefined,
+    seriesType: roomData.seriesType ?? undefined,
+    overs: roomData.overs ?? undefined,
+    durationHours: roomData.durationHours ?? undefined,
+    // P1: per-attempt idempotency key for the wallet/free create path.
+    clientCreateRequestId: (roomData as any).clientCreateRequestId ?? undefined,
     slotsA,
     slotsB,
     captainUidA: roomData.captainUidA || roomData.hostUid,
