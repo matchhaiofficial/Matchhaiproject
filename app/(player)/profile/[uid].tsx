@@ -2,7 +2,7 @@ import { FontAwesome5 } from "@expo/vector-icons";
 import { formatDistanceToNow } from "date-fns";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, Share, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { convex } from "../../../src/lib/convex";
 import { api } from "../../../convex/_generated/api";
@@ -24,6 +24,8 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { normalizeValorantRole } from "../../../constants/profileOptions";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
+import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
+import { formatPlayerProfileShare } from "../../../src/utils/shareContent";
 import styles from "./profile.styles";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -923,12 +925,48 @@ export default function PlayerProfile() {
     const playerGames = getPlayerGames(profile);
     const avatarUrl = `https://ui-avatars.com/api/?name=${profile.username || 'Player'}&background=42a5f5&color=fff&size=200`;
 
+    const handleShareProfile = async () => {
+        if (!profile) return;
+        try {
+            const gameLabels = getPlayerGames(profile).map((key) =>
+                getCanonicalGameLabel(key),
+            );
+            const ratingSource = selectedGame
+                ? profile.skillScores?.[
+                      selectedGame as keyof NonNullable<UserProfile['skillScores']>
+                  ]?.rating
+                : undefined;
+            const message = formatPlayerProfileShare({
+                uid: String(uid),
+                displayName: profile.fullName || profile.username,
+                gameLabels,
+                rating: typeof ratingSource === "number" ? ratingSource : null,
+                faceitLevel: profile.faceitElo
+                    ? getFaceitLevel(profile.faceitElo)
+                    : null,
+            });
+            await Share.share({ message });
+        } catch (error) {
+            Logger.error("PlayerProfile", "Error sharing profile", error);
+        }
+    };
+
     return (
         <Screen style={styles.screen} scroll={false} contentStyle={styles.screenContent}>
             <AppHeader
                 title="Player Profile"
                 onBack={() => router.back()}
                 inlineTitle
+                rightAction={
+                    <Pressable
+                        onPress={() => void handleShareProfile()}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Share profile"
+                    >
+                        <AppIcon name="share" size="lg" tone="accent" />
+                    </Pressable>
+                }
             />
 
             <Animated.View style={[styles.body, entranceStyle]}>

@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Share, ScrollView, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { AppButton, AppCard } from "../../../src/components/AppPrimitives";
@@ -27,6 +27,7 @@ import {
   getPlayerVenueDetails,
 } from "../../../src/services/convex/zoneService";
 import { COLORS } from "../../../src/theme";
+import { formatVenueShare } from "../../../src/utils/shareContent";
 
 const REPORT_REASONS = [
   "Staff Behavior",
@@ -158,6 +159,22 @@ export default function PlayerVenueDetailsScreen() {
     }
   }, [selectedBranch, showToast]);
 
+  const onShareVenue = useCallback(async () => {
+    if (!venue) return;
+    try {
+      const message = formatVenueShare({
+        id: String(venue.id),
+        name: venue.venueBrandName,
+        areaCity: selectedBranch?.areaCityLabel,
+        games: venue.supportedGameLabels,
+        startingPriceLabel: selectedBranch?.startingPriceLabel,
+      });
+      await Share.share({ message });
+    } catch {
+      // ignore
+    }
+  }, [venue, selectedBranch]);
+
   const onCreateMatchroom = useCallback(() => {
     if (!selectedBranch) return;
     router.push({
@@ -214,6 +231,18 @@ export default function PlayerVenueDetailsScreen() {
         onBack={() => router.back()}
         inlineTitle
         style={styles.header}
+        rightAction={
+          venue ? (
+            <Pressable
+              onPress={() => void onShareVenue()}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Share venue"
+            >
+              <AppIcon name="share" size="lg" tone="accent" />
+            </Pressable>
+          ) : undefined
+        }
       />
 
       {loading ? (

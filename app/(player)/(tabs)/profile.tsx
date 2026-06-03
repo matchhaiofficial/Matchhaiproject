@@ -10,6 +10,7 @@ import {
     Pressable,
     RefreshControl,
     ScrollView,
+    Share,
     Text,
     View
 } from "react-native";
@@ -46,6 +47,8 @@ import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
 } from "../components/PlayerSurface";
+import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
+import { formatPlayerProfileShare } from "../../../src/utils/shareContent";
 import styles from "./profile.styles";
 
 // FACEIT Level Icons
@@ -310,6 +313,32 @@ export default function Profile() {
     };
 
     const handleSettings = () => router.push("/profile/edit");
+
+    const handleShareProfile = async () => {
+        if (!profile || !user?._id) return;
+        try {
+            const activeKeys = ALL_GAMES.map((g) => g.key).filter((key) =>
+                isGameActive(key),
+            );
+            const gameLabels = activeKeys.map((key) => getCanonicalGameLabel(key));
+            const firstRating = activeKeys
+                .map((key) => profile.skillScores?.[key]?.rating)
+                .find((rating) => typeof rating === "number");
+            const message = formatPlayerProfileShare({
+                uid: String(user._id),
+                displayName: profile.fullName || profile.username,
+                gameLabels,
+                rating: typeof firstRating === "number" ? firstRating : null,
+                faceitLevel:
+                    typeof profile.faceitSkillLevel === "number"
+                        ? profile.faceitSkillLevel
+                        : null,
+            });
+            await Share.share({ message });
+        } catch {
+            // ignore
+        }
+    };
     const handleSupport = () => router.push("/(player)/support" as any);
 
     const handleAddGame = (gameKey: string) => {
@@ -444,6 +473,14 @@ export default function Profile() {
                 inlineTitle
                 rightAction={(
                     <View style={styles.headerActions}>
+                        <Pressable
+                            style={styles.headerIcon}
+                            onPress={() => void handleShareProfile()}
+                            accessibilityRole="button"
+                            accessibilityLabel="Share profile"
+                        >
+                            <AppIcon name="share" size={22} color={COLORS.text} />
+                        </Pressable>
                         <Pressable
                             style={styles.headerIcon}
                             onPress={handleSupport}

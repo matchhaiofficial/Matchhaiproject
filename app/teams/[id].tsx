@@ -33,6 +33,7 @@ import { getUserProfile } from "../../src/services/userService";
 import { COLORS, SPACING } from "../../src/theme";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../src/utils/verificationGate";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { formatTeamShare } from "../../src/utils/shareContent";
 import { getTeamMainRosterSize, getTeamMaxSubstitutes } from "../../src/constants/teamRosterRules";
 import Logger from "../../src/utils/logger";
 import { buildLegacyTeamsHref } from "../../src/navigation/routes";
@@ -517,9 +518,18 @@ export default function TeamDetails() {
     const handleShare = async () => {
         if (!team) return;
         try {
-            await Share.share({
-                message: `Check out my team ${team.name} on MatchHai!`,
+            const captainMember = (team.members || []).find(
+                (m: any) => m.uid === team.captainUid || m.role === "captain",
+            );
+            const message = formatTeamShare({
+                id: String(team._id || id),
+                name: team.name,
+                game: team.game,
+                memberCount:
+                    team.memberUids?.length || team.members?.length || 0,
+                captainName: captainMember?.username,
             });
+            await Share.share({ message });
         } catch (error) {
             Logger.error("TeamDetails", "Error sharing", error);
         }

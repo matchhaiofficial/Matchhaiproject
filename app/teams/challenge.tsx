@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAction, useQuery } from "convex/react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Pressable, Share, ScrollView, Text, TextInput, View } from "react-native";
 
 import AppHeader from "../../src/components/AppHeader";
 import { AppIcon } from "../../src/components/AppIcon";
@@ -25,6 +25,7 @@ import {
 import type { Zone } from "../../src/services/convex/zoneService";
 import { COLORS } from "../../src/theme";
 import { getCanonicalGameLabel } from "../../src/utils/gameLabels";
+import { formatTeamChallengeShare } from "../../src/utils/shareContent";
 import { getTeamMainRosterSize } from "../../src/constants/teamRosterRules";
 import ZonePicker from "../matchrooms/create/components/ZonePicker";
 import { formatPakistaniPhone, isValidPakistaniPhone, normalizePakistaniPhone } from "../../src/utils/phoneUtils";
@@ -468,6 +469,31 @@ export default function TeamMatchChallengeDetails() {
         router.push(`/teams/challenge-chat?id=${challenge.id}` as any);
     };
 
+    // Captain-to-captain share. The challenge route is captain-only (getById
+    // returns null to anyone else), so a forwarded link only opens for the two
+    // captains; everyone else sees a safe "unavailable" state. Copy carries no
+    // payment/wallet/chat details.
+    const handleShareChallenge = async () => {
+        if (!challenge) return;
+        try {
+            const message = formatTeamChallengeShare({
+                id: String(challenge.id || challengeId),
+                teamAName: challenge.challengerTeamName,
+                teamBName: challenge.opponentTeamName,
+                game: challenge.gameKey,
+                scheduledDate: challenge.scheduledDate,
+                scheduledTime: challenge.scheduledTime,
+                venue:
+                    (challenge as any).venueName ||
+                    (challenge as any).confirmedVenueName ||
+                    undefined,
+            });
+            await Share.share({ message });
+        } catch {
+            // ignore
+        }
+    };
+
     if (loading) {
         return (
             <Screen style={styles.screen} scroll={false}>
@@ -503,20 +529,32 @@ export default function TeamMatchChallengeDetails() {
                 onBack={() => router.back()}
                 inlineTitle
                 rightAction={(
-                    <Pressable
-                        onPress={handleOpenChat}
-                        style={({ pressed }) => [
-                            styles.chatButton,
-                            !challenge.chatId && styles.chatButtonDisabled,
-                            pressed && styles.chatButtonPressed,
-                        ]}
-                    >
-                        <AppIcon
-                            name="chat-bubble-outline"
-                            size={18}
-                            color={challenge.chatId ? COLORS.accent : COLORS.muted}
-                        />
-                    </Pressable>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        {isCaptain && (
+                            <Pressable
+                                onPress={() => void handleShareChallenge()}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Share challenge"
+                            >
+                                <AppIcon name="share" size={18} color={COLORS.accent} />
+                            </Pressable>
+                        )}
+                        <Pressable
+                            onPress={handleOpenChat}
+                            style={({ pressed }) => [
+                                styles.chatButton,
+                                !challenge.chatId && styles.chatButtonDisabled,
+                                pressed && styles.chatButtonPressed,
+                            ]}
+                        >
+                            <AppIcon
+                                name="chat-bubble-outline"
+                                size={18}
+                                color={challenge.chatId ? COLORS.accent : COLORS.muted}
+                            />
+                        </Pressable>
+                    </View>
                 )}
             />
             <AppDialog

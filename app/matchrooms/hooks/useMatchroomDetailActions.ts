@@ -25,6 +25,7 @@ import { useToast } from "../../../src/hooks/useToast";
 import { choose, confirm } from "../../../src/ui/confirm";
 import Logger from "../../../src/utils/logger";
 import { isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
+import { formatMatchroomShare } from "../../../src/utils/shareContent";
 import { COUNTER_OFFER_TIME_WINDOW_MS } from "../../../src/constants/timing";
 import { getUserProfile } from "../../../src/services/userService";
 import { useCallback, useEffect, useRef } from "react";
@@ -574,10 +575,24 @@ export function useMatchroomDetailActions({
     }
   }, [user, id, startJoin, fetchRoom, showToast])
   const handleShare = async () => {
+    if (!room) return;
     try {
-      await Share.share({
-        message: `Join my ${room?.game} lobby on MatchHai! ${room?.title}`,
+      const venue =
+        String(room?.location || "").trim() ||
+        (Array.isArray(room?.broadcastAreas) ? room.broadcastAreas[0] : "") ||
+        "";
+      const message = formatMatchroomShare({
+        id: String(room?.id || id),
+        game: room?.game,
+        title: room?.title,
+        venue,
+        scheduledDate: room?.scheduledDate,
+        scheduledTime: room?.scheduledTime,
+        maxPlayers: room?.maxPlayers,
+        currentPlayers: room?.currentPlayers,
+        status: room?.status,
       });
+      await Share.share({ message });
     } catch {
       // ignore
     }
