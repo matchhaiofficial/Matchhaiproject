@@ -248,8 +248,10 @@ export function deriveMatchroomLobbyState(
         );
 
   const isFull = occupiedSeatCount >= (room?.maxPlayers || 0);
-  const matchCode =
-    room?.matchCode || (room?.id ? room.id.slice(-6).toUpperCase() : "");
+  // Only ever surface a check-in code the server explicitly returned. Never
+  // synthesize one from the room id — outsiders receive `matchCode: null`, and
+  // a code derived from the public id would defeat that server-side gating.
+  const matchCode = room?.matchCode || "";
   const qrValue = room?.id ? `matchhai://matchrooms/${room.id}` : "";
 
   return {

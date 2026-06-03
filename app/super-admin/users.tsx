@@ -14,6 +14,7 @@ import { AppButton } from "../../src/components/AppPrimitives";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { DiscoverFilterRow } from "../../src/features/discover/components/DiscoverShared";
+import { useAuth } from "../../src/context/AuthContext";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
@@ -79,12 +80,16 @@ function matchesDateRange(timestamp: number | null | undefined, range: DateRange
 const UserRow = React.memo(function UserRow({
   user,
   busy,
+  canManageSuperAdmins,
   onSuspend,
   onReactivate,
   onDelete,
 }: {
   user: SuperAdminUser;
   busy: boolean;
+  // True only when the viewer is the primary Super Admin (ovais@matchhai.com).
+  // Gates suspend/reactivate/delete actions on other Super Admin rows.
+  canManageSuperAdmins: boolean;
   onSuspend: (user: SuperAdminUser) => void;
   onReactivate: (user: SuperAdminUser) => void;
   onDelete: (user: SuperAdminUser) => void;
@@ -92,6 +97,9 @@ const UserRow = React.memo(function UserRow({
   const suspended = user.accountStatus === "suspended";
   const isDeleted = (user as any).suspensionReason === "account_deletion_processed";
   const isSuperAdmin = user.role === "super_admin" || user.role === "super-admin";
+  // A non-primary Super Admin cannot suspend/reactivate/delete another Super Admin.
+  // The backend enforces this too; this just hides actions that would be rejected.
+  const canAct = !isSuperAdmin || canManageSuperAdmins;
   return (
     <AdminListCard
       title={user.fullName || user.username || "Unknown user"}
@@ -99,7 +107,7 @@ const UserRow = React.memo(function UserRow({
       statusLabel={isDeleted ? "Deleted" : suspended ? "Suspended" : "Active"}
       statusTone={isDeleted || suspended ? "danger" : "success"}
       actions={
-        isDeleted ? (
+        !canAct ? null : isDeleted ? (
           <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
             Re-run Cleanup
           </AppButton>
@@ -112,7 +120,7 @@ const UserRow = React.memo(function UserRow({
             <AppButton size="sm" variant="danger" loading={busy} onPress={() => onSuspend(user)}>
               Suspend
             </AppButton>
-            {!isSuperAdmin ? (
+            {(!isSuperAdmin || canManageSuperAdmins) ? (
               <AppButton size="sm" variant="danger" loading={busy} onPress={() => onDelete(user)}>
                 Delete Account
               </AppButton>
@@ -132,10 +140,16 @@ const UserRow = React.memo(function UserRow({
   );
 });
 
+const PRIMARY_SUPER_ADMIN_EMAIL = "ovais@matchhai.com";
+
 export default function SuperAdminUsersScreen() {
   const router = useRouter();
+  const { user: authedUser } = useAuth();
   const { showToast } = useToast();
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
+  // Only the primary Super Admin may manage (suspend/delete) other Super Admins.
+  const canManageSuperAdmins =
+    String(authedUser?.email || "").trim().toLowerCase() === PRIMARY_SUPER_ADMIN_EMAIL;
   const [tab, setTab] = useState<UserTab>("all");
   const [users, setUsers] = useState<SuperAdminUser[]>([]);
   const [search, setSearch] = useState("");
@@ -285,12 +299,13 @@ export default function SuperAdminUsersScreen() {
       <UserRow
         user={item}
         busy={busyUserId === item.id}
+        canManageSuperAdmins={canManageSuperAdmins}
         onSuspend={handleSuspend}
         onReactivate={handleReactivate}
         onDelete={handleDelete}
       />
     ),
-    [busyUserId, handleDelete, handleSuspend, handleReactivate],
+    [busyUserId, canManageSuperAdmins, handleDelete, handleSuspend, handleReactivate],
   );
 
   const renderEmpty = useCallback(

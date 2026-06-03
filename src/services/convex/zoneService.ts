@@ -1172,7 +1172,7 @@ export async function getActiveZones(
  */
 export async function getZoneById(zoneId: string): Promise<Result<Zone>> {
   try {
-    const zone = await convex.query(api.zones.getById, {
+    const zone = await convex.query(api.zones.getPublicVenueById, {
       zoneId: zoneId as Id<"zones">,
     });
     if (!zone) {

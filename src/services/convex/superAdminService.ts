@@ -412,6 +412,7 @@ export type SuperAdminWithdrawalRequest = {
   bankName?: string | null;
   accountNumberMasked?: string | null;
   accountNumberLast4?: string | null;
+  accountNumberFull?: string | null;
   ownerName?: string | null;
   ownerEmail?: string | null;
   ownerPhone?: string | null;

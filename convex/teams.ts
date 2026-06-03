@@ -8,6 +8,34 @@ import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { getCurrentUser, isSuperAdminProfile } from "./authz";
+
+// Non-throwing membership check: captain, roster member, or super admin.
+async function isTeamViewerMember(ctx: any, team: any): Promise<boolean> {
+  try {
+    const actor = await getCurrentUser(ctx);
+    const viewer = actor.user;
+    if (!viewer) return false;
+    const viewerId = String(viewer._id);
+    if (String(team.captainUid || "") === viewerId) return true;
+    if (
+      Array.isArray(team.memberUids) &&
+      team.memberUids.map(String).includes(viewerId)
+    ) {
+      return true;
+    }
+    return isSuperAdminProfile(
+      viewer,
+      actor.authUser?.email || actor.identity?.email,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isPrivateTeam(team: any): boolean {
+  return String(team?.visibility || "").toLowerCase() === "private";
+}
 
 function doesUserPlayGame(user: any, game: string): boolean {
   switch (game) {
@@ -167,6 +195,18 @@ export const getWithMembers = query({
       .query("teamMembers")
       .withIndex("by_teamId", (q) => q.eq("teamId", args.teamId))
       .collect();
+
+    // Private teams: hide member identities from non-members. Keep the public
+    // header + a safe count so the UI can still show a join CTA, but never leak
+    // who is on the roster. Public teams are unchanged.
+    if (isPrivateTeam(team) && !(await isTeamViewerMember(ctx, team))) {
+      return {
+        ...team,
+        members: [],
+        memberCount: members.length,
+        rosterRestricted: true,
+      };
+    }
 
     return { ...team, members };
   },

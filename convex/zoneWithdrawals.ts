@@ -95,6 +95,7 @@ export const requestZoneWithdrawal = action({
         bankName,
         accountNumberMasked,
         accountNumberLast4,
+        accountNumberFull: accountNumberRaw,
         ownerName: args.ownerName,
         ownerEmail: args.ownerEmail,
         venueName: args.venueName,

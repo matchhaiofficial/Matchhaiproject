@@ -103,6 +103,9 @@ export interface Matchroom {
   // Server-derived: true only for host/captain/joined participants/owning zone
   // admin/super admin. Outsiders receive `false` and a null matchCode.
   canViewCheckIn?: boolean;
+  // Server-derived shape marker. "full" = authorized actor (entire document);
+  // "public" = non-member receiving the allow-listed public-safe projection.
+  accessLevel?: "full" | "public";
   flexibility?: string;
   bookingSource?: string;
   skipBookingRequest?: boolean;

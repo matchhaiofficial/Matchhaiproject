@@ -395,6 +395,10 @@ function serializeAdminZoneWithdrawal(row: any) {
     bankName: metadata.bankName || null,
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
+    // Full payout account number (Super-Admin-only serializer) so the reviewer can
+    // execute the bank transfer. Older requests created before this field was
+    // persisted will be null; the request email still carries the full number.
+    accountNumberFull: metadata.accountNumberFull || null,
     ownerName: metadata.ownerName || null,
     ownerEmail: metadata.ownerEmail || null,
     adminDecision: metadata.adminDecision || null,
@@ -431,6 +435,8 @@ function serializeAdminZoneWithdrawalEnriched(
     bankName: metadata.bankName || null,
     accountNumberMasked: metadata.accountNumberMasked || null,
     accountNumberLast4: metadata.accountNumberLast4 || null,
+    // Full payout account number (Super-Admin-only) for executing the transfer.
+    accountNumberFull: metadata.accountNumberFull || null,
     // Owner identity — metadata stored at request time, verified from user record
     ownerName: metadata.ownerName || user?.fullName || user?.username || null,
     ownerEmail: metadata.ownerEmail || user?.email || null,
@@ -1819,7 +1825,10 @@ export const listUsers = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    // Exclude the currently authenticated Super Admin's own row from the normal
+    // Users management list. Identity is server-derived, never client-passed.
+    const actorId = String(admin.profile._id);
 
     const limit = args.limit || 150;
     const docs = args.accountType
@@ -1831,6 +1840,7 @@ export const listUsers = query({
       : await ctx.db.query("users").withIndex("by_updatedAt").order("desc").take(limit);
 
     return docs
+      .filter((user) => String(user._id) !== actorId)
       .map((user) => ({
         id: user._id,
         ...user,
@@ -1846,7 +1856,10 @@ export const listUsersPage = query({
     cursor: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
-    await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    // Exclude the currently authenticated Super Admin's own row from the normal
+    // Users management list. Identity is server-derived, never client-passed.
+    const actorId = String(admin.profile._id);
     const limit = Math.max(1, Math.min(args.limit || 50, 100));
     const offset = Math.max(0, Number(args.cursor || 0) || 0);
     const takeLimit = offset + limit;
@@ -1857,15 +1870,23 @@ export const listUsersPage = query({
           .order("desc")
           .take(takeLimit)
       : await ctx.db.query("users").withIndex("by_updatedAt").order("desc").take(takeLimit);
-    const page = docs.slice(offset, offset + limit).map((user) => ({
-      id: user._id,
-      ...user,
-    }));
-    const nextOffset = offset + page.length;
+    // Pagination math is kept identical to the unfiltered query: offsets index the
+    // raw ordered window, and we advance the cursor by the raw window size. The
+    // actor's single row is simply dropped from whichever page it falls in, so a
+    // load-more / search / filter can never bring it back.
+    const windowDocs = docs.slice(offset, offset + limit);
+    const page = windowDocs
+      .filter((user) => String(user._id) !== actorId)
+      .map((user) => ({
+        id: user._id,
+        ...user,
+      }));
+    const nextOffset = offset + windowDocs.length;
+    const isDone = docs.length < takeLimit || windowDocs.length < limit;
     return {
       page,
-      isDone: docs.length < takeLimit || page.length < limit,
-      continueCursor: docs.length < takeLimit || page.length < limit ? null : String(nextOffset),
+      isDone,
+      continueCursor: isDone ? null : String(nextOffset),
       total: docs.length,
     };
   },
@@ -4014,6 +4035,19 @@ export const processAccountDeletion = mutation({
   },
 });
 
+// Only the primary Super Admin (ovais@matchhai.com) may suspend, reactivate, or
+// delete another Super Admin account. Any other Super Admin acting on a
+// Super-Admin target is rejected. Acting on a non-super-admin target — or the
+// primary acting on any account — is unaffected. Identity is server-derived.
+function assertCanActOnSuperAdminTarget(admin: any, target: any) {
+  const targetIsSuperAdmin = isAuthorizedSuperAdmin(target, target?.email);
+  if (!targetIsSuperAdmin) return;
+  const actorEmail = normalizeEmail(admin?.authUser?.email || admin?.profile?.email || "");
+  if (actorEmail !== normalizeEmail(PRIMARY_SUPER_ADMIN_PROTECTED_EMAIL)) {
+    throw new Error("Only the primary Super Admin can suspend or delete a Super Admin account.");
+  }
+}
+
 // Directly deletes a user account from the Users admin screen (no ticket required).
 // Use this when the ticket is already resolved or no ticket exists.
 export const deleteUserAccount = mutation({
@@ -4025,6 +4059,7 @@ export const deleteUserAccount = mutation({
     const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found.");
+    assertCanActOnSuperAdminTarget(admin, user);
     // Allow re-running on already-deleted accounts so stale deletions (run before
     // auth-email anonymization was added) can have their Better Auth record cleaned up.
 
@@ -4206,6 +4241,9 @@ export const setUserSuspension = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await getAuthenticatedAdmin(ctx, args.sessionToken);
+    const target = await ctx.db.get(args.userId);
+    if (!target) throw new Error("User not found.");
+    assertCanActOnSuperAdminTarget(admin, target);
     await applyUserSuspension(ctx, admin, {
       userId: args.userId,
       status: args.status,

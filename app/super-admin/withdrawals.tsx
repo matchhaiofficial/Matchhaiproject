@@ -661,7 +661,7 @@ export default function SuperAdminWithdrawalsScreen() {
                 {/* Bank Payout */}
                 <DetailSection title="Bank Payout">
                   <AdminInfoLine label="Bank" value={selected.bankName || "N/A"} />
-                  <AdminInfoLine label="Account" value={selected.accountNumberMasked || "N/A"} />
+                  <AdminInfoLine label="Account" value={selected.accountNumberFull || selected.accountNumberMasked || "N/A"} />
                   <AdminInfoLine label="Reference" value={selected.reference || selected.id} />
                 </DetailSection>
 

@@ -191,3 +191,82 @@ Matchroom QR:
 6. Super admin → QR/code visible.
 7. Shared link contains no QR/code; outsider opening it still can't see the code.
 8. No raw authorization errors shown.
+
+---
+
+## 10. Super Admin Users self-row exclusion (additional task, 2026-06-02)
+
+Requirement: in Super Admin → Users, the currently authenticated Super Admin's own
+row must not appear in the normal Users management list (only their own row; other
+admins/users still appear). Access-overview/admin-management screens are unaffected.
+
+Root behavior before: `app/super-admin/users.tsx` → `getUsersPage` →
+`api.admin.listUsersPage` (and `getUsers` → `api.admin.listUsers`) returned every
+user, including the logged-in Super Admin.
+
+Fix (backend, server-derived identity — never client-passed):
+- `convex/admin.ts` `listUsersPage` and `listUsers` now read the actor via
+  `getAuthenticatedAdmin(...)` → `admin.profile._id` and filter out that single row.
+- `listUsersPage` keeps offset math identical to the unfiltered query: offsets index
+  the raw ordered window and the cursor advances by the raw window size
+  (`windowDocs.length`), so the actor's row is just dropped from whichever page it
+  lands in. Search, filters, and load-more all operate on the actor-free server
+  result, so none can bring the row back.
+- `listSuperAdminAccess` (Access overview) intentionally left UNCHANGED — the current
+  Super Admin still appears there.
+- `getUsers`/`listUsers` is exported but currently unused by the app; filtered too for
+  consistency, no consumer affected.
+
+Validation: tsc PASS. Page/cursor/isDone semantics unchanged except the actor row is
+absent. Auth gate (`getAuthenticatedAdmin`) still rejects non-Super-Admins.
+
+QA: login as Ovais → Users list excludes Ovais; other users present; search/filters/
+load-more never surface Ovais; Access overview still shows Ovais; non-Super-Admin
+still blocked from the page.
+
+---
+
+## 11. Zone-admin withdrawal: full payout account number for Super Admin (2026-06-02)
+
+Issue: the Super Admin withdrawal review surface showed only the masked account
+number, so the reviewer could not execute the bank transfer. Root cause: the raw
+account number was never persisted — `wallet.createZoneWithdrawalTransaction` stored
+only `accountNumberMasked` / `accountNumberLast4`, so every review query/screen could
+only show the masked value. (The request-time email already included the full number.)
+
+Fix:
+- `convex/wallet.ts` `createZoneWithdrawalTransaction` — new optional arg
+  `accountNumberFull`, persisted to transaction `metadata.accountNumberFull`
+  (`metadata` is `v.any()`, no schema change).
+- `convex/zoneWithdrawals.ts` — passes `accountNumberFull: accountNumberRaw`.
+- `convex/admin.ts` — both Super-Admin-only serializers
+  (`serializeAdminZoneWithdrawal`, `serializeAdminZoneWithdrawalEnriched`) now return
+  `accountNumberFull`. These run only inside `getAuthenticatedAdmin`-gated queries;
+  zone/player paths never receive it.
+- `src/services/convex/superAdminService.ts` — `SuperAdminWithdrawalRequest` gains
+  `accountNumberFull?: string | null`.
+- `app/super-admin/withdrawals.tsx` — Bank Payout "Account" shows
+  `accountNumberFull || accountNumberMasked || "N/A"`.
+
+Note: requests created before this change have no stored full number → fall back to
+masked; their original request email still carries the full number. Exposure is
+Super-Admin-only (necessary to send the payout); list-row view stays masked.
+
+## 12. Restrict suspend/delete of a Super Admin to the primary (2026-06-02)
+
+Requirement: only `ovais@matchhai.com` may suspend or delete another Super Admin
+account; other Super Admins cannot.
+
+Fix (backend, server-derived identity):
+- `convex/admin.ts` — new `assertCanActOnSuperAdminTarget(admin, target)`: if the
+  target is a Super Admin (`isAuthorizedSuperAdmin`), the actor's email must equal
+  `ovais@matchhai.com` (normalized) or it throws. Non-super-admin targets are
+  unaffected. Called in `deleteUserAccount` and `setUserSuspension` (covers
+  suspend AND reactivate).
+- Frontend `app/super-admin/users.tsx` — `canManageSuperAdmins` (viewer email ===
+  ovais) gates the Suspend/Reactivate/Delete buttons on Super-Admin rows; backend
+  remains the hard gate. Delete on a Super-Admin row is now shown to the primary
+  (previously hidden for all Super-Admin rows).
+
+Validation: tsc PASS; codegen run (target `dev:ardent-lynx-28`) for the new
+`accountNumberFull` mutation arg; `git diff --check` exit 0.

@@ -193,17 +193,17 @@ const getZoneRateForChallenge = (zoneData: any, gameKey: string, maxPlayers: num
 
 const getZoneForChallenge = async (zoneId: string) => {
     try {
-        const zone = await convex.query(api.zones.getById, { zoneId: zoneId as Id<"zones"> });
+        const zone = await convex.query(api.zones.getPublicVenueById, { zoneId: zoneId as Id<"zones"> });
         if (zone) return zone;
     } catch {
         // Fall back to the string-compatible query below.
     }
 
-    const getByIdString = (api.zones as any).getByIdString;
-    if (!getByIdString) return null;
+    const getPublicVenueByIdString = (api.zones as any).getPublicVenueByIdString;
+    if (!getPublicVenueByIdString) return null;
 
     try {
-        return await convex.query(getByIdString, { zoneId });
+        return await convex.query(getPublicVenueByIdString, { zoneId });
     } catch {
         return null;
     }

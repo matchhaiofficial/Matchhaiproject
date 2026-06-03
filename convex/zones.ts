@@ -77,21 +77,66 @@ function buildAggregateCapacity(branches: any[]) {
 // ZONE QUERIES
 // ============================================
 
-// Get zone by ID
+// Public-safe venue projection. Strips owner identity, internal notes,
+// rejection reasons, migration internals, and payout-rate economics so the
+// player-facing venue page (and team-challenge rate lookups) never receive
+// those over the wire. Customer-facing pricing and intentionally-public
+// contact details (contactPhone/contactEmail) are retained.
+function buildPublicZoneView(zone: any): any {
+  if (!zone) return null;
+  const {
+    ownerUid: _ownerUid,
+    ownerUsername: _ownerUsername,
+    ownerFullName: _ownerFullName,
+    notes: _notes,
+    rejectionReason: _rejectionReason,
+    migration: _migration,
+    pilotPayoutRate: _pilotPayoutRate,
+    normalPayoutRate: _normalPayoutRate,
+    ...publicZone
+  } = zone;
+  return publicZone;
+}
+
+// Get zone by ID. Returns the public-safe projection only — the owner zone
+// dashboard reads its own zone via `getByOwner`, and super admins via the
+// `admin` namespace, so this query never needs to expose internal/payout fields
+// to a (potentially anonymous) caller.
 export const getById = query({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.zoneId);
+    return buildPublicZoneView(await ctx.db.get(args.zoneId));
   },
 });
 
-// Get zone by ID (string version for compatibility)
+// Get zone by ID (string version for compatibility) — public-safe projection.
 export const getByIdString = query({
   args: { zoneId: v.string() },
   handler: async (ctx, args) => {
     try {
       const id = args.zoneId as any;
-      return await ctx.db.get(id);
+      return buildPublicZoneView(await ctx.db.get(id));
+    } catch {
+      return null;
+    }
+  },
+});
+
+// Explicit public venue queries for player-facing surfaces. Same allow-listed
+// projection; named so callers can't accidentally assume internal fields exist.
+export const getPublicVenueById = query({
+  args: { zoneId: v.id("zones") },
+  handler: async (ctx, args) => {
+    return buildPublicZoneView(await ctx.db.get(args.zoneId));
+  },
+});
+
+export const getPublicVenueByIdString = query({
+  args: { zoneId: v.string() },
+  handler: async (ctx, args) => {
+    try {
+      const id = args.zoneId as any;
+      return buildPublicZoneView(await ctx.db.get(id));
     } catch {
       return null;
     }

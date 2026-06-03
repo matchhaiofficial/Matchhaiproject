@@ -530,19 +530,21 @@ export default function MatchroomDetails() {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               />
             )}
-            <HeaderIconButton
-              icon="share"
-              color={COLORS.accent}
-              onPress={handleShareAction}
-              onPressIn={() => {
-                if (touchDebugEnabled) {
-                  Logger.debug("TouchDebug", "pressIn", {
-                    tag: "lobby_header_share",
-                  });
-                }
-              }}
-              hitSlop={footerHitSlop}
-            />
+            {room && !isTerminalStatus && !room?.isPrivate && (
+              <HeaderIconButton
+                icon="share"
+                color={COLORS.accent}
+                onPress={handleShareAction}
+                onPressIn={() => {
+                  if (touchDebugEnabled) {
+                    Logger.debug("TouchDebug", "pressIn", {
+                      tag: "lobby_header_share",
+                    });
+                  }
+                }}
+                hitSlop={footerHitSlop}
+              />
+            )}
             {room && (isZoneAdmin || (isJoined && canSubmitComplain(room))) && (
               <HeaderIconButton
                 icon="flag"

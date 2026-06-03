@@ -139,19 +139,24 @@ export default function RootLayout() {
           return;
         }
 
-        if (provider === "faceit") {
-          showToast({
-            type: "success",
-            title: "FACEIT login callback",
-            message: `nickname=${nickname || ""} · faceitId=${faceitId || ""}`,
-          });
-        } else if (provider === "steam") {
-          showToast({
-            type: "success",
-            title: "Steam login callback",
-            message: `steamId=${steamId || ""}`,
-          });
-        } else {
+        if (provider === "faceit" || provider === "steam") {
+          const providerLabel = provider === "faceit" ? "FACEIT" : "Steam";
+          // Never echo externally-supplied provider IDs/nicknames into a
+          // production toast — keep that detail to dev diagnostics only.
+          if (__DEV__) {
+            showToast({
+              type: "success",
+              title: `${providerLabel} login callback`,
+              message: `nickname=${nickname || ""} · faceitId=${faceitId || ""} · steamId=${steamId || ""}`,
+            });
+          } else {
+            showToast({
+              type: "success",
+              title: "Account linked",
+              message: `Your ${providerLabel} account was connected.`,
+            });
+          }
+        } else if (__DEV__) {
           showToast({
             type: "info",
             title: "OAuth callback",

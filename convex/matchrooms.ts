@@ -2221,6 +2221,135 @@ async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
   }
 }
 
+function isTerminalMatchroomStatus(status: any): boolean {
+  return (
+    status === "completed" || status === "expired" || status === "cancelled"
+  );
+}
+
+// Whether a non-member viewer is still allowed to *see* a private/invite-only
+// room: assigned team-challenge members and users holding a pending matchroom
+// invite. True outsiders get nothing (the room resolves to "unavailable").
+async function viewerMayViewPrivateMatchroom(
+  ctx: any,
+  room: any,
+): Promise<boolean> {
+  try {
+    const actor = await getCurrentUser(ctx);
+    const viewer = actor.user;
+    if (!viewer) return false;
+    const viewerId = String(viewer._id);
+
+    if (
+      Array.isArray(room.assignedTeamMembers) &&
+      room.assignedTeamMembers.some(
+        (m: any) => String(m?.uid || "") === viewerId,
+      )
+    ) {
+      return true;
+    }
+
+    const invites = await ctx.db
+      .query("notifications")
+      .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", room._id))
+      .collect();
+    return invites.some(
+      (n: any) =>
+        String(n?.toUid || "") === viewerId &&
+        String(n?.type || "").startsWith("match.") &&
+        n?.status === "pending",
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Public-safe matchroom projection. Allow-listed fields only: never payment/
+// payout/settlement references, GPS coordinates, internal UIDs, result votes,
+// cancellation notes, idempotency keys, or the check-in `matchCode`.
+function buildPublicMatchroomView(room: any): any {
+  const sanitizedPlayers = Array.isArray(room.players)
+    ? room.players.map((p: any) => ({
+        uid: "",
+        username: String(p?.username || ""),
+        joinedAt: p?.joinedAt ?? null,
+        role: p?.role,
+        skillTier: p?.skillTier,
+      }))
+    : [];
+  return {
+    id: room._id,
+    _id: room._id,
+    title: room.title,
+    description: room.description,
+    game: room.game,
+    status: room.status,
+    format: room.format,
+    seriesType: room.seriesType ?? null,
+    selectedMaps: room.selectedMaps,
+    skillLevel: room.skillLevel,
+    teamMode: room.teamMode,
+    teamName: room.teamName ?? null,
+    maxPlayers: room.maxPlayers,
+    currentPlayers: room.currentPlayers,
+    players: sanitizedPlayers,
+    // Internal identifiers, raw slots, GPS, and all payment/payout/settlement
+    // fields are intentionally omitted for non-members.
+    playerUids: [],
+    slotsA: [],
+    slotsB: [],
+    location: room.location,
+    locationMode: room.locationMode,
+    broadcastAreas: room.broadcastAreas,
+    scheduledDate: room.scheduledDate,
+    scheduledTime: room.scheduledTime,
+    scheduledStartAt: room.scheduledStartAt,
+    startTime: room.startTime,
+    lockAt: room.lockAt,
+    expiresAt: room.expiresAt,
+    durationMinutes: room.durationMinutes,
+    durationHours: room.durationHours,
+    pricing: room.pricing,
+    hostName: room.hostName,
+    hostUid: "",
+    isPrivate: Boolean(room.isPrivate),
+    isLocked: Boolean(room.isLocked),
+    createdAt: room.createdAt,
+    canViewCheckIn: false,
+    matchCode: null,
+    accessLevel: "public",
+  };
+}
+
+// Decide the shape a viewer receives. Authorized actors (host / either captain /
+// joined participant / owning zone admin / super admin) get the full document;
+// outsiders get the public-safe projection. Private rooms resolve to `null`
+// (unavailable) for true outsiders so direct links/codes respect privacy.
+async function projectMatchroomForViewer(
+  ctx: any,
+  room: any,
+): Promise<any | null> {
+  const authorized = await resolveCheckInAccess(ctx, room);
+  if (!authorized) {
+    if (room.isPrivate) {
+      const mayView = await viewerMayViewPrivateMatchroom(ctx, room);
+      if (!mayView) return null;
+    }
+    return buildPublicMatchroomView(room);
+  }
+  const result: any = {
+    ...room,
+    id: room._id,
+    canViewCheckIn: true,
+    accessLevel: "full",
+  };
+  // Never expose an active check-in code once the room is finished/cancelled.
+  if (isTerminalMatchroomStatus(room.status)) {
+    result.matchCode = null;
+  }
+  return result;
+}
+
 export const getById = query({
   args: { matchroomId: v.string() },
   handler: async (ctx, args) => {
@@ -2228,14 +2357,7 @@ export const getById = query({
       const id = args.matchroomId as Id<"matchrooms">;
       const room = await ctx.db.get(id);
       if (room) {
-        // Gate the check-in code: outsiders never receive the real matchCode, so
-        // the secret can't leak via the payload even if a client renders it.
-        const canViewCheckIn = await resolveCheckInAccess(ctx, room);
-        const result: any = { ...room, id: room._id, canViewCheckIn };
-        if (!canViewCheckIn) {
-          result.matchCode = null;
-        }
-        return result;
+        return await projectMatchroomForViewer(ctx, room);
       }
     } catch {
       // Not a valid Convex ID
@@ -2244,7 +2366,9 @@ export const getById = query({
   },
 });
 
-// Get matchroom by matchCode (fallback lookup)
+// Get matchroom by matchCode (fallback lookup). Uses the same viewer-scoped
+// projection so a guessed/known code never returns the raw document or echoes
+// the check-in code back to a non-member.
 export const getByMatchCode = query({
   args: { matchCode: v.string() },
   handler: async (ctx, args): Promise<any> => {
@@ -2253,7 +2377,7 @@ export const getByMatchCode = query({
       .withIndex("by_matchCode", (q: any) => q.eq("matchCode", args.matchCode))
       .unique();
     if (room) {
-      return { ...room, id: room._id };
+      return await projectMatchroomForViewer(ctx, room);
     }
     return null;
   },

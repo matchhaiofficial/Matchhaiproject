@@ -306,6 +306,10 @@ export const createZoneWithdrawalTransaction = mutation({
     bankName: v.string(),
     accountNumberMasked: v.string(),
     accountNumberLast4: v.string(),
+    // Full payout account number. Persisted so the Super Admin who executes the
+    // bank transfer can read it on the review screen (Super-Admin-only surfaces).
+    // Never returned on zone/player-facing queries.
+    accountNumberFull: v.optional(v.string()),
     ownerName: v.optional(v.string()),
     ownerEmail: v.optional(v.string()),
     venueName: v.optional(v.string()),
@@ -344,6 +348,7 @@ export const createZoneWithdrawalTransaction = mutation({
         bankName: args.bankName,
         accountNumberMasked: args.accountNumberMasked,
         accountNumberLast4: args.accountNumberLast4,
+        accountNumberFull: args.accountNumberFull || null,
         ownerName: args.ownerName || user.fullName || user.username || null,
         ownerEmail: args.ownerEmail || user.email || null,
         venueName: args.venueName || null,
