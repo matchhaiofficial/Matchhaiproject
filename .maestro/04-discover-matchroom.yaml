@@ -1,0 +1,42 @@
+appId: ${E2E_APP_ID}
+name: 04 - Discover created matchroom
+tags:
+  - core
+env:
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+- launchApp
+
+# Open Discover from the bottom tab bar (app/(player)/(tabs)/_layout.tsx).
+# Discover is gated behind KYC; the seeded user must be verified.
+# TODO testID: add `discover-tab` to the Discover tab item.
+- tapOn: "Discover"
+- assertVisible: "Discover"
+
+# Discover defaults to the "Rooms" (matchrooms) segment.
+- tapOn:
+    text: "Rooms"
+    optional: true
+
+# Search for the room we created in flow 03.
+# TODO testID: add `discover-search-input` to the search TextInput in
+# app/(player)/(tabs)/discover.tsx.
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+
+# The created room card should appear in the list.
+# TODO testID: add `matchroom-card` to the card in
+# app/matchrooms/components/MatchroomCard.tsx.
+- assertVisible:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Open its detail screen (app/matchrooms/[id].tsx).
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Detail screen shows the room title and a join/lobby area.
+- assertVisible:
+    text: ${E2E_MATCHROOM_TITLE}

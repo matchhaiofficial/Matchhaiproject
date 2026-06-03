@@ -54,6 +54,8 @@ import {
 // Theme + Auth provider + Toast
 import Toast from "react-native-toast-message";
 import AuthProvider from "../src/context/AuthContext";
+import AppErrorBoundary from "../src/components/AppErrorBoundary";
+import { initMonitoring } from "../src/lib/monitoring";
 import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBridge";
 import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
 import MatchResultGate from "../src/components/MatchResultGate";
@@ -83,6 +85,11 @@ export default function RootLayout() {
   const { showToast } = useToast();
 
   useEffect(() => {
+    // Initialise provider-agnostic monitoring once, BEFORE the keep-awake
+    // filter below captures the global handler — this way monitoring's handler
+    // becomes the "previous" handler the filter chains to, so both run.
+    initMonitoring();
+
     const globalAny = globalThis as any;
     const errorUtils = globalAny.ErrorUtils;
     const previousGlobalErrorHandler =
@@ -179,25 +186,27 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <AuthenticatedConvexProvider>
-      <AuthProvider>
-        <InAppAlertProvider>
-          <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
-            <StatusBar style="light" translucent backgroundColor="transparent" />
-            <NotificationRuntimeBridge />
-            <PushRegistrationBridge />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: COLORS.backgroundDark },
-              }}
-            />
-            <MatchResultGate />
-            <Toast config={toastConfig} />
-          </View>
-        </InAppAlertProvider>
-      </AuthProvider>
-    </AuthenticatedConvexProvider>
+    <AppErrorBoundary>
+      <AuthenticatedConvexProvider>
+        <AuthProvider>
+          <InAppAlertProvider>
+            <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
+              <StatusBar style="light" translucent backgroundColor="transparent" />
+              <NotificationRuntimeBridge />
+              <PushRegistrationBridge />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: COLORS.backgroundDark },
+                }}
+              />
+              <MatchResultGate />
+              <Toast config={toastConfig} />
+            </View>
+          </InAppAlertProvider>
+        </AuthProvider>
+      </AuthenticatedConvexProvider>
+    </AppErrorBoundary>
   );
 }
 

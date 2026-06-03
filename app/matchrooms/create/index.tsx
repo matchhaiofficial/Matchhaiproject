@@ -2311,6 +2311,7 @@ export default function CreateMatchroom() {
       {selectedGame ? (
         <BottomActionBar>
           <Pressable
+            testID="matchroom-create-submit"
             onPressIn={onSubmitPressIn}
             onPressOut={onSubmitPressOut}
             style={({ pressed }) => [

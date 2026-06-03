@@ -1,0 +1,82 @@
+appId: ${E2E_APP_ID}
+name: 08 - Mock payment (STAGING / MOCK MODE ONLY)
+tags:
+  - payment
+env:
+  E2E_USER_EMAIL: ${E2E_USER_EMAIL}
+  E2E_USER_PASSWORD: ${E2E_USER_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# ===========================================================================
+# **** STAGING / MOCK PAYMENT MODE ONLY ****
+# **** NEVER run this against the real Easypaisa production gateway.      ****
+# **** NEVER use a real Easypaisa mobile-account number or real money.    ****
+# **** This flow assumes the staging Convex deployment is configured with ****
+# **** Easypaisa in mock/sandbox mode so no real charge can occur.        ****
+# ===========================================================================
+- launchApp:
+    clearState: true
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_USER_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_USER_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+# Reach a room that has a pending payment. Open it from Discover.
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Trigger payment. On the detail screen this is "Pay Now"; in create it is the
+# Easypaisa dialog ("Confirm Easypaisa Number").
+# TODO testID: add `payment-pay-now-button` to the Pay Now button in
+# app/matchrooms/[id].tsx, and `payment-confirm-button` to the Easypaisa
+# "Continue to Pay" button in
+# app/matchrooms/create/index.tsx (Easypaisa dialog footer).
+- tapOn:
+    text: "Pay Now"
+    optional: true
+- tapOn:
+    text: "Open Payment Status"
+    optional: true
+
+# Confirm Easypaisa number prompt. Use a MOCK staging number only.
+- assertVisible:
+    text: "Confirm Easypaisa Number|Easypaisa|Payment pending"
+    optional: true
+# TODO testID: add `payment-phone-input` to the Easypaisa phone TextInput.
+- tapOn:
+    text: "03XX XXX XXXX"
+    optional: true
+- inputText: "03000000000"  # MOCK staging number — never a real account.
+- hideKeyboard
+- tapOn:
+    text: "Continue to Pay"
+    optional: true
+
+# In mock mode the gateway auto-confirms. Refresh status to pull the result.
+- tapOn:
+    text: "I've paid / Refresh"
+    optional: true
+- tapOn:
+    text: "Open matchroom"
+    optional: true
+
+# Assert payment confirmed and the room status advanced.
+- assertVisible:
+    text: "Payment confirmed|Matchroom created|Payment received|Paid|You are in"

@@ -1,0 +1,53 @@
+appId: ${E2E_APP_ID}
+name: 06b - Host rejects join request
+tags:
+  - core
+env:
+  E2E_HOST_EMAIL: ${E2E_HOST_EMAIL}
+  E2E_HOST_PASSWORD: ${E2E_HOST_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# Standalone reject path. Run against a matchroom that has a FRESH pending
+# join request (re-seed or have user 2 request again before running). Do not
+# run right after 06-approve against the same request — it will already be
+# approved.
+- launchApp:
+    clearState: true
+
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_HOST_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_HOST_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# Reject the pending request.
+# TODO testID: add `join-request-reject-button` in app/matchrooms/[id].tsx.
+- assertVisible:
+    text: "Reject|Decline|Pending request"
+- tapOn:
+    text: "Reject"
+- tapOn:
+    text: "Decline"
+    optional: true
+
+- assertVisible:
+    text: "Rejected|Declined|Request removed|No pending requests"

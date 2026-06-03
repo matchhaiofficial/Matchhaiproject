@@ -1,0 +1,64 @@
+appId: ${E2E_APP_ID}
+name: 06 - Host approves join request
+tags:
+  - core
+env:
+  E2E_HOST_EMAIL: ${E2E_HOST_EMAIL}
+  E2E_HOST_PASSWORD: ${E2E_HOST_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# Sign in as the host/captain who owns the matchroom.
+- launchApp:
+    clearState: true
+
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_HOST_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_HOST_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+- assertVisible: "Player dashboard"
+
+# Open the host's own matchroom. Hosts can reach it from the dashboard
+# "Upcoming Matches" section or via Discover. Use Discover for determinism.
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# The pending join request from user 2 appears in the participants / requests
+# list. Approve it.
+# TODO testID: add `join-request-approve-button` and
+# `join-request-reject-button` (per pending requester) in
+# app/matchrooms/[id].tsx for stable targeting.
+- assertVisible:
+    text: "Approve|Pending request|Requests"
+- tapOn:
+    text: "Approve"
+
+# Confirm the requester is now an accepted participant.
+- assertVisible:
+    text: "Approved|Joined|You are in|Accepted"
+
+# ---------------------------------------------------------------------------
+# REJECT PATH (alternative branch — commented out so a single run does not both
+# approve and reject the same request). To exercise rejection, seed a fresh
+# request and run this section instead of the approve steps above. A dedicated
+# 06b-reject-join.yaml can be added if you want it as a standalone flow.
+# ---------------------------------------------------------------------------
+# - tapOn:
+#     text: "Reject"
+# - assertVisible:
+#     text: "Rejected|Declined|Request removed"

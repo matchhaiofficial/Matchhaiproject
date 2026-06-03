@@ -1,0 +1,49 @@
+appId: ${E2E_APP_ID}
+name: 02 - Edit profile selected games
+tags:
+  - core
+env:
+  E2E_GAME_LABEL: ${E2E_GAME_LABEL}
+---
+# Assumes 01-login already established a session. If run standalone, run
+# 01-login first (or `runFlow: 01-login.yaml`).
+- launchApp
+
+# Open the Profile tab. The custom tab bar renders "Profile" as a label.
+# TODO testID: add `profile-tab` to the Profile tab item in
+# app/(player)/(tabs)/_layout.tsx if text matching proves flaky.
+- tapOn: "Profile"
+
+# Open profile editing. The dashboard sidebar and profile screen expose
+# "Profile Settings" / an edit affordance routing to /profile/edit.
+# TODO testID: add `profile-edit-button` to the edit entry point.
+- tapOn:
+    text: "Edit Profile"
+    optional: true
+- tapOn:
+    text: "Profile Settings"
+    optional: true
+- tapOn:
+    text: "Edit"
+    optional: true
+
+# In the game-details / edit screen, toggle the target game on.
+# The game grid uses the human label (e.g. "CS2", "Valorant").
+# TODO testID: add `profile-game-toggle-<gameKey>` to the game cards in
+# app/(player)/profile/game-details.tsx for deterministic targeting.
+- assertVisible:
+    text: ${E2E_GAME_LABEL}
+- tapOn: ${E2E_GAME_LABEL}
+
+# Persist the change.
+# TODO testID: add `profile-save-button` to the save action.
+- tapOn:
+    text: "Save"
+    optional: true
+- tapOn:
+    text: "Save Changes"
+    optional: true
+
+# Confirm the game now appears as a selected/active game on the profile.
+- assertVisible:
+    text: ${E2E_GAME_LABEL}

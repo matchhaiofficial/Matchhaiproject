@@ -795,6 +795,7 @@ export default function Login() {
 
               <TextInput
                 ref={emailRef}
+                testID="login-email-input"
                 placeholder="Email or phone"
                 placeholderTextColor={COLORS.muted}
                 style={[styles.input, { paddingRight: INPUT_PADDING.withIcon }]}
@@ -874,6 +875,7 @@ export default function Login() {
 
               <TextInput
                 ref={passwordRef}
+                testID="login-password-input"
                 placeholder="Password"
                 placeholderTextColor={COLORS.muted}
                 style={[styles.input, { paddingRight: INPUT_PADDING.withToggle }]}
@@ -940,6 +942,7 @@ export default function Login() {
         {/* Primary Login button + brute-force UI */}
         <View style={styles.buttonShadowWrapper}>
           <Pressable
+            testID="login-submit-button"
             onPress={handleLogin}
             disabled={isSubmitDisabled}
             style={({ pressed }) => [

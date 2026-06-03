@@ -1,0 +1,60 @@
+appId: ${E2E_APP_ID}
+name: 05 - Second user requests to join
+tags:
+  - core
+env:
+  E2E_USER2_EMAIL: ${E2E_USER2_EMAIL}
+  E2E_USER2_PASSWORD: ${E2E_USER2_PASSWORD}
+  E2E_MATCHROOM_TITLE: ${E2E_MATCHROOM_TITLE}
+---
+# Start fresh and sign in as the SECOND seeded player.
+- launchApp:
+    clearState: true
+
+- assertVisible: "Welcome back"
+- tapOn: "Player"
+
+- tapOn:
+    id: "login-email-input"
+- inputText: ${E2E_USER2_EMAIL}
+- tapOn:
+    id: "login-password-input"
+- inputText: ${E2E_USER2_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit-button"
+
+- assertVisible: "Player dashboard"
+
+# Find the host's matchroom via Discover.
+- tapOn: "Discover"
+- tapOn:
+    text: "Rooms"
+    optional: true
+- tapOn:
+    text: "Search rooms..."
+    optional: true
+- inputText: ${E2E_MATCHROOM_TITLE}
+- hideKeyboard
+- assertVisible:
+    text: ${E2E_MATCHROOM_TITLE}
+- tapOn:
+    text: ${E2E_MATCHROOM_TITLE}
+
+# On the detail screen, request to join. Two confirmed testIDs exist:
+# - matchroom-request-join-button        (inline footer button)
+# - matchroom-request-join-bottom-button (sticky bottom action bar button)
+# The sticky button shows when the inline one is scrolled off; try both.
+- tapOn:
+    id: "matchroom-request-join-bottom-button"
+    optional: true
+- tapOn:
+    id: "matchroom-request-join-button"
+    optional: true
+- tapOn:
+    text: "Request to Join"
+    optional: true
+
+# Confirm the request was sent — the button flips to a cancel/pending state.
+- assertVisible:
+    text: "Cancel Request|Request sent|Waiting for approval|Pending"
