@@ -41,6 +41,39 @@ export const MATCHROOM_LOCKED_MESSAGE =
   "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.";
 const MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE =
   "This venue already has a matchroom for the same game at the same scheduled time. Please choose a different time or venue.";
+const INSUFFICIENT_WALLET_BALANCE_MESSAGE =
+  "Insufficient wallet balance. Please add funds from Wallet.";
+const MATCHROOM_CREATE_INSUFFICIENT_WALLET_CODE =
+  "INSUFFICIENT_WALLET_BALANCE";
+
+function matchroomCreateFailure(message: string, code: string) {
+  return {
+    ok: false,
+    message,
+    code,
+  } as const;
+}
+
+function isMatchroomCreateFailureResult(value: any) {
+  return Boolean(value && typeof value === "object" && value.ok === false);
+}
+
+function getHostWalletCreateFailure(args: any, hostUser: any) {
+  const paymentAmount = Math.max(0, Math.ceil(Number(args.paymentAmount || 0)));
+  if (String(args.paymentStatus || "") !== "paid" || paymentAmount <= 0) {
+    return null;
+  }
+
+  const walletBalance = Number(hostUser?.walletBalance || 0);
+  if (Number.isFinite(walletBalance) && walletBalance >= paymentAmount) {
+    return null;
+  }
+
+  return matchroomCreateFailure(
+    INSUFFICIENT_WALLET_BALANCE_MESSAGE,
+    MATCHROOM_CREATE_INSUFFICIENT_WALLET_CODE,
+  );
+}
 
 function getMatchroomPlayerUids(room: any): string[] {
   const fromPlayerUids = Array.isArray(room.playerUids) ? room.playerUids.map(String) : [];
@@ -3001,9 +3034,13 @@ const createMatchroomArgsValidator = {
 
 async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   trustedHostUid?: boolean;
+  verifiedActor?: any;
+  walletPrecheckHostUser?: any;
   sourcePaymentOrderRefNum?: string | null;
 }) {
-  const actor = options?.trustedHostUid
+  const actor = options?.verifiedActor
+    ? options.verifiedActor
+    : options?.trustedHostUid
     ? {
         convexUser: await ctx.db.get(args.hostUid as Id<"users">),
       }
@@ -3159,6 +3196,12 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
   const hostSkill = await requireUserGameSkill(ctx, actorUid, args.game);
   const skillStats = await buildRoomSkillStats(ctx, args.game, normalizedPlayerUids);
+  const walletFailure = options?.walletPrecheckHostUser
+    ? getHostWalletCreateFailure(args, options.walletPrecheckHostUser)
+    : null;
+  if (walletFailure) {
+    return walletFailure;
+  }
 
   const matchroomId = await ctx.db.insert("matchrooms", {
     hostUid: actorUid,
@@ -3247,7 +3290,23 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
 export const create = mutation({
   args: createMatchroomArgsValidator,
   handler: async (ctx, args) => {
-    const matchroomId = await createMatchroomFromValidatedArgs(ctx, args);
+    const actor = await requireVerifiedActor(ctx, args.hostUid);
+    const actorUid = String(actor.convexUser._id);
+    if (actorUid !== args.hostUid) {
+      return matchroomCreateFailure(
+        "You can only create a matchroom as yourself",
+        "HOST_MISMATCH",
+      );
+    }
+
+    const createResult = await createMatchroomFromValidatedArgs(ctx, args, {
+      verifiedActor: actor,
+      walletPrecheckHostUser: actor.convexUser,
+    });
+    if (isMatchroomCreateFailureResult(createResult)) {
+      return createResult;
+    }
+    const matchroomId = createResult;
 
     // Charge the host's wallet inside the same authenticated transaction so
     // creation and payment succeed or fail together. If the deduction throws

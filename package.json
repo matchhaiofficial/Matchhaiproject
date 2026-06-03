@@ -24,6 +24,7 @@
     "@react-native-picker/picker": "2.11.1",
     "@react-navigation/native": "^7.1.8",
     "better-auth": "1.4.9",
+    "babel-preset-expo": "~54.0.11",
     "convex": "^1.32.0",
     "date-fns": "^4.1.0",
     "expo": "~54.0.33",

@@ -70,6 +70,14 @@ function getCandidateFetchLimit(limit: number, options: { min: number; max: numb
   return Math.min(options.max, Math.max(options.min, limit * multiplier));
 }
 
+function uniqueRowsById(rows: any[]) {
+  const byId = new Map<string, any>();
+  rows.forEach((row) => {
+    if (row?._id) byId.set(String(row._id), row);
+  });
+  return Array.from(byId.values());
+}
+
 function getSafeDiscoverLimit(value: number | undefined, fallback: number, max: number) {
   const parsed = Number(value || fallback);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -418,9 +426,19 @@ export const listDiscoverPlayers = query({
       return [];
     }
 
+    const search = args.searchQuery.trim().toLowerCase();
     const playerFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 1200 });
+    const playersQuery = search
+      ? ctx.db
+        .query("users")
+        .withIndex("by_usernameLower", (q) =>
+          q.gte("usernameLower", search).lt("usernameLower", `${search}\uffff`)
+        )
+      : ctx.db
+        .query("users")
+        .withIndex("by_accountType", (q) => q.eq("accountType", "player"));
     const [players, friendships, pendingRequests] = await Promise.all([
-      ctx.db.query("users").withIndex("by_accountType", (q) => q.eq("accountType", "player")).take(playerFetchLimit),
+      playersQuery.take(playerFetchLimit),
       ctx.db.query("friendships").withIndex("by_userId", (q) => q.eq("userId", viewerUserId)).collect(),
       ctx.db
         .query("notifications")
@@ -436,7 +454,6 @@ export const listDiscoverPlayers = query({
         .filter(isActivePendingNotification)
         .map((row: any) => String(row.toUid))
     );
-    const search = args.searchQuery.trim().toLowerCase();
     const presenceNow = Date.now();
     const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
     const isPlayerOnline = (player: any) =>
@@ -444,6 +461,7 @@ export const listDiscoverPlayers = query({
 
     return players
       .filter((player: any) => String(player._id) !== String(viewerUserId))
+      .filter((player: any) => player.accountType === "player")
       .filter((player: any) => !isUserHiddenFromPublic(player))
       .filter(playerHasEnabledGame)
       .filter((player: any) => !search || String(player.username || "").toLowerCase().includes(search))
@@ -529,16 +547,40 @@ export const listDiscoverMatchrooms = query({
       return [];
     }
 
+    const searchText = args.searchQuery.trim();
+    const search = searchText.toLowerCase();
     const roomFetchLimit = getCandidateFetchLimit(limit, { min: 120, max: 1200 });
-    const baseRooms =
+    const fetchBaseRooms = () =>
       args.selectedGame !== "all"
-        ? await ctx.db
-            .query("matchrooms")
-            .withIndex("by_game", (q) => q.eq("game", args.selectedGame))
-            .take(roomFetchLimit)
-        : await ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(roomFetchLimit);
+        ? ctx.db
+          .query("matchrooms")
+          .withIndex("by_game", (q) => q.eq("game", args.selectedGame))
+          .take(roomFetchLimit)
+        : ctx.db.query("matchrooms").withIndex("by_createdAt").order("desc").take(roomFetchLimit);
+    const baseRooms = search
+      ? uniqueRowsById(
+        (
+          await Promise.all([
+            ctx.db
+              .query("matchrooms")
+              .withSearchIndex("search_title", (q) => {
+                const query = q.search("title", searchText);
+                return args.selectedGame !== "all" ? query.eq("game", args.selectedGame) : query;
+              })
+              .take(roomFetchLimit),
+            ctx.db
+              .query("matchrooms")
+              .withSearchIndex("search_location", (q) => {
+                const query = q.search("location", searchText);
+                return args.selectedGame !== "all" ? query.eq("game", args.selectedGame) : query;
+              })
+              .take(roomFetchLimit),
+            fetchBaseRooms(),
+          ])
+        ).flat(),
+      )
+      : await fetchBaseRooms();
 
-    const search = args.searchQuery.trim().toLowerCase();
     return baseRooms
       .filter((room: any) => !isRoomExpired(room))
       .filter((room: any) => !isDisabledPhysicalGame(room.game))
@@ -690,10 +732,32 @@ export const listDiscoverTeams = query({
         }
       });
 
-    const baseTeams =
+    const fetchBaseTeams = () =>
       args.selectedGame !== "all"
-        ? await ctx.db.query("teams").withIndex("by_game", (q) => q.eq("game", args.selectedGame)).take(teamFetchLimit)
-        : await ctx.db.query("teams").order("desc").take(teamFetchLimit);
+        ? ctx.db.query("teams").withIndex("by_game", (q) => q.eq("game", args.selectedGame)).take(teamFetchLimit)
+        : ctx.db.query("teams").order("desc").take(teamFetchLimit);
+    const baseTeams = search
+      ? uniqueRowsById(
+        (
+          await Promise.all([
+            ctx.db
+              .query("teams")
+              .withSearchIndex("search_name", (q) => {
+                const query = q.search("name", search);
+                return args.selectedGame !== "all" ? query.eq("game", args.selectedGame) : query;
+              })
+              .take(teamFetchLimit),
+            ctx.db
+              .query("teams")
+              .withIndex("by_nameLower", (q) =>
+                q.gte("nameLower", search).lt("nameLower", `${search}\uffff`)
+              )
+              .take(teamFetchLimit),
+            fetchBaseTeams(),
+          ])
+        ).flat(),
+      )
+      : await fetchBaseTeams();
     const captainMap = await hydrateCaptainMap(baseTeams);
 
     return baseTeams
@@ -759,12 +823,53 @@ export const listDiscoverZones = query({
     }
 
     const zoneFetchLimit = getCandidateFetchLimit(limit, { min: 40, max: 1200, multiplier: 2 });
-    const zones = await ctx.db
-      .query("zones")
-      .withIndex("by_status", (q) => q.eq("status", "active"))
-      .order("desc")
-      .take(zoneFetchLimit);
-    const search = args.searchQuery.trim().toLowerCase();
+    const searchText = args.searchQuery.trim();
+    const search = searchText.toLowerCase();
+    const fetchActiveZones = () =>
+      ctx.db
+        .query("zones")
+        .withIndex("by_status", (q) => q.eq("status", "active"))
+        .order("desc")
+        .take(zoneFetchLimit);
+    const zones = search
+      ? uniqueRowsById(
+        (
+          await Promise.all([
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_name", (q) => q.search("name", searchText).eq("status", "active"))
+              .take(zoneFetchLimit),
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_venueBrandName", (q) =>
+                q.search("venueBrandName", searchText).eq("status", "active")
+              )
+              .take(zoneFetchLimit),
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_city", (q) => q.search("city", searchText).eq("status", "active"))
+              .take(zoneFetchLimit),
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_address", (q) => q.search("address", searchText).eq("status", "active"))
+              .take(zoneFetchLimit),
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_primaryBranch_areaLabel", (q) =>
+                q.search("primaryBranch.areaLabel", searchText).eq("status", "active")
+              )
+              .take(zoneFetchLimit),
+            ctx.db
+              .query("zones")
+              .withSearchIndex("search_primaryBranch_addressLine1", (q) =>
+                q.search("primaryBranch.addressLine1", searchText).eq("status", "active")
+              )
+              .take(zoneFetchLimit),
+            fetchActiveZones(),
+          ])
+        ).flat(),
+      )
+      : await fetchActiveZones();
     const normalizedArea = String(args.userArea || "").trim().toLowerCase();
     const normalizedCity = String(args.userCity || "").trim().toLowerCase();
 

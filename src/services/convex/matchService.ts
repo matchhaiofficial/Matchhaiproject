@@ -189,6 +189,27 @@ type SuccessResult<T> = { ok: true; data?: T; id?: string; message?: string };
 type ErrorResult = { ok: false; message: string; code?: string };
 type Result<T = void> = SuccessResult<T> | ErrorResult;
 
+function normalizeCreateMatchroomMutationResult(result: any): Result<{ id: string }> {
+  if (result && typeof result === "object" && result.ok === false) {
+    return {
+      ok: false,
+      message: String(result.message || "Failed to create matchroom."),
+      code: result.code ? String(result.code) : undefined,
+    };
+  }
+
+  const id =
+    typeof result === "string"
+      ? result
+      : String(result?.matchroomId || result?.id || "");
+
+  if (!id) {
+    return { ok: false, message: "Failed to create matchroom." };
+  }
+
+  return { ok: true, id };
+}
+
 function normalizeMatchroomRequestError(error: any) {
   const message = cleanConvexErrorMessage(error, "Failed to send request");
   if (message.includes("Request already pending")) {
@@ -548,7 +569,7 @@ export async function createMatchroom(
       matchroomId = await convex.mutation(api.matchrooms.create, mutationArgs);
     }
 
-    return { ok: true, id: matchroomId };
+    return normalizeCreateMatchroomMutationResult(matchroomId);
   } catch (error: any) {
     const message = getUserFacingErrorMessage(error, "Failed to create matchroom");
     return { ok: false, message };

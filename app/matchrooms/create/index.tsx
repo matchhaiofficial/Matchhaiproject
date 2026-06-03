@@ -1,5 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -208,6 +208,7 @@ export default function CreateMatchroom() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState<MatchroomCreateSubmitFeedback | null>(null);
+  const lastInvalidScheduleToastKeyRef = useRef<string | null>(null);
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const { animatedStyle: contentEntranceStyle } = useEntrance({
     visible: Boolean(selectedGame),
@@ -572,12 +573,29 @@ export default function CreateMatchroom() {
   }, [formData.date, formData.time, isZoneWalkInAdmin, minAllowedDate]);
 
   useEffect(() => {
-    if (isZoneWalkInAdmin) return;
-    if (!formData.date || !formData.time) return;
-    if (!isDateAllowed) {
-      setFormData((prev) => ({ ...prev, date: "" }));
+    if (isZoneWalkInAdmin) {
+      lastInvalidScheduleToastKeyRef.current = null;
+      return;
     }
-  }, [formData.date, formData.time, isDateAllowed, isZoneWalkInAdmin]);
+    if (!formData.date || !formData.time) {
+      lastInvalidScheduleToastKeyRef.current = null;
+      return;
+    }
+    if (isDateAllowed) {
+      lastInvalidScheduleToastKeyRef.current = null;
+      return;
+    }
+    const invalidScheduleKey = `${formData.date}|${formData.time}`;
+    if (lastInvalidScheduleToastKeyRef.current !== invalidScheduleKey) {
+      lastInvalidScheduleToastKeyRef.current = invalidScheduleKey;
+      showToast({
+        message: "You can only create a matchroom after 3 full days (72 hours).",
+        title: "Date too soon",
+        type: "warning",
+      });
+    }
+    setFormData((prev) => ({ ...prev, date: "" }));
+  }, [formData.date, formData.time, isDateAllowed, isZoneWalkInAdmin, showToast]);
 
   // Format-specific defaults are now applied in handleFieldChange to avoid duplicated effects
 
