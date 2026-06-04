@@ -16,10 +16,10 @@
     "e2e:maestro": "maestro test .maestro",
     "e2e:maestro:android": "maestro --platform android test .maestro",
     "e2e:maestro:ios": "maestro --platform ios test .maestro",
-    "load:smoke": "k6 run load-tests/scenarios/smoke.js",
-    "load:100": "k6 run -e PROFILE=load100 load-tests/scenarios/stress.js",
-    "load:500": "k6 run -e PROFILE=load500 load-tests/scenarios/stress.js",
-    "load:1000": "k6 run -e PROFILE=load1000 load-tests/scenarios/stress.js"
+    "load:smoke": "k6 run --env PROFILE=smoke load-tests/scenarios/smoke.js",
+    "load:100": "k6 run --env PROFILE=load100 load-tests/scenarios/smoke.js",
+    "load:500": "k6 run --env PROFILE=load500 load-tests/scenarios/smoke.js",
+    "load:1000": "k6 run --env PROFILE=load1000 load-tests/scenarios/smoke.js"
   },
   "dependencies": {
     "@auth/core": "^0.37.4",
