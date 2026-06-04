@@ -25,7 +25,7 @@ export const thresholds = {
   http_req_failed: ['rate<0.01'],
   // 95th percentile request duration. 800ms is the documented target SLO.
   // Adjust after establishing a clean baseline on staging.
-  http_req_duration: ['p95<800'],
+  http_req_duration: ['p(95)<800'],
   // Functional checks (assertions in scenarios) must pass > 99% of the time.
   checks: ['rate>0.99'],
   // Custom metric defined in lib/http.js: must remain exactly 0.

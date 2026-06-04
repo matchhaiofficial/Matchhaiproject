@@ -1809,8 +1809,8 @@ Legend: auth check and ownership check are pattern-detected (not formally proven
 ### 24.2 `eas.json` (static)
 
 - Preview env points to a concrete Convex deployment:
-  - `EXPO_PUBLIC_CONVEX_URL=https://quick-panda-920.convex.cloud`
-  - `EXPO_PUBLIC_CONVEX_SITE_URL=https://quick-panda-920.convex.site`
+  - `EXPO_PUBLIC_CONVEX_URL=https://acrobatic-bison-271.convex.cloud`
+  - `EXPO_PUBLIC_CONVEX_SITE_URL=https://acrobatic-bison-271.convex.site`
 - Production env contains placeholders:
   - `EXPO_PUBLIC_CONVEX_URL=https://REPLACE_WITH_PRODUCTION_DEPLOYMENT.convex.cloud`
   - `EXPO_PUBLIC_CONVEX_SITE_URL=https://REPLACE_WITH_PRODUCTION_DEPLOYMENT.convex.site`

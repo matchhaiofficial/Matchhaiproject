@@ -28,8 +28,8 @@ import { Rate } from 'k6/metrics';
 export const serverErrors = new Rate('server_errors');
 
 // Staging defaults. Overridable via environment, but must remain non-prod.
-const DEFAULT_SITE_URL = 'https://quick-panda-920.convex.site';
-const DEFAULT_CLOUD_URL = 'https://quick-panda-920.convex.cloud';
+const DEFAULT_SITE_URL = 'https://acrobatic-bison-271.convex.site';
+const DEFAULT_CLOUD_URL = 'https://acrobatic-bison-271.convex.cloud';
 
 export const SITE_URL = (__ENV.CONVEX_SITE_URL || DEFAULT_SITE_URL).replace(/\/$/, '');
 export const CLOUD_URL = (__ENV.CONVEX_URL || DEFAULT_CLOUD_URL).replace(/\/$/, '');

@@ -5,6 +5,7 @@ import {
   Modal,
   Pressable,
   Platform,
+  type LayoutChangeEvent,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -377,12 +378,27 @@ export function AppBottomSheet({
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(0, insets.bottom || 0);
+  const [sheetViewportHeight, setSheetViewportHeight] = React.useState(0);
+  const measuredViewportHeight = sheetViewportHeight || windowHeight;
+  const availableSheetHeight = Math.max(
+    0,
+    measuredViewportHeight - insets.top - bottomInset - SPACING.xl,
+  );
   const maxSheetHeight = Math.floor(
     Math.min(
-      windowHeight * 0.82,
-      windowHeight - insets.top - bottomInset - SPACING.xl,
+      measuredViewportHeight * 0.82,
+      availableSheetHeight,
     ),
   );
+  React.useEffect(() => {
+    if (!visible) setSheetViewportHeight(0);
+  }, [visible]);
+  const handleSheetViewportLayout = React.useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    setSheetViewportHeight((currentHeight) =>
+      Math.abs(currentHeight - nextHeight) > 1 ? nextHeight : currentHeight,
+    );
+  }, []);
   const entrance = useEntrance({
     visible,
     axis: "y",
@@ -410,13 +426,14 @@ export function AppBottomSheet({
           onPress={handleRequestClose}
         />
         <MaybeKeyboardAvoidingView
-          enabled={keyboardAware}
+          enabled={keyboardAware && Platform.OS === "ios"}
           behavior={keyboardAvoidBehavior}
           keyboardVerticalOffset={keyboardVerticalOffset}
           style={styles.sheetKeyboardAvoiding}
         >
           <View
             style={styles.sheetWrap}
+            onLayout={handleSheetViewportLayout}
           >
             <Animated.View style={entrance.animatedStyle}>
               <View

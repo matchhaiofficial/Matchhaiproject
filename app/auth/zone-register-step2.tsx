@@ -152,6 +152,16 @@ export default function AdminRegisterStep2() {
     debouncedSearch(text);
   };
 
+  const getBranchAddressSearchLabel = (branch: BranchData) => {
+    const address = String(branch.addressLine1 || "").trim();
+    if (!address) return "";
+
+    return address
+      .split(",")
+      .map((part) => part.trim())
+      .find(Boolean) || address;
+  };
+
   const handleSelectLocation = (result: LocationSearchResult) => {
     const formattedAddress = String(result.display_name || "");
     const simplifiedName = formattedAddress.split(",").slice(0, 3).join(", ");
@@ -248,6 +258,8 @@ export default function AdminRegisterStep2() {
     setAddressLine1(branch.addressLine1);
     setGoogleMapsUrl(branch.googleMapsUrl);
     setContactPhone(branch.contactPhone || "");
+    setSearchQuery(getBranchAddressSearchLabel(branch));
+    setSearchResults([]);
     setModalVisible(true);
   };
 
