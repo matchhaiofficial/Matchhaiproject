@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -29,7 +29,7 @@ import { GAME_RULES, GameRule } from "../../../src/constants/gameRules";
 import { SKILL_ASSESSMENT_CONFIG } from "../../../src/constants/skillQuestions";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
-import { calculateInitialRating, GameKey, GameSkillScore, getTierFromRating } from "../../../src/services/skillRatingService";
+import { calculateInitialRating, GameKey, GameSkillScore, getDisplaySkillScoreForGame, getTierFromRating } from "../../../src/services/skillRatingService";
 import { refreshUserStats } from "../../../src/services/userService";
 import { COLORS } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
@@ -68,7 +68,7 @@ const normalizeSkillScores = (scores: Record<string, GameSkillScore>) => {
     Object.entries(scores || {}).forEach(([key, score]) => {
         if (!score || typeof score.rating !== 'number') return;
         const rating = clampRating(score.rating);
-        normalized[key] = { ...score, rating, tier: score.tier || getTierFromRating(rating) };
+        normalized[key] = { ...score, rating, tier: getTierFromRating(rating) };
     });
     return normalized;
 };
@@ -109,6 +109,7 @@ export default function GameDetails() {
     const [tekkenBracket, setTekkenBracket] = useState<string | null>(null);
     const [skillScores, setSkillScores] = useState<Record<string, GameSkillScore>>({});
     const [profileData, setProfileData] = useState<any | null>(null);
+    const autoRefreshKeyRef = useRef<string | null>(null);
 
     // -- Game Specific State --
     // We use a generic approach where possible but keep specific vars for complexity
@@ -218,6 +219,8 @@ export default function GameDetails() {
     };
 
     const linkedPlatforms = getLinkedPlatformsForGame(gameId, profileData);
+    const currentSkillScore = getDisplaySkillScoreForGame(skillScores, gameId);
+    const currentTierConfig = currentSkillScore ? (TIER_CONFIG[currentSkillScore.tier] || DEFAULT_TIER) : DEFAULT_TIER;
     const hasSteamOrFaceit = Boolean(
         profileData?.steamId ||
         profileData?.steamProfileUrl ||
@@ -356,30 +359,59 @@ export default function GameDetails() {
         }
     };
 
-    const handleRefreshStats = async () => {
+    const refreshAndApplyStats = useCallback(async (
+        options: { force?: boolean; showFeedback?: boolean } = {},
+    ) => {
         if (!user?._id || refreshingStats) return;
 
         setRefreshingStats(true);
-        const result = await refreshUserStats(user._id);
-        if (!result.ok) {
-            showToast({
-                type: "warning",
-                title: "Refresh unavailable",
-                message: result.message,
-            });
+        try {
+            const result = await refreshUserStats(user._id, { force: options.force });
+            if (!result.ok) {
+                if (options.showFeedback) {
+                    showToast({
+                        type: "warning",
+                        title: "Refresh unavailable",
+                        message: result.message,
+                    });
+                }
+                return;
+            }
+
+            const latest = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
+            if (latest) applyProfileData(latest);
+
+            if (options.showFeedback) {
+                showToast({
+                    type: "success",
+                    title: "Stats refreshed",
+                    message: "Your linked Steam, FACEIT and PSN stats are up to date.",
+                });
+            }
+        } catch (error: any) {
+            Logger.error("GameDetails", "Stats refresh failed", error);
+            if (options.showFeedback) {
+                showToast({
+                    type: "error",
+                    title: "Stats refresh failed",
+                    message: error?.message || "Could not refresh linked gaming stats.",
+                });
+            }
+        } finally {
             setRefreshingStats(false);
-            return;
         }
+    }, [applyProfileData, refreshingStats, showToast, user?._id]);
 
-        const latest = await convex.query(api.users.getById, { userId: user._id as Id<"users"> });
-        if (latest) applyProfileData(latest);
+    useEffect(() => {
+        if (!user?._id || !gameId || !active || !canRefreshExternalStats || refreshingStats) return;
+        const autoRefreshKey = `${String(user._id)}:${gameId}`;
+        if (autoRefreshKeyRef.current === autoRefreshKey) return;
+        autoRefreshKeyRef.current = autoRefreshKey;
+        void refreshAndApplyStats({ force: false, showFeedback: false });
+    }, [active, canRefreshExternalStats, gameId, refreshAndApplyStats, refreshingStats, user?._id]);
 
-        showToast({
-            type: "success",
-            title: "Stats refreshed",
-            message: "Your linked Steam, FACEIT and PSN stats are up to date.",
-        });
-        setRefreshingStats(false);
+    const handleRefreshStats = () => {
+        void refreshAndApplyStats({ force: true, showFeedback: true });
     };
 
     const handleAssessmentSuccess = (rating: number, tier: string) => {
@@ -634,7 +666,7 @@ export default function GameDetails() {
                 {active && (
                     <>
                         {/* Skill Card */}
-                        {skillScores[gameId] && (
+                        {currentSkillScore && (
                             <View style={styles.statsCard}>
                                 <View style={styles.statsHeader}>
                                     <Text style={styles.statsLabel}>Official Skill Rating</Text>
@@ -643,27 +675,27 @@ export default function GameDetails() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
                                         width: 50, height: 50, borderRadius: 25,
-                                        backgroundColor: (TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color + '20',
+                                        backgroundColor: currentTierConfig.color + '20',
                                         alignItems: 'center', justifyContent: 'center', marginRight: 16
                                     }}>
                                         <AppIcon
-                                            name={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).icon}
+                                            name={currentTierConfig.icon}
                                             size={28}
-                                            color={(TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color}
+                                            color={currentTierConfig.color}
                                         />
                                     </View>
                                     <View>
                                         <Text style={{ fontSize: 32, fontWeight: 'bold', color: COLORS.text, lineHeight: 38 }}>
-                                            {clampRating(skillScores[gameId].rating)}
+                                            {clampRating(currentSkillScore.rating)}
                                         </Text>
                                         <Text style={{
                                             fontSize: 14,
-                                            color: (TIER_CONFIG[skillScores[gameId].tier] || DEFAULT_TIER).color,
+                                            color: currentTierConfig.color,
                                             fontWeight: '700',
                                             textTransform: 'uppercase',
                                             letterSpacing: 1
                                         }}>
-                                            {skillScores[gameId].tier}
+                                            {currentSkillScore.tier}
                                         </Text>
                                     </View>
                                 </View>
