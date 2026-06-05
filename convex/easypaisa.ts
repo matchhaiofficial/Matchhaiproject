@@ -309,6 +309,32 @@ function isActiveCheckoutTransaction(transaction: any, now: number) {
   );
 }
 
+const WALLET_TOPUP_REUSE_WINDOW_MS = 2 * 60 * 1000;
+
+function hasDomainCheckoutArgs(args: any) {
+  return Boolean(args?.matchroomCreateArgs || args?.teamChallengeHold);
+}
+
+function hasDomainCheckoutContext(transaction: any) {
+  return Boolean(
+    transaction?.providerPayload?.checkoutContext?.matchroomCreateArgs
+    || transaction?.providerPayload?.checkoutContext?.teamChallengeHold,
+  );
+}
+
+function shouldIgnoreActiveWalletTopupForRequest(transaction: any, args: any, now: number) {
+  if (!transaction) return false;
+
+  // Do not bind a matchroom/team payment to a generic wallet top-up prompt.
+  if (hasDomainCheckoutArgs(args) && !hasDomainCheckoutContext(transaction)) {
+    return true;
+  }
+
+  // Polling can keep updatedAt fresh, but it does not resend the mobile-account
+  // approval request. After this window, a new payment attempt should be allowed.
+  return Number(transaction.createdAt || 0) + WALLET_TOPUP_REUSE_WINDOW_MS < now;
+}
+
 function chooseLatestActiveTransaction(transactions: any[], now: number) {
   return transactions
     .filter((transaction) => isActiveCheckoutTransaction(transaction, now))
@@ -1139,26 +1165,12 @@ export const getStartCheckoutContext = internalQuery({
       activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
     }
 
+    if (shouldIgnoreActiveWalletTopupForRequest(activeTransaction, args, now)) {
+      activeTransaction = null;
+    }
+
     if (activeTransaction && Number(activeTransaction.amount || 0) !== amount) {
       throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
-    }
-
-    if (
-      activeTransaction
-      && (args.matchroomCreateArgs || args.teamChallengeHold)
-      && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
-      && !activeTransaction.providerPayload?.checkoutContext?.teamChallengeHold
-    ) {
-      activeTransaction = null;
-    }
-
-    // Avoid reusing old pending wallet top-ups; polling updates `updatedAt`, but does not resend
-    // the Easypaisa mobile-account approval request.
-    if (
-      activeTransaction &&
-      Number(activeTransaction.createdAt || 0) + 2 * 60 * 1000 < now
-    ) {
-      activeTransaction = null;
     }
 
     return {
@@ -1246,51 +1258,55 @@ export const createCheckoutTransactionWithLock = internalMutation({
           && String(pointedTransaction.userId) === String(args.userId)
           && isActiveCheckoutTransaction(pointedTransaction, now)
         ) {
-          if (Number(pointedTransaction.amount || 0) !== Number(args.amount || 0)) {
-            throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
-          }
-          if (
-            (args.matchroomCreateArgs || args.teamChallengeHold)
-            && !pointedTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
-            && !pointedTransaction.providerPayload?.checkoutContext?.teamChallengeHold
-          ) {
-            // Do not bind a domain-linked payment to a generic wallet top-up.
+          if (shouldIgnoreActiveWalletTopupForRequest(pointedTransaction, args, now)) {
+            await ctx.db.patch(args.userId, {
+              activeTopupPaymentTransactionId: undefined,
+              activeTopupAmount: undefined,
+              activeTopupExpiresAt: undefined,
+              updatedAt: now,
+            });
           } else {
-          return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
+            if (Number(pointedTransaction.amount || 0) !== Number(args.amount || 0)) {
+              throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
+            }
+            return { transaction: pointedTransaction, ...buildAttemptFields("reused") };
           }
         }
       }
 
       const activeTopups: any[] = [];
       for (const status of ACTIVE_PAYMENT_STATUSES) {
-      const rows = await ctx.db
-        .query("paymentTransactions")
-        .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
-        .collect();
+        const rows = await ctx.db
+          .query("paymentTransactions")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
+          .collect();
         activeTopups.push(...rows.filter((transaction: any) =>
-        transaction.kind === "wallet_topup"
+          transaction.kind === "wallet_topup"
           && isActiveCheckoutTransaction(transaction, now),
         ));
       }
       const activeTransaction = chooseLatestActiveTransaction(activeTopups, now);
       if (activeTransaction) {
-        if (Number(activeTransaction.amount || 0) !== Number(args.amount || 0)) {
-          throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
-        }
-        if (
-          (args.matchroomCreateArgs || args.teamChallengeHold)
-          && !activeTransaction.providerPayload?.checkoutContext?.matchroomCreateArgs
-          && !activeTransaction.providerPayload?.checkoutContext?.teamChallengeHold
-        ) {
-          // Continue below and create a domain-linked checkout.
+        if (shouldIgnoreActiveWalletTopupForRequest(activeTransaction, args, now)) {
+          if (String(user.activeTopupPaymentTransactionId || "") === String(activeTransaction._id)) {
+            await ctx.db.patch(args.userId, {
+              activeTopupPaymentTransactionId: undefined,
+              activeTopupAmount: undefined,
+              activeTopupExpiresAt: undefined,
+              updatedAt: now,
+            });
+          }
         } else {
-        await ctx.db.patch(args.userId, {
-          activeTopupPaymentTransactionId: activeTransaction._id,
-          activeTopupAmount: activeTransaction.amount,
-          activeTopupExpiresAt: activeTransaction.expiresAt,
-          updatedAt: now,
-        });
-        return { transaction: activeTransaction, ...buildAttemptFields("reused") };
+          if (Number(activeTransaction.amount || 0) !== Number(args.amount || 0)) {
+            throw new Error(ACTIVE_TOPUP_IN_PROGRESS_MESSAGE);
+          }
+          await ctx.db.patch(args.userId, {
+            activeTopupPaymentTransactionId: activeTransaction._id,
+            activeTopupAmount: activeTransaction.amount,
+            activeTopupExpiresAt: activeTransaction.expiresAt,
+            updatedAt: now,
+          });
+          return { transaction: activeTransaction, ...buildAttemptFields("reused") };
         }
       }
     }
@@ -2036,6 +2052,7 @@ export const getCheckoutStatus = query({
       lastError: latest.lastError || null,
       providerPayload: latest.providerPayload || null,
       finalizedMatchroomId: latest.providerPayload?.matchroomCreate?.matchroomId || null,
+      processedAt: latest.processedAt || null,
       createdAt: latest.createdAt,
       updatedAt: latest.updatedAt,
     };
@@ -2475,6 +2492,11 @@ export const applyProviderUpdate = internalMutation({
       };
     }
 
+    let walletCreditApplied = false;
+    let walletTopupMatchroomCreateArgs: any = null;
+    let walletTopupTeamChallengeHold: any = null;
+    let createdWalletTopupMatchroomId: string | null = null;
+
     try {
       logGatewayDebug("reconcile.wallet_credit.begin", {
         transactionId: String(row._id),
@@ -2496,6 +2518,7 @@ export const applyProviderUpdate = internalMutation({
           providerReference,
         },
       });
+      walletCreditApplied = true;
 
       if (row.kind === "booking_intent" && row.bookingIntentId) {
         logGatewayDebug("reconcile.booking_intent.begin", {
@@ -2512,10 +2535,10 @@ export const applyProviderUpdate = internalMutation({
         });
       }
 
-      const matchroomCreateArgs = row.kind === "wallet_topup"
+      walletTopupMatchroomCreateArgs = row.kind === "wallet_topup"
         ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
         : null;
-      if (matchroomCreateArgs) {
+      if (walletTopupMatchroomCreateArgs) {
         logGatewayDebug("reconcile.matchroom_create.begin", {
           transactionId: String(row._id),
           orderRefNum: row.orderRefNum,
@@ -2528,15 +2551,16 @@ export const applyProviderUpdate = internalMutation({
             orderRefNum: row.orderRefNum,
             userId: row.userId,
             amount: row.amount,
-            matchroomCreateArgs,
+            matchroomCreateArgs: walletTopupMatchroomCreateArgs,
           },
         );
         const matchroomId = finalizeResult?.matchroomId;
         if (matchroomId) {
+          createdWalletTopupMatchroomId = String(matchroomId);
           await ctx.runMutation(internal.wallet.deductFundsInternal, {
             amount: row.amount,
             metadata: {
-              flow: String(matchroomCreateArgs.locationMode || "") === "broadcast"
+              flow: String(walletTopupMatchroomCreateArgs.locationMode || "") === "broadcast"
                 ? "broadcast_matchroom_create"
                 : "zone_matchroom_create",
               matchroomId: String(matchroomId),
@@ -2563,13 +2587,13 @@ export const applyProviderUpdate = internalMutation({
       // team side. holdSideFromProvider is defensive (never throws on a
       // recoverable condition) so the credited top-up is preserved as wallet
       // credit if the hold cannot be placed.
-      const teamChallengeHold = row.kind === "wallet_topup"
+      walletTopupTeamChallengeHold = row.kind === "wallet_topup"
         ? row.providerPayload?.checkoutContext?.teamChallengeHold
         : null;
-      if (teamChallengeHold?.challengeId && (teamChallengeHold?.side === "teamA" || teamChallengeHold?.side === "teamB")) {
+      if (walletTopupTeamChallengeHold?.challengeId && (walletTopupTeamChallengeHold?.side === "teamA" || walletTopupTeamChallengeHold?.side === "teamB")) {
         const holdResult: any = await ctx.runMutation(internal.teamChallenges.holdSideFromProvider, {
-          challengeId: teamChallengeHold.challengeId,
-          side: teamChallengeHold.side,
+          challengeId: walletTopupTeamChallengeHold.challengeId,
+          side: walletTopupTeamChallengeHold.side,
           userId: row.userId,
           amount: row.amount,
           orderRefNum: row.orderRefNum,
@@ -2579,8 +2603,8 @@ export const applyProviderUpdate = internalMutation({
             ...sourcePayload,
             teamChallengeHold: {
               heldAt: now,
-              challengeId: String(teamChallengeHold.challengeId),
-              side: teamChallengeHold.side,
+              challengeId: String(walletTopupTeamChallengeHold.challengeId),
+              side: walletTopupTeamChallengeHold.side,
             },
           };
         }
@@ -2610,7 +2634,7 @@ export const applyProviderUpdate = internalMutation({
         // money as MatchHai wallet credit (addFunds already committed in this
         // same transaction). Tell the payer it landed in their wallet rather
         // than the generic "top-up successful" so the policy is honoured.
-        const createWasAttempted = Boolean(matchroomCreateArgs);
+        const createWasAttempted = Boolean(walletTopupMatchroomCreateArgs);
         const createFinalized = Boolean((sourcePayload as any)?.matchroomCreate?.matchroomId);
         const decision = createWasAttempted && !createFinalized ? "wallet_credit_only" : "paid";
         await notifyPlayerPaymentOutcome(ctx, {
@@ -2637,11 +2661,63 @@ export const applyProviderUpdate = internalMutation({
       const walletCreditedBookingFailure =
         row.kind === "booking_intent" &&
         /slot is no longer available|payment window expired|matchroom has expired|matchroom is locked/i.test(message);
+      const walletTopupCompletionFellBackToWallet =
+        row.kind === "wallet_topup"
+        && walletCreditApplied
+        && (walletTopupMatchroomCreateArgs || walletTopupTeamChallengeHold)
+        && !createdWalletTopupMatchroomId;
 
       if (walletCreditedBookingFailure) {
         await ctx.db.patch(row._id, {
           ...callbackPatch,
           providerPayload: { ...sourcePayload, bookingFundsMode: "wallet_hold" },
+          status: "paid",
+          processedAt: now,
+          lastError: message,
+        });
+        await clearActivePaymentPointerIfMatching(ctx, row, now);
+
+        await notifyPlayerPaymentOutcome(ctx, {
+          payment: row,
+          decision: "wallet_credit_only",
+          status: "accepted",
+        });
+        await notifySuperAdminsPaymentAttentionRequired(ctx, {
+          payment: row,
+          status: "paid",
+          now,
+        });
+
+        return {
+          appReturnUrl: row.appReturnUrl,
+          orderRefNum: row.orderRefNum,
+          ok: true,
+          shouldRetry: false,
+          status: "paid",
+          message,
+        };
+      }
+
+      if (walletTopupCompletionFellBackToWallet) {
+        const fallbackPayload: any = { ...sourcePayload };
+        if (walletTopupMatchroomCreateArgs) {
+          fallbackPayload.matchroomCreate = {
+            ...(fallbackPayload.matchroomCreate || {}),
+            completionFailedAt: now,
+            completionError: message,
+          };
+        }
+        if (walletTopupTeamChallengeHold) {
+          fallbackPayload.teamChallengeHold = {
+            ...(fallbackPayload.teamChallengeHold || {}),
+            completionFailedAt: now,
+            completionError: message,
+          };
+        }
+
+        await ctx.db.patch(row._id, {
+          ...callbackPatch,
+          providerPayload: fallbackPayload,
           status: "paid",
           processedAt: now,
           lastError: message,

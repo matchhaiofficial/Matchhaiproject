@@ -455,6 +455,7 @@ export default function WalletScreen() {
     (api as any).easypaisa.syncTransactionStatus,
   );
   const lastAutoSyncKeyRef = useRef<string | null>(null);
+  const lastCheckoutOutcomeKeyRef = useRef<string | null>(null);
 
   const autoSyncCheckoutStatus = useCallback(
     async (orderRefNum: string, reason: string) => {
@@ -750,6 +751,76 @@ export default function WalletScreen() {
   ]);
 
   useEffect(() => {
+    if (!checkoutStatus) return;
+
+    const status = String(checkoutStatus.status || "");
+    if (ACTIVE_CHECKOUT_STATUSES.has(status)) return;
+
+    const orderRefNum = String(
+      checkoutStatus.orderRefNum || activeOrderRef || params.orderRefNum || "",
+    );
+    if (!orderRefNum) return;
+
+    const outcomeKey = `${orderRefNum}:${status}:${checkoutStatus.processedAt || checkoutStatus.updatedAt || ""}`;
+    if (lastCheckoutOutcomeKeyRef.current === outcomeKey) return;
+    lastCheckoutOutcomeKeyRef.current = outcomeKey;
+
+    fetchWalletHistoryPage({ append: false });
+    const retryTimer = setTimeout(() => {
+      fetchWalletHistoryPage({ append: false });
+    }, 1500);
+
+    const returnedStatus = String(params.paymentStatus || "");
+    const routeAlreadyShowedTerminalToast =
+      String(params.gateway || "") === "easypaisa" &&
+      String(params.orderRefNum || "") === orderRefNum &&
+      (
+        (status === "paid" && returnedStatus === "success") ||
+        (status === "failed" && returnedStatus === "failed") ||
+        (status === "cancelled" && returnedStatus === "failed") ||
+        (status === "expired" && returnedStatus === "expired")
+      );
+
+    if (status === "paid") {
+      if (!routeAlreadyShowedTerminalToast) {
+        showToast({
+          type: "success",
+          title: "Top-up successful",
+          message: `${formatCurrency(Number(checkoutStatus.amount || 0))} was added to your wallet.`,
+        });
+      }
+    } else if (status === "failed" || status === "cancelled") {
+      if (routeAlreadyShowedTerminalToast) {
+        return () => clearTimeout(retryTimer);
+      }
+      showToast({
+        type: "error",
+        title: "Top-up failed",
+        message: "Easypaisa did not complete the top-up.",
+      });
+    } else if (status === "expired") {
+      if (routeAlreadyShowedTerminalToast) {
+        return () => clearTimeout(retryTimer);
+      }
+      showToast({
+        type: "warning",
+        title: "Top-up expired",
+        message: "This Easypaisa payment session expired before completion.",
+      });
+    }
+
+    return () => clearTimeout(retryTimer);
+  }, [
+    activeOrderRef,
+    checkoutStatus,
+    fetchWalletHistoryPage,
+    params.gateway,
+    params.orderRefNum,
+    params.paymentStatus,
+    showToast,
+  ]);
+
+  useEffect(() => {
     const gateway = String(params.gateway || "");
     const paymentStatus = String(params.paymentStatus || "");
     const orderRefNum = String(params.orderRefNum || "");
@@ -774,9 +845,9 @@ export default function WalletScreen() {
     if (gateway === "easypaisa" && paymentStatus === "success") {
       showToast({
         type: "success",
-        title: "Top-up received",
+        title: "Top-up successful",
         message:
-          "Your Easypaisa payment was received. Wallet balance will refresh shortly.",
+          "Your Easypaisa payment was received. Wallet balance and transactions will refresh shortly.",
       });
     }
     if (gateway === "easypaisa" && paymentStatus === "pending") {

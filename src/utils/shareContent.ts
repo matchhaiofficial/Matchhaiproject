@@ -2,7 +2,7 @@
  * Standardized, privacy-safe share copy for MatchHai surfaces.
  *
  * Every formatter returns WhatsApp/DM-friendly text: a headline, a blank line,
- * a details block (one item per line), a blank line, then the deep link.
+ * a details block (one item per line), a blank line, then the clickable link.
  *
  * Hard rules (enforced by keeping these formatters the single source of truth):
  * - Never include matchCode / QR / check-in codes.
@@ -14,9 +14,14 @@ import { getCanonicalGameLabel } from "./gameLabels";
 import { parseScheduledDateTime } from "./matchroomTime";
 
 export const APP_SCHEME = "matchhai://";
+export const APP_WEB_URL =
+  (process.env.EXPO_PUBLIC_APP_WEB_URL || "https://matchhai.com").replace(/\/+$/, "");
 
 export const buildDeepLink = (path: string): string =>
   `${APP_SCHEME}${path.replace(/^\/+/, "")}`;
+
+export const buildShareLink = (path: string): string =>
+  `${APP_WEB_URL}/${path.replace(/^\/+/, "")}`;
 
 /** "Sat, Jun 6, 2026" (device-local, matching how scheduled strings are stored). */
 export function formatShareDate(date: Date | null | undefined): string | null {
@@ -48,8 +53,8 @@ const joinLines = (lines: Array<string | null | undefined>): string =>
 const joinSections = (sections: Array<string | null | undefined>): string =>
   sections.filter((section) => clean(section) !== "").join("\n\n");
 
-const linkSection = (path: string): string =>
-  joinLines(["Open in MatchHai:", buildDeepLink(path)]);
+const linkSection = (label: string, path: string): string =>
+  joinLines([label, buildShareLink(path)]);
 
 // ---------------------------------------------------------------------------
 // Matchroom
@@ -99,7 +104,7 @@ export function formatMatchroomShare(input: MatchroomShareInput): string {
   return joinSections([
     `Join my ${gameLabel} matchroom on MatchHai 🎮`,
     details,
-    linkSection(`matchrooms/${input.id}`),
+    linkSection("Open in MatchHai:", `matchrooms/${input.id}`),
   ]);
 }
 
@@ -132,7 +137,7 @@ export function formatVenueShare(input: VenueShareInput): string {
   return joinSections([
     `Book a slot at ${name} on MatchHai 🎮`,
     details,
-    linkSection(`zones/${input.id}`),
+    linkSection("Open venue:", `zones/${input.id}`),
   ]);
 }
 
@@ -171,7 +176,7 @@ export function formatPlayerProfileShare(input: PlayerShareInput): string {
   return joinSections([
     `Check out ${name} on MatchHai 🎮`,
     details,
-    joinLines(["Open profile:", buildDeepLink(`profile/${input.uid}`)]),
+    linkSection("Open profile:", `profile/${input.uid}`),
   ]);
 }
 
@@ -201,7 +206,7 @@ export function formatTeamShare(input: TeamShareInput): string {
   return joinSections([
     `Check out Team ${name} on MatchHai 🎮`,
     details,
-    joinLines(["Open team:", buildDeepLink(`teams/${input.id}`)]),
+    linkSection("Open team:", `teams/${input.id}`),
   ]);
 }
 
@@ -241,6 +246,6 @@ export function formatTeamChallengeShare(input: TeamChallengeShareInput): string
   return joinSections([
     "Team Challenge on MatchHai ⚔️",
     details,
-    joinLines(["Open challenge:", buildDeepLink(`teams/challenge?id=${input.id}`)]),
+    linkSection("Open challenge:", `teams/challenge?id=${input.id}`),
   ]);
 }

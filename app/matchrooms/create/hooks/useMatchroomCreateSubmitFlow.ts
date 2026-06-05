@@ -240,6 +240,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
   const resumedEasypaisaOrderRef = useRef<string | null>(null);
   const completingEasypaisaOrderRef = useRef<string | null>(null);
   const finalizedEasypaisaOrderRef = useRef<string | null>(null);
+  const walletCreditedEasypaisaOrderRef = useRef<string | null>(null);
   const pendingPaidMatchroomCreateArgsRef = useRef<any | null>(null);
   // P1 FIX 4: stable per-attempt idempotency key for the direct wallet/free create
   // path. Generated lazily for a create attempt and persisted across in-attempt
@@ -340,6 +341,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     setEasypaisaPaymentPhase("idle");
     setFinalizedEasypaisaMatchroomId(null);
     resumedEasypaisaOrderRef.current = null;
+    walletCreditedEasypaisaOrderRef.current = null;
     setShowEasypaisaPhonePrompt(true);
   }, [easypaisaPaymentPhase, startingEasypaisaPayment]);
 
@@ -481,6 +483,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     setEasypaisaPaymentPhase("idle");
     setFinalizedEasypaisaMatchroomId(null);
     resumedEasypaisaOrderRef.current = null;
+    walletCreditedEasypaisaOrderRef.current = null;
     await confirmEasypaisaPayment({ forceNew: true });
   }, [confirmEasypaisaPayment, easypaisaPaymentPhase, startingEasypaisaPayment]);
 
@@ -815,6 +818,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           setActiveEasypaisaOrderRef(null);
           setEasypaisaPaymentPhase("idle");
           resumedEasypaisaOrderRef.current = null;
+          walletCreditedEasypaisaOrderRef.current = null;
           setShowEasypaisaPhonePrompt(true);
           setSubmitting(false);
           return true;
@@ -837,6 +841,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         setEasypaisaPaymentPhase("idle");
         setFinalizedEasypaisaMatchroomId(null);
         resumedEasypaisaOrderRef.current = null;
+        walletCreditedEasypaisaOrderRef.current = null;
         // Room created — retire this attempt's idempotency key so a genuinely new
         // create attempt generates a fresh key (a repeat of THIS attempt would be
         // deduped server-side and return this same room).
@@ -989,6 +994,29 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       return;
     }
 
+    if (
+      status === "paid" &&
+      !finalizedMatchroomId &&
+      String((checkoutStatus as any).kind || "") === "wallet_topup" &&
+      Number((checkoutStatus as any).processedAt || 0) > 0
+    ) {
+      if (walletCreditedEasypaisaOrderRef.current === activeEasypaisaOrderRef) return;
+      walletCreditedEasypaisaOrderRef.current = activeEasypaisaOrderRef;
+      setShowEasypaisaPhonePrompt(false);
+      setActiveEasypaisaOrderRef(null);
+      setEasypaisaPaymentPhase("idle");
+      setFinalizedEasypaisaMatchroomId(null);
+      resumedEasypaisaOrderRef.current = null;
+      pendingPaidMatchroomCreateArgsRef.current = null;
+      createRequestIdRef.current = null;
+      notify({
+        message: "Your Easypaisa payment was added to your MatchHai wallet. You can send the booking request again and pay with wallet.",
+        title: "Wallet credited",
+        type: "success",
+      });
+      return;
+    }
+
     if (EASYPAY_PENDING_STATUSES.includes(status)) {
       setEasypaisaPaymentPhase("payment_sent");
       return;
@@ -1077,6 +1105,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     setEasypaisaPaymentPhase("idle");
     setFinalizedEasypaisaMatchroomId(null);
     resumedEasypaisaOrderRef.current = null;
+    walletCreditedEasypaisaOrderRef.current = null;
     router.replace(`/matchrooms/${matchroomId}` as any);
   }, [finalizedEasypaisaMatchroomId]);
 
