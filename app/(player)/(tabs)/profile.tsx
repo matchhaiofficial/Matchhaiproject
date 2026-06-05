@@ -35,7 +35,7 @@ import { useAuth } from "../../../src/context/AuthContext";
 import { useToast } from "../../../src/hooks/useToast";
 import { signOutUser } from "../../../src/services/authService";
 import type { PsnVerificationResult } from "../../../src/services/convex/externalApiService";
-import { GameSkillScore } from "../../../src/services/skillRatingService";
+import { GameSkillScore, getDisplaySkillScoreForGame } from "../../../src/services/skillRatingService";
 import { getUserTeams, Team } from "../../../src/services/convex/teamService";
 import { buildLegacyTeamsHref } from "../../../src/navigation/routes";
 import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
@@ -322,7 +322,7 @@ export default function Profile() {
             );
             const gameLabels = activeKeys.map((key) => getCanonicalGameLabel(key));
             const firstRating = activeKeys
-                .map((key) => profile.skillScores?.[key]?.rating)
+                .map((key) => getDisplaySkillScoreForGame(profile.skillScores, key)?.rating)
                 .find((rating) => typeof rating === "number");
             const message = formatPlayerProfileShare({
                 uid: String(user._id),
@@ -402,11 +402,11 @@ export default function Profile() {
             if (profile.steamCs2Hours) return `${Math.round(profile.steamCs2Hours)}h Played`;
         }
         if (gameKey === 'cs16') {
-            const score = profile.skillScores?.cs16;
+            const score = getDisplaySkillScoreForGame(profile.skillScores, 'cs16');
             if (score?.tier) return `${score.tier} ${score.rating ?? ''}`.trim();
         }
         if (gameKey === 'valorant') {
-            const score = profile.skillScores?.valorant;
+            const score = getDisplaySkillScoreForGame(profile.skillScores, 'valorant');
             if (score?.tier) return `${score.tier} ${score.rating ?? ''}`.trim();
         }
         if (gameKey === 'fc26') {
@@ -559,7 +559,7 @@ export default function Profile() {
                     >
                         {ALL_GAMES.map(game => {
                             const isActive = isGameActive(game.key);
-                            const skillScore = profile?.skillScores?.[game.key];
+                            const skillScore = getDisplaySkillScoreForGame(profile?.skillScores, game.key);
                             const externalStat = getExternalStatLine(game.key);
                             const roleText = getGameRole(game.key);
 

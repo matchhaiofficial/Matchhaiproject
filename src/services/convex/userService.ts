@@ -360,7 +360,8 @@ export async function completeOnboarding(
 // ============================================
 
 export async function refreshUserStats(
-  userId: Id<"users">
+  userId: Id<"users">,
+  options?: { force?: boolean }
 ): Promise<
   | { ok: true; data: Partial<UserProfile> }
   | { ok: false; message: string }
@@ -368,6 +369,7 @@ export async function refreshUserStats(
   try {
     const result: any = await convex.action(api.users.refreshExternalStats, {
       userId,
+      force: options?.force,
     });
 
     if (result?.throttled) {

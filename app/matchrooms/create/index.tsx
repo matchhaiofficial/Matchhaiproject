@@ -45,6 +45,7 @@ import {
 import { getZoneById, type Zone } from "../../../src/services/convex/zoneService";
 import { Id } from "../../../convex/_generated/dataModel";
 import { COLORS, FONTS } from "../../../src/theme";
+import { getCanonicalGameLabel } from "../../../src/utils/gameLabels";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../../../src/utils/verificationGate";
 import { isPhysicalGameDisabled } from "../../../constants/gameAvailability";
 import { normalizeValorantRole } from "../../../constants/profileOptions";
@@ -210,6 +211,22 @@ export default function CreateMatchroom() {
   const [submitFeedback, setSubmitFeedback] = useState<MatchroomCreateSubmitFeedback | null>(null);
   const lastInvalidScheduleToastKeyRef = useRef<string | null>(null);
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
+  const selectedGameLabel = useMemo(
+    () => getCanonicalGameLabel(selectedGame),
+    [selectedGame],
+  );
+  const competitiveLobbyMessage = useMemo(() => {
+    if (selectedGame === "cs16") {
+      return `${selectedGameLabel} competitive lobbies use your questionnaire-based skill tier and selected role.`;
+    }
+    if (selectedGame === "valorant") {
+      return `${selectedGameLabel} competitive lobbies use your questionnaire-based skill tier and selected role.`;
+    }
+    if (selectedGame === "cs2") {
+      return `${selectedGameLabel} competitive lobbies use your saved MatchHai skill. Steam or FACEIT can improve calibration, but they are not required to host.`;
+    }
+    return `${selectedGameLabel} competitive lobbies use your saved MatchHai skill. Linked accounts can improve calibration, but they are not required to host.`;
+  }, [selectedGame, selectedGameLabel]);
   const { animatedStyle: contentEntranceStyle } = useEntrance({
     visible: Boolean(selectedGame),
     distance: 18,
@@ -2199,15 +2216,8 @@ export default function CreateMatchroom() {
                         size={16}
                         color={COLORS.accent}
                       />
-                      {selectedGame === "cs16" ? (
-                        <>{"\u00A0"}CS 1.6 competitive lobbies use your questionnaire-based skill tier and selected role.</>
-                      ) : selectedGame === "valorant" ? (
-                        <>{"\u00A0"}Valorant competitive lobbies use your questionnaire-based skill tier and selected role.</>
-                      ) : (
-                        <>
-                          {"\u00A0"}CS2 competitive lobbies use your saved MatchHai skill. Steam or FACEIT can improve calibration, but they are not required to host.
-                        </>
-                      )}
+                      {"\u00A0"}
+                      {competitiveLobbyMessage}
                     </Text>
                   </View>
                 </>

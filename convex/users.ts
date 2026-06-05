@@ -103,6 +103,75 @@ function sanitizeSkillScoresUpdate(
   return merged;
 }
 
+function hasSkillMatchHistory(score: any): boolean {
+  return Number(score?.matchesPlayed || 0) > 0 || Boolean(score?.lastMatchDate);
+}
+
+function buildExternalCalibratedSkillScore(
+  game: "cs2" | "fc26" | "tekken8",
+  profile: Record<string, any>,
+  existing: any,
+  now: number,
+) {
+  if (hasSkillMatchHistory(existing)) return null;
+
+  let rating: number | null = null;
+  let initialSource: string | null = null;
+
+  if (game === "cs2" && typeof profile.faceitSkillLevel === "number" && profile.faceitSkillLevel > 0) {
+    const level = profile.faceitSkillLevel;
+    if (level <= 3) rating = 25;
+    else if (level <= 6) rating = 50;
+    else if (level <= 8) rating = 75;
+    else rating = 90;
+    initialSource = "faceit";
+
+    const steamHours = Number(profile.steamCs2Hours || 0);
+    if (steamHours > 3000) rating += 10;
+    else if (steamHours > 1000) rating += 5;
+  }
+
+  if (game === "fc26") {
+    const psnProgress = profile.psnStats?.fc?.progress;
+    if (typeof psnProgress === "number") {
+      rating = 20 + psnProgress * 0.6;
+      initialSource = "psn";
+    }
+    const steamHours = Number(profile.steamFc26Hours || 0);
+    if (steamHours > 500) {
+      rating = Math.max(rating ?? 0, 70);
+      initialSource = initialSource || "steam";
+    } else if (steamHours > 200) {
+      rating = Math.max(rating ?? 0, 50);
+      initialSource = initialSource || "steam";
+    }
+  }
+
+  if (game === "tekken8") {
+    const psnProgress = profile.psnStats?.tekken8?.progress;
+    if (typeof psnProgress === "number") {
+      rating = 20 + psnProgress * 0.6;
+      initialSource = "psn";
+    }
+  }
+
+  if (rating === null || !initialSource) return null;
+
+  const normalizedRating = clampNumber(rating, 0, 100);
+  return {
+    ...(existing || {}),
+    rating: normalizedRating,
+    tier: tierFromRating(normalizedRating),
+    matchesPlayed: Number(existing?.matchesPlayed || 0),
+    wins: Number(existing?.wins || 0),
+    losses: Number(existing?.losses || 0),
+    initialSource,
+    initialRating: normalizedRating,
+    lastMatchDate: existing?.lastMatchDate ?? null,
+    lastUpdated: now,
+  };
+}
+
 function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
 }
@@ -737,10 +806,11 @@ export const updatePlatformLinks = mutation({
     psnStats: v.optional(v.any()),
     lastExternalSyncAt: v.optional(v.number()),
     psnLastSyncedAt: v.optional(v.number()),
+    skillScores: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const { userId, ...updates } = args;
-    await requireProfileOwner(ctx, userId);
+    const user = await requireProfileOwner(ctx, userId);
     const now = Date.now();
 
     const updateData: Record<string, unknown> = { updatedAt: now };
@@ -762,6 +832,12 @@ export const updatePlatformLinks = mutation({
     if (updates.psnStats !== undefined) updateData.psnStats = updates.psnStats;
     if (updates.lastExternalSyncAt !== undefined) updateData.lastExternalSyncAt = updates.lastExternalSyncAt;
     if (updates.psnLastSyncedAt !== undefined) updateData.psnLastSyncedAt = updates.psnLastSyncedAt;
+    if (updates.skillScores !== undefined) {
+      updateData.skillScores = sanitizeSkillScoresUpdate(
+        (user.skillScores || {}) as Record<string, any>,
+        updates.skillScores as Record<string, any>,
+      );
+    }
 
     await ctx.db.patch(userId, updateData);
     return true;
@@ -881,6 +957,45 @@ export const refreshExternalStats = action({
 
     if (refreshed.length > 0) {
       updates.lastExternalSyncAt = now;
+      const existingScores = ((user as any).skillScores || {}) as Record<string, any>;
+      const profileAfterRefresh = { ...(user as any), ...updates };
+      const refreshedSkillScores: Record<string, any> = {};
+
+      if ((user as any).playsCs2) {
+        const calibrated = buildExternalCalibratedSkillScore(
+          "cs2",
+          profileAfterRefresh,
+          existingScores.cs2,
+          now,
+        );
+        if (calibrated) refreshedSkillScores.cs2 = calibrated;
+      }
+      if ((user as any).playsFc) {
+        const calibrated = buildExternalCalibratedSkillScore(
+          "fc26",
+          profileAfterRefresh,
+          existingScores.fc26 || existingScores.fc25,
+          now,
+        );
+        if (calibrated) refreshedSkillScores.fc26 = calibrated;
+      }
+      if ((user as any).playsTekken) {
+        const calibrated = buildExternalCalibratedSkillScore(
+          "tekken8",
+          profileAfterRefresh,
+          existingScores.tekken8 || existingScores.tekken,
+          now,
+        );
+        if (calibrated) refreshedSkillScores.tekken8 = calibrated;
+      }
+
+      if (Object.keys(refreshedSkillScores).length > 0) {
+        updates.skillScores = {
+          ...existingScores,
+          ...refreshedSkillScores,
+        };
+      }
+
       await ctx.runMutation(api.users.updatePlatformLinks, {
         userId: args.userId,
         ...updates,

@@ -86,6 +86,42 @@ function clampRating(value: number) {
     return clamp(value, 0, 100);
 }
 
+export function normalizeSkillScoreForDisplay<T extends Record<string, any>>(
+    score: T | null | undefined
+): (T & { rating: number; tier: SkillTier }) | null {
+    if (!score || typeof score !== 'object') return null;
+    const rawRating = Number(score.rating);
+    if (!Number.isFinite(rawRating)) return null;
+    const rating = clampRating(rawRating);
+    return {
+        ...score,
+        rating,
+        tier: getTierFromRating(rating),
+    };
+}
+
+export function getDisplaySkillScoreForGame(
+    scores: Record<string, GameSkillScore | undefined> | null | undefined,
+    gameKey: string | null | undefined
+): (GameSkillScore & Record<string, any>) | null {
+    if (!scores || !gameKey) return null;
+    const canonicalGameKey = getCanonicalGameKey(gameKey);
+    const candidateKeys =
+        canonicalGameKey === 'fc26'
+            ? ['fc26', 'fc25']
+            : canonicalGameKey === 'tekken8'
+                ? ['tekken8', 'tekken']
+                : canonicalGameKey === 'indoor_cricket'
+                    ? ['indoor_cricket', 'cricket']
+                    : [canonicalGameKey];
+
+    for (const key of candidateKeys) {
+        const normalized = normalizeSkillScoreForDisplay(scores[key]);
+        if (normalized) return normalized as GameSkillScore & Record<string, any>;
+    }
+    return null;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // INITIAL RATING CALCULATION (0-100)
 // ═══════════════════════════════════════════════════════════════

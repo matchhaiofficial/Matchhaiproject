@@ -740,6 +740,7 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
   })
     .index("by_hostUid", ["hostUid"])
+    .index("by_hostUid_and_clientCreateRequestId", ["hostUid", "clientCreateRequestId"])
     .index("by_hostUid_and_scheduledStartAt", ["hostUid", "scheduledStartAt"])
     .index("by_hostUid_and_createdAt", ["hostUid", "createdAt"])
     .index("by_status", ["status"])
