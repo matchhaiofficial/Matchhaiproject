@@ -19,6 +19,7 @@ import { usePressScale } from "../../../src/motion/usePressScale";
 import { respondFriendRequestDecision, sendFriendRequestToUser } from "../../../src/services/convex/socialService";
 import { submitUserReport } from "../../../src/services/convex/reportService";
 import { getPublicUserProfile, isProfileGameEnabled, refreshUserStats, UserProfile } from "../../../src/services/userService";
+import { getDisplaySkillScoreForGame } from "../../../src/services/skillRatingService";
 import { formatChatPresenceLabel, isChatUserOnline, useRelativeNow } from "../../../src/features/chat/utils";
 import { Id } from "../../../convex/_generated/dataModel";
 import { normalizeValorantRole } from "../../../constants/profileOptions";
@@ -153,7 +154,7 @@ export default function PlayerProfile() {
     const { winRate, confidence, activityStatus, trend } = useMemo(() => {
         if (!profile || !selectedGame) return { winRate: 0, confidence: 'Low', activityStatus: 'No data', trend: 'Stable' };
 
-        const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
+        const skillData = getDisplaySkillScoreForGame(profile.skillScores as any, selectedGame);
 
         // 1. Win Rate
         const wins = skillData?.wins || 0;
@@ -289,10 +290,10 @@ export default function PlayerProfile() {
         if (!uid || syncing) return;
         setSyncing(true);
         try {
-            const res = await refreshUserStats(uid as Id<"users">);
+            const res = await refreshUserStats(uid as Id<"users">, { force: true });
             if (res.ok) {
                 showToast({ type: "success", title: "Synced", message: "Gaming stats updated successfully" });
-                loadProfile();
+                await loadProfile();
             }
         } catch (error) {
             console.error(error);
@@ -580,7 +581,7 @@ export default function PlayerProfile() {
 
     const renderPrimarySkillCard = () => {
         if (!profile || !selectedGame) return null;
-        const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
+        const skillData = getDisplaySkillScoreForGame(profile.skillScores as any, selectedGame);
         if (!skillData) return null;
 
         const extendedSkillData = skillData as typeof skillData & { initialSource?: string };
@@ -777,7 +778,7 @@ export default function PlayerProfile() {
     const renderGameStats = () => {
         if (!profile || !selectedGame) return null;
 
-        const skillData = profile.skillScores?.[selectedGame as keyof NonNullable<UserProfile['skillScores']>];
+        const skillData = getDisplaySkillScoreForGame(profile.skillScores as any, selectedGame);
         const tier = skillData?.tier || 'N/A';
         const rating = skillData?.rating !== undefined ? skillData.rating.toString() : 'Unranked';
 
@@ -932,9 +933,7 @@ export default function PlayerProfile() {
                 getCanonicalGameLabel(key),
             );
             const ratingSource = selectedGame
-                ? profile.skillScores?.[
-                      selectedGame as keyof NonNullable<UserProfile['skillScores']>
-                  ]?.rating
+                ? getDisplaySkillScoreForGame(profile.skillScores as any, selectedGame)?.rating
                 : undefined;
             const message = formatPlayerProfileShare({
                 uid: String(uid),

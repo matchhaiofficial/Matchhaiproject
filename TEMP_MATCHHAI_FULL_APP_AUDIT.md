@@ -403,7 +403,7 @@ Crons (every ~2 min): lifecycle transitions (lock, expire-not-full, start, resul
 | Item | Status | Finding / Action |
 |---|---|---|
 | EAS profiles | CONFIRMED | `development`/`preview`/`production` exist. **`production` has no `env`** (CR-04). |
-| Env separation | FAIL | One Convex deployment (`quick-panda-920`) for preview; prod unset. Create distinct staging/prod Convex + env. |
+| Env separation | FAIL | One Convex deployment (`acrobatic-bison-271`) for preview; prod unset. Create distinct staging/prod Convex + env. |
 | Bundle id / package | PASS | `com.ovaisto.matchhai` (iOS & Android). Note: `owner:"matchhai"` vs bundle `ovaisto` — confirm Apple team/Play account alignment. |
 | App version source | PASS | `appVersionSource:"remote"` + prod `autoIncrement`. |
 | Push entitlement | PARTIAL | `expo-notifications` plugin present; iOS APNs + Android FCM creds via EAS — verify configured. |

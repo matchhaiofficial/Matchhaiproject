@@ -266,6 +266,7 @@ export default function AdminRegisterStep1() {
       style={styles.screen}
       contentStyle={styles.container}
       routeKey="/auth/zone-register"
+      keyboardFocusKey={focused}
       scrollProps={{
         showsVerticalScrollIndicator: false,
         keyboardShouldPersistTaps: "handled",

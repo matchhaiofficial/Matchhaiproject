@@ -45,7 +45,7 @@ import {
 } from "../../../src/services/convex/zoneAdminResourceService";
 import { COLORS } from "../../../src/theme";
 import { getResourceLifecycleLabel } from "../../../src/utils/statusLabels";
-import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
+import { isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
 import styles from "./resources.styles";
 
 type AssetFilter =
@@ -304,9 +304,6 @@ export default function ZoneResourcesModule() {
     const [errorText, setErrorText] = useState<string | null>(null);
     const [subcollectionsBlocked, setSubcollectionsBlocked] = useState(false);
     const migrationReady = isZoneMigrationReady(zone);
-    const migrationNotice = !migrationReady
-        ? `This venue is not live on the resource model yet. Current state: ${getZoneMigrationLabel(zone)}. Legacy fallback remains visible until migration succeeds. Open Migration Tools if you need to repair the venue setup.`
-        : null;
     const deepBranchId = Array.isArray(params.branchId) ? params.branchId[0] : params.branchId;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
     const deepResourceId = Array.isArray(params.resourceId) ? params.resourceId[0] : params.resourceId;
@@ -374,7 +371,7 @@ export default function ZoneResourcesModule() {
                 setSelectedBranchId((prev) => prev || deepBranchId || legacyBranches[0]?.id || null);
                 if (error?.code === "permission-denied") {
                     setSubcollectionsBlocked(true);
-                    setErrorText("Branch/resource subcollections are blocked by Firestore rules. Using legacy fallback.");
+                    setErrorText("Resource details are not available right now.");
                 } else {
                     setErrorText("Failed to load branch resources.");
                 }
@@ -405,7 +402,7 @@ export default function ZoneResourcesModule() {
             (error) => {
                 setLoadingResources(false);
                 if (error?.code === "permission-denied") {
-                    setErrorText("Resource grid permission denied.");
+                    setErrorText("Resource details are not available right now.");
                 } else {
                     setErrorText("Failed to load resources.");
                 }
@@ -891,12 +888,6 @@ export default function ZoneResourcesModule() {
                     <Text style={styles.errorText}>{errorText}</Text>
                 </View>
             ) : null}
-            {migrationNotice ? (
-                <View style={styles.noticeBox}>
-                    <Text style={styles.noticeText}>{migrationNotice}</Text>
-                </View>
-            ) : null}
-
             <View style={styles.searchRow}>
                 <View style={styles.searchBar}>
                     <AppIcon name="search" size={20} color={COLORS.muted} />

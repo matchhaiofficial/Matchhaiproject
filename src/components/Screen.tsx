@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
     StyleSheet,
+    TextInput,
     View,
     type ScrollViewProps,
     type StyleProp,
@@ -27,6 +29,7 @@ type ScreenProps = {
     edges?: Edge[];
     debugTag?: string;
     routeKey?: string;
+    keyboardFocusKey?: unknown;
 };
 
 export default function Screen({
@@ -40,6 +43,7 @@ export default function Screen({
     edges,
     debugTag,
     routeKey,
+    keyboardFocusKey,
 }: ScreenProps) {
     const segments = useSegments() as string[];
     const pathname = usePathname();
@@ -49,9 +53,15 @@ export default function Screen({
             ? (isTabsScreen ? 'tabs' : 'stack')
             : variant;
     const horizontalPadding = useScreenPadding();
+    const containerRef = useRef<View | null>(null);
+    const scrollRef = useRef<ScrollView | null>(null);
+    const scrollOffsetYRef = useRef(0);
+    const keyboardTopRef = useRef<number | null>(null);
+    const [keyboardInset, setKeyboardInset] = useState(0);
     const { contentContainerStyle: scrollContentStyle, ...restScrollProps } = scrollProps || {};
     const scrollKeyboardShouldPersistTaps = restScrollProps.keyboardShouldPersistTaps ?? 'handled';
     const scrollKeyboardDismissMode = restScrollProps.keyboardDismissMode ?? (Platform.OS === 'ios' ? 'interactive' : 'on-drag');
+    const userOnScroll = restScrollProps.onScroll;
     const presetByVariant: Record<'tabs' | 'stack' | 'fullscreen', { edges: Edge[]; bottomPadding: number }> = {
         tabs: { edges: ['top'], bottomPadding: 0 },
         stack: { edges: ['top', 'bottom'], bottomPadding: SPACING.xxl },
@@ -115,6 +125,8 @@ export default function Screen({
         }, [resolvedRouteKey]),
     );
 
+    const keyboardScrollInset = scroll && keyboardAvoiding ? keyboardInset : 0;
+    const bottomPadding = resolvedBottomPadding + keyboardScrollInset;
     const contentContainerStyles = resolvedVariant === 'tabs'
         ? [
             styles.content,
@@ -122,23 +134,120 @@ export default function Screen({
             { paddingTop: resolvedTopPadding },
             scrollContentStyle,
             contentStyle,
-            { paddingBottom: resolvedBottomPadding },
+            { paddingBottom: bottomPadding },
         ]
         : [
             styles.content,
             { paddingHorizontal: horizontalPadding },
-            { paddingTop: resolvedTopPadding },
-            { paddingBottom: resolvedBottomPadding },
+            { paddingTop: resolvedTopPadding, paddingBottom: bottomPadding },
             scrollContentStyle,
             contentStyle,
+            { paddingBottom: bottomPadding },
         ];
+
+    const ensureFocusedInputVisible = useCallback(() => {
+        if (!scroll || !keyboardAvoiding) return;
+
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                const focusedInput = TextInput.State?.currentlyFocusedInput?.();
+                const scrollView = scrollRef.current;
+                const container = containerRef.current;
+                if (!focusedInput || !scrollView || !container) return;
+
+                const measurableInput = focusedInput as {
+                    measureInWindow?: (
+                        callback: (x: number, y: number, width: number, height: number) => void,
+                    ) => void;
+                };
+                if (!measurableInput.measureInWindow) return;
+
+                container.measureInWindow((_containerX, containerY, _containerWidth, containerHeight) => {
+                    measurableInput.measureInWindow?.((_inputX, inputY, _inputWidth, inputHeight) => {
+                        const keyboardTop = keyboardTopRef.current;
+                        const containerBottom = containerY + containerHeight;
+                        const visibleBottom = Math.min(containerBottom, keyboardTop ?? containerBottom) - SPACING.lg;
+                        const visibleTop = containerY + SPACING.sm;
+                        const inputBottom = inputY + inputHeight;
+                        let nextOffsetY = scrollOffsetYRef.current;
+
+                        if (inputBottom > visibleBottom) {
+                            nextOffsetY += inputBottom - visibleBottom;
+                        } else if (inputY < visibleTop) {
+                            nextOffsetY -= visibleTop - inputY;
+                        }
+
+                        nextOffsetY = Math.max(0, Math.round(nextOffsetY));
+                        if (Math.abs(nextOffsetY - scrollOffsetYRef.current) > 1) {
+                            scrollView.scrollTo({ y: nextOffsetY, animated: true });
+                        }
+                    });
+                });
+            }, 80);
+        });
+    }, [keyboardAvoiding, scroll]);
+
+    useEffect(() => {
+        if (!scroll || !keyboardAvoiding) {
+            keyboardTopRef.current = null;
+            setKeyboardInset(0);
+            return undefined;
+        }
+
+        const handleKeyboardFrame = (event: { endCoordinates?: { screenY?: number } }) => {
+            const keyboardTop = event.endCoordinates?.screenY;
+            keyboardTopRef.current = typeof keyboardTop === 'number' ? keyboardTop : null;
+
+            containerRef.current?.measureInWindow((_x, containerY, _width, containerHeight) => {
+                const containerBottom = containerY + containerHeight;
+                const nextInset =
+                    typeof keyboardTop === 'number' ? Math.max(0, containerBottom - keyboardTop) : 0;
+                setKeyboardInset(nextInset);
+            });
+            ensureFocusedInputVisible();
+        };
+        const handleKeyboardHide = () => {
+            keyboardTopRef.current = null;
+            setKeyboardInset(0);
+        };
+
+        const showSubscription = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+            handleKeyboardFrame,
+        );
+        const frameSubscription =
+            Platform.OS === 'ios'
+                ? Keyboard.addListener('keyboardWillChangeFrame', handleKeyboardFrame)
+                : null;
+        const hideSubscription = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+            handleKeyboardHide,
+        );
+
+        return () => {
+            showSubscription.remove();
+            frameSubscription?.remove();
+            hideSubscription.remove();
+        };
+    }, [ensureFocusedInputVisible, keyboardAvoiding, scroll]);
+
+    useEffect(() => {
+        if (keyboardFocusKey == null) return;
+        ensureFocusedInputVisible();
+    }, [ensureFocusedInputVisible, keyboardFocusKey]);
 
     const body = scroll ? (
         <ScrollView
+            ref={scrollRef}
             contentContainerStyle={contentContainerStyles}
             keyboardShouldPersistTaps={scrollKeyboardShouldPersistTaps}
             keyboardDismissMode={scrollKeyboardDismissMode}
+            scrollEventThrottle={16}
             {...restScrollProps}
+            onScroll={(event) => {
+                scrollOffsetYRef.current = event.nativeEvent.contentOffset.y;
+                userOnScroll?.(event);
+            }}
         >
             {children}
         </ScrollView>
@@ -160,7 +269,7 @@ export default function Screen({
 
     if (keyboardAvoiding) {
         return (
-            <SafeAreaView style={[styles.container, style]} edges={resolvedEdges}>
+            <SafeAreaView ref={containerRef} style={[styles.container, style]} edges={resolvedEdges}>
                 <KeyboardAvoidingView
                     style={styles.flex1}
                     behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -172,7 +281,7 @@ export default function Screen({
     }
 
     return (
-        <SafeAreaView style={[styles.container, style]} edges={resolvedEdges}>
+        <SafeAreaView ref={containerRef} style={[styles.container, style]} edges={resolvedEdges}>
             {body}
         </SafeAreaView>
     );

@@ -2,7 +2,7 @@
 import React from 'react';
 import { Text, View, ViewStyle } from 'react-native';
 import { AppIcon, type AppIconName } from './AppIcon';
-import type { SkillTier } from '../services/skillRatingService';
+import { getTierFromRating, type SkillTier } from '../services/skillRatingService';
 import { COLORS, FONTS } from '../theme';
 import styles from './SkillBadge.styles';
 
@@ -30,7 +30,10 @@ export default function SkillBadge({
     showRating = true,
     style,
 }: SkillBadgeProps) {
-    const config = TIER_CONFIG[tier] || TIER_CONFIG.Beginner;
+    const normalizedRating =
+        typeof rating === 'number' ? Math.max(0, Math.min(100, Math.round(rating))) : undefined;
+    const displayTier = normalizedRating !== undefined ? getTierFromRating(normalizedRating) : tier;
+    const displayConfig = TIER_CONFIG[displayTier] || TIER_CONFIG.Beginner;
 
     const containerSizeStyle =
         size === 'compact'
@@ -54,54 +57,52 @@ export default function SkillBadge({
                 : undefined;
 
     const tierStyle =
-        tier === 'Beginner'
+        displayTier === 'Beginner'
             ? styles.containerBeginner
-            : tier === 'Casual'
+            : displayTier === 'Casual'
                 ? styles.containerIntermediate
-            : tier === 'Intermediate'
+            : displayTier === 'Intermediate'
                 ? styles.containerIntermediate
-                : tier === 'Advanced'
+                : displayTier === 'Advanced'
                     ? styles.containerAdvanced
-                    : tier === 'Pro'
+                    : displayTier === 'Pro'
                         ? styles.containerPro
                         : styles.containerElite;
 
     const textTierStyle =
-        tier === 'Beginner'
+        displayTier === 'Beginner'
             ? styles.textBeginner
-            : tier === 'Casual'
+            : displayTier === 'Casual'
                 ? styles.textIntermediate
-            : tier === 'Intermediate'
+            : displayTier === 'Intermediate'
                 ? styles.textIntermediate
-                : tier === 'Advanced'
+                : displayTier === 'Advanced'
                     ? styles.textAdvanced
-                    : tier === 'Pro'
+                    : displayTier === 'Pro'
                         ? styles.textPro
                         : styles.textElite;
 
     const iconSize = size === 'compact' ? 14 : size === 'large' ? 20 : 16;
     const isCompact = size === 'compact';
-    const normalizedRating =
-        typeof rating === 'number' ? Math.max(0, Math.min(100, Math.round(rating))) : undefined;
 
     return (
         <View style={[styles.container, tierStyle, containerSizeStyle, style]}>
             <AppIcon
-                name={config.icon}
+                name={displayConfig.icon}
                 size={iconSize}
-                color={config.color}
+                color={displayConfig.color}
                 style={styles.icon}
             />
             {!isCompact && (
                 <Text style={[styles.text, textTierStyle, textSizeStyle]}>
-                    {tier.toUpperCase()}
+                    {displayTier.toUpperCase()}
                 </Text>
             )}
             {showRating && normalizedRating !== undefined && (
                 <Text style={[
                     styles.rating,
                     ratingSizeStyle,
-                    isCompact && { color: config.color, fontFamily: FONTS.interSemiBold, marginLeft: 2 }
+                    isCompact && { color: displayConfig.color, fontFamily: FONTS.interSemiBold, marginLeft: 2 }
                 ]}>
                     {isCompact ? normalizedRating : `(${normalizedRating})`}
                 </Text>
