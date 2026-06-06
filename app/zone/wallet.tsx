@@ -31,6 +31,7 @@ import {
     SPACING,
     TEXT_SIZES,
 } from "../../src/theme";
+import { getZoneBranchOption, ZoneBranchOption } from "../../src/utils/zoneBranch";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,36 @@ const BranchChip = ({
     </Pressable>
 );
 
+const BranchChipRow = ({
+    branches,
+    selectedBranchId,
+    onSelectBranch,
+}: {
+    branches: ZoneBranchOption[];
+    selectedBranchId: string | null;
+    onSelectBranch: (branchId: string | null) => void;
+}) => (
+    <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+    >
+        <BranchChip
+            label="All"
+            active={selectedBranchId === null}
+            onPress={() => onSelectBranch(null)}
+        />
+        {branches.map((branch) => (
+            <BranchChip
+                key={branch.id}
+                label={branch.label}
+                active={selectedBranchId === branch.id}
+                onPress={() => onSelectBranch(selectedBranchId === branch.id ? null : branch.id)}
+            />
+        ))}
+    </ScrollView>
+);
+
 // ─── main screen ─────────────────────────────────────────────────────────────
 
 export default function ZoneWalletScreen() {
@@ -187,14 +218,17 @@ export default function ZoneWalletScreen() {
 
     const { zone } = useZoneData();
 
-    const branches: any[] = useMemo(() => {
+    const branches = useMemo<ZoneBranchOption[]>(() => {
         const raw: any[] = Array.isArray(zone?.branches) ? zone.branches : [];
-        return raw.filter(
-            (b: any) => b && (b.branchDisplayName || b.name || b.areaLabel),
-        );
+        return raw
+            .map(getZoneBranchOption)
+            .filter((branch): branch is ZoneBranchOption => Boolean(branch));
     }, [zone?.branches]);
 
     const showBranchChips = branches.length > 0;
+    const selectedBranch = selectedBranchId
+        ? branches.find((branch) => branch.id === selectedBranchId) || null
+        : null;
 
     const summary = useQuery(api.zoneWallet.getSummary, {
         branchId: selectedBranchId ?? undefined,
@@ -253,12 +287,12 @@ export default function ZoneWalletScreen() {
     const handleWithdraw = () => {
         router.push({
             pathname: "/zone/(tabs)/profile",
-            params: { withdraw: "1" },
+            params: {
+                withdraw: "1",
+                ...(selectedBranchId ? { branchId: selectedBranchId } : {}),
+            },
         } as any);
     };
-
-    const branchLimitationVisible =
-        showBranchChips && selectedBranchId !== null;
 
     if (isLoading) {
         return (
@@ -336,6 +370,9 @@ export default function ZoneWalletScreen() {
                         <Text style={styles.balanceAmount}>
                             {fmt(summary.availableBalance)}
                         </Text>
+                        <Text style={styles.balanceHelper}>
+                            Available balance is combined across all branches.
+                        </Text>
                         {summary.pendingWithdrawals > 0 ? (
                             <Text style={styles.pendingNote}>
                                 {summary.pendingWithdrawals} withdrawal
@@ -347,54 +384,17 @@ export default function ZoneWalletScreen() {
 
                     {/* Branch chips */}
                     {showBranchChips ? (
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.chipsRow}
-                        >
-                            <BranchChip
-                                label="All"
-                                active={selectedBranchId === null}
-                                onPress={() => setSelectedBranchId(null)}
-                            />
-                            {branches.map((b: any, idx: number) => {
-                                const bId = String(
-                                    b.branchId ?? b.id ?? b.branchDisplayName ?? idx,
-                                );
-                                const bLabel =
-                                    b.branchDisplayName ||
-                                    b.name ||
-                                    b.areaLabel ||
-                                    `Branch ${idx + 1}`;
-                                return (
-                                    <BranchChip
-                                        key={bId}
-                                        label={bLabel}
-                                        active={selectedBranchId === bId}
-                                        onPress={() =>
-                                            setSelectedBranchId(
-                                                selectedBranchId === bId
-                                                    ? null
-                                                    : bId,
-                                            )
-                                        }
-                                    />
-                                );
-                            })}
-                        </ScrollView>
+                        <BranchChipRow
+                            branches={branches}
+                            selectedBranchId={selectedBranchId}
+                            onSelectBranch={setSelectedBranchId}
+                        />
                     ) : null}
 
-                    {/* Branch limitation notice */}
-                    {branchLimitationVisible ? (
-                        <View style={styles.limitationBanner}>
-                            <AppIcon
-                                name="pending"
-                                size={14}
-                                color={COLORS.warning}
-                            />
-                            <Text style={styles.limitationText}>
-                                Branch-level earnings breakdown coming soon.
-                                Totals shown are for all branches combined.
+                    {selectedBranch ? (
+                        <View style={styles.contextBanner}>
+                            <Text style={styles.contextText}>
+                                Showing earnings for {selectedBranch.label}
                             </Text>
                         </View>
                     ) : null}
@@ -437,41 +437,20 @@ export default function ZoneWalletScreen() {
                     showsVerticalScrollIndicator={false}
                     ListHeaderComponent={
                         showBranchChips ? (
-                            <ScrollView
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.chipsRow}
-                            >
-                                <BranchChip
-                                    label="All"
-                                    active={selectedBranchId === null}
-                                    onPress={() => setSelectedBranchId(null)}
+                            <View>
+                                <BranchChipRow
+                                    branches={branches}
+                                    selectedBranchId={selectedBranchId}
+                                    onSelectBranch={setSelectedBranchId}
                                 />
-                                {branches.map((b: any, idx: number) => {
-                                    const bId = String(
-                                        b.branchId ?? b.id ?? b.branchDisplayName ?? idx,
-                                    );
-                                    const bLabel =
-                                        b.branchDisplayName ||
-                                        b.name ||
-                                        b.areaLabel ||
-                                        `Branch ${idx + 1}`;
-                                    return (
-                                        <BranchChip
-                                            key={bId}
-                                            label={bLabel}
-                                            active={selectedBranchId === bId}
-                                            onPress={() =>
-                                                setSelectedBranchId(
-                                                    selectedBranchId === bId
-                                                        ? null
-                                                        : bId,
-                                                )
-                                            }
-                                        />
-                                    );
-                                })}
-                            </ScrollView>
+                                {selectedBranch ? (
+                                    <View style={styles.contextBanner}>
+                                        <Text style={styles.contextText}>
+                                            Showing transactions for {selectedBranch.label}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                            </View>
                         ) : null
                     }
                     ListEmptyComponent={
@@ -490,11 +469,12 @@ export default function ZoneWalletScreen() {
                                     color={COLORS.textSecondary}
                                 />
                                 <Text style={styles.emptyTitle}>
-                                    No transactions yet
+                                    {selectedBranch ? "No transactions for this branch yet" : "No transactions yet"}
                                 </Text>
                                 <Text style={styles.emptySubtext}>
-                                    Matchroom payouts will appear here after
-                                    completion.
+                                    {selectedBranch
+                                        ? "Branch payouts and withdrawal requests will appear here."
+                                        : "Matchroom payouts will appear here after completion."}
                                 </Text>
                             </View>
                         )
@@ -585,6 +565,13 @@ const styles = StyleSheet.create({
         color: COLORS.warning,
         textAlign: "center",
     },
+    balanceHelper: {
+        fontFamily: FONTS.interRegular,
+        fontSize: TEXT_SIZES.caption,
+        color: COLORS.textSecondary,
+        textAlign: "center",
+        opacity: 0.75,
+    },
 
     // ── branch chips ──
     chipsRow: {
@@ -614,22 +601,19 @@ const styles = StyleSheet.create({
     },
 
     // ── branch limitation banner ──
-    limitationBanner: {
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: SPACING.sm,
+    contextBanner: {
         borderWidth: 1,
-        borderColor: `${COLORS.warning}40`,
-        backgroundColor: `${COLORS.warning}10`,
+        borderColor: COLORS.cardBorder,
+        backgroundColor: `${COLORS.accent}0C`,
         borderRadius: CONTROL_SIZES.cardRadius - 4,
-        padding: SPACING.md,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
     },
-    limitationText: {
-        flex: 1,
+    contextText: {
         fontFamily: FONTS.interRegular,
         fontSize: TEXT_SIZES.caption,
-        color: COLORS.warning,
-        lineHeight: 18,
+        color: COLORS.textSecondary,
+        textAlign: "center",
     },
 
     // ── section label ──

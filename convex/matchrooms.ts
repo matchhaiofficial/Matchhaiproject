@@ -1141,6 +1141,22 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
       zone = null;
     }
   }
+  const payoutBranchId = String(room.branchId || room.confirmedBranchId || "").trim() || null;
+  const payoutBranch = Array.isArray(zone?.branches) && payoutBranchId
+    ? zone.branches.find((branch: any, index: number) => {
+        const id = String(branch?.id || branch?.branchId || `branch_${index + 1}`).trim();
+        return id === payoutBranchId;
+      })
+    : null;
+  const payoutBranchName = payoutBranchId
+    ? String(
+        payoutBranch?.branchDisplayName ||
+        payoutBranch?.name ||
+        payoutBranch?.areaLabel ||
+        room.branchName ||
+        "",
+      ).trim() || null
+    : null;
   const grossAmount = getMatchroomGrossAmount(room);
   const normalPayoutRate = Number.isFinite(Number(zone?.normalPayoutRate)) ? Number(zone.normalPayoutRate) : 0.9;
   const pilotPayoutRate = Number.isFinite(Number(zone?.pilotPayoutRate)) ? Number(zone.pilotPayoutRate) : 1.0;
@@ -1160,6 +1176,9 @@ async function payVenueWalletForCompletedMatchroom(ctx: any, matchroomId: Id<"ma
     reference,
     metadata: {
       source: "matchroom_completion_payout",
+      zoneId: room.zoneId ? String(room.zoneId) : null,
+      branchId: payoutBranchId,
+      branchName: payoutBranchName,
       matchroomId: String(matchroomId),
       grossAmount,
       platformShareAmount,
