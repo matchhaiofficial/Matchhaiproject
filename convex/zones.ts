@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 function toPositiveNumber(value: unknown) {
   const parsed = Number(value);
@@ -254,10 +255,7 @@ export const create = mutation({
       },
     });
 
-    const superAdmins = await ctx.db
-      .query("users")
-      .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-      .collect();
+    const superAdmins = await listSuperAdminNotificationRecipients(ctx);
     for (const superAdmin of superAdmins) {
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "moderation.review_needed",

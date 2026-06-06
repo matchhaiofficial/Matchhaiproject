@@ -32,6 +32,7 @@ import {
   deriveRatingFromElo,
   DEFAULT_ELO,
 } from "./ratingEngine";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -253,10 +254,7 @@ async function notifyResultFinalized(ctx: any, room: any, winner: "team1" | "tea
     }
   }
 
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
   for (const superAdmin of superAdmins) {
     recipients.set(String(superAdmin._id), { id: superAdmin._id, role: "super_admin" });
   }
@@ -1413,10 +1411,7 @@ async function notifyBookingWalletCredit(
     });
   }
 
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
   const adminRoute = "/super-admin";
   for (const superAdmin of superAdmins) {
     const adminDedupe = `payments.booking_credit:${intentId}:${kind}:${String(superAdmin._id)}`;
@@ -1551,10 +1546,7 @@ async function markInvalidResultVerificationForAdminReview(
   });
 
   // Alert super admins that this result needs manual review.
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
   for (const superAdmin of superAdmins) {
     const dedupeKey = `match.result_admin_review:${String(matchroomId)}:${String(superAdmin._id)}`;
     if (await notificationExistsByDedupeKey(ctx, dedupeKey)) continue;

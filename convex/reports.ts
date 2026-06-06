@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { query, mutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { requireCurrentUser, requireSuperAdmin } from "./authz";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 const DUPLICATE_WINDOW_MS = 60 * 60 * 1000;
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -103,10 +104,7 @@ async function getOwnedZone(ctx: any, ownerUid: Id<"users">) {
 }
 
 async function listSuperAdminUsers(ctx: any) {
-  return await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  return await listSuperAdminNotificationRecipients(ctx);
 }
 
 async function findRecentDuplicate(ctx: any, args: {

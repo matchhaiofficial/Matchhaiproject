@@ -5,6 +5,7 @@ import { api, internal } from "./_generated/api";
 import { mutation, query, internalMutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
@@ -400,34 +401,8 @@ export const create = mutation({
     game: v.string(),
     message: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const challenger = await ctx.db.get(args.challengerTeamId);
-    const opponent = await ctx.db.get(args.opponentTeamId);
-    if (!challenger || !opponent) throw new Error("Team not found");
-
-    const actorId = await getAuthenticatedUserId(ctx, challenger.captainUid);
-    if (challenger.captainUid !== actorId) {
-      throw new Error("Only the challenging captain can create this challenge");
-    }
-
-    const now = Date.now();
-    return await ctx.db.insert("teamChallenges", {
-      challengerTeamId: args.challengerTeamId,
-      challengerTeamName: args.challengerTeamName || challenger.name,
-      opponentTeamId: args.opponentTeamId,
-      opponentTeamName: args.opponentTeamName || opponent.name,
-      game: args.game,
-      gameKey: args.game,
-      status: "pending",
-      captainAUid: challenger.captainUid,
-      captainAName: challenger.captainUsername || "Captain",
-      captainBUid: opponent.captainUid,
-      captainBName: opponent.captainUsername || "Captain",
-      message: args.message,
-      commonAreas: [],
-      createdAt: now,
-      updatedAt: now,
-    });
+  handler: async () => {
+    throw new Error("Deprecated Team Challenge lifecycle endpoint is disabled.");
   },
 });
 
@@ -665,18 +640,8 @@ export const complete = mutation({
     score: v.optional(v.string()),
     actorUid: v.optional(v.id("users")),
   },
-  handler: async (ctx, args) => {
-    await requireCaptain(ctx, args.challengeId, args.actorUid);
-    await ctx.db.patch(args.challengeId, {
-      status: "completed",
-      result: {
-        winnerId: args.winnerId,
-        score: args.score,
-      },
-      updatedAt: Date.now(),
-    });
-
-    return true;
+  handler: async () => {
+    throw new Error("Deprecated Team Challenge lifecycle endpoint is disabled.");
   },
 });
 
@@ -1012,10 +977,7 @@ async function notifySuperAdminsChallengePayment(
   ctx: any,
   args: { challenge: any; title: string; body: string; dedupeKey: string },
 ) {
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
   for (const admin of superAdmins) {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       type: "operations.general",

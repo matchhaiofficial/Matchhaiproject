@@ -144,3 +144,26 @@ export function resolveSuperAdminAccessSource(
   if (byEnv) return "env_allowlist";
   return null;
 }
+
+export async function listSuperAdminNotificationRecipients(ctx: any) {
+  const [canonicalRoleAdmins, legacyRoleAdmins, separateAccountAdmins] = await Promise.all([
+    ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", SUPER_ADMIN_ROLE)).collect(),
+    ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", LEGACY_SUPER_ADMIN_ROLE)).collect(),
+    ctx.db.query("users").withIndex("by_accountType", (q: any) => q.eq("accountType", SUPER_ADMIN_ROLE)).collect(),
+  ]);
+
+  const byId = new Map<string, any>();
+  for (const user of [...canonicalRoleAdmins, ...legacyRoleAdmins, ...separateAccountAdmins]) {
+    byId.set(String(user._id), user);
+  }
+
+  for (const entry of getSuperAdminAllowlist().filter((item) => item.isActive)) {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q: any) => q.eq("email", entry.email))
+      .unique();
+    if (user) byId.set(String(user._id), user);
+  }
+
+  return Array.from(byId.values());
+}

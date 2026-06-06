@@ -1,5 +1,6 @@
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 type KycNotificationStatus = "not_started" | "pending" | "in_progress" | "in_review" | "verified" | "rejected" | "expired";
 type KycNotificationRole = "player" | "zone_owner" | "venue_admin" | "high_risk_dispute" | "tournament_organizer";
@@ -127,10 +128,7 @@ export async function notifySuperAdminsKycReviewNeeded(ctx: any, input: {
   role: KycNotificationRole;
   now: number;
 }) {
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
 
   if (superAdmins.length === 0) {
     await recordNotificationIssue(ctx, {

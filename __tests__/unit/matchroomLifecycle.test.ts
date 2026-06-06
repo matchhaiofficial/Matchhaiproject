@@ -23,6 +23,14 @@ import {
 
 const now = FIXED_NOW;
 
+beforeAll(() => {
+  jest.useFakeTimers().setSystemTime(now);
+});
+
+afterAll(() => {
+  jest.useRealTimers();
+});
+
 describe("isRoomFull", () => {
   it("is true when confirmed slots meet maxPlayers", () => {
     expect(isRoomFull(fullRoom)).toBe(true);

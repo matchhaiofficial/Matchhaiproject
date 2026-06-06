@@ -4,6 +4,7 @@ import { httpAction, internalMutation, internalQuery, mutation, query } from "./
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 const SUPPORT_AGENT_TOKEN_TTL_MS = 5 * 60 * 1000;
 const SUPPORT_AGENT_MAX_MESSAGE_CHARS = 2000;
@@ -211,10 +212,7 @@ async function notifySupportTicketCreated(ctx: any, input: {
     },
   });
 
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .take(50);
+  const superAdmins = (await listSuperAdminNotificationRecipients(ctx)).slice(0, 50);
 
   for (const admin of superAdmins) {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
@@ -1178,10 +1176,7 @@ async function createModerationReportFromAgent(
     updatedAt: now,
   });
 
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .take(50);
+  const superAdmins = (await listSuperAdminNotificationRecipients(ctx)).slice(0, 50);
   for (const admin of superAdmins) {
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       type: "moderation.review_needed",

@@ -1,5 +1,6 @@
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 
 const SUPER_ADMIN_WITHDRAWAL_ROUTE = "/super-admin/withdrawals";
 const ZONE_ADMIN_WITHDRAWAL_ROUTE = "/zone/wallet";
@@ -7,10 +8,7 @@ const ZONE_ADMIN_WITHDRAWAL_ROUTE = "/zone/wallet";
 export async function notifySuperAdminsWithdrawalReviewNeeded(ctx: any, input: {
   withdrawalId: Id<"walletTransactions">;
 }) {
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
 
   const baseDedupeKey = `withdrawal.review_needed:${String(input.withdrawalId)}`;
 

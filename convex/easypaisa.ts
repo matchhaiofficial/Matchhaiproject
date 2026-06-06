@@ -6,6 +6,7 @@ import { action, httpAction, internalAction, internalMutation, internalQuery, mu
 import { authComponent } from "./auth";
 import { EasypaisaTransactionType } from "./easypaisaRest";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
+import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import { EASYPAY_CHECKOUT_TTL_MS, getMatchroomLockAt } from "./timing";
 
 const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
@@ -584,10 +585,7 @@ async function notifySuperAdminsPaymentAttentionRequired(ctx: any, input: {
   });
   if (flags.length === 0) return;
 
-  const superAdmins = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-    .collect();
+  const superAdmins = await listSuperAdminNotificationRecipients(ctx);
   const route = `/super-admin/payment/${encodeURIComponent(orderRefNum)}`;
 
   for (const flagName of flags) {
@@ -2758,10 +2756,7 @@ export const applyProviderUpdate = internalMutation({
         lastError: message,
       });
 
-      const superAdmins = await ctx.db
-        .query("users")
-        .withIndex("by_role", (q: any) => q.eq("role", "super-admin"))
-        .collect();
+      const superAdmins = await listSuperAdminNotificationRecipients(ctx);
       const adminRoute = `/super-admin/payment/${encodeURIComponent(row.orderRefNum)}`;
       for (const superAdmin of superAdmins) {
         await ctx.runMutation(internal.notifications.createCanonicalFromServer, {

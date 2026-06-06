@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireCurrentUser } from "./authz";
 
 const normalizePermissionStatus = (
   value: string
@@ -61,17 +62,23 @@ export const upsertDevice = mutation({
     permissionStatus: v.string(),
   },
   handler: async (ctx, args) => {
+    const { user } = await requireCurrentUser(ctx);
+    if (String(args.userId) !== String(user._id)) {
+      throw new Error("Push device registration must match the authenticated user.");
+    }
+
     const now = Date.now();
     const permissionStatus = normalizePermissionStatus(args.permissionStatus);
     const platform = normalizePlatform(args.platform);
     const isActive = permissionStatus === "granted" && Boolean(args.expoPushToken);
-    const existing = await ctx.db
+    const ownedDevices = await ctx.db
       .query("pushDevices")
-      .withIndex("by_installationId", (q) => q.eq("installationId", args.installationId))
-      .unique();
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .collect();
+    const existing = ownedDevices.find((device) => device.installationId === args.installationId);
 
     const patch = {
-      userId: args.userId,
+      userId: user._id,
       installationId: args.installationId,
       provider: args.provider,
       platform,
@@ -85,6 +92,24 @@ export const upsertDevice = mutation({
       lastError: undefined,
       updatedAt: now,
     };
+
+    if (args.expoPushToken) {
+      const tokenRows = await ctx.db
+        .query("pushDevices")
+        .withIndex("by_expoPushToken", (q) => q.eq("expoPushToken", args.expoPushToken))
+        .take(20);
+
+      for (const row of tokenRows) {
+        const sameDevice = row.installationId === args.installationId && String(row.userId) === String(user._id);
+        if (!sameDevice) {
+          await ctx.db.patch(row._id, {
+            isActive: false,
+            expoPushToken: undefined,
+            updatedAt: now,
+          });
+        }
+      }
+    }
 
     if (existing) {
       await ctx.db.patch(existing._id, patch);
@@ -103,16 +128,18 @@ export const deactivateDevice = mutation({
     installationId: v.string(),
   },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
+    const { user } = await requireCurrentUser(ctx);
+    const ownedDevices = await ctx.db
       .query("pushDevices")
-      .withIndex("by_installationId", (q) => q.eq("installationId", args.installationId))
-      .unique();
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .collect();
+    const existing = ownedDevices.find((device) => device.installationId === args.installationId);
 
     if (!existing) return false;
 
     await ctx.db.patch(existing._id, {
       isActive: false,
-      permissionStatus: "denied",
+      expoPushToken: undefined,
       updatedAt: Date.now(),
     });
     return true;
