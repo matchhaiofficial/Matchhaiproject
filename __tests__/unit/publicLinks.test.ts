@@ -23,7 +23,7 @@ describe("public MatchHai links", () => {
       "/zones/zone-1",
     );
     expect(resolvePublicAppHref("https://matchhai.com/booking/room-1/")).toBe(
-      "/matchrooms/book/room-1",
+      "/matchrooms/book/status/room-1",
     );
   });
 

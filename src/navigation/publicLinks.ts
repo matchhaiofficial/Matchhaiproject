@@ -37,7 +37,7 @@ export function resolvePublicAppHref(
   if (venueMatch) return `/zones/${venueMatch[1]}${suffix}`;
 
   const bookingMatch = pathname.match(/^\/booking\/([^/]+)\/?$/);
-  if (bookingMatch) return `/matchrooms/book/${bookingMatch[1]}${suffix}`;
+  if (bookingMatch) return `/matchrooms/book/status/${bookingMatch[1]}${suffix}`;
 
   if (/^\/notifications\/?$/.test(pathname)) {
     if (accountKind === "zone") return "/zone/modules/notifications";
