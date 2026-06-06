@@ -37,6 +37,7 @@ import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
 import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
+import { getZoneBranchDisplayName, getZoneBranchId } from "../../../src/utils/zoneBranch";
 import {
     PlayerEmptyStateCard,
     PlayerSectionHeader,
@@ -57,9 +58,6 @@ const getInitials = (value?: string | null) => {
     }
     return cleaned[0].toUpperCase();
 };
-
-const getBranchDisplayName = (branch: any) =>
-    branch?.branchDisplayName || branch?.name || "Branch";
 
 const getBranchLocation = (branch: any) =>
     [branch?.areaLabel, branch?.city].filter(Boolean).join(", ") || "Location not set";
@@ -128,7 +126,7 @@ const maskAccountNumber = (value: string) => {
 
 export default function ZoneProfile() {
     const router = useRouter();
-    const params = useLocalSearchParams<{ withdraw?: string | string[] }>();
+    const params = useLocalSearchParams<{ withdraw?: string | string[]; branchId?: string | string[] }>();
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
     const { user, authUser } = useAuth();
@@ -166,10 +164,14 @@ export default function ZoneProfile() {
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
         return zone.branches.map((branch: any, index: number) => ({
-            id: branch?.id || `branch_${index + 1}`,
             ...branch,
+            id: getZoneBranchId(branch, index),
         }));
     }, [zone?.branches]);
+    const requestedWithdrawBranchId = useMemo(() => {
+        const raw = Array.isArray(params.branchId) ? params.branchId[0] : params.branchId;
+        return String(raw || "").trim();
+    }, [params.branchId]);
     const walletBalance = Number((user as any)?.walletBalance || 0);
 
     useEffect(() => {
@@ -188,10 +190,19 @@ export default function ZoneProfile() {
     }, [kycVerified, params.withdraw, showToast]);
 
     useEffect(() => {
-        if (!withdrawBranchId && branches[0]?.id) {
+        if (!branches.length) return;
+        const requestedBranch = requestedWithdrawBranchId
+            ? branches.find((branch: any) => branch.id === requestedWithdrawBranchId)
+            : null;
+        if (requestedBranch && withdrawBranchId !== requestedBranch.id) {
+            setWithdrawBranchId(requestedBranch.id);
+            return;
+        }
+        const currentBranchStillExists = branches.some((branch: any) => branch.id === withdrawBranchId);
+        if (!withdrawBranchId || !currentBranchStillExists) {
             setWithdrawBranchId(branches[0].id);
         }
-    }, [branches, withdrawBranchId]);
+    }, [branches, requestedWithdrawBranchId, withdrawBranchId]);
 
     const venueName = zone?.venueBrandName || "Zone Venue";
     const ownerName = zone?.ownerFullName || user?.fullName || "Zone Admin";
@@ -240,7 +251,7 @@ export default function ZoneProfile() {
             userId: user._id,
             zoneId: zone?.id,
             branchId: selectedWithdrawBranch.id,
-            branchName: getBranchDisplayName(selectedWithdrawBranch),
+            branchName: getZoneBranchDisplayName(selectedWithdrawBranch),
             amount: parsedWithdrawAmount,
             bankName: withdrawBankName,
             accountNumber: trimmedAccountNumber,
@@ -255,7 +266,7 @@ export default function ZoneProfile() {
         }
         setWithdrawSuccess({
             amount: parsedWithdrawAmount,
-            branchName: getBranchDisplayName(selectedWithdrawBranch),
+            branchName: getZoneBranchDisplayName(selectedWithdrawBranch),
             bankName: withdrawBankName,
             maskedAccount: maskAccountNumber(trimmedAccountNumber),
         });
@@ -453,7 +464,7 @@ export default function ZoneProfile() {
                                         <View style={styles.branchInfo}>
                                             <View style={styles.branchTitleRow}>
                                                 <Text style={styles.branchName} numberOfLines={1}>
-                                                    {getBranchDisplayName(branch)}
+                                                    {getZoneBranchDisplayName(branch)}
                                                 </Text>
                                                 {branch?.isPrimary ? (
                                                     <View style={styles.primaryBadge}>
@@ -580,7 +591,7 @@ export default function ZoneProfile() {
                                             disabled={withdrawSubmitting}
                                         >
                                             <Text style={[styles.withdrawBranchChipText, selected && styles.withdrawBranchChipTextActive]}>
-                                                {getBranchDisplayName(branch)}
+                                                {getZoneBranchDisplayName(branch)}
                                             </Text>
                                         </Pressable>
                                     );

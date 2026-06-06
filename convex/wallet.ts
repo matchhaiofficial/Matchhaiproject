@@ -321,12 +321,31 @@ export const createZoneWithdrawalTransaction = mutation({
 
     const actor = await requireSelf(ctx, args.userId);
     const user = actor.user;
-    if (args.zoneId) {
-      const zone = await ctx.db.get(args.zoneId as Id<"zones">);
-      if (zone && zone.ownerUid !== user._id) {
-        throw new Error("Not authorized.");
-      }
+    const zone = args.zoneId
+      ? await ctx.db.get(args.zoneId as Id<"zones">)
+      : await ctx.db
+          .query("zones")
+          .withIndex("by_ownerUid", (q: any) => q.eq("ownerUid", user._id))
+          .unique();
+    if (!zone || String(zone.ownerUid || "") !== String(user._id)) {
+      throw new Error("Not authorized.");
     }
+    const branch = Array.isArray((zone as any).branches)
+      ? (zone as any).branches.find((candidate: any, index: number) => {
+          const id = String(candidate?.id || candidate?.branchId || `branch_${index + 1}`).trim();
+          return id === String(args.branchId || "").trim();
+        })
+      : null;
+    if (!branch) {
+      throw new Error("Branch not found.");
+    }
+    const safeBranchName = String(
+      branch.branchDisplayName ||
+      branch.name ||
+      branch.areaLabel ||
+      args.branchName ||
+      "Branch",
+    ).trim();
     const walletBalance = Number(user.walletBalance || 0);
     if (walletBalance < args.amount) {
       throw new Error("Withdrawal amount cannot exceed wallet balance.");
@@ -342,9 +361,9 @@ export const createZoneWithdrawalTransaction = mutation({
       reference,
       metadata: {
         source: "zone_admin_withdrawal_request",
-        zoneId: args.zoneId || null,
+        zoneId: String(zone._id),
         branchId: args.branchId,
-        branchName: args.branchName,
+        branchName: safeBranchName,
         bankName: args.bankName,
         accountNumberMasked: args.accountNumberMasked,
         accountNumberLast4: args.accountNumberLast4,
