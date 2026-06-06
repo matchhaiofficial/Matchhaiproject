@@ -1,4 +1,4 @@
-import { Redirect, Stack } from "expo-router";
+import { Redirect, Stack, usePathname } from "expo-router";
 import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 
@@ -11,6 +11,7 @@ import { getDefaultSignedInRoute, isZoneAccount, isSuperAdminProfile } from "../
 
 export default function PlayerLayout() {
   const { user, loading } = useAuth();
+  const pathname = usePathname();
   const resetLoginForm = useLoginFormStore((state) => state.reset);
   const registrationPhase = useOnboardingStore((state) => state.registrationPhase);
   const resetOnboarding = useOnboardingStore((state) => state.resetAll);
@@ -46,6 +47,9 @@ export default function PlayerLayout() {
   }
 
   if (isSuperAdmin || isZoneUser) {
+    if (isZoneUser && pathname === "/wallet") {
+      return <Redirect href="/zone/wallet" />;
+    }
     return <Redirect href={getDefaultSignedInRoute(user) as any} />;
   }
 

@@ -22,10 +22,117 @@ function normalizeResourceToken(value?: string | null) {
 
 function parseLocalDateTimeMillis(dateValue?: string | null, timeValue?: string | null) {
   const date = String(dateValue || "").trim();
-  const time = String(timeValue || "").trim();
+  let time = String(timeValue || "").trim();
   if (!date || !time) return null;
+  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]);
+    const minute = Number(twelveHour[2]);
+    const period = twelveHour[3].toUpperCase();
+    if (period === "PM" && hour !== 12) hour += 12;
+    if (period === "AM" && hour === 12) hour = 0;
+    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
   const parsed = new Date(`${date}T${time}`).getTime();
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getScheduledStartMillis(dateValue: unknown, timeValue: unknown) {
+  const time = String(timeValue || "").trim();
+  if (!time) return null;
+
+  if (typeof dateValue === "number" && Number.isFinite(dateValue)) {
+    const date = new Date(dateValue);
+    const localDate = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+    return parseLocalDateTimeMillis(localDate, time);
+  }
+
+  return parseLocalDateTimeMillis(String(dateValue || ""), time);
+}
+
+function isExpiredForZoneDecision(request: any, linkedRoom: any, now = Date.now()) {
+  const requestStatus = String(request?.status || "").toLowerCase();
+  if (["expired", "cancelled"].includes(requestStatus)) return true;
+
+  const responseExpiresAt = Number(request?.responseExpiresAt || 0);
+  if (Number.isFinite(responseExpiresAt) && responseExpiresAt > 0 && responseExpiresAt <= now) {
+    return true;
+  }
+
+  const requestStartAt = getScheduledStartMillis(request?.preferredDate, request?.preferredTime);
+  if (requestStartAt !== null && requestStartAt <= now) return true;
+
+  if (!linkedRoom) return false;
+  const roomStatus = String(linkedRoom.status || "").toLowerCase();
+  if (["expired", "cancelled", "completed"].includes(roomStatus)) return true;
+
+  const maxPlayers = Number(linkedRoom.maxPlayers || 0);
+  const confirmedSlots = [...(linkedRoom.slotsA || []), ...(linkedRoom.slotsB || [])]
+    .filter((slot: any) => slot?.status === "confirmed" && (slot?.uid || slot?.user?.uid))
+    .length;
+  const roomIsFull =
+    maxPlayers > 0 &&
+    Math.max(Number(linkedRoom.currentPlayers || 0), confirmedSlots) >= maxPlayers;
+  const expiresAt = Number(linkedRoom.expiresAt || 0);
+  if (!roomIsFull && Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
+    return true;
+  }
+  const broadcastExpiresAt = Number(linkedRoom.broadcastRequestExpiresAt || 0);
+  if (
+    Number.isFinite(broadcastExpiresAt) &&
+    broadcastExpiresAt > 0 &&
+    broadcastExpiresAt <= now
+  ) {
+    return true;
+  }
+
+  const roomStartAt =
+    Number(linkedRoom.scheduledStartAt || linkedRoom.startTime || 0) ||
+    getScheduledStartMillis(linkedRoom.scheduledDate, linkedRoom.scheduledTime);
+  return roomStartAt !== null && roomStartAt > 0 && roomStartAt <= now;
+}
+
+async function filterActionableZoneRequests(ctx: any, requests: any[], now = Date.now()) {
+  const linkedRoomIds = Array.from(
+    new Set(requests.map((request) => String(request?.matchroomId || "")).filter(Boolean)),
+  );
+  const linkedRooms = await Promise.all(
+    linkedRoomIds.map((matchroomId) => ctx.db.get(matchroomId as any).catch(() => null)),
+  );
+  const linkedRoomsById = new Map(
+    linkedRoomIds.map((matchroomId, index) => [matchroomId, linkedRooms[index]]),
+  );
+
+  return requests.filter(
+    (request) =>
+      !isExpiredForZoneDecision(
+        request,
+        request?.matchroomId ? linkedRoomsById.get(String(request.matchroomId)) : null,
+        now,
+      ),
+  );
+}
+
+async function assertActionableZoneRequest(
+  ctx: any,
+  request: any,
+  now = Date.now(),
+): Promise<any> {
+  if (!request) throw new Error("Booking request not found.");
+  if (!["open", "pending_payment"].includes(String(request.status || ""))) {
+    throw new Error("Booking request can no longer be updated.");
+  }
+  const linkedRoom = request.matchroomId
+    ? await ctx.db.get(request.matchroomId as any).catch(() => null)
+    : null;
+  if (isExpiredForZoneDecision(request, linkedRoom, now)) {
+    throw new Error("This booking request has expired and can no longer be updated.");
+  }
+  return request;
 }
 
 function inferResourceTier(resource: any) {
@@ -705,7 +812,10 @@ export const listBookingQueueForZone = query({
       }
     });
 
-    const normalizedRequests = Array.from(deduped.values());
+    const normalizedRequests = await filterActionableZoneRequests(
+      ctx,
+      Array.from(deduped.values()),
+    );
 
     const users = await Promise.all(
       normalizedRequests.map((request) => ctx.db.get(request.userId)).map((promise) => promise.catch(() => null)),
@@ -782,7 +892,11 @@ export const listBookingQueuePageForZone = query({
     });
 
     const searchNeedle = String(filters.searchText || "").trim().toLowerCase();
-    const rows = Array.from(deduped.values())
+    const actionableRequests = await filterActionableZoneRequests(
+      ctx,
+      Array.from(deduped.values()),
+    );
+    const rows = actionableRequests
       .filter((request: any) => {
         if (filters.requestKind && String(request.requestKind || "direct_zone") !== String(filters.requestKind)) return false;
         if (filters.branchId && String(request.branchId || "") !== String(filters.branchId)) return false;
@@ -1203,13 +1317,11 @@ export const acceptBookingRequest = mutation({
     const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const actorUid = String(actor._id);
     const now = Date.now();
-    const bookingRequest = await ctx.db.get(args.requestId);
-    if (!bookingRequest) {
-      throw new Error("Booking request not found.");
-    }
-    if (!["open", "pending_payment"].includes(String(bookingRequest.status || ""))) {
-      throw new Error("Booking request can no longer be accepted.");
-    }
+    const bookingRequest = await assertActionableZoneRequest(
+      ctx,
+      await ctx.db.get(args.requestId),
+      now,
+    );
     if (!args.resourceIds.length) {
       throw new Error("Select at least one resource.");
     }
@@ -1237,7 +1349,7 @@ export const acceptBookingRequest = mutation({
 
     if (bookingRequest.requestKind === "broadcast_fanout" && bookingRequest.matchroomId) {
       matchroomId = bookingRequest.matchroomId;
-      const room = await ctx.db.get(bookingRequest.matchroomId);
+      const room: any = await ctx.db.get(bookingRequest.matchroomId);
       if (!room || room.locationMode !== "broadcast") {
         throw new Error("Broadcast matchroom not found.");
       }
@@ -1487,7 +1599,11 @@ export const rejectBookingRequest = mutation({
     const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
     const actorUid = String(actor._id);
     const now = Date.now();
-    const request = await ctx.db.get(args.requestId);
+    const request = await assertActionableZoneRequest(
+      ctx,
+      await ctx.db.get(args.requestId),
+      now,
+    );
 
     const statusPatch =
       request?.requestKind === "broadcast_fanout"
@@ -1618,10 +1734,11 @@ export const sendCounterOffer = mutation({
     const actorUid = String(actor._id);
     const now = Date.now();
     const currency = args.currency || "PKR";
-    const request = await ctx.db.get(args.requestId);
-    if (!request) {
-      throw new Error("Booking request not found.");
-    }
+    const request = await assertActionableZoneRequest(
+      ctx,
+      await ctx.db.get(args.requestId),
+      now,
+    );
 
     // Alternative-time rules: the proposed time(s) must be in the future and
     // within ±2 hours of the originally requested time. Comparisons use

@@ -29,6 +29,7 @@ import { formatMatchroomShare } from "../../../src/utils/shareContent";
 import { COUNTER_OFFER_TIME_WINDOW_MS } from "../../../src/constants/timing";
 import { getUserProfile } from "../../../src/services/userService";
 import { useCallback, useEffect, useRef } from "react";
+import { canInviteToMatchroomTeam } from "../utils/matchroomLobbyState";
 
 const isNoPendingRequestResult = (result: { ok: boolean; message?: string }) =>
   !result.ok && /no pending request found/i.test(result.message || "");
@@ -850,13 +851,19 @@ export function useMatchroomDetailActions({
   };
 
   const handleInvitePress = (team: "A" | "B", slotId: string) => {
-    const captainUid = team === "A" ? captainUidAResolved : captainUidBResolved;
-    const canInviteForTeam =
-      !!captainUid && identityMatches(captainUid, currentIdentityValues);
+    const canInviteForTeam = canInviteToMatchroomTeam(
+      room,
+      team,
+      currentIdentityValues,
+      identityMatches,
+    );
 
     if (!canInviteForTeam) {
       showToast({
-        message: `Only the captain of Team ${team} can invite teammates for that team.`,
+        message:
+          team === "B" && !captainUidBResolved
+            ? "Join this lobby before inviting teammates to Team B."
+            : `Only the captain of Team ${team} or the host can invite teammates for that team.`,
         title: "Invite unavailable",
         type: "warning",
       });
@@ -868,10 +875,10 @@ export function useMatchroomDetailActions({
   };
 
   const handleSendInvite = async (friend: any) => {
-    if (!invitingSlot || !id || !room) return;
+    if (!invitingSlot || !id || !room) return false;
 
     if (inviteInFlightRef.current) {
-      return;
+      return false;
     }
 
     const inviteeUid = friend?.uid ?? friend?.friendId ?? friend?._id ?? null;
@@ -881,7 +888,7 @@ export function useMatchroomDetailActions({
         title: "Invite failed",
         type: "error",
       });
-      return;
+      return false;
     }
 
     setJoining(true);
@@ -903,13 +910,14 @@ export function useMatchroomDetailActions({
           title: "Invitation sent",
           type: "success",
         });
-        setShowInviteModal(false);
+        return true;
       } else {
         showToast({
           message: res.message || "Failed to send invitation.",
           title: "Invite failed",
           type: "error",
         });
+        return false;
       }
     } catch (e) {
       Logger.error("MatchroomDetails", "Error sending invite", e);
@@ -918,6 +926,7 @@ export function useMatchroomDetailActions({
         title: "Invite failed",
         type: "error",
       });
+      return false;
     } finally {
       inviteInFlightRef.current = false;
       setJoining(false);

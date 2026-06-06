@@ -18,6 +18,28 @@ export const normalizeWalkInSkillTier = (value: unknown): SkillTier | null => {
 export const getSlotUserId = (slot: any) =>
   slot?.user?._id || slot?.user?.uid || slot?.uid || null;
 
+export function canInviteToMatchroomTeam(
+  room: Matchroom | null,
+  team: "A" | "B",
+  currentIdentityValues: Array<string | null | undefined>,
+  identityMatches: (
+    candidate: unknown,
+    values: Array<string | null | undefined>,
+  ) => boolean,
+) {
+  const captainUid =
+    team === "A" ? room?.captainUidA || room?.hostUid : room?.captainUidB;
+  const isHost = identityMatches(room?.hostUid, currentIdentityValues);
+  const isTeamCaptain =
+    !!captainUid && identityMatches(captainUid, currentIdentityValues);
+  const canFillCaptainlessTeamB =
+    team === "B" &&
+    !room?.captainUidB &&
+    deriveMatchroomLobbyState(room, currentIdentityValues).isJoined;
+
+  return isHost || isTeamCaptain || canFillCaptainlessTeamB;
+}
+
 type LobbySlot = {
   slotId: string;
   status: "open" | "confirmed" | "reserved";
@@ -196,7 +218,7 @@ export function deriveMatchroomLobbyState(
 
   const slots = [...(room?.slotsA || []), ...(room?.slotsB || [])];
   const slotUids = slots
-    .map((slot: any) => slot?.user?._id || slot?.uid)
+    .map(getSlotUserId)
     .filter(Boolean);
   const participantUids = new Set<string>(
     [
