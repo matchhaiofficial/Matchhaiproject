@@ -135,6 +135,8 @@ type WalkInSeriesType = (typeof WALKIN_SERIES_OPTIONS)[number];
 const isCsStyleGame = (gameKey: string | null | undefined) =>
   gameKey === "cs2" || gameKey === "cs16" || gameKey === "valorant";
 
+const MATCHROOM_SUMMARY_SEPARATOR = " | ";
+
 const getWalkInDurationMinutes = (
   gameKey: string | null,
   series: WalkInSeriesType,
@@ -1351,7 +1353,6 @@ export default function CreateMatchroom() {
       <View
         style={{
           gap: 14,
-          marginHorizontal: 16,
           marginBottom: 20,
           padding: 16,
           borderRadius: 16,
@@ -1392,7 +1393,7 @@ export default function CreateMatchroom() {
               style={{ flex: 1 }}
               onPress={openEasypaisaPhonePrompt}
             >
-              Open payment status
+              Status
             </AppButton>
           ) : null}
           {easypaisaPaymentPhase === "payment_sent" ? (
@@ -1402,7 +1403,7 @@ export default function CreateMatchroom() {
               loading={refreshingEasypaisaStatus}
               disabled={refreshingEasypaisaStatus}
             >
-              I've paid / Refresh
+              Refresh
             </AppButton>
           ) : isEasypaisaFinalized ? (
             <AppButton style={{ flex: 1 }} onPress={openFinalizedEasypaisaMatchroom}>
@@ -1693,7 +1694,7 @@ export default function CreateMatchroom() {
                     {isEasypaisaFinalized
                       ? "Open Matchroom"
                       : isEasypaisaPaymentActive
-                        ? "Open Payment Status"
+                        ? "Status"
                         : "Create Walk-in Matchroom"}
                   </Text>
                 )}
@@ -2249,14 +2250,14 @@ export default function CreateMatchroom() {
                       ? `${broadcastAreas.length > 0 ? broadcastAreas.join(", ") : userProfile?.areasPreferred?.join(", ") || "preferred areas"} `
                       : selectedZoneName || "selected zone"}
                   </Text>
-                  {" ? "}
+                  {MATCHROOM_SUMMARY_SEPARATOR}
                   <Text style={{ color: COLORS.accent }}>
                     {hostSkillTier || formData.skillLevel || "Any skill"}
                   </Text>
                   {formData.selectedMaps &&
                     formData.selectedMaps.length > 0 && (
                       <>
-                        {" ? "}
+                        {MATCHROOM_SUMMARY_SEPARATOR}
                         <Text style={{ color: COLORS.accent }}>
                           {formData.selectedMaps.join(", ")}
                         </Text>
@@ -2296,14 +2297,14 @@ export default function CreateMatchroom() {
                         "preferred areas"
                       : selectedZoneName || "selected zone"}
                   </Text>
-                  {" ? "}
+                  {MATCHROOM_SUMMARY_SEPARATOR}
                   <Text style={{ color: COLORS.accent }}>
                     {hostSkillTier || formData.skillLevel || "Any bracket"}
                   </Text>
                   {Array.isArray(formData.tekkenCharacters) &&
                     formData.tekkenCharacters.length > 0 && (
                       <>
-                        {" ? "}
+                        {MATCHROOM_SUMMARY_SEPARATOR}
                         <Text style={{ color: COLORS.accent }}>
                           {formData.tekkenCharacters.join(", ")}
                         </Text>
@@ -2370,7 +2371,7 @@ export default function CreateMatchroom() {
                   {isEasypaisaFinalized
                     ? "Open Matchroom"
                     : isEasypaisaPaymentActive
-                    ? "Open Payment Status"
+                    ? "Status"
                     : locationMode === "broadcast"
                       ? "Send Broadcast"
                       : "Send Booking Request"}
@@ -2548,7 +2549,7 @@ export default function CreateMatchroom() {
                     loading={refreshingEasypaisaStatus}
                     disabled={refreshingEasypaisaStatus}
                   >
-                    I've paid / Refresh
+                    Refresh
                   </AppButton>
                 </>
               )}

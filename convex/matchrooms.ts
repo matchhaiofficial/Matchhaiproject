@@ -4289,9 +4289,9 @@ export const inviteToMatchroom = mutation({
     if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
     if (isJoinLocked(room)) throw new Error("This matchroom is locked.");
 
-    // Verify inviter: the team's captain may invite to their own team, and the
-    // host may invite to either team's open slots (Team B frequently has no
-    // captain assigned yet, but the host still needs to be able to fill it).
+    // Verify inviter: the team's captain may invite to their own team and the
+    // host may invite to either team. Until Team B has a captain, any joined
+    // lobby participant may help fill its open slots.
     const captainUid = args.team === "A"
       ? (room.captainUidA || room.hostUid)
       : room.captainUidB;
@@ -4300,8 +4300,28 @@ export const inviteToMatchroom = mutation({
     const host = await resolveUserByAnyId(ctx, room.hostUid);
     const actorIsHost = !!actor && !!host && String(actor._id) === String(host._id);
     const actorIsTeamCaptain = !!actor && !!captain && String(captain._id) === String(actor._id);
-    if (!actor || (!actorIsHost && !actorIsTeamCaptain)) {
-      throw new Error(`Only the captain of Team ${args.team} or the host can send invitations for this team.`);
+    const participantUidValues = Array.from(
+      new Set([
+        ...getMatchroomPlayerUids(room),
+        ...getAllMatchroomSlots(room).map(getSlotUserUid),
+        String(room.hostUid || ""),
+      ].filter(Boolean)),
+    );
+    const actorIsParticipant =
+      !!actor &&
+      participantUidValues.some(
+        (uid) =>
+          String(uid) === String(actor._id) ||
+          String(uid) === String(actor.authId || ""),
+      );
+    const canFillCaptainlessTeamB =
+      args.team === "B" && !room.captainUidB && actorIsParticipant;
+    if (!actor || (!actorIsHost && !actorIsTeamCaptain && !canFillCaptainlessTeamB)) {
+      throw new Error(
+        args.team === "B" && !room.captainUidB
+          ? "Only joined lobby players can invite teammates to Team B until it has a captain."
+          : `Only the captain of Team ${args.team} or the host can send invitations for this team.`,
+      );
     }
 
     // Not already in room

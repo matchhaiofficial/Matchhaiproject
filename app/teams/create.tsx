@@ -225,9 +225,9 @@ export default function CreateTeam() {
     return (
         <Screen style={styles.screen} scroll={false}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={localStyles.keyboardShell}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                keyboardVerticalOffset={0}
             >
                 <AppHeader title="Create Team" onBack={() => router.back()} inlineTitle />
 
@@ -239,6 +239,7 @@ export default function CreateTeam() {
                         styles.scrollContentWithBottomAction,
                     ]}
                     keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                     showsVerticalScrollIndicator={false}
                 >
                     {/* Team Name */}

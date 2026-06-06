@@ -1160,6 +1160,7 @@ export default function MatchroomDetails() {
         friends={friends}
         joining={joining}
         styles={styles}
+        inviteContextKey={`${invitingSlot?.team || ""}:${invitingSlot?.slotId || ""}`}
         onInvite={handleSendInviteAction}
       />
 

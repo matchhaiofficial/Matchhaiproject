@@ -137,7 +137,7 @@ export function formatVenueShare(input: VenueShareInput): string {
   return joinSections([
     `Book a slot at ${name} on MatchHai 🎮`,
     details,
-    linkSection("Open venue:", `zones/${input.id}`),
+    linkSection("Open venue:", `venues/${input.id}`),
   ]);
 }
 

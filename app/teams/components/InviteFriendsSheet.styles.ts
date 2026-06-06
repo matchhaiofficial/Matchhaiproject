@@ -115,11 +115,25 @@ export default StyleSheet.create({
         borderColor: 'transparent',
         backgroundColor: 'transparent',
     },
+    inviteBtnInvited: {
+        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+        borderColor: COLORS.warning,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+    },
     inviteBtnText: {
         color: COLORS.accent,
         fontFamily: FONTS.heading,
         fontSize: 12,
         fontWeight: '700',
+    },
+    inviteBtnTextInvited: {
+        color: COLORS.warning,
+        fontFamily: FONTS.heading,
+        fontSize: 11,
+        fontWeight: '700',
+        textTransform: 'uppercase',
     },
     emptyContainer: {
         padding: 40,

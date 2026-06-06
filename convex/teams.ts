@@ -8,7 +8,7 @@ import { authComponent } from "./auth";
 import { api, internal } from "./_generated/api";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { isUserHiddenFromPublic } from "./userVisibility";
-import { getCurrentUser, isSuperAdminProfile } from "./authz";
+import { getCurrentUser, isSuperAdminProfile, requireCurrentUser } from "./authz";
 
 // Non-throwing membership check: captain, roster member, or super admin.
 async function isTeamViewerMember(ctx: any, team: any): Promise<boolean> {
@@ -774,6 +774,40 @@ export const isNameAvailable = query({
       .withIndex("by_nameLower", (q) => q.eq("nameLower", args.name.toLowerCase()))
       .collect();
     return !existingTeams.some(isActiveTeam);
+  },
+});
+
+// Active invite recipients for the captain's invite sheet.
+export const listPendingInviteeUids = query({
+  args: { teamId: v.id("teams") },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId);
+    assertActiveTeam(team);
+
+    const actor = await requireCurrentUser(ctx);
+    if (String(team.captainUid) !== String(actor.user._id)) {
+      throw new Error("Only captain can view pending team invitations");
+    }
+
+    const now = Date.now();
+    const [pendingInvites, legacyPendingInvites] = await Promise.all([
+      ctx.db
+        .query("notifications")
+        .withIndex("by_teamId_type_status", (q) =>
+          q.eq("teamId", args.teamId).eq("type", "team.invite").eq("status", "pending")
+        )
+        .collect(),
+      ctx.db
+        .query("notifications")
+        .withIndex("by_teamId_type_status", (q) =>
+          q.eq("teamId", args.teamId).eq("type", "team_invite").eq("status", "pending")
+        )
+        .collect(),
+    ]);
+
+    return [...pendingInvites, ...legacyPendingInvites]
+      .filter((invite) => !invite.expiresAt || invite.expiresAt > now)
+      .map((invite) => String(invite.toUid));
   },
 });
 
