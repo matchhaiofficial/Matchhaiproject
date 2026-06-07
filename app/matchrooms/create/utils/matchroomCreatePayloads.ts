@@ -322,7 +322,7 @@ export function buildAssignedTeamMembers(params: {
   return [
     {
       role: memberSportRoleByUid[resolvedTeam.captainUid]
-        ? `Captain ? ${memberSportRoleByUid[resolvedTeam.captainUid]}`
+        ? `Captain - ${memberSportRoleByUid[resolvedTeam.captainUid]}`
         : "Captain",
       uid: resolvedTeam.captainUid,
       username:

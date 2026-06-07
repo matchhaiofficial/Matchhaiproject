@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { useMinuteTicker } from "../../../../src/hooks/useMinuteTicker";
 import {
   type ZoneBookingQueueItem,
   type ZoneMatchroomListItem,
@@ -125,6 +126,33 @@ export const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {
   return raw.matchroomId || raw.matchroom?.id || raw.meta?.matchroomId || null;
 };
 
+export const isZoneBookingRequestExpired = (
+  item: ZoneBookingQueueItem,
+  now = Date.now(),
+) => {
+  if (["expired", "cancelled"].includes(String(item.status || "").toLowerCase())) {
+    return true;
+  }
+
+  const responseExpiresAt = toScheduleMillis(item.responseExpiresAt);
+  if (responseExpiresAt > 0 && responseExpiresAt <= now) return true;
+
+  const date = toDateString(item.preferredDate);
+  let time = String(item.preferredTime || "").trim();
+  if (!date || !time) return false;
+  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]);
+    const minute = Number(twelveHour[2]);
+    const period = twelveHour[3].toUpperCase();
+    if (period === "PM" && hour !== 12) hour += 12;
+    if (period === "AM" && hour === 12) hour = 0;
+    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+  const scheduledStartAt = new Date(`${date}T${time}`).getTime();
+  return Number.isFinite(scheduledStartAt) && scheduledStartAt <= now;
+};
+
 export const formatDate = (value: any) => {
   const millis = toMillis(value);
   if (!millis) return "N/A";
@@ -165,6 +193,7 @@ export function useZoneBookingsViewModel({
   selectedRequestId,
   monthCursor,
 }: Params) {
+  const now = useMinuteTicker();
   const branchAreas = useMemo(() => {
     const allAreas = new Set<string>();
     const rawBranches = Array.isArray(zone?.branches) ? zone.branches : [];
@@ -216,6 +245,7 @@ export function useZoneBookingsViewModel({
     };
 
     return combinedQueue.filter((item) => {
+      if (isZoneBookingRequestExpired(item, now)) return false;
       const gameOk = gameFilter === "all" ? true : item.gameKey === gameFilter;
       const hour = toClockHour(item.preferredTime);
       const timeOk =
@@ -250,11 +280,12 @@ export function useZoneBookingsViewModel({
     requestStatusFilter,
     searchQuery,
     zone?.branches,
+    now,
   ]);
 
   const selectedRequest = useMemo(
-    () => combinedQueue.find((item) => item.id === selectedRequestId) || null,
-    [combinedQueue, selectedRequestId],
+    () => filteredQueue.find((item) => item.id === selectedRequestId) || null,
+    [filteredQueue, selectedRequestId],
   );
 
   const selectedMatchroomId = useMemo(

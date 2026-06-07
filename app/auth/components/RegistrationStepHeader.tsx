@@ -1,5 +1,6 @@
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useEffect, useRef } from "react";
+import { BackHandler, StyleSheet, Text, View } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
 import { COLORS, FONTS, SPACING, TEXT_SIZES } from "../../../src/theme";
@@ -21,6 +22,26 @@ export default function RegistrationStepHeader({
   progress,
   onBack,
 }: RegistrationStepHeaderProps) {
+  const onBackRef = useRef(onBack);
+
+  useEffect(() => {
+    onBackRef.current = onBack;
+  }, [onBack]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+        const handleBack = onBackRef.current;
+        if (!handleBack) return false;
+
+        handleBack();
+        return true;
+      });
+
+      return () => subscription.remove();
+    }, []),
+  );
+
   return (
     <View style={styles.wrapper}>
       <AppHeader title={title} subtitle={subtitle} onBack={onBack} inlineTitle />

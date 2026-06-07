@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -39,11 +39,26 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
     const { user } = useAuth();
     const { showToast } = useToast();
     const [invitingIds, setInvitingIds] = useState<Set<string>>(new Set());
+    const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
 
     const friendsData = useQuery(
         api.social.listFriendsForGame,
         user?._id && game ? { userId: user._id as Id<"users">, game } : "skip"
     );
+    const pendingInviteeUids = useQuery(
+        api.teams.listPendingInviteeUids,
+        visible && user?._id && teamId ? { teamId: teamId as Id<"teams"> } : "skip",
+    );
+
+    useEffect(() => {
+        if (!visible) {
+            setInvitingIds(new Set());
+            return;
+        }
+        if (pendingInviteeUids !== undefined) {
+            setInvitedIds(new Set(pendingInviteeUids.map(String)));
+        }
+    }, [pendingInviteeUids, visible]);
 
     const membersSet = new Set(memberUids);
     const friends: Friend[] = (friendsData ?? [])
@@ -54,29 +69,26 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
             teamName: f.teamName || null,
         }))
         .filter((f) => !membersSet.has(f.uid));
-    const loading = visible && friendsData === undefined;
+    const loading = visible && (friendsData === undefined || pendingInviteeUids === undefined);
 
     const handleInvite = async (friendUid: string) => {
-        if (invitingIds.has(friendUid)) return;
+        if (invitingIds.has(friendUid) || invitedIds.has(friendUid)) return;
 
         setInvitingIds((prev) => new Set(prev).add(friendUid));
         try {
             const res = await inviteToTeamAction({ teamId, toUid: friendUid });
             if (!res.ok) {
                 showToast({ type: "error", title: "Error", message: res.message || "Failed to send invite" });
-                setInvitingIds((prev) => {
-                    const next = new Set(prev);
-                    next.delete(friendUid);
-                    return next;
-                });
                 return;
             }
 
+            setInvitedIds((prev) => new Set(prev).add(friendUid));
             if (res.alreadyPending) {
                 showToast({ type: "info", title: "Invite Pending", message: res.message || "An invite is already pending for this friend." });
             }
         } catch (error) {
             Logger.error("InviteFriendsSheet", "HandleInvite error", error);
+        } finally {
             setInvitingIds((prev) => {
                 const next = new Set(prev);
                 next.delete(friendUid);
@@ -86,9 +98,10 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
     };
 
     const renderFriendRow = (item: Friend) => {
-        const isInvited = invitingIds.has(item.uid);
+        const isInviting = invitingIds.has(item.uid);
+        const isInvited = invitedIds.has(item.uid);
         const disabledByTeam = Boolean(item.inTeam);
-        const disabled = isInvited || disabledByTeam;
+        const disabled = isInviting || isInvited || disabledByTeam;
 
         return (
             <View style={styles.friendItem}>
@@ -108,7 +121,11 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                     </View>
                 </View>
                 <Pressable
-                    style={[styles.inviteBtn, disabled && styles.inviteBtnDisabled]}
+                    style={[
+                        styles.inviteBtn,
+                        isInvited && styles.inviteBtnInvited,
+                        disabledByTeam && styles.inviteBtnDisabled,
+                    ]}
                     onPress={() => {
                         if (disabledByTeam) {
                             showToast({ type: "info", title: "Already in a team", message: "This player is already in a team for this game and can't be invited." });
@@ -119,9 +136,11 @@ export default function InviteFriendsSheet({ visible, onClose, teamId, teamName,
                     disabled={disabled}
                 >
                     {isInvited ? (
-                        <AppIcon name="check" size={16} color={COLORS.muted} />
+                        <Text style={styles.inviteBtnTextInvited}>Invited</Text>
                     ) : (
-                        <Text style={styles.inviteBtnText}>{disabledByTeam ? "Unavailable" : "Invite"}</Text>
+                        <Text style={styles.inviteBtnText}>
+                            {disabledByTeam ? "Unavailable" : isInviting ? "Inviting..." : "Invite"}
+                        </Text>
                     )}
                 </Pressable>
             </View>

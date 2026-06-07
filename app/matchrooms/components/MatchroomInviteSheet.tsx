@@ -37,17 +37,25 @@ const localStyles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 18,
   },
+  inviteAction: {
+    minWidth: 76,
+  },
+  inviteAllButton: {
+    flexShrink: 0,
+  },
 });
 
 const InviteRow = React.memo(function InviteRow({
   friend,
   disabled,
+  invited,
   inviting,
   styles,
   onInvite,
 }: {
   friend: any;
   disabled: boolean;
+  invited: boolean;
   inviting: boolean;
   styles: any;
   onInvite: (friend: any) => void;
@@ -64,8 +72,13 @@ const InviteRow = React.memo(function InviteRow({
         </Text>
       </View>
       <Text style={styles.friendName}>{friend.username}</Text>
-      <AppButton style={styles.sendInviteButton} onPress={handleInvite} disabled={disabled}>
-        {inviting ? <ActivityIndicator size="small" color="#FFF" /> : "Invite"}
+      <AppButton
+        variant={invited ? "success" : "primary"}
+        style={[localStyles.inviteAction, !invited && styles.sendInviteButton]}
+        onPress={handleInvite}
+        disabled={disabled}
+      >
+        {inviting ? <ActivityIndicator size="small" color="#FFF" /> : invited ? "Invited" : "Invite"}
       </AppButton>
     </View>
   );
@@ -78,7 +91,8 @@ type Props = {
   friends: any[];
   joining: boolean;
   styles: any;
-  onInvite: (friend: any) => Promise<void> | void;
+  inviteContextKey: string;
+  onInvite: (friend: any) => Promise<boolean>;
 };
 
 export function MatchroomInviteSheet({
@@ -88,36 +102,73 @@ export function MatchroomInviteSheet({
   friends,
   joining,
   styles,
+  inviteContextKey,
   onInvite,
 }: Props) {
   const [invitingFriendKey, setInvitingFriendKey] = useState<string | null>(null);
+  const [invitedFriendKeys, setInvitedFriendKeys] = useState<Set<string>>(() => new Set());
+  const [invitingAll, setInvitingAll] = useState(false);
 
   useEffect(() => {
     if (!visible) {
       setInvitingFriendKey(null);
+      setInvitingAll(false);
     }
   }, [visible]);
+
+  useEffect(() => {
+    setInvitedFriendKeys(new Set());
+  }, [inviteContextKey]);
 
   const keyExtractor = useCallback((item: any, index: number) => {
     return item.uid || item.friendId || item._id || item.id || `${item.username || "friend"}-${index}`;
   }, []);
 
   const handleInvite = useCallback(async (friend: any, friendKey: string) => {
-    if (invitingFriendKey) return;
+    if (invitingFriendKey || invitingAll || invitedFriendKeys.has(friendKey)) return;
 
     setInvitingFriendKey(friendKey);
     try {
-      await onInvite(friend);
+      const invited = await onInvite(friend);
+      if (invited) {
+        setInvitedFriendKeys((current) => new Set(current).add(friendKey));
+      }
     } finally {
       setInvitingFriendKey((currentKey) => currentKey === friendKey ? null : currentKey);
     }
-  }, [invitingFriendKey, onInvite]);
+  }, [invitedFriendKeys, invitingAll, invitingFriendKey, onInvite]);
+
+  const handleInviteAll = useCallback(async () => {
+    if (invitingFriendKey || invitingAll || joining) return;
+
+    const friendsToInvite = friends
+      .map((friend, index) => ({ friend, friendKey: keyExtractor(friend, index) }))
+      .filter(({ friendKey }) => !invitedFriendKeys.has(friendKey));
+
+    if (friendsToInvite.length === 0) return;
+
+    setInvitingAll(true);
+    try {
+      for (const { friend, friendKey } of friendsToInvite) {
+        setInvitingFriendKey(friendKey);
+        const invited = await onInvite(friend);
+        if (invited) {
+          setInvitedFriendKeys((current) => new Set(current).add(friendKey));
+        }
+      }
+    } finally {
+      setInvitingFriendKey(null);
+      setInvitingAll(false);
+    }
+  }, [friends, invitedFriendKeys, invitingAll, invitingFriendKey, joining, keyExtractor, onInvite]);
 
   const renderFriendRow = useCallback((item: any, friendKey: string) => {
+    const invited = invitedFriendKeys.has(friendKey);
     return (
       <InviteRow
         friend={item}
-        disabled={joining || Boolean(invitingFriendKey)}
+        disabled={invited || joining || invitingAll || Boolean(invitingFriendKey)}
+        invited={invited}
         inviting={invitingFriendKey === friendKey}
         styles={styles}
         onInvite={(friend) => {
@@ -125,11 +176,36 @@ export function MatchroomInviteSheet({
         }}
       />
     );
-  }, [handleInvite, invitingFriendKey, joining, styles]);
+  }, [handleInvite, invitedFriendKeys, invitingAll, invitingFriendKey, joining, styles]);
+
+  const hasFriendsToInvite = friends.some(
+    (friend, index) => !invitedFriendKeys.has(keyExtractor(friend, index)),
+  );
 
   return (
-    <AppBottomSheet visible={visible} onClose={onClose} sheetStyle={[styles.modalContent, localStyles.sheet]}>
-      <AppModalHeader title="Invite Teammate" onClose={onClose} />
+    <AppBottomSheet
+      visible={visible}
+      onClose={onClose}
+      dismissDisabled={invitingAll}
+      sheetStyle={[styles.modalContent, localStyles.sheet]}
+    >
+      <AppModalHeader
+        title="Invite Teammate"
+        onClose={onClose}
+        closeDisabled={invitingAll}
+        rightAccessory={friends.length > 0 ? (
+          <AppButton
+            size="sm"
+            style={localStyles.inviteAllButton}
+            onPress={() => {
+              void handleInviteAll();
+            }}
+            disabled={!hasFriendsToInvite || joining || invitingAll || Boolean(invitingFriendKey)}
+          >
+            {invitingAll ? "Inviting..." : hasFriendsToInvite ? "Invite all" : "All invited"}
+          </AppButton>
+        ) : undefined}
+      />
       <AppModalBody scroll contentContainerStyle={localStyles.bodyContent}>
         {loading ? (
           <View style={localStyles.loadingWrap}>
@@ -160,7 +236,7 @@ export function MatchroomInviteSheet({
         )}
       </AppModalBody>
       <AppModalFooter style={localStyles.footer}>
-        <AppButton variant="secondary" onPress={onClose}>
+        <AppButton variant="secondary" onPress={onClose} disabled={invitingAll}>
           Done
         </AppButton>
       </AppModalFooter>

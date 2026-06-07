@@ -514,7 +514,6 @@ export default function ZoneBookingsModule() {
     const [matchroomsDone, setMatchroomsDone] = useState(false);
     const [loadingQueueMore, setLoadingQueueMore] = useState(false);
     const [loadingMatchroomsMore, setLoadingMatchroomsMore] = useState(false);
-    const [queueTotal, setQueueTotal] = useState(0);
     const [matchroomsTotal, setMatchroomsTotal] = useState(0);
     const [allocationBranches, setAllocationBranches] = useState<ZoneBranch[]>([]);
     const [allocationBranchId, setAllocationBranchId] = useState<string | null>(null);
@@ -646,7 +645,6 @@ export default function ZoneBookingsModule() {
             setQueue((current) => append ? mergeQueueRows(current, result.page) : result.page);
             setQueueCursor(result.continueCursor);
             setQueueDone(result.isDone);
-            setQueueTotal(result.total || result.page.length);
             setSelectedRequestId((prev) => prev || result.page[0]?.id || null);
         } catch (error) {
             Logger.error("ZoneBookingsModule", "Failed to load paginated booking queue", error);
@@ -1331,7 +1329,7 @@ export default function ZoneBookingsModule() {
 
             <SegmentedTabs
                 items={[
-                    { key: "requests", label: "Requests", badge: queueTotal || visibleRequestsQueue.length },
+                    { key: "requests", label: "Requests", badge: visibleRequestsQueue.length },
                     { key: "pending", label: "Pending", badge: pendingOffers.length },
                     { key: "matchrooms", label: "Matchrooms", badge: matchroomsTotal || filteredMatchrooms.length },
                     { key: "walkins", label: "Walk-ins", badge: segment === "walkins" ? (matchroomsTotal || walkInCount) : walkInCount },
@@ -1388,7 +1386,7 @@ export default function ZoneBookingsModule() {
                     activeFilterCount={activeRequestFilterCount}
                     onSearchQueryChange={setRequestSearchQuery}
                     onResetFilters={resetRequestFilters}
-                    filteredQueue={combinedQueue.filter((item) => pendingRequestIds.has(String(item.id)))}
+                    filteredQueue={filteredQueue.filter((item) => pendingRequestIds.has(String(item.id)))}
                     loadingMore={loadingQueueMore}
                     onLoadMore={() => loadQueuePage({ append: true })}
                     pendingOffers={pendingOffers}

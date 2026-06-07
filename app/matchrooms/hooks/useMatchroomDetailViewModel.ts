@@ -6,6 +6,7 @@ import {
   isLeaveLocked,
 } from "../../../src/utils/matchroomLifecycle";
 import {
+  canInviteToMatchroomTeam,
   deriveMatchroomLobbyState,
   normalizeWalkInSkillTier,
 } from "../utils/matchroomLobbyState";
@@ -74,18 +75,25 @@ export function useMatchroomDetailViewModel({
   // (locked/full/completed/cancelled rooms must not surface invite actions).
   const canInviteToRoom =
     room?.status === "open" && !isExpired && !joinLocked;
-  // The host can invite to either team's open slots (Team B often has no
-  // captain assigned yet); each team captain can invite to their own team.
+  // The host can invite to either team's open slots and each team captain can
+  // invite to their own team. Until Team B has a captain, any joined player
+  // can help fill its open slots.
   const canInviteTeamA =
     canInviteToRoom &&
-    (isHost ||
-      (!!captainUidAResolved &&
-        identityMatches(captainUidAResolved, currentIdentityValues)));
+    canInviteToMatchroomTeam(
+      room,
+      "A",
+      currentIdentityValues,
+      identityMatches,
+    );
   const canInviteTeamB =
     canInviteToRoom &&
-    (isHost ||
-      (!!captainUidBResolved &&
-        identityMatches(captainUidBResolved, currentIdentityValues)));
+    canInviteToMatchroomTeam(
+      room,
+      "B",
+      currentIdentityValues,
+      identityMatches,
+    );
 
   const getSkillBadgeProps = useCallback(
     (uid?: string, fallbackTierRaw?: unknown): SkillBadgeProps => {

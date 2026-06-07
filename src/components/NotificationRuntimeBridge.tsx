@@ -10,17 +10,10 @@ import {
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
-import { isVisibleZoneAdminNotification } from "../features/zoneAdmin/notificationFilters";
-import { buildNotificationRoute } from "../navigation/routes";
-import {
-  ensureLocalNotificationsConfigured,
-  requestLocalNotificationPermissions,
-  clearAllMatchroomReminders,
-  runOneTimeReminderCleanupIfNeeded,
-  clearLocalBadgeCount,
-  setLocalBadgeCount,
-} from "../services/localNotifications";
+import { resolvePublicAppHref } from "../navigation/publicLinks";
+import { ensureLocalNotificationsConfigured, requestLocalNotificationPermissions, clearAllMatchroomReminders, runOneTimeReminderCleanupIfNeeded } from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
+import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
 
 const LAST_HANDLED_RESPONSE_KEY = "notifications.lastHandledResponse.v1";
 
@@ -135,7 +128,12 @@ export default function NotificationRuntimeBridge() {
     if (convexAuthLoading) return;
     if (!isAuthenticated) return;
 
-    router.push(pendingHref as any);
+    const accountKind = isSuperAdminProfile(user)
+      ? "super_admin"
+      : isZoneAccount(user)
+        ? "zone"
+        : "player";
+    router.push(resolvePublicAppHref(pendingHref, accountKind) as any);
     setPendingHref(null);
   }, [convexAuthLoading, isAuthenticated, pendingHref, user?._id]);
 
