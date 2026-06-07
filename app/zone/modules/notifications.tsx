@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
-import React, { memo, useCallback, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 
 import { api } from "../../../convex/_generated/api";
@@ -25,8 +25,10 @@ import {
 } from "../../../src/features/zoneAdmin/notificationFilters";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
+import { buildNotificationRoute } from "../../../src/navigation/routes";
 import { respondToMatchJoinRequest } from "../../../src/services/convex/matchService";
 import { rejectZoneBookingRequest } from "../../../src/services/convex/zoneAdminBookingService";
+import { adjustLocalBadgeCount, setLocalBadgeCount } from "../../../src/services/localNotifications";
 import { COLORS, SPACING } from "../../../src/theme";
 import Logger from "../../../src/utils/logger";
 import { getNotificationStatusLabel } from "../../../src/utils/statusLabels";
@@ -48,6 +50,7 @@ type AdminNotification = {
     toUid?: string;
     data?: Record<string, any>;
     matchroomId?: string;
+    route?: string;
 };
 
 const getTimeAgo = (timestamp: any): string => {
@@ -245,6 +248,7 @@ export default function ZoneNotificationsModule() {
                 toUid: notification.toUid,
                 data: notification.data || {},
                 matchroomId: notification.matchroomId,
+                route: notification.route,
             }))
             .filter(isVisibleZoneAdminNotification)
             .sort((left: AdminNotification, right: AdminNotification) => (right.createdAt || 0) - (left.createdAt || 0));
@@ -262,10 +266,12 @@ export default function ZoneNotificationsModule() {
 
     const markSeenIfPending = useCallback(async (item: AdminNotification) => {
         try {
+            const wasPending = isPendingZoneAdminNotification(item);
             if (getZoneAdminNotificationStatus(item) !== "seen") {
                 await markAsReadMutation({
                     notificationId: item._id as Id<"notifications">,
                 });
+                if (wasPending) void adjustLocalBadgeCount(-1);
             }
         } catch (error) {
             Logger.warn("ZoneNotifications", "Unable to mark notification seen", error);
@@ -293,15 +299,33 @@ export default function ZoneNotificationsModule() {
             });
             return;
         }
+        if (type === "zone.matchroom_full") {
+            router.push(buildNotificationRoute({
+                type,
+                route: item.route,
+                recipientRole: "zone_admin",
+                matchroomId: meta.matchroomId || item.matchroomId,
+                data: meta,
+            }) as any);
+            return;
+        }
         if (type.includes("match") && (meta.matchroomId || item.matchroomId)) {
             router.push(`/matchrooms/${meta.matchroomId || item.matchroomId}` as any);
             return;
         }
-        // Non-booking/non-match notifications (withdrawal, zone, broadcast, etc.)
-        // carry their own route — honor it instead of defaulting to bookings.
-        const explicitRoute = String((item as any).route || meta.href || meta.route || "").trim();
-        if (explicitRoute) {
-            router.push(explicitRoute as any);
+        // Non-booking/non-match notifications (withdrawal, KYC, support/report,
+        // zone status, etc.) use the shared safe route map.
+        const safeRoute = buildNotificationRoute({
+            type,
+            route: item.route,
+            href: meta.href,
+            recipientRole: "zone_admin",
+            matchroomId: meta.matchroomId || item.matchroomId,
+            teamId: meta.teamId,
+            data: meta,
+        });
+        if (safeRoute) {
+            router.push(safeRoute as any);
             return;
         }
         openBookings({
@@ -324,11 +348,13 @@ export default function ZoneNotificationsModule() {
         setClearing(true);
         try {
             if (hasPending) {
+                const unreadCount = items.filter(isPendingZoneAdminNotification).length;
                 await markManyAsReadMutation({
                     notificationIds: items
                         .filter(isPendingZoneAdminNotification)
                         .map((item) => item._id as Id<"notifications">),
                 });
+                if (unreadCount > 0) void adjustLocalBadgeCount(-unreadCount);
             } else {
                 await archiveManyMutation({
                     notificationIds: items
@@ -368,7 +394,9 @@ export default function ZoneNotificationsModule() {
                 reason: "Declined by admin",
             });
             if (result.ok) {
+                const wasPending = isPendingZoneAdminNotification(item);
                 await markAsReadMutation({ notificationId: item._id as Id<"notifications"> });
+                if (wasPending) void adjustLocalBadgeCount(-1);
                 showToast({ type: "success", title: "Rejected", message: "Booking request rejected." });
             } else {
                 showToast({ type: "error", title: "Error", message: result.message });
@@ -416,6 +444,11 @@ export default function ZoneNotificationsModule() {
             )}
         </Pressable>
     ) : undefined;
+
+    useEffect(() => {
+        if (!user?._id || loading) return;
+        void setLocalBadgeCount(pendingCount);
+    }, [loading, pendingCount, user?._id]);
 
     return (
         <Screen style={styles.screen} scroll={false}>

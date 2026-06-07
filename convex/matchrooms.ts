@@ -1703,6 +1703,7 @@ async function maybeNotifyZoneAdminMatchroomFull(ctx: any, matchroomId: Id<"matc
 
   const zoneOwner = await resolveUserByAnyId(ctx, String(zone.ownerUid));
   if (!zoneOwner?._id) return;
+  const route = `/zone/modules/bookings?segment=matchrooms&matchroomId=${encodeURIComponent(String(matchroomId))}`;
 
   await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
     type: "zone.matchroom_full",
@@ -1713,14 +1714,15 @@ async function maybeNotifyZoneAdminMatchroomFull(ctx: any, matchroomId: Id<"matc
     dedupePolicy: "upsert_active",
     pushPolicy: "eligible",
     matchroomId,
-    route: `/matchrooms/${String(matchroomId)}`,
+    route,
     title: "Matchroom is ready",
     body: `${room.title || "Matchroom"} is full and ready for zone confirmation.`,
     data: {
       matchroomId: String(matchroomId),
       matchroomTitle: room.title || null,
       zoneId: String(room.zoneId),
-      href: `/matchrooms/${String(matchroomId)}`,
+      route,
+      href: route,
     },
   });
 }
@@ -4738,7 +4740,7 @@ export const respondToMatchroomInvite = mutation({
       dedupeKey: `match.payment_required:${String(matchroomId)}:${String(args.userId)}:${String(intentId)}`,
       dedupePolicy: "upsert_active",
       matchroomId: matchroomId as Id<"matchrooms">,
-      route: `/matchrooms/${String(matchroomId)}`,
+      route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
       title: "Payment required",
       body: `Your invite to ${room.title} was accepted. Pay now to confirm your slot.`,
       data: {
@@ -4750,7 +4752,8 @@ export const respondToMatchroomInvite = mutation({
         slotId: slotId || null,
         intentId,
         paymentRequired: true,
-        href: `/matchrooms/${String(matchroomId)}`,
+        route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
+        href: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
       },
       expiresAt: paymentExpiresAt,
     });
@@ -4927,7 +4930,7 @@ export const respondToMatchroomJoinRequest = mutation({
         dedupeKey: `match.payment_required:${String(matchroomId)}:${requesterUid}:${String(intentId)}`,
         dedupePolicy: "upsert_active",
         matchroomId: matchroomId as Id<"matchrooms">,
-        route: `/matchrooms/${String(matchroomId)}`,
+        route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
         title: "Payment required",
         body: `Your request for ${room.title} was accepted. Pay now to confirm your slot.`,
         data: {
@@ -4939,7 +4942,8 @@ export const respondToMatchroomJoinRequest = mutation({
           slotId: data?.slotId || null,
           intentId,
           paymentRequired: true,
-          href: `/matchrooms/${String(matchroomId)}`,
+          route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
+          href: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
         },
         expiresAt: paymentExpiresAt,
       });
@@ -5007,7 +5011,7 @@ export const respondToMatchroomJoinRequest = mutation({
       dedupeKey: `match.payment_required:${String(matchroomId)}:${requesterUid}:${String(intentId)}`,
       dedupePolicy: "upsert_active",
       matchroomId: matchroomId as Id<"matchrooms">,
-      route: `/matchrooms/${String(matchroomId)}`,
+      route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
       title: "Payment required",
       body: `Your request for ${room.title} was accepted. Pay now to confirm your slot.`,
       data: {
@@ -5019,7 +5023,8 @@ export const respondToMatchroomJoinRequest = mutation({
         slotId: data?.slotId || null,
         intentId,
         paymentRequired: true,
-        href: `/matchrooms/${String(matchroomId)}`,
+        route: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
+        href: `/matchrooms/book/pay/${encodeURIComponent(String(intentId))}`,
       },
       expiresAt: paymentExpiresAt,
     });

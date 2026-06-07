@@ -7,7 +7,7 @@ type KycNotificationRole = "player" | "zone_owner" | "venue_admin" | "high_risk_
 
 function getOwnerNotificationTarget(role: KycNotificationRole): { recipientRole: "player" | "zone_admin"; route: string } {
   if (role === "zone_owner" || role === "venue_admin") {
-    return { recipientRole: "zone_admin", route: "/zone/profile" };
+    return { recipientRole: "zone_admin", route: "/zone/(tabs)/profile" };
   }
   return { recipientRole: "player", route: "/auth/verification-required" };
 }

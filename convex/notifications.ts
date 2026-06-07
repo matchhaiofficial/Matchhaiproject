@@ -27,9 +27,13 @@ const pushPolicyValidator = v.union(
 );
 
 const pushStateValidator = v.union(
+  v.literal("queued"),
+  v.literal("sending"),
   v.literal("pending"),
   v.literal("sent"),
+  v.literal("receipt_ok"),
   v.literal("failed"),
+  v.literal("no_device"),
   v.literal("skipped")
 );
 
@@ -41,6 +45,7 @@ const dedupePolicyValidator = v.union(
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_INBOX_LIMIT = 100;
+const PUSH_SEND_STALE_MS = 10 * 60 * 1000;
 
 type NotificationStatus =
   | "pending"
@@ -134,6 +139,9 @@ function canonicalizeType(rawType: string) {
     case "team_match_challenge":
     case "team.challenge_received":
       return "team.challenge_received";
+    case "team_challenge_payment_required":
+    case "team.challenge_payment_required":
+      return "team.challenge_payment_required";
     case "team_match_challenge_update":
     case "team.challenge_updated":
       return "team.challenge_updated";
@@ -220,6 +228,8 @@ function inferLegacyType(type: string) {
       return "booking_counter_offer";
     case "team.challenge_received":
       return "team_match_challenge";
+    case "team.challenge_payment_required":
+      return "team_match_challenge_update";
     case "team.challenge_updated":
       return "team_match_challenge_update";
     case "system.general":
@@ -251,6 +261,7 @@ function defaultDedupePolicy(type: string): DedupePolicy {
     case "booking.request_submitted":
     case "booking.counter_offer":
     case "team.challenge_received":
+    case "team.challenge_payment_required":
     case "moderation.report_submitted":
     case "moderation.review_needed":
     case "payments.attention_required":
@@ -352,6 +363,78 @@ function inferEntity(type: string, input: CanonicalInput) {
   return { kind: "system", id: input.entityId || null };
 }
 
+function routeValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function routeWithQuery(pathname: string, params: Record<string, unknown>) {
+  const query = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join("&");
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function matchroomRoute(matchroomId: unknown) {
+  const id = routeValue(matchroomId);
+  return id ? `/matchrooms/${encodeURIComponent(id)}` : "/(player)/inbox";
+}
+
+function matchroomPaymentRoute(intentId: unknown, matchroomId: unknown) {
+  const id = routeValue(intentId);
+  return id ? `/matchrooms/book/pay/${encodeURIComponent(id)}` : matchroomRoute(matchroomId);
+}
+
+function teamRoute(teamId: unknown) {
+  const id = routeValue(teamId);
+  return id ? `/teams/${encodeURIComponent(id)}` : "/teams";
+}
+
+function teamChallengeRoute(challengeId: unknown) {
+  const id = routeValue(challengeId);
+  return id ? routeWithQuery("/teams/challenge", { id }) : "/teams/challenges";
+}
+
+function zoneBookingRequestRoute(requestId: unknown) {
+  return routeWithQuery("/zone/modules/bookings", {
+    segment: "requests",
+    requestId,
+    expandedRequestId: requestId,
+    focusRequestId: requestId,
+  });
+}
+
+function zoneBookingMatchroomRoute(matchroomId: unknown) {
+  return routeWithQuery("/zone/modules/bookings", {
+    segment: "matchrooms",
+    matchroomId,
+  });
+}
+
+function superAdminReportRoute(reportId: unknown) {
+  const id = routeValue(reportId);
+  return id ? `/super-admin/report/${encodeURIComponent(id)}` : "/super-admin/reports";
+}
+
+function playerReportRoute(reportId: unknown) {
+  const id = routeValue(reportId);
+  return id ? `/(player)/report/${encodeURIComponent(id)}` : "/(player)/reports";
+}
+
+function superAdminSupportTicketRoute(ticketId: unknown) {
+  const id = routeValue(ticketId);
+  return id ? `/super-admin/support-ticket/${encodeURIComponent(id)}` : "/super-admin/support-tickets";
+}
+
+function normalizeExplicitNotificationRoute(route?: unknown) {
+  const text = routeValue(route);
+  if (!text) return undefined;
+  if (text === "/zone/profile") return "/zone/(tabs)/profile";
+  if (text === "/super-admin/reports") return "/super-admin/reports";
+  return text;
+}
+
 function buildCanonicalRoute(source: {
   type: string;
   route?: string;
@@ -360,22 +443,79 @@ function buildCanonicalRoute(source: {
   teamId?: unknown;
   data?: Record<string, any> | null;
 }) {
-  if (source.route) return source.route;
-
   const rawData = source.data || {};
-  const legacyHref = typeof rawData.href === "string" ? rawData.href : "";
-  if (legacyHref) return legacyHref;
-
-  if (rawData.challengeId) return `/teams/challenge?id=${rawData.challengeId}`;
-
+  const type = canonicalizeType(String(source.type || rawData.canonicalType || ""));
+  const recipientRole = String(source.recipientRole || rawData.recipientRole || "").toLowerCase();
+  const explicitRoute = normalizeExplicitNotificationRoute(source.route || rawData.route || rawData.href);
+  const requestId = routeValue(rawData.requestId || rawData.requestRef);
   const matchroomId = asStringId(source.matchroomId) || asStringId(rawData.matchroomId);
-  if (matchroomId) return `/matchrooms/${matchroomId}`;
-
   const teamId = asStringId(source.teamId) || asStringId(rawData.teamId);
-  if (teamId) return `/teams/${teamId}`;
+  const intentId = routeValue(rawData.intentId);
+  const challengeId = routeValue(rawData.challengeId);
+  const offerId = routeValue(rawData.offerId);
+  const reportId = routeValue(rawData.reportId);
+  const ticketId = routeValue(rawData.ticketId || rawData.supportTicketId);
 
-  if (source.recipientRole === "zone_admin") return "/zone/modules/notifications";
-  if (source.recipientRole === "super_admin") return "/super-admin";
+  if (type === "booking.request_submitted") {
+    return recipientRole === "zone_admin" ? zoneBookingRequestRoute(requestId) : matchroomRoute(matchroomId);
+  }
+  if (type === "booking.counter_offer_result") return zoneBookingRequestRoute(requestId);
+  if (type === "booking.counter_offer") return "/(player)/inbox";
+  if (
+    type === "booking.request_accepted" ||
+    type === "booking.request_rejected" ||
+    type === "booking.request_closed_elsewhere"
+  ) {
+    return matchroomRoute(matchroomId);
+  }
+
+  if (type === "match.payment_required") return matchroomPaymentRoute(intentId, matchroomId);
+  if (type === "match.join_request" || type === "match.join_request_result" || type.startsWith("match.")) {
+    return matchroomRoute(matchroomId);
+  }
+  if (type === "zone.matchroom_full") return zoneBookingMatchroomRoute(matchroomId);
+
+  if (
+    type === "team.challenge_received" ||
+    type === "team.challenge_payment_required" ||
+    type === "team.challenge_updated"
+  ) {
+    return teamChallengeRoute(challengeId);
+  }
+  if (type.startsWith("team.")) return teamRoute(teamId);
+
+  if (type.startsWith("withdrawal.")) {
+    if (recipientRole === "super_admin" || recipientRole === "super-admin") return "/super-admin/withdrawals";
+    return "/zone/wallet";
+  }
+
+  if (type === "kyc.review_needed") return "/super-admin/identity-verifications";
+  if (type === "kyc.status_updated") {
+    return recipientRole === "zone_admin" ? "/zone/(tabs)/profile" : "/auth/verification-required";
+  }
+
+  if (type.startsWith("support.")) {
+    if (recipientRole === "super_admin") return superAdminSupportTicketRoute(ticketId);
+    if (recipientRole === "zone_admin") return "/zone/modules/support";
+    return "/(player)/support";
+  }
+  if (type.startsWith("moderation.") || type.includes("report")) {
+    if (recipientRole === "super_admin") return superAdminReportRoute(reportId);
+    if (recipientRole === "zone_admin") {
+      return reportId ? `/zone/report/${encodeURIComponent(reportId)}` : "/zone/modules/support";
+    }
+    return playerReportRoute(reportId);
+  }
+
+  if (challengeId) return teamChallengeRoute(challengeId);
+  if (offerId && recipientRole === "zone_admin") return zoneBookingRequestRoute(requestId);
+  if (requestId && recipientRole === "zone_admin") return zoneBookingRequestRoute(requestId);
+  if (matchroomId) return matchroomRoute(matchroomId);
+  if (teamId) return teamRoute(teamId);
+  if (explicitRoute) return explicitRoute;
+
+  if (recipientRole === "zone_admin") return "/zone/modules/notifications";
+  if (recipientRole === "super_admin") return "/super-admin";
   return "/(player)/inbox";
 }
 
@@ -635,7 +775,7 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     route,
     dedupeKey: effectiveDedupeKey,
     pushPolicy,
-    pushState: pushPolicy === "none" ? "skipped" : "pending",
+    pushState: pushPolicy === "none" ? "skipped" : "queued",
     pushAttemptedAt: undefined,
     pushDeliveredAt: undefined,
     pushError: undefined,
@@ -1259,6 +1399,72 @@ export const markPushState = internalMutation({
       pushAttemptedAt: args.attemptedAt,
       pushDeliveredAt: args.deliveredAt,
       pushError: args.error,
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
+export const claimPushSend = internalMutation({
+  args: {
+    notificationId: v.id("notifications"),
+    attemptedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.notificationId);
+    if (!existing) return { ok: false, reason: "notification_not_found" };
+
+    const state = String(existing.pushState || "queued");
+    if (state === "sending") {
+      const attemptedAt = Number(existing.pushAttemptedAt || 0);
+      if (attemptedAt && args.attemptedAt - attemptedAt < PUSH_SEND_STALE_MS) {
+        return { ok: false, reason: "already_sending" };
+      }
+    }
+    if (["sent", "receipt_ok", "skipped", "no_device"].includes(state)) {
+      return { ok: false, reason: "already_processed" };
+    }
+
+    await ctx.db.patch(args.notificationId, {
+      pushState: "sending",
+      pushAttemptedAt: args.attemptedAt,
+      pushError: undefined,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+export const refreshPushStateFromTickets = internalMutation({
+  args: {
+    notificationId: v.id("notifications"),
+    checkedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const notification = await ctx.db.get(args.notificationId);
+    if (!notification) return false;
+
+    const tickets = await ctx.db
+      .query("pushTickets")
+      .withIndex("by_notificationId", (q) => q.eq("notificationId", args.notificationId))
+      .take(100);
+
+    if (!tickets.length) return false;
+
+    const hasPendingReceipt = tickets.some(
+      (ticket) => ticket.ticketStatus === "ok" && !ticket.receiptCheckedAt
+    );
+    if (hasPendingReceipt) return false;
+
+    const hasOkReceipt = tickets.some((ticket) => ticket.receiptStatus === "ok");
+    const hasTicketOkWithoutReceipt = tickets.some(
+      (ticket) => ticket.ticketStatus === "ok" && !ticket.receiptStatus
+    );
+
+    await ctx.db.patch(args.notificationId, {
+      pushState: hasOkReceipt || hasTicketOkWithoutReceipt ? "receipt_ok" : "failed",
+      pushDeliveredAt: hasOkReceipt ? args.checkedAt : notification.pushDeliveredAt,
+      pushError: hasOkReceipt || hasTicketOkWithoutReceipt ? undefined : "expo_push_receipts_failed",
       updatedAt: Date.now(),
     });
     return true;

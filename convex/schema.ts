@@ -1601,9 +1601,13 @@ export default defineSchema({
     ),
     pushState: v.optional(
       v.union(
+        v.literal("queued"),
+        v.literal("sending"),
         v.literal("pending"),
         v.literal("sent"),
+        v.literal("receipt_ok"),
         v.literal("failed"),
+        v.literal("no_device"),
         v.literal("skipped")
       )
     ),
@@ -1669,6 +1673,8 @@ export default defineSchema({
     isActive: v.boolean(),
     lastRegisteredAt: v.number(),
     lastDeliveredAt: v.optional(v.number()),
+    lastTicketId: v.optional(v.string()),
+    lastReceiptCheckedAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1676,6 +1682,24 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_installationId", ["installationId"])
     .index("by_expoPushToken", ["expoPushToken"]),
+
+  pushTickets: defineTable({
+    notificationId: v.optional(v.id("notifications")),
+    deviceId: v.id("pushDevices"),
+    pushKind: v.union(v.literal("notification"), v.literal("chat")),
+    receiptId: v.string(),
+    ticketStatus: v.union(v.literal("ok"), v.literal("error")),
+    receiptStatus: v.optional(v.union(v.literal("ok"), v.literal("error"))),
+    receiptCheckedAt: v.optional(v.number()),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_receiptId", ["receiptId"])
+    .index("by_notificationId", ["notificationId"])
+    .index("by_pushKind_and_createdAt", ["pushKind", "createdAt"])
+    .index("by_ticketStatus_and_receiptCheckedAt", ["ticketStatus", "receiptCheckedAt"]),
 
   // ============================================
   // CHATROOMS (for matchrooms + friend DMs)

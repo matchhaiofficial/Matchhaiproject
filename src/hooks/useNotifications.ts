@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
+import { adjustLocalBadgeCount, clearLocalBadgeCount } from "../services/localNotifications";
 
 export type NotificationType = string;
 
@@ -146,6 +147,14 @@ function transformNotification(notif: any): Notification {
   };
 }
 
+function isUnreadActionableNotification(notification?: Notification | null) {
+  if (!notification) return false;
+  if (notification.isRead === true || notification.isArchived === true) return false;
+  if (notification.status === "expired") return false;
+  if (notification.expiresAt && notification.expiresAt < Date.now()) return false;
+  return true;
+}
+
 /**
  * Custom hook for real-time notifications using Convex
  */
@@ -175,37 +184,57 @@ export function useNotifications(tab: "pending" | "resolved" = "pending") {
 
   // Helper functions
   const markAsRead = async (notificationId: string) => {
+    const wasUnread = isUnreadActionableNotification(
+      notifications.find((item) => item.id === notificationId)
+    );
     await markAsReadMutation({ notificationId: notificationId as Id<"notifications"> });
+    if (wasUnread) void adjustLocalBadgeCount(-1);
   };
 
   const markAllAsRead = async () => {
     if (!userId) return 0;
-    return await markAllAsReadMutation({ userId });
+    const updated = await markAllAsReadMutation({ userId });
+    void clearLocalBadgeCount();
+    return updated;
   };
 
   const markManyAsRead = async (notificationIds: string[]) => {
     if (!notificationIds.length) return;
+    const idSet = new Set(notificationIds);
+    const unreadCount = notifications.filter((item) => idSet.has(item.id) && isUnreadActionableNotification(item)).length;
     await markManyAsReadMutation({
       notificationIds: notificationIds.map((id) => id as Id<"notifications">),
     });
+    if (unreadCount > 0) void adjustLocalBadgeCount(-unreadCount);
   };
 
   const updateStatus = async (notificationId: string, status: NotificationStatus) => {
+    const wasUnread = isUnreadActionableNotification(
+      notifications.find((item) => item.id === notificationId)
+    );
     await updateStatusMutation({
       notificationId: notificationId as Id<"notifications">,
       status: status as any,
     });
+    if (wasUnread && status !== "pending") void adjustLocalBadgeCount(-1);
   };
 
   const deleteNotification = async (notificationId: string) => {
+    const wasUnread = isUnreadActionableNotification(
+      notifications.find((item) => item.id === notificationId)
+    );
     await archiveMutation({ notificationId: notificationId as Id<"notifications"> });
+    if (wasUnread) void adjustLocalBadgeCount(-1);
   };
 
   const deleteNotifications = async (notificationIds: string[]) => {
     if (!notificationIds.length) return;
+    const idSet = new Set(notificationIds);
+    const unreadCount = notifications.filter((item) => idSet.has(item.id) && isUnreadActionableNotification(item)).length;
     await archiveManyMutation({
       notificationIds: notificationIds.map((id) => id as Id<"notifications">),
     });
+    if (unreadCount > 0) void adjustLocalBadgeCount(-unreadCount);
   };
 
   const deleteAllNotifications = async () => {

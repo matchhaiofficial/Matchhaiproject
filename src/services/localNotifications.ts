@@ -8,6 +8,8 @@ import scheduleNotificationAsync from "expo-notifications/build/scheduleNotifica
 import cancelScheduledNotificationAsync from "expo-notifications/build/cancelScheduledNotificationAsync";
 import getAllScheduledNotificationsAsync from "expo-notifications/build/getAllScheduledNotificationsAsync";
 import { SchedulableTriggerInputTypes } from "expo-notifications/build/Notifications.types";
+import setBadgeCountAsync from "expo-notifications/build/setBadgeCountAsync";
+import getBadgeCountAsync from "expo-notifications/build/getBadgeCountAsync";
 
 const ANDROID_CHANNEL_ID = "default";
 const STORAGE_KEY = "local_notifications.matchroom_reminders.v2";
@@ -31,6 +33,33 @@ type StoredReminderRecord = ReminderPlan & {
 type StoredReminderMap = Record<string, StoredReminderRecord>;
 
 const reminderOps = new Map<string, Promise<unknown>>();
+
+function normalizeBadgeCount(count: number) {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.max(0, Math.floor(count));
+}
+
+export async function setLocalBadgeCount(count: number) {
+  try {
+    return await setBadgeCountAsync(normalizeBadgeCount(count));
+  } catch {
+    return false;
+  }
+}
+
+export async function clearLocalBadgeCount() {
+  return setLocalBadgeCount(0);
+}
+
+export async function adjustLocalBadgeCount(delta: number) {
+  if (!Number.isFinite(delta) || delta === 0) return false;
+  try {
+    const current = await getBadgeCountAsync();
+    return await setLocalBadgeCount(normalizeBadgeCount(Number(current || 0) + delta));
+  } catch {
+    return false;
+  }
+}
 
 const runSerializedForKey = async <T>(key: string, task: () => Promise<T>): Promise<T> => {
   const previous = reminderOps.get(key) || Promise.resolve();

@@ -1,3 +1,5 @@
+import { getNotificationCategory, type NotificationCategory } from "../../utils/notificationCategories";
+
 export type ZoneAdminNotificationLike = {
   type?: string | null;
   status?: string | null;
@@ -6,19 +8,41 @@ export type ZoneAdminNotificationLike = {
   data?: Record<string, any> | null;
 };
 
-const ADMIN_NOTIFICATION_KEYWORDS = [
-  "admin",
+const ZONE_ADMIN_NOTIFICATION_CATEGORIES = new Set<NotificationCategory>([
   "booking",
-  "match",
-  "moderation",
-  "resource",
-];
+  "broadcast",
+  "matchroom",
+  "report",
+  "support",
+  "kyc",
+  "withdrawal",
+  "zone",
+]);
+
+const EXCLUDED_RECIPIENT_ROLES = new Set(["player", "super_admin", "super-admin"]);
+
+function getNotificationType(notification: ZoneAdminNotificationLike) {
+  const data = notification.data || {};
+  const type = String(notification.type || "").toLowerCase();
+  if (!type || type === "general" || type === "system.general") {
+    return String(data.canonicalType || type).toLowerCase();
+  }
+  return type;
+}
+
+function getRecipientRole(notification: ZoneAdminNotificationLike) {
+  const data = notification.data || {};
+  return String(notification.recipientRole || data.recipientRole || data.role || "").toLowerCase();
+}
 
 export function isVisibleZoneAdminNotification(notification: ZoneAdminNotificationLike) {
-  const data = notification.data || {};
-  const type = String(notification.type || data.canonicalType || "").toLowerCase();
+  const recipientRole = getRecipientRole(notification);
+  if (EXCLUDED_RECIPIENT_ROLES.has(recipientRole)) {
+    return false;
+  }
 
-  return ADMIN_NOTIFICATION_KEYWORDS.some((keyword) => type.includes(keyword));
+  const category = getNotificationCategory(getNotificationType(notification));
+  return ZONE_ADMIN_NOTIFICATION_CATEGORIES.has(category);
 }
 
 export function getZoneAdminNotificationStatus(notification: ZoneAdminNotificationLike) {

@@ -4,6 +4,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { authClient } from "../../lib/auth-client";
 import { Zone } from "./zoneService";
 import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
+import { setLocalBadgeCount } from "../localNotifications";
 
 export type SuperAdminSummary = {
   counts: {
@@ -1320,6 +1321,13 @@ export async function getSuperAdminUnreadNotificationCount(): Promise<Result<num
   }
 }
 
+async function refreshSuperAdminLocalBadge() {
+  const result = await getSuperAdminUnreadNotificationCount();
+  if (result.ok) {
+    await setLocalBadgeCount(result.data);
+  }
+}
+
 export async function markSuperAdminNotificationRead(notificationId: string): Promise<BasicResult> {
   try {
     const sessionToken = await getRequiredSessionToken();
@@ -1328,6 +1336,7 @@ export async function markSuperAdminNotificationRead(notificationId: string): Pr
       notificationId: notificationId as Id<"notifications">,
     });
     clearSuperAdminCache();
+    void refreshSuperAdminLocalBadge();
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] markSuperAdminNotificationRead error", error);
@@ -1343,6 +1352,7 @@ export async function archiveSuperAdminNotification(notificationId: string): Pro
       notificationId: notificationId as Id<"notifications">,
     });
     clearSuperAdminCache();
+    void refreshSuperAdminLocalBadge();
     return { ok: true };
   } catch (error: any) {
     console.error("[superAdminService] archiveSuperAdminNotification error", error);

@@ -93,6 +93,7 @@ async function notifyZoneOwnerOfRequest(
   const gameLabel = normalizeBookingGameKey(input.gameKey).toUpperCase();
   const requestTitle = input.title?.trim() || `${gameLabel} booking request`;
   const now = Date.now();
+  const requestRoute = `/zone/modules/bookings?segment=requests&requestId=${encodeURIComponent(String(input.requestId))}&expandedRequestId=${encodeURIComponent(String(input.requestId))}&focusRequestId=${encodeURIComponent(String(input.requestId))}`;
 
   await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
     type: "booking.request_submitted",
@@ -104,7 +105,7 @@ async function notifyZoneOwnerOfRequest(
     dedupeKey: `booking.request_submitted:${String(input.requestId)}:${String(zone.ownerUid)}`,
     dedupePolicy: "upsert_active",
     entity: { kind: "booking_request", id: String(input.requestId) },
-    route: "/zone/modules/notifications",
+    route: requestRoute,
     title: "New booking request",
     body: `${playerName} requested ${requestTitle} at ${zoneName}.`,
     data: {
@@ -114,7 +115,8 @@ async function notifyZoneOwnerOfRequest(
       gameKey: normalizeBookingGameKey(input.gameKey),
       title: requestTitle,
       playerCount: input.playerCount,
-      href: "/zone/modules/notifications",
+      route: requestRoute,
+      href: requestRoute,
     },
   });
 }

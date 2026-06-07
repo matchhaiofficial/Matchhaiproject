@@ -490,6 +490,11 @@ export const respond = mutation({
       });
     }
 
+    if (args.accept) {
+      const freshChallenge = await ctx.db.get(args.challengeId);
+      await notifyChallengePaymentRequired(ctx, freshChallenge || challenge, "teamB", "challenge_accepted");
+    }
+
     return { ok: true, status: nextStatus, chatId };
   },
 });
@@ -830,6 +835,9 @@ export const createFull = mutation({
       },
     });
 
+    const freshChallenge = await ctx.db.get(challengeId);
+    await notifyChallengePaymentRequired(ctx, freshChallenge || { _id: challengeId, ...args }, "teamA", "challenge_created");
+
     return challengeId;
   },
 });
@@ -1043,6 +1051,41 @@ async function notifyChallengePaymentHeld(ctx: any, challenge: any, side: Challe
     body: `PKR ${amount} is held for your team. It will be charged only once the challenge is confirmed, and returned to your wallet if it is cancelled or expires.`,
     updateKind: "payment_held",
     extraData: { side, amount },
+  });
+}
+
+async function notifyChallengePaymentRequired(
+  ctx: any,
+  challenge: any,
+  side: ChallengeSide,
+  reason: "challenge_created" | "challenge_accepted",
+) {
+  const captainUid = sideCaptainUid(challenge, side);
+  if (!captainUid) return;
+
+  const amount = challengeSideAmount(challenge);
+  if (amount <= 0) return;
+
+  const state = sideState(challenge, side);
+  if (!["unpaid", "payment_required", "failed"].includes(state)) return;
+
+  await createChallengeNotification(ctx, {
+    type: "team.challenge_payment_required",
+    toUid: captainUid,
+    fromUid: captainUid,
+    fromUsername: "MatchHai",
+    challengeId: challenge._id,
+    dedupeKey: `team.challenge_payment_required:${String(challenge._id)}:${side}`,
+    dedupePolicy: "upsert_active",
+    title: "Team Challenge payment required",
+    body: `Pay PKR ${amount} for your team to continue this Team Challenge.`,
+    updateKind: "payment_required",
+    extraData: {
+      side,
+      amount,
+      reason,
+      paymentState: state,
+    },
   });
 }
 

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
@@ -31,6 +31,7 @@ import {
   SuperAdminSummary,
 } from "../../../src/services/convex/superAdminService";
 import { signOutUser } from "../../../src/services/convex/authService";
+import { setLocalBadgeCount } from "../../../src/services/localNotifications";
 import { COLORS, SPACING } from "../../../src/theme";
 import styles from "./index.styles";
 
@@ -168,6 +169,11 @@ export default function SuperAdminDashboardTab() {
     summary?.badges?.unreadNotifications,
     summary?.badges?.unreadNotificationsCapped,
   );
+
+  useEffect(() => {
+    if (!summary?.badges) return;
+    void setLocalBadgeCount(Number(summary.badges.unreadNotifications || 0));
+  }, [summary?.badges?.unreadNotifications]);
 
   const metrics = useMemo<MetricConfig[]>(() => [
     {

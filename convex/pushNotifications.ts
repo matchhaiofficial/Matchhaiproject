@@ -191,6 +191,8 @@ export const markDeviceDeliveryResult = internalMutation({
     delivered: v.boolean(),
     error: v.optional(v.string()),
     deactivate: v.optional(v.boolean()),
+    ticketId: v.optional(v.string()),
+    receiptCheckedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -199,6 +201,14 @@ export const markDeviceDeliveryResult = internalMutation({
       lastError: args.error,
     };
 
+    if (args.ticketId) {
+      patch.lastTicketId = args.ticketId;
+    }
+
+    if (args.receiptCheckedAt) {
+      patch.lastReceiptCheckedAt = args.receiptCheckedAt;
+    }
+
     if (args.delivered) {
       patch.lastDeliveredAt = now;
       patch.lastError = undefined;
@@ -206,9 +216,87 @@ export const markDeviceDeliveryResult = internalMutation({
 
     if (args.deactivate) {
       patch.isActive = false;
+      patch.expoPushToken = undefined;
     }
 
     await ctx.db.patch(args.deviceId, patch);
     return true;
+  },
+});
+
+export const recordExpoPushTicket = internalMutation({
+  args: {
+    notificationId: v.optional(v.id("notifications")),
+    deviceId: v.id("pushDevices"),
+    pushKind: v.union(v.literal("notification"), v.literal("chat")),
+    receiptId: v.optional(v.string()),
+    ticketStatus: v.union(v.literal("ok"), v.literal("error")),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (!args.receiptId) return null;
+    const now = Date.now();
+    return await ctx.db.insert("pushTickets", {
+      notificationId: args.notificationId,
+      deviceId: args.deviceId,
+      pushKind: args.pushKind,
+      receiptId: args.receiptId,
+      ticketStatus: args.ticketStatus,
+      errorCode: args.errorCode,
+      errorMessage: args.errorMessage,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const getTicketsByReceiptIds = internalQuery({
+  args: {
+    receiptIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const tickets = [];
+    for (const receiptId of args.receiptIds.slice(0, 1000)) {
+      const matches = await ctx.db
+        .query("pushTickets")
+        .withIndex("by_receiptId", (q) => q.eq("receiptId", receiptId))
+        .take(1);
+      const ticket = matches[0];
+      if (ticket) tickets.push(ticket);
+    }
+    return tickets;
+  },
+});
+
+export const markTicketReceiptResult = internalMutation({
+  args: {
+    receiptId: v.string(),
+    receiptStatus: v.union(v.literal("ok"), v.literal("error")),
+    checkedAt: v.number(),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const matches = await ctx.db
+      .query("pushTickets")
+      .withIndex("by_receiptId", (q) => q.eq("receiptId", args.receiptId))
+      .take(1);
+    const ticket = matches[0];
+    if (!ticket) return null;
+
+    await ctx.db.patch(ticket._id, {
+      receiptStatus: args.receiptStatus,
+      receiptCheckedAt: args.checkedAt,
+      errorCode: args.errorCode,
+      errorMessage: args.errorMessage,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      notificationId: ticket.notificationId,
+      deviceId: ticket.deviceId,
+      pushKind: ticket.pushKind,
+    };
   },
 });

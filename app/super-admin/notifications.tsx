@@ -15,6 +15,7 @@ import {
   type SuperAdminNotification,
   type SuperAdminNotificationTab,
 } from "../../src/services/convex/superAdminService";
+import { setLocalBadgeCount } from "../../src/services/localNotifications";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
 
 function formatDate(value?: number) {
@@ -157,6 +158,9 @@ export default function SuperAdminNotificationsScreen() {
       setItems((previous) => mode === "more" ? mergeItems(previous, result.data.page) : result.data.page);
       setCursor(result.data.continueCursor);
       setIsDone(result.data.isDone);
+      if (tab === "unread") {
+        void setLocalBadgeCount(Number(result.data.total || 0));
+      }
     } else {
       showToast({ type: "error", title: "Notifications failed", message: result.message });
     }

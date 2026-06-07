@@ -293,6 +293,26 @@ export const sendMessage = mutation({
           : messageType === "file"
             ? args.attachment?.fileName || "File"
             : args.text.trim();
+
+    // Idempotency: client retries with the same sender + challenge chat +
+    // clientMessageId return the original message before chat metadata, unread
+    // counts, or push notifications are touched.
+    if (args.clientMessageId) {
+      const existing = await ctx.db
+        .query("teamChallengeChatMessages")
+        .withIndex("by_chatId_and_createdAt", (q) => q.eq("chatId", args.chatId))
+        .order("desc")
+        .take(100);
+      const duplicate = existing.find(
+        (message) =>
+          message.clientMessageId === args.clientMessageId &&
+          String(message.senderUid) === String(userId)
+      );
+      if (duplicate) {
+        return duplicate._id;
+      }
+    }
+
     const messageId = await ctx.db.insert("teamChallengeChatMessages", {
       chatId: args.chatId,
       senderUid: String(userId),
