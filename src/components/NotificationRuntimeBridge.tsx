@@ -10,8 +10,17 @@ import {
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
+import { isVisibleZoneAdminNotification } from "../features/zoneAdmin/notificationFilters";
+import { buildNotificationRoute } from "../navigation/routes";
 import { resolvePublicAppHref } from "../navigation/publicLinks";
-import { ensureLocalNotificationsConfigured, requestLocalNotificationPermissions, clearAllMatchroomReminders, runOneTimeReminderCleanupIfNeeded } from "../services/localNotifications";
+import {
+  ensureLocalNotificationsConfigured,
+  requestLocalNotificationPermissions,
+  clearAllMatchroomReminders,
+  runOneTimeReminderCleanupIfNeeded,
+  clearLocalBadgeCount,
+  setLocalBadgeCount,
+} from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
 import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
 
