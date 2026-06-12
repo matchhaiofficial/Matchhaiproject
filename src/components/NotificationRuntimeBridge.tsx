@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import {
   addNotificationResponseReceivedListener,
+  clearLastNotificationResponseAsync,
   getLastNotificationResponseAsync,
 } from "expo-notifications/build/NotificationsEmitter";
 import { api } from "../../convex/_generated/api";
@@ -38,6 +39,24 @@ function getResponseKey(response: any) {
 
 function getHrefFromResponse(response: any) {
   const data: any = response?.notification?.request?.content?.data || {};
+  const hasRoutingSignal = [
+    data?.type,
+    data?.canonicalType,
+    data?.route,
+    data?.href,
+    data?.matchroomId,
+    data?.teamId,
+    data?.requestId,
+    data?.requestRef,
+    data?.intentId,
+    data?.offerId,
+    data?.challengeId,
+    data?.reportId,
+    data?.ticketId,
+    data?.supportTicketId,
+  ].some((value) => String(value ?? "").trim().length > 0);
+  if (!hasRoutingSignal) return null;
+
   return buildNotificationRoute({
     type: data?.type,
     route: data?.route,
@@ -107,13 +126,15 @@ export default function NotificationRuntimeBridge() {
     void runOneTimeReminderCleanupIfNeeded().finally(() => setCleanupReady(true));
 
     const responseSub = addNotificationResponseReceivedListener((response) => {
-      void handleNotificationResponse(response, (href) => setPendingHref(href));
+      void handleNotificationResponse(response, (href) => setPendingHref(href))
+        .finally(() => clearLastNotificationResponseAsync().catch(() => null));
     });
 
     void getLastNotificationResponseAsync()
       .then((response) => {
         if (response) {
-          return handleNotificationResponse(response, (href) => setPendingHref(href));
+          return handleNotificationResponse(response, (href) => setPendingHref(href))
+            .finally(() => clearLastNotificationResponseAsync().catch(() => null));
         }
         return null;
       })

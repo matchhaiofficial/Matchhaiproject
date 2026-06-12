@@ -947,7 +947,7 @@ export default function Login() {
             disabled={isSubmitDisabled}
             style={({ pressed }) => [
               styles.primaryBtn,
-              isSubmitDisabled ? styles.primaryBtnDisabled : null,
+              isSubmitDisabled ? styles.primaryBtnDisabled : styles.primaryBtnEnabled,
               pressed && !isSubmitDisabled && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.12)" }}
@@ -955,7 +955,7 @@ export default function Login() {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.primaryBtnText}>Login</Text>
+              <Text style={[styles.primaryBtnText, isSubmitDisabled && styles.primaryBtnTextDisabled]}>Login</Text>
             )}
           </Pressable>
 
