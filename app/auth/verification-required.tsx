@@ -10,7 +10,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { useToast } from "../../src/hooks/useToast";
 import { useStartDiditKyc } from "../../src/hooks/useDiditKyc";
 import { COLORS } from "../../src/theme";
-import { KYC_VERIFICATION_REQUIRED_MESSAGE } from "../../src/utils/verificationGate";
+import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycReviewActive } from "../../src/utils/verificationGate";
 import styles from "./login.styles";
 
 function formatKycReason(reason?: string | null) {
@@ -43,6 +43,14 @@ export default function VerificationRequiredScreen() {
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus || "not_started";
   const isRejected = kycStatus === "rejected";
   const isVerified = kycStatus === "verified";
+  const reviewActive = isKycReviewActive(kycStatus);
+  const hasKycAttempt = Boolean(currentKyc?._id);
+  const startActionLabel =
+    isRejected
+      ? "Retry Verification"
+      : hasKycAttempt && (kycStatus === "not_started" || kycStatus === "expired")
+        ? "Try Again"
+        : "Start Verification";
   const accountEmail = String(user?.email || "").trim().toLowerCase();
   const accountEmailValid = isValidAccountEmail(accountEmail);
   const dashboardRoute = user?.accountType === "zone" ? "/zone/(tabs)" : "/(player)/(tabs)";
@@ -105,16 +113,9 @@ export default function VerificationRequiredScreen() {
   };
 
   const handleRefresh = async () => {
-    await refreshVerificationState();
-    showToast({
-      type: isVerified ? "success" : isRejected ? "warning" : "info",
-      title: "Status refreshed",
-      message: isVerified
-        ? "Identity verification is complete."
-        : isRejected
-          ? safeReason || "Identity verification was declined. Please start a new attempt."
-          : KYC_VERIFICATION_REQUIRED_MESSAGE,
-    });
+    try {
+      await refreshVerificationState();
+    } catch {}
   };
 
   return (
@@ -160,11 +161,13 @@ export default function VerificationRequiredScreen() {
           </Text>
         </View>
 
-        <View style={styles.buttonShadowWrapper}>
-          <AppButton onPress={handleStart} disabled={starting || !accountEmailValid} loading={starting}>
-            {isRejected ? "Retry Verification" : "Start Verification"}
-          </AppButton>
-        </View>
+        {!isVerified && !reviewActive ? (
+          <View style={styles.buttonShadowWrapper}>
+            <AppButton onPress={handleStart} disabled={starting || !accountEmailValid} loading={starting}>
+              {startActionLabel}
+            </AppButton>
+          </View>
+        ) : null}
 
         {!accountEmailValid ? (
           <View style={styles.buttonShadowWrapper}>
@@ -174,11 +177,13 @@ export default function VerificationRequiredScreen() {
           </View>
         ) : null}
 
-        <View style={styles.buttonShadowWrapper}>
-          <AppButton variant="secondary" onPress={handleRefresh} disabled={refreshing} loading={refreshing}>
-            Refresh status
-          </AppButton>
-        </View>
+        {reviewActive ? (
+          <View style={styles.buttonShadowWrapper}>
+            <AppButton variant="secondary" onPress={handleRefresh} disabled={refreshing} loading={refreshing}>
+              Refresh status
+            </AppButton>
+          </View>
+        ) : null}
 
         <View style={{ flexDirection: "row", justifyContent: "center" }}>
           <Text style={styles.bottomText}>Need help? </Text>

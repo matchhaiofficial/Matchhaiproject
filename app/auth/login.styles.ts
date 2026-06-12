@@ -288,14 +288,6 @@ export default StyleSheet.create({
     alignItems: 'center',
   },
 
-  primaryBtnEnabled: {
-    backgroundColor: COLORS.accent,
-  },
-
-  primaryBtnDisabled: {
-    backgroundColor: COLORS.inputBorder,
-  },
-
   primaryBtnText: {
     color: COLORS.text,
     fontFamily: FONTS.heading,

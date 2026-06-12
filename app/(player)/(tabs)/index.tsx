@@ -301,6 +301,12 @@ const getTeamGameLabel = (game?: string) => {
 
 const formatKycBannerMessage = (status?: string | null, reason?: string | null) => {
   if (isKycReviewActive(status)) return KYC_VERIFICATION_PENDING_MESSAGE;
+  if (status === "not_started") {
+    return "Your previous verification did not begin. Tap Try Again to reopen CNIC & face verification.";
+  }
+  if (status === "expired") {
+    return "Your previous verification session expired. Tap Try Again to start a new session.";
+  }
   if (status !== "rejected") return KYC_VERIFICATION_DASHBOARD_DETAIL_MESSAGE;
   if (reason === "LOW_FACE_MATCH_SIMILARITY") {
     return "Verification was declined because face match did not pass. Retry with the same person as the CNIC photo, good lighting, and no glare.";
@@ -333,6 +339,13 @@ export default function PlayerDashboard() {
     !verificationDocLoading &&
     (!currentKyc || isKycAccessAllowed(currentKyc.status));
   const kycReviewActive = isKycReviewActive(kycStatus);
+  const hasKycAttempt = Boolean(currentKyc?._id);
+  const kycStartActionLabel =
+    currentKyc?.status === "rejected"
+      ? "Retry Verification"
+      : hasKycAttempt && (currentKyc?.status === "not_started" || currentKyc?.status === "expired")
+        ? "Try Again"
+        : "Start Verification";
   const showKycBanner = !kycAccessAllowed || kycReviewActive;
   const kycBannerMessage = formatKycBannerMessage(kycStatus, currentKyc?.rejectionReason);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -471,18 +484,13 @@ export default function PlayerDashboard() {
       await refreshSession();
       await refreshUser();
     } catch (error: any) {
-      Logger.error("Dashboard", "Could not refresh KYC", error?.message || error);
+      Logger.debug("Dashboard", "Could not refresh KYC", error?.message || error);
       // Best-effort: re-fetch profile from Convex even if Better Auth session call failed.
       try { await refreshUser(); } catch {}
-      showToast({
-        type: "info",
-        title: "Could not refresh",
-        message: "Could not refresh right now. Please check your connection and try again.",
-      });
     } finally {
       setRefreshingKyc(false);
     }
-  }, [currentKyc?._id, refreshDiditStatus, refreshSession, refreshUser, showToast]);
+  }, [currentKyc?._id, refreshDiditStatus, refreshSession, refreshUser]);
 
   useFocusEffect(
     useCallback(() => {
@@ -499,7 +507,7 @@ export default function PlayerDashboard() {
           await refreshDiditStatus({ verificationId: currentKyc._id });
           await refreshUser();
         } catch (error: any) {
-          Logger.warn("Dashboard", "Could not automatically refresh KYC", error?.message || error);
+          Logger.debug("Dashboard", "Could not automatically refresh KYC", error?.message || error);
         }
       })();
     }, [
@@ -654,7 +662,11 @@ export default function PlayerDashboard() {
               <View style={styles.verificationBannerHeader}>
                 <AppIcon name="mailVerified" size={20} color={COLORS.warning} />
                 <Text style={styles.verificationBannerTitle}>
-                  {kycReviewActive ? "Verification pending" : "Verify your identity"}
+                  {kycReviewActive
+                    ? "Verification pending"
+                    : currentKyc?.status === "not_started"
+                      ? "Verification not started"
+                      : "Verify your identity"}
                 </Text>
               </View>
               <Text style={styles.verificationBannerText}>
@@ -675,7 +687,7 @@ export default function PlayerDashboard() {
                     style={styles.verificationPrimaryButton}
                     onPress={handleStartVerification}
                   >
-                    Start Verification
+                    {kycStartActionLabel}
                   </AppButton>
                 )}
                 <AppButton

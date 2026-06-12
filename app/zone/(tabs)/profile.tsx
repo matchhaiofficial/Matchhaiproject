@@ -134,6 +134,13 @@ export default function ZoneProfile() {
     const { showToast } = useToast();
     const [loggingOut, setLoggingOut] = useState(false);
     const startDiditKyc = useStartDiditKyc();
+    const kycStartActionLabel =
+        user?.kycVerificationStatus === "rejected"
+            ? "Retry CNIC & Face Verification"
+            : user?.identityVerificationId &&
+                (user?.kycVerificationStatus === "not_started" || user?.kycVerificationStatus === "expired")
+                ? "Try Again"
+                : "Start CNIC & Face Verification";
     const { animatedStyle: entranceStyle } = useEntrance({
         axis: "y",
         distance: 10,
@@ -410,7 +417,7 @@ export default function ZoneProfile() {
                     </View>
                     {!kycVerified ? (
                         <AppButton style={styles.logoutButton} onPress={handleStartVerification}>
-                            Start CNIC & Face Verification
+                            {kycStartActionLabel}
                         </AppButton>
                     ) : user?.kycVerifiedAt ? (
                         <Text style={styles.profileMetaText}>

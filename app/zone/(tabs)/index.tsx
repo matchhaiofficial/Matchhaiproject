@@ -133,6 +133,12 @@ export default function ZoneDashboardHome() {
     const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
     const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
     const kycVerified = isUserFullyVerified(authUser, user);
+    const kycStartActionLabel =
+        currentKyc?.status === "rejected"
+            ? "Retry Verification"
+            : currentKyc?._id && (currentKyc.status === "not_started" || currentKyc.status === "expired")
+                ? "Try Again"
+                : "Start Verification";
     const bottomContentPadding = useTabBarClearance(16);
 
     useFocusEffect(
@@ -412,10 +418,10 @@ export default function ZoneDashboardHome() {
                 : [
                     { label: "Dashboard", icon: "dashboard" as const, onPress: () => router.push("/zone/(tabs)" as any) },
                     { label: "Profile Settings", icon: "settings" as const, onPress: () => router.push("/zone/profile/edit" as any) },
-                    { label: "Start Verification", icon: "status" as const, onPress: handleStartVerification },
+                    { label: kycStartActionLabel, icon: "status" as const, onPress: handleStartVerification },
                     { label: "Logout", icon: "logout" as const, onPress: handleLogout },
                 ],
-        [kycVerified, router, sidebarModules],
+        [kycStartActionLabel, kycVerified, router, sidebarModules],
     );
 
     if (loading) {
@@ -518,7 +524,7 @@ export default function ZoneDashboardHome() {
                             </Text>
                             <View style={styles.verificationBannerActions}>
                                 <AppButton style={styles.verificationActionButton} onPress={handleStartVerification}>
-                                    Start Verification
+                                    {kycStartActionLabel}
                                 </AppButton>
                                 <AppButton
                                     variant="secondary"

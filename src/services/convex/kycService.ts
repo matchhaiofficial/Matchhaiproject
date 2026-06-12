@@ -26,12 +26,16 @@ export async function startDiditKyc(role: KycRole): Promise<
 }
 
 export async function refreshDiditKycStatus(verificationId: Id<"identityVerifications">): Promise<
-  | { ok: true; status: string; updatedAt: number }
+  | { ok: true; refreshed: true; status: string; updatedAt: number }
+  | { ok: true; refreshed: false }
   | { ok: false; message: string }
 > {
   try {
     const result = await convex.action(api.kyc.refreshDiditVerificationStatus, { verificationId });
-    return { ok: true, status: result.status, updatedAt: result.updatedAt };
+    if (!result.refreshed || !result.status || !result.updatedAt) {
+      return { ok: true, refreshed: false };
+    }
+    return { ok: true, refreshed: true, status: result.status, updatedAt: result.updatedAt };
   } catch (error: any) {
     return { ok: false, message: getUserFacingErrorMessage(error, "Could not refresh verification status.") };
   }

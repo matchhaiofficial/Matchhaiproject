@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { useQuery } from "convex/react";
 import React, { useMemo } from "react";
 import {
     ActivityIndicator,
@@ -9,6 +10,7 @@ import {
 } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
+import { api } from "../../../convex/_generated/api";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
 import { useAuth } from "../../../src/context/AuthContext";
@@ -32,6 +34,13 @@ export default function ZoneBranches() {
     const router = useRouter();
     const bottomContentPadding = useTabBarClearance(SPACING.lg);
     const kycVerified = isUserFullyVerified(authUser, user);
+    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const kycStartActionLabel =
+        currentKyc?.status === "rejected"
+            ? "Retry Verification"
+            : currentKyc?._id && (currentKyc.status === "not_started" || currentKyc.status === "expired")
+                ? "Try Again"
+                : "Start Verification";
 
     // Branches are stored as an array on the zone document in Convex.
     // The zone data from useZoneData already includes branches.
@@ -106,7 +115,7 @@ export default function ZoneBranches() {
                         </Text>
                         <View style={styles.verificationBannerActions}>
                             <AppButton style={styles.verificationActionButton} onPress={handleStartVerification}>
-                                Start Verification
+                                {kycStartActionLabel}
                             </AppButton>
                             <AppButton
                                 variant="secondary"
