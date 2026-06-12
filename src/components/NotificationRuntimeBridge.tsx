@@ -24,17 +24,21 @@ import {
 } from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
 import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
+import { getNotificationResponseKey } from "../utils/notificationResponse";
 
 const LAST_HANDLED_RESPONSE_KEY = "notifications.lastHandledResponse.v1";
+const responsesBeingHandled = new Set<string>();
+const MAX_HANDLED_RESPONSE_KEYS = 25;
 
-function getResponseKey(response: any) {
-  const identifier = String(
-    response?.notification?.request?.identifier ||
-    response?.notification?.request?.content?.data?.reminderKey ||
-    response?.notification?.request?.content?.data?.notificationId ||
-    ""
-  ).trim();
-  return identifier;
+function parseHandledResponseKeys(value: string | null) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === "string");
+    }
+  } catch {}
+  return [value];
 }
 
 function getHrefFromResponse(response: any) {
@@ -69,18 +73,24 @@ function getHrefFromResponse(response: any) {
 }
 
 async function handleNotificationResponse(response: any, onHref: (href: string) => void) {
-  const key = getResponseKey(response);
+  const key = getNotificationResponseKey(response);
   const href = getHrefFromResponse(response);
-  if (!key) {
+  if (!key || responsesBeingHandled.has(key)) return;
+
+  responsesBeingHandled.add(key);
+  try {
+    const stored = await AsyncStorage.getItem(LAST_HANDLED_RESPONSE_KEY);
+    const handledKeys = parseHandledResponseKeys(stored);
+    if (handledKeys.includes(key)) return;
+
+    await AsyncStorage.setItem(
+      LAST_HANDLED_RESPONSE_KEY,
+      JSON.stringify([...handledKeys, key].slice(-MAX_HANDLED_RESPONSE_KEYS)),
+    );
     if (href) onHref(href);
-    return;
+  } finally {
+    responsesBeingHandled.delete(key);
   }
-
-  const lastHandled = await AsyncStorage.getItem(LAST_HANDLED_RESPONSE_KEY);
-  if (lastHandled === key) return;
-
-  await AsyncStorage.setItem(LAST_HANDLED_RESPONSE_KEY, key);
-  if (href) onHref(href);
 }
 
 export default function NotificationRuntimeBridge() {

@@ -600,7 +600,13 @@ export const createDiditKycStartIntent = mutation({
       .query("identityVerifications")
       .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "pending"))
       .first();
-    const verificationId = existing?._id ?? await ctx.db.insert("identityVerifications", {
+    const existingNotStarted = existing
+      ? null
+      : await ctx.db
+          .query("identityVerifications")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "not_started"))
+          .first();
+    const verificationId = existing?._id ?? existingNotStarted?._id ?? await ctx.db.insert("identityVerifications", {
       userId: profile._id,
       type: "kyc",
       role: args.role,
@@ -710,46 +716,51 @@ export const startDiditKycSessionFromIntent = action({
 
 export const refreshDiditVerificationStatus = action({
   args: { verificationId: v.id("identityVerifications") },
-  handler: async (ctx, args): Promise<{ status: KycStatus; updatedAt: number }> => {
-    const authUser = await authComponent.getAuthUser(ctx);
-    if (!authUser?.userId) throw new Error("Please sign in to continue.");
-    const profile: any = await ctx.runQuery(api.users.getByAuthId, { authId: authUser.userId });
-    const verification: any = await ctx.runQuery(internal.kyc.getVerificationForRefresh, { verificationId: args.verificationId });
-    if (!profile?._id || !verification || String(verification.userId) !== String(profile._id)) {
-      throw new Error("Verification not found.");
+  handler: async (ctx, args): Promise<{ status?: KycStatus; updatedAt?: number; refreshed: boolean }> => {
+    try {
+      const authUser = await authComponent.getAuthUser(ctx);
+      if (!authUser?.userId) return { refreshed: false };
+
+      const profile: any = await ctx.runQuery(api.users.getByAuthId, { authId: authUser.userId });
+      const verification: any = await ctx.runQuery(internal.kyc.getVerificationForRefresh, { verificationId: args.verificationId });
+      if (!profile?._id || !verification || String(verification.userId) !== String(profile._id)) {
+        return { refreshed: false };
+      }
+
+      if (!verification.providerSessionId) {
+        return { status: verification.status, updatedAt: verification.updatedAt, refreshed: false };
+      }
+
+      const config = getDiditConfig();
+      const response = await fetch(`${config.baseUrl}/v3/session/${encodeURIComponent(verification.providerSessionId)}/decision/`, {
+        method: "GET",
+        headers: {
+          "x-api-key": config.apiKey,
+          accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        return { status: verification.status, updatedAt: verification.updatedAt, refreshed: false };
+      }
+
+      const payload = await response.json();
+      const status = normalizeDiditStatus(extractStatus(payload) || extractDecision(payload) || verification.status);
+      const now = Date.now();
+      await ctx.runMutation(internal.kyc.applyDiditStatusUpdate, {
+        verificationId: args.verificationId,
+        providerSessionId: extractSessionId(payload),
+        workflowId: extractWorkflowId(payload),
+        status,
+        decision: extractDecision(payload),
+        rejectionReason: extractSafeReason(payload),
+        checkStatuses: extractSafeCheckStatuses(payload),
+        now,
+      });
+      return { status, updatedAt: now, refreshed: true };
+    } catch {
+      return { refreshed: false };
     }
-
-    const config = getDiditConfig();
-    if (!verification.providerSessionId) {
-      return { status: verification.status, updatedAt: verification.updatedAt };
-    }
-
-    const response = await fetch(`${config.baseUrl}/v3/session/${encodeURIComponent(verification.providerSessionId)}/decision/`, {
-      method: "GET",
-      headers: {
-        "x-api-key": config.apiKey,
-        accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Could not refresh verification status.");
-    }
-
-    const payload = await response.json();
-    const status = normalizeDiditStatus(extractStatus(payload) || extractDecision(payload) || verification.status);
-    const now = Date.now();
-    await ctx.runMutation(internal.kyc.applyDiditStatusUpdate, {
-      verificationId: args.verificationId,
-      providerSessionId: extractSessionId(payload),
-      workflowId: extractWorkflowId(payload),
-      status,
-      decision: extractDecision(payload),
-      rejectionReason: extractSafeReason(payload),
-      checkStatuses: extractSafeCheckStatuses(payload),
-      now,
-    });
-    return { status, updatedAt: now };
   },
 });
 
@@ -945,7 +956,7 @@ export const applyDiditStatusUpdate = internalMutation({
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
     const previousStatus = verification.status as KycStatus;
-    const effectiveStatus: KycStatus = args.status === "not_started" ? "in_progress" : args.status;
+    const effectiveStatus: KycStatus = args.status;
     const statusChanged = previousStatus !== effectiveStatus;
 
     const verificationPatch: Record<string, unknown> = {
@@ -1033,7 +1044,7 @@ export const applyDiditStatusUpdate = internalMutation({
       createdAt: args.now,
     });
 
-    if (statusChanged) {
+    if (statusChanged && effectiveStatus !== "not_started") {
       await notifyKycStatusUpdated(ctx, {
         verificationId: args.verificationId,
         userId: verification.userId,

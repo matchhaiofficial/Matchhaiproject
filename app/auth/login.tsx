@@ -24,6 +24,7 @@ import {
 } from "../../src/services/convex/authService";
 import { getUserProfile } from "../../src/services/convex/userService";
 import { useLoginFormStore } from "../../src/store/loginFormStore";
+import { getLoginButtonState } from "../../src/utils/loginButtonState";
 import { COLORS, INPUT_PADDING } from "../../src/theme";
 import Logger from "../../src/utils/logger";
 import { APP_ROUTES } from "../../src/navigation/routes";
@@ -125,11 +126,10 @@ export default function Login() {
   const emailOrPhone = useLoginFormStore((state) => state.emailOrPhone);
   const password = useLoginFormStore((state) => state.password);
   const userType = useLoginFormStore((state) => state.userType);
-  const loading = useLoginFormStore((state) => state.loading);
   const setEmailOrPhone = useLoginFormStore((state) => state.setEmailOrPhone);
   const setPassword = useLoginFormStore((state) => state.setPassword);
   const setUserType = useLoginFormStore((state) => state.setUserType);
-  const setLoading = useLoginFormStore((state) => state.setLoading);
+  const [loading, setLoading] = useState(false);
 
   const [emailFocused, setEmailFocused] = useState(false);
   const [passFocused, setPassFocused] = useState(false);
@@ -490,6 +490,7 @@ export default function Login() {
             await refreshSession();
             if (loginAttemptRef.current !== attemptId) return;
             handoffStarted = true;
+            setLoading(false);
             showToast({
               type: "success",
               title: "Profile restored",
@@ -605,6 +606,7 @@ export default function Login() {
       if (loginAttemptRef.current !== attemptId) return;
 
       handoffStarted = true;
+      setLoading(false);
 
       showToast({
         type: "success",
@@ -680,7 +682,13 @@ export default function Login() {
     </View>
   );
 
-  const isSubmitDisabled = loading || !isEmailValid || !password || isLockedOut;
+  const { canSubmit, showActiveStyle } = getLoginButtonState({
+    isIdentifierValid: isEmailValid,
+    hasPassword: password.length > 0,
+    loading,
+    isLockedOut,
+  });
+  const isSubmitDisabled = !canSubmit;
 
   // Bottom CTA text + href based on role
   const bottomLabel =
@@ -947,7 +955,9 @@ export default function Login() {
             disabled={isSubmitDisabled}
             style={({ pressed }) => [
               styles.primaryBtn,
-              isSubmitDisabled ? styles.primaryBtnDisabled : styles.primaryBtnEnabled,
+              {
+                backgroundColor: showActiveStyle ? COLORS.accent : COLORS.disabled,
+              },
               pressed && !isSubmitDisabled && { opacity: 0.92 },
             ]}
             android_ripple={{ color: "rgba(255,255,255,0.12)" }}
