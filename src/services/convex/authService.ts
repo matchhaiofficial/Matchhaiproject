@@ -8,13 +8,24 @@ import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { isKycAccessAllowed, isKycVerificationBypassEnabled } from "../../utils/verificationGate";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 import { deactivateCurrentInstallation } from "../pushRegistration";
 
 /** Friendly message mapper for common auth errors */
 function mapAuthError(error?: any): string {
-  const code = String(error?.code || error?.message || "");
+  const structuredMessage =
+    typeof error?.data === "string"
+      ? error.data
+      : typeof error?.data?.message === "string"
+        ? error.data.message
+        : "";
+  const structuredCode =
+    error?.data && typeof error.data === "object" && typeof error.data.code === "string"
+      ? error.data.code
+      : "";
+  const code = String(structuredCode || error?.code || error?.message || "");
   const statusText = String(error?.statusText || error?.error?.message || "");
-  const raw = [code, statusText, String(error?.message || "")]
+  const raw = [structuredMessage, code, statusText, String(error?.message || "")]
     .filter(Boolean)
     .join(" | ");
 
@@ -88,7 +99,8 @@ function mapAuthError(error?: any): string {
     return "Email delivery is not configured. Add a valid RESEND_API_KEY before registering accounts.";
   }
 
-  return String(error?.message || statusText || "Something went wrong. Please try again.");
+  if (structuredMessage) return structuredMessage;
+  return getUserFacingErrorMessage(error, statusText || "Something went wrong. Please try again.");
 }
 
 async function markAuthUserOffline(authId?: string | null) {

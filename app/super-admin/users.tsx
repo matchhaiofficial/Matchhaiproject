@@ -18,6 +18,7 @@ import { useAuth } from "../../src/context/AuthContext";
 import { useTabBarClearance } from "../../src/hooks/useTabBarClearance";
 import { useToast } from "../../src/hooks/useToast";
 import {
+  bootstrapPartnerSuperAdmins,
   deleteUserAccount,
   getUsersPage,
   setUserSuspension,
@@ -159,6 +160,7 @@ export default function SuperAdminUsersScreen() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [isDone, setIsDone] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [bootstrappingAdmins, setBootstrappingAdmins] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(ALL);
   const [roleFilter, setRoleFilter] = useState<string>(ALL);
@@ -294,6 +296,52 @@ export default function SuperAdminUsersScreen() {
     );
   }, [load, showToast]);
 
+  const handleBootstrapPartnerAdmins = useCallback(() => {
+    Alert.alert(
+      "Create Partner Admin Accounts",
+      "This creates any missing configured partner Super Admin accounts using the temporary password stored securely in the production Convex environment. Existing accounts will not be overwritten.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Create Accounts",
+          onPress: async () => {
+            setBootstrappingAdmins(true);
+            const result = await bootstrapPartnerSuperAdmins({
+              reason: "Provisioned from the Super Admin users screen.",
+            });
+            setBootstrappingAdmins(false);
+
+            if (!result.ok) {
+              showToast({ type: "error", title: "Provisioning failed", message: result.message });
+              return;
+            }
+
+            const counts = result.data.results.reduce<Record<string, number>>((summary, entry) => {
+              summary[entry.status] = (summary[entry.status] || 0) + 1;
+              return summary;
+            }, {});
+            const summary = [
+              counts.created ? `${counts.created} created` : null,
+              counts.already_exists ? `${counts.already_exists} already existed` : null,
+              counts.conflict_existing_player_account ? `${counts.conflict_existing_player_account} conflicts` : null,
+              counts.failed ? `${counts.failed} failed` : null,
+              counts.missing_temp_password_env ? `${counts.missing_temp_password_env} missing password configuration` : null,
+            ].filter(Boolean).join(", ");
+
+            if (counts.created) {
+              await load("refresh");
+            }
+
+            Alert.alert(
+              result.data.ok ? "Partner Admins Processed" : "Partner Admins Not Created",
+              result.data.message || summary || "No account changes were required.",
+            );
+          },
+        },
+      ],
+    );
+  }, [load, showToast]);
+
   const renderUser = useCallback(
     ({ item }: { item: SuperAdminUser }) => (
       <UserRow
@@ -321,6 +369,17 @@ export default function SuperAdminUsersScreen() {
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Users" subtitle="Review accounts and manage suspensions." onBack={() => router.back()} inlineTitle />
+      {/* {canManageSuperAdmins ? (
+        <AppButton
+          variant="secondary"
+          leadingIcon="person-add"
+          loading={bootstrappingAdmins}
+          onPress={handleBootstrapPartnerAdmins}
+          style={styles.bootstrapButton}
+        >
+          Create Partner Admin Accounts
+        </AppButton>
+      ) : null} */}
       <AdminSearchFilterBar
         value={search}
         onChangeText={setSearch}
@@ -385,6 +444,7 @@ export default function SuperAdminUsersScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.backgroundDark },
   screenContent: { paddingTop: 0 },
+  bootstrapButton: { marginBottom: SPACING.md },
   searchBar: { marginBottom: SPACING.md },
   tabs: { marginBottom: SPACING.md },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center" },

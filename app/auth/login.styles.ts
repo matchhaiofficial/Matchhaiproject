@@ -283,10 +283,13 @@ export default StyleSheet.create({
   },
 
   primaryBtn: {
-    backgroundColor: COLORS.accent,
     borderRadius: RADII.lg,
     paddingVertical: SPACING.lg - 2,
     alignItems: 'center',
+  },
+
+  primaryBtnEnabled: {
+    backgroundColor: COLORS.accent,
   },
 
   primaryBtnDisabled: {
@@ -297,6 +300,10 @@ export default StyleSheet.create({
     color: COLORS.text,
     fontFamily: FONTS.heading,
     fontSize: TEXT_SIZES.body,
+  },
+
+  primaryBtnTextDisabled: {
+    color: COLORS.muted,
   },
 
   dividerRow: {

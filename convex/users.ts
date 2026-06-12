@@ -1,5 +1,5 @@
 import { query, mutation, action, internalQuery, internalMutation } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
@@ -425,15 +425,18 @@ export const validateRegistrationIdentity = action({
     phoneNumberMasked?: string;
     phoneNumberHash?: string;
   }> => {
+    const rejectRegistration = (code: string, message: string): never => {
+      throw new ConvexError({ code, message });
+    };
     const email = normalizeEmail(args.email);
     const phone = normalizePhone(args.phone);
     const username = args.username ? String(args.username).trim() : "";
     const usernameLower = username ? normalizeUsername(username) : "";
 
-    if (!email) throw new Error("Email is required.");
-    if (!phone) throw new Error("Phone number is required.");
+    if (!email) rejectRegistration("EMAIL_REQUIRED", "Email is required.");
+    if (!phone) rejectRegistration("PHONE_REQUIRED", "Phone number is required.");
     if (args.accountType === "player" && !username) {
-      throw new Error("Username is required.");
+      rejectRegistration("USERNAME_REQUIRED", "Username is required.");
     }
 
     const [emailAvailable, phoneAvailable, usernameAvailable] = await Promise.all([
@@ -444,9 +447,9 @@ export const validateRegistrationIdentity = action({
         : Promise.resolve(true),
     ]);
 
-    if (!emailAvailable) throw new Error("This email is already registered.");
-    if (!phoneAvailable) throw new Error("This phone number is already registered.");
-    if (!usernameAvailable) throw new Error("This username is already in use.");
+    if (!emailAvailable) rejectRegistration("EMAIL_ALREADY_REGISTERED", "This email is already registered.");
+    if (!phoneAvailable) rejectRegistration("PHONE_ALREADY_REGISTERED", "This phone number is already registered.");
+    if (!usernameAvailable) rejectRegistration("USERNAME_ALREADY_REGISTERED", "This username is already in use.");
 
     let phoneOtpVerified = false;
     let phoneOtpVerifiedAt: number | undefined;
@@ -471,7 +474,7 @@ export const validateRegistrationIdentity = action({
         });
 
         if (!verified) {
-          throw new Error("Please verify your phone number.");
+          return rejectRegistration("PHONE_VERIFICATION_REQUIRED", "Please verify your phone number again before creating your account.");
         }
         phoneOtpVerified = true;
         phoneOtpVerifiedAt = verified.updatedAt;
@@ -480,13 +483,21 @@ export const validateRegistrationIdentity = action({
       }
     }
 
-    const validation: any = await ctx.runAction(api.externalApis.validatePhoneNumber, {
-      phone,
-      countryCode: "PK",
-    });
+    let validation: any;
+    try {
+      validation = await ctx.runAction(api.externalApis.validatePhoneNumber, {
+        phone,
+        countryCode: "PK",
+      });
+    } catch {
+      rejectRegistration(
+        "PHONE_VALIDATION_UNAVAILABLE",
+        "Phone validation is temporarily unavailable. Please try again shortly.",
+      );
+    }
 
     if (!validation.valid) {
-      throw new Error("Please enter a valid phone number.");
+      rejectRegistration("INVALID_PHONE", "Please enter a valid phone number.");
     }
 
     return {
