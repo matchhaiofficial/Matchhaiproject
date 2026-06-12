@@ -484,6 +484,33 @@ export default function PlayerDashboard() {
     }
   }, [currentKyc?._id, refreshDiditStatus, refreshSession, refreshUser, showToast]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const shouldRefreshProvider =
+        currentKyc?._id &&
+        currentKyc.providerSessionId &&
+        currentKyc.status !== "verified" &&
+        currentKyc.status !== "rejected" &&
+        currentKyc.status !== "expired";
+      if (!shouldRefreshProvider) return;
+
+      void (async () => {
+        try {
+          await refreshDiditStatus({ verificationId: currentKyc._id });
+          await refreshUser();
+        } catch (error: any) {
+          Logger.warn("Dashboard", "Could not automatically refresh KYC", error?.message || error);
+        }
+      })();
+    }, [
+      currentKyc?._id,
+      currentKyc?.providerSessionId,
+      currentKyc?.status,
+      refreshDiditStatus,
+      refreshUser,
+    ]),
+  );
+
   return (
     <Screen
       style={styles.screen}

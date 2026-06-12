@@ -1,6 +1,6 @@
-import { useRouter } from "expo-router";
-import { useQuery } from "convex/react";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useAction, useQuery } from "convex/react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -127,11 +127,38 @@ const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: 
 export default function ZoneDashboardHome() {
     const router = useRouter();
     const { zone, loading } = useZoneData();
-    const { user, authUser } = useAuth();
+    const { user, authUser, refreshUser } = useAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
+    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
     const kycVerified = isUserFullyVerified(authUser, user);
     const bottomContentPadding = useTabBarClearance(16);
+
+    useFocusEffect(
+        useCallback(() => {
+            const shouldRefreshProvider =
+                currentKyc?._id &&
+                currentKyc.providerSessionId &&
+                currentKyc.status !== "verified" &&
+                currentKyc.status !== "rejected" &&
+                currentKyc.status !== "expired";
+            if (!shouldRefreshProvider) return;
+
+            void (async () => {
+                try {
+                    await refreshDiditStatus({ verificationId: currentKyc._id });
+                    await refreshUser();
+                } catch {}
+            })();
+        }, [
+            currentKyc?._id,
+            currentKyc?.providerSessionId,
+            currentKyc?.status,
+            refreshDiditStatus,
+            refreshUser,
+        ]),
+    );
 
     useRouteLogger("ZoneDashboardHome", {
         zoneId: zone?.id,
