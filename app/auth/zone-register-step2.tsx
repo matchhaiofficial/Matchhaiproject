@@ -49,6 +49,7 @@ export default function AdminRegisterStep2() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [branchModalFocusKey, setBranchModalFocusKey] = useState(0);
 
   useEffect(() => {
     setCurrentStep(2);
@@ -236,6 +237,10 @@ export default function AdminRegisterStep2() {
     }
     setContactPhone(next);
   };
+
+  const handleBranchFieldFocus = useCallback(() => {
+    setBranchModalFocusKey((current) => current + 1);
+  }, []);
 
   const openAddModal = () => {
     if (branches.length >= 10) {
@@ -483,6 +488,8 @@ export default function AdminRegisterStep2() {
 
         <AppModalBody
           scroll
+          keyboardAware
+          keyboardFocusKey={branchModalFocusKey}
           contentContainerStyle={styles.branchModalContent}
         >
             <View style={styles.fieldGroup}>
@@ -498,6 +505,7 @@ export default function AdminRegisterStep2() {
                     onChangeText={setBranchDisplayName}
                     selectionColor={COLORS.accent}
                     returnKeyType="next"
+                    onFocus={handleBranchFieldFocus}
                   />
                 </View>
               </View>
@@ -532,6 +540,7 @@ export default function AdminRegisterStep2() {
                     onChangeText={handlePhoneChange}
                     selectionColor={COLORS.accent}
                     keyboardType="phone-pad"
+                    onFocus={handleBranchFieldFocus}
                   />
                 </View>
               </View>
@@ -549,6 +558,7 @@ export default function AdminRegisterStep2() {
                     value={searchQuery}
                     onChangeText={handleSearchChange}
                     selectionColor={COLORS.accent}
+                    onFocus={handleBranchFieldFocus}
                   />
                   {isSearching ? (
                     <View
@@ -618,6 +628,7 @@ export default function AdminRegisterStep2() {
                     onChangeText={setAddressLine1}
                     selectionColor={COLORS.accent}
                     multiline
+                    onFocus={handleBranchFieldFocus}
                   />
                 </View>
               </View>

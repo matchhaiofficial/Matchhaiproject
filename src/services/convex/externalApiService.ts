@@ -4,6 +4,7 @@
 
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
+import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
 
 // ============================================
 // STEAM
@@ -162,10 +163,12 @@ export async function verifyPsnProfile(
       data: result as PsnVerificationResult,
     };
   } catch (error: any) {
-    console.error("[externalApiService] verifyPsnProfile error:", error);
     return {
       ok: false,
-      message: error?.message || "Failed to verify PSN profile",
+      message: getUserFacingErrorMessage(
+        error,
+        "Could not verify this PSN profile. Please try again.",
+      ),
     };
   }
 }

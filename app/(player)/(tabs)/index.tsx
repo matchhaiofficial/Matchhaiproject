@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from "expo-router";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
@@ -37,6 +37,7 @@ import Logger from "../../../src/utils/logger";
 import { recordCountMetric } from "../../../src/utils/perfInstrumentation";
 import { getZoneStatusLabel } from "../../../src/utils/statusLabels";
 import { getTeamMainDisplayRoster } from "../../../src/utils/teamRosterDisplay";
+import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
 import DashboardAlertRow from "../components/dashboard/DashboardAlertRow";
 import DashboardAtGlancePanel from "../components/dashboard/DashboardAtGlancePanel";
 import DashboardQuickActionTile from "../components/dashboard/DashboardQuickActionTile";
@@ -320,7 +321,8 @@ const formatKycBannerMessage = (status?: string | null, reason?: string | null) 
 export default function PlayerDashboard() {
   useRouteLogger("PlayerDashboard");
 
-  const { user, authUser, refreshSession, refreshUser } = useAuth();
+  const { user, authUser, loading, refreshSession, refreshUser } = useAuth();
+  const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const bottomContentPadding = useTabBarClearance(SPACING.lg);
   const { animatedStyle: entranceStyle } = useEntrance({
     axis: "y",
@@ -330,7 +332,18 @@ export default function PlayerDashboard() {
   const startDiditKyc = useStartDiditKyc();
   const { showToast } = useToast();
   const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
-  const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+  const protectedQueriesReady = isAuthenticatedProfileReady({
+    authLoading: loading,
+    convexAuthLoading,
+    isAuthenticated,
+    authUserId: authUser?.id,
+    profileAuthId: user?.authId,
+    profileUserId: user?._id,
+  });
+  const currentKyc = useQuery(
+    api.kyc.getCurrentUserKyc,
+    protectedQueriesReady ? {} : "skip",
+  );
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
 
   const verificationDocLoading = Boolean(user?.identityVerificationId) && currentKyc === undefined;
@@ -352,21 +365,20 @@ export default function PlayerDashboard() {
   const [refreshingKyc, setRefreshingKyc] = useState(false);
   const didLogInitialQueryCountRef = useRef(false);
   const [loggingOut, setLoggingOut] = useState(false);
-
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
-    user?._id ? { userId: user._id as Id<"users"> } : "skip",
+    protectedQueriesReady && user?._id ? { userId: user._id as Id<"users"> } : "skip",
   );
 
   const notificationCount =
     useQuery(
       api.notifications.countUnreadFast,
-      user?._id ? { userId: user._id as Id<"users"> } : "skip",
+      protectedQueriesReady && user?._id ? { userId: user._id as Id<"users"> } : "skip",
     ) ?? 0;
 
   const pendingNotifications = useQuery(
     api.notifications.listInboxPage,
-    user?._id
+    protectedQueriesReady && user?._id
       ? { userId: user._id as Id<"users">, tab: "pending" as const, limit: 10 }
       : "skip",
   );

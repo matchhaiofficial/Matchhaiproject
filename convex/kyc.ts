@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { httpAction, action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { httpAction, action, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./_generated/server";
 import { api, components, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import { Id } from "./_generated/dataModel";
@@ -27,6 +27,15 @@ const kycRoleValidator = v.union(
 
 type KycStatus = "not_started" | "pending" | "in_progress" | "in_review" | "verified" | "rejected" | "expired";
 type KycRole = "player" | "zone_owner" | "venue_admin" | "high_risk_dispute" | "tournament_organizer";
+type DiditSessionStartClaim =
+  | { state: "claimed" }
+  | { state: "busy" }
+  | { state: "already_started" }
+  | { state: "reuse"; verificationUrl: string; status: KycStatus };
+
+const DIDIT_SESSION_START_LEASE_MS = 2 * 60 * 1000;
+const DIDIT_SESSION_START_WAIT_ATTEMPTS = 30;
+const DIDIT_SESSION_START_WAIT_MS = 300;
 
 const ACCOUNT_EMAIL_REQUIRED_MESSAGE =
   "Your account email is missing or invalid. Please update your account email before starting verification.";
@@ -490,6 +499,96 @@ export const getCurrentUserKyc = query({
   },
 });
 
+async function createOrReuseDiditProviderSession(
+  ctx: ActionCtx,
+  verificationId: Id<"identityVerifications">,
+  profile: any,
+): Promise<{ verificationUrl: string; verificationId: Id<"identityVerifications">; status: KycStatus }> {
+  const leaseToken = createStartToken();
+  let claimed = false;
+
+  for (let attempt = 0; attempt < DIDIT_SESSION_START_WAIT_ATTEMPTS; attempt += 1) {
+    const claim: DiditSessionStartClaim = await ctx.runMutation(internal.kyc.claimDiditSessionStart, {
+      verificationId,
+      leaseToken,
+      now: Date.now(),
+      leaseDurationMs: DIDIT_SESSION_START_LEASE_MS,
+    });
+
+    if (claim.state === "reuse") {
+      return {
+        verificationUrl: claim.verificationUrl,
+        verificationId,
+        status: claim.status,
+      };
+    }
+    if (claim.state === "already_started") {
+      throw new Error(
+        "Identity verification is already in progress. Return to the existing Didit session or refresh its status.",
+      );
+    }
+    if (claim.state === "claimed") {
+      claimed = true;
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, DIDIT_SESSION_START_WAIT_MS));
+  }
+
+  if (!claimed) {
+    throw new Error("Identity verification is already opening. Please wait a moment and try again.");
+  }
+
+  try {
+    const config = getDiditConfig();
+    const response = await fetch(`${config.baseUrl}/v3/session/`, {
+      method: "POST",
+      headers: {
+        "x-api-key": config.apiKey,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(buildDiditSessionBody(config, verificationId, profile)),
+    });
+
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      throw new Error("Could not start identity verification. Please try again.");
+    }
+
+    const verificationUrl = extractVerificationUrl(payload);
+    if (!verificationUrl) {
+      throw new Error("Didit did not return a verification URL.");
+    }
+
+    const diditStatus = normalizeDiditStatus(extractStatus(payload) || "pending");
+    const status = toSessionCreatedStatus(diditStatus);
+    await ctx.runMutation(internal.kyc.markKycSessionCreated, {
+      verificationId,
+      providerSessionId: extractSessionId(payload),
+      providerReference: extractString(payload?.reference, payload?.session?.reference),
+      verificationUrl,
+      leaseToken,
+      status,
+      now: Date.now(),
+    });
+
+    return { verificationUrl, verificationId, status };
+  } catch (error) {
+    await ctx.runMutation(internal.kyc.releaseDiditSessionStart, {
+      verificationId,
+      leaseToken,
+    });
+    throw error;
+  }
+}
+
 export const startDiditKycSession = action({
   args: { role: kycRoleValidator },
   handler: async (ctx, args): Promise<{ verificationUrl: string; verificationId: Id<"identityVerifications">; status: KycStatus }> => {
@@ -526,44 +625,7 @@ export const startDiditKycSession = action({
       timestamp: Date.now(),
     });
 
-    const response = await fetch(`${config.baseUrl}/v3/session/`, {
-      method: "POST",
-      headers: {
-        "x-api-key": config.apiKey,
-        "content-type": "application/json",
-        accept: "application/json",
-      },
-      body: JSON.stringify(buildDiditSessionBody(config, verificationId, profile)),
-    });
-
-    let payload: any = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
-
-    if (!response.ok) {
-      throw new Error("Could not start identity verification. Please try again.");
-    }
-
-    const providerSessionId = extractSessionId(payload);
-    const verificationUrl = extractVerificationUrl(payload);
-    if (!verificationUrl) {
-      throw new Error("Didit did not return a verification URL.");
-    }
-
-    const diditStatus = normalizeDiditStatus(extractStatus(payload) || "pending");
-    const status = toSessionCreatedStatus(diditStatus);
-    await ctx.runMutation(internal.kyc.markKycSessionCreated, {
-      verificationId,
-      providerSessionId,
-      providerReference: extractString(payload?.reference, payload?.session?.reference),
-      status,
-      now: Date.now(),
-    });
-
-    return { verificationUrl, verificationId, status };
+    return await createOrReuseDiditProviderSession(ctx, verificationId, profile);
   },
 });
 
@@ -596,17 +658,49 @@ export const createDiditKycStartIntent = mutation({
 
     const config = getDiditConfig();
     const now = Date.now();
-    const existing = await ctx.db
-      .query("identityVerifications")
-      .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "pending"))
-      .first();
-    const existingNotStarted = existing
+    let currentVerification: any = null;
+    if (profile.identityVerificationId) {
+      try {
+        currentVerification = await ctx.db.get(
+          profile.identityVerificationId as Id<"identityVerifications">,
+        );
+      } catch {
+        currentVerification = null;
+      }
+    }
+    const currentActive =
+      currentVerification &&
+      String(currentVerification.userId) === String(profile._id) &&
+      currentVerification.role === args.role &&
+      !isTerminal(currentVerification.status as KycStatus)
+        ? currentVerification
+        : null;
+    const existingPending = currentActive
+      ? null
+      : await ctx.db
+          .query("identityVerifications")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "pending"))
+          .first();
+    const existingInProgress = currentActive || existingPending
+      ? null
+      : await ctx.db
+          .query("identityVerifications")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_progress"))
+          .first();
+    const existingInReview = currentActive || existingPending || existingInProgress
+      ? null
+      : await ctx.db
+          .query("identityVerifications")
+          .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "in_review"))
+          .first();
+    const existingNotStarted = currentActive || existingPending || existingInProgress || existingInReview
       ? null
       : await ctx.db
           .query("identityVerifications")
           .withIndex("by_userId_and_status", (q) => q.eq("userId", profile._id).eq("status", "not_started"))
           .first();
-    const verificationId = existing?._id ?? existingNotStarted?._id ?? await ctx.db.insert("identityVerifications", {
+    const existing = currentActive ?? existingPending ?? existingInProgress ?? existingInReview ?? existingNotStarted;
+    const verificationId = existing?._id ?? await ctx.db.insert("identityVerifications", {
       userId: profile._id,
       type: "kyc",
       role: args.role,
@@ -618,13 +712,15 @@ export const createDiditKycStartIntent = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    const intentStatus: KycStatus =
+      existing?.status === "not_started" ? "pending" : (existing?.status as KycStatus | undefined) || "pending";
 
     const startToken = createStartToken();
     await ctx.db.patch(verificationId, {
       role: args.role,
       vendorData: String(verificationId),
       workflowId: config.workflowId,
-      status: "pending",
+      status: intentStatus,
       startTokenHash: await sha256Hex(startToken),
       startTokenExpiresAt: now + 10 * 60 * 1000,
       updatedAt: now,
@@ -639,7 +735,7 @@ export const createDiditKycStartIntent = mutation({
     });
 
     await ctx.db.patch(profile._id, {
-      kycVerificationStatus: "pending",
+      kycVerificationStatus: intentStatus,
       kycProvider: "didit",
       identityVerificationId: String(verificationId),
       updatedAt: now,
@@ -673,44 +769,7 @@ export const startDiditKycSessionFromIntent = action({
       throw new Error("Verification session expired. Please try again.");
     }
 
-    const config = getDiditConfig();
-    const response = await fetch(`${config.baseUrl}/v3/session/`, {
-      method: "POST",
-      headers: {
-        "x-api-key": config.apiKey,
-        "content-type": "application/json",
-        accept: "application/json",
-      },
-      body: JSON.stringify(buildDiditSessionBody(config, args.verificationId, profile)),
-    });
-
-    let payload: any = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
-
-    if (!response.ok) {
-      throw new Error("Could not start identity verification. Please try again.");
-    }
-
-    const verificationUrl = extractVerificationUrl(payload);
-    if (!verificationUrl) {
-      throw new Error("Didit did not return a verification URL.");
-    }
-
-    const diditStatus = normalizeDiditStatus(extractStatus(payload) || "pending");
-    const status = toSessionCreatedStatus(diditStatus);
-    await ctx.runMutation(internal.kyc.markKycSessionCreated, {
-      verificationId: args.verificationId,
-      providerSessionId: extractSessionId(payload),
-      providerReference: extractString(payload?.reference, payload?.session?.reference),
-      status,
-      now: Date.now(),
-    });
-
-    return { verificationUrl, verificationId: args.verificationId, status };
+    return await createOrReuseDiditProviderSession(ctx, args.verificationId, profile);
   },
 });
 
@@ -829,19 +888,29 @@ export const createOrReuseKycVerification = internalMutation({
     now: v.number(),
   },
   handler: async (ctx, args) => {
-    const rows = await ctx.db
-      .query("identityVerifications")
-      .withIndex("by_type_and_role_and_status", (q) => q.eq("type", "kyc").eq("role", args.role).eq("status", "pending"))
-      .take(50);
-    const existingPending = rows.find((row) => String(row.userId) === String(args.userId));
-    if (existingPending) return existingPending._id;
+    const user = await ctx.db.get(args.userId);
+    if (user?.identityVerificationId) {
+      try {
+        const current = await ctx.db.get(
+          user.identityVerificationId as Id<"identityVerifications">,
+        );
+        if (current && current.role === args.role && !isTerminal(current.status as KycStatus)) {
+          return current._id;
+        }
+      } catch {
+        // Fall through to indexed active-session lookup.
+      }
+    }
 
-    const inProgressRows = await ctx.db
-      .query("identityVerifications")
-      .withIndex("by_type_and_role_and_status", (q) => q.eq("type", "kyc").eq("role", args.role).eq("status", "in_progress"))
-      .take(50);
-    const existingInProgress = inProgressRows.find((row) => String(row.userId) === String(args.userId));
-    if (existingInProgress) return existingInProgress._id;
+    for (const status of ["pending", "in_progress", "in_review", "not_started"] as const) {
+      const existing = await ctx.db
+        .query("identityVerifications")
+        .withIndex("by_userId_and_status", (q) => q.eq("userId", args.userId).eq("status", status))
+        .first();
+      if (existing && existing.role === args.role) {
+        return existing._id;
+      }
+    }
 
     const verificationId = await ctx.db.insert("identityVerifications", {
       userId: args.userId,
@@ -866,23 +935,92 @@ export const createOrReuseKycVerification = internalMutation({
   },
 });
 
+export const claimDiditSessionStart = internalMutation({
+  args: {
+    verificationId: v.id("identityVerifications"),
+    leaseToken: v.string(),
+    now: v.number(),
+    leaseDurationMs: v.number(),
+  },
+  handler: async (ctx, args): Promise<DiditSessionStartClaim> => {
+    const verification = await ctx.db.get(args.verificationId);
+    if (!verification) {
+      throw new Error("Verification record not found.");
+    }
+
+    if (verification.verificationUrl && !isTerminal(verification.status as KycStatus)) {
+      return {
+        state: "reuse",
+        verificationUrl: verification.verificationUrl,
+        status: verification.status as KycStatus,
+      };
+    }
+
+    if (verification.providerSessionId && !isTerminal(verification.status as KycStatus)) {
+      return { state: "already_started" };
+    }
+
+    if (
+      verification.sessionStartLeaseToken &&
+      verification.sessionStartLeaseExpiresAt &&
+      verification.sessionStartLeaseExpiresAt > args.now
+    ) {
+      return { state: "busy" };
+    }
+
+    await ctx.db.patch(args.verificationId, {
+      sessionStartLeaseToken: args.leaseToken,
+      sessionStartLeaseExpiresAt: args.now + args.leaseDurationMs,
+      updatedAt: args.now,
+    });
+    return { state: "claimed" };
+  },
+});
+
+export const releaseDiditSessionStart = internalMutation({
+  args: {
+    verificationId: v.id("identityVerifications"),
+    leaseToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const verification = await ctx.db.get(args.verificationId);
+    if (!verification || verification.sessionStartLeaseToken !== args.leaseToken) {
+      return false;
+    }
+    await ctx.db.patch(args.verificationId, {
+      sessionStartLeaseToken: undefined,
+      sessionStartLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
 export const markKycSessionCreated = internalMutation({
   args: {
     verificationId: v.id("identityVerifications"),
     providerSessionId: v.optional(v.string()),
     providerReference: v.optional(v.string()),
+    verificationUrl: v.string(),
+    leaseToken: v.string(),
     status: kycStatusValidator,
     now: v.number(),
   },
   handler: async (ctx, args) => {
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
+    if (verification.sessionStartLeaseToken !== args.leaseToken) {
+      throw new Error("Verification session start lease expired.");
+    }
     const safeStatus = toSessionCreatedStatus(args.status);
     const patch: Record<string, unknown> = {
       status: safeStatus,
       submittedAt: verification.submittedAt || args.now,
+      verificationUrl: args.verificationUrl,
       startTokenHash: undefined,
       startTokenExpiresAt: undefined,
+      sessionStartLeaseToken: undefined,
+      sessionStartLeaseExpiresAt: undefined,
       updatedAt: args.now,
     };
     if (args.providerSessionId) patch.providerSessionId = args.providerSessionId;
@@ -955,6 +1093,10 @@ export const applyDiditStatusUpdate = internalMutation({
   handler: async (ctx, args) => {
     const verification = await ctx.db.get(args.verificationId);
     if (!verification) return;
+    const profile = await ctx.db.get(verification.userId);
+    const isCurrentVerification =
+      String(profile?.identityVerificationId || "") === String(args.verificationId);
+    const shouldApplyToUser = isCurrentVerification || args.status === "verified";
     const previousStatus = verification.status as KycStatus;
     const effectiveStatus: KycStatus = args.status;
     const statusChanged = previousStatus !== effectiveStatus;
@@ -973,51 +1115,57 @@ export const applyDiditStatusUpdate = internalMutation({
     if (effectiveStatus === "verified") verificationPatch.verifiedAt = args.now;
     if (effectiveStatus === "rejected") verificationPatch.rejectedAt = args.now;
     if (effectiveStatus === "in_review") verificationPatch.reviewedAt = args.now;
+    if (isTerminal(effectiveStatus)) {
+      verificationPatch.verificationUrl = undefined;
+      verificationPatch.sessionStartLeaseToken = undefined;
+      verificationPatch.sessionStartLeaseExpiresAt = undefined;
+    }
 
     await ctx.db.patch(args.verificationId, verificationPatch);
 
-    const userPatch: Record<string, unknown> = {
-      kycVerificationStatus: effectiveStatus,
-      kycProvider: "didit",
-      identityVerificationId: String(args.verificationId),
-      updatedAt: args.now,
-    };
     let pendingEmailAuthSyncStatus: "not_attempted" | "synced" | "missing_auth_id" | "failed" = "not_attempted";
-    if (args.checkStatuses.emailVerificationStatus) {
-      userPatch.emailVerificationStatus = args.checkStatuses.emailVerificationStatus;
-    }
-    if (effectiveStatus === "verified") {
-      userPatch.kycVerifiedAt = args.now;
-      if (args.checkStatuses.emailVerificationStatus) userPatch.emailVerifiedAt = args.now;
-      const profile = await ctx.db.get(verification.userId);
-      if (profile?.pendingEmail) {
-        const pendingEmailToSync = String(profile.pendingEmail).trim().toLowerCase();
-        const pendingEmailAuthId = profile.authId || null;
-        if (pendingEmailAuthId) {
-          try {
-            await ctx.runMutation(components.betterAuth.adapter.updateOne, {
-              input: {
-                model: "user",
-                where: [{ field: "_id", operator: "eq", value: pendingEmailAuthId }],
-                update: {
-                  email: pendingEmailToSync,
-                  emailVerified: true,
-                  updatedAt: args.now,
+    if (shouldApplyToUser) {
+      const userPatch: Record<string, unknown> = {
+        kycVerificationStatus: effectiveStatus,
+        kycProvider: "didit",
+        identityVerificationId: String(args.verificationId),
+        updatedAt: args.now,
+      };
+      if (args.checkStatuses.emailVerificationStatus) {
+        userPatch.emailVerificationStatus = args.checkStatuses.emailVerificationStatus;
+      }
+      if (effectiveStatus === "verified") {
+        userPatch.kycVerifiedAt = args.now;
+        if (args.checkStatuses.emailVerificationStatus) userPatch.emailVerifiedAt = args.now;
+        if (profile?.pendingEmail) {
+          const pendingEmailToSync = String(profile.pendingEmail).trim().toLowerCase();
+          const pendingEmailAuthId = profile.authId || null;
+          if (pendingEmailAuthId) {
+            try {
+              await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+                input: {
+                  model: "user",
+                  where: [{ field: "_id", operator: "eq", value: pendingEmailAuthId }],
+                  update: {
+                    email: pendingEmailToSync,
+                    emailVerified: true,
+                    updatedAt: args.now,
+                  },
                 },
-              },
-            });
-            userPatch.email = pendingEmailToSync;
-            userPatch.pendingEmail = null;
-            pendingEmailAuthSyncStatus = "synced";
-          } catch {
-            pendingEmailAuthSyncStatus = "failed";
+              });
+              userPatch.email = pendingEmailToSync;
+              userPatch.pendingEmail = null;
+              pendingEmailAuthSyncStatus = "synced";
+            } catch {
+              pendingEmailAuthSyncStatus = "failed";
+            }
+          } else {
+            pendingEmailAuthSyncStatus = "missing_auth_id";
           }
-        } else {
-          pendingEmailAuthSyncStatus = "missing_auth_id";
         }
       }
+      await ctx.db.patch(verification.userId, userPatch);
     }
-    await ctx.db.patch(verification.userId, userPatch);
     await ctx.db.insert("zoneAuditEvents", {
       zoneId: "identity",
       module: "kyc",
@@ -1040,11 +1188,12 @@ export const applyDiditStatusUpdate = internalMutation({
         amlStatus: args.checkStatuses.amlStatus || null,
         ipAnalysisStatus: args.checkStatuses.ipAnalysisStatus || null,
         pendingEmailAuthSyncStatus,
+        appliedToUser: shouldApplyToUser,
       },
       createdAt: args.now,
     });
 
-    if (statusChanged && effectiveStatus !== "not_started") {
+    if (shouldApplyToUser && statusChanged && effectiveStatus !== "not_started") {
       await notifyKycStatusUpdated(ctx, {
         verificationId: args.verificationId,
         userId: verification.userId,

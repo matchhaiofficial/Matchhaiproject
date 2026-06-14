@@ -14,6 +14,8 @@ LogBox.ignoreLogs([
   // Easypaisa failures are user-facing via toasts; don't show LogBox overlays for them.
   "[CONVEX A(easypaisa:startCheckout)]",
   "[CONVEX A(easypaisa:syncTransactionStatus)]",
+  // PSN lookup failures are handled by the verification toast.
+  "[CONVEX A(externalApis:verifyPsnProfile)]",
 ]);
 
 if (__DEV__) {
@@ -25,7 +27,8 @@ if (__DEV__) {
     }
     if (
       text.includes("[CONVEX A(easypaisa:startCheckout)]") ||
-      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]")
+      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]") ||
+      text.includes("[CONVEX A(externalApis:verifyPsnProfile)]")
     ) {
       return;
     }
@@ -186,21 +189,29 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <AppErrorBoundary>
+    <AppErrorBoundary autoRetry maxAutoRetries={3}>
       <AuthenticatedConvexProvider>
         <AuthProvider>
           <InAppAlertProvider>
             <View style={{ flex: 1, backgroundColor: COLORS.backgroundDark }}>
               <StatusBar style="light" translucent backgroundColor="transparent" />
-              <NotificationRuntimeBridge />
-              <PushRegistrationBridge />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: COLORS.backgroundDark },
-                }}
-              />
-              <MatchResultGate />
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <NotificationRuntimeBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <PushRegistrationBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={3}>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: COLORS.backgroundDark },
+                  }}
+                />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <MatchResultGate />
+              </AppErrorBoundary>
               <Toast config={toastConfig} />
             </View>
           </InAppAlertProvider>

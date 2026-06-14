@@ -15,6 +15,7 @@ import {
   completeOnboarding,
   saveOnboardingStep2,
   saveOnboardingStep3Platforms,
+  waitForRegistrationSession,
 } from "../../src/services/convex/userService";
 import { useOnboardingStore } from "../../src/store/onboardingStore";
 import { COLORS } from "../../src/theme";
@@ -183,7 +184,7 @@ export default function RegisterStep4() {
 
     try {
       let userId = registeredUserId;
-      if (currentSubStep <= 0) {
+      if (!userId) {
         setCurrentSubStep(1);
         setRegistrationProgress("submitting", 1);
         const signUpResult = await signUpWithEmail(
@@ -207,41 +208,49 @@ export default function RegisterStep4() {
         throw { step: 1, message: "User ID not available. Please try again." };
       }
 
-      if (currentSubStep <= 1) {
-        setCurrentSubStep(2);
-        setRegistrationProgress("submitting", 2);
-        const saveStep2Result = await saveOnboardingStep2(userId as any, {
-          areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
-          playsCs2: step2.playsCs2,
-          cs2Role: step2.cs2Role,
-          playsCs16: (step2 as any).playsCs16 ?? false,
-          cs16Role: (step2 as any).cs16Role ?? null,
-          playsValorant: (step2 as any).playsValorant ?? false,
-          valorantRole: (step2 as any).valorantRole ?? null,
-          playsFc: step2.playsFc,
-          fcTeam: step2.fcTeam.trim() || null,
-          fcFormation: step2.fcFormation,
-          playsTekken: step2.playsTekken,
-          tekkenFavorites: step2.tekkenFavorites,
-          playsFutsal: false,
-          playsIndoorCricket: false,
-          playsPadel: false,
-          playsPickleball: false,
-          futsalPositions: [],
-          indoorCricketRole: null,
-          indoorCricketBowlingStyle: null,
-          indoorCricketBattingStyle: null,
-          padelRole: null,
-          pickleballRole: null,
-        } as any);
-        if (!saveStep2Result.ok) {
-          throw { step: 2, message: saveStep2Result.message };
-        }
+      setCurrentSubStep(2);
+      setRegistrationProgress("submitting", 2);
+      await refreshSession();
+      const registrationSessionReady = await waitForRegistrationSession(userId as any);
+      if (!registrationSessionReady) {
+        throw {
+          step: 2,
+          message:
+            "Your account was created, but its secure session is still syncing. Tap Retry failed steps to finish setup.",
+        };
       }
 
-      if (currentSubStep <= 2 && hasAnyStep3Data) {
-        setCurrentSubStep(3);
-        setRegistrationProgress("submitting", 3);
+      const saveStep2Result = await saveOnboardingStep2(userId as any, {
+        areasPreferred: normalizeKarachiAreaList(step2.selectedAreas),
+        playsCs2: step2.playsCs2,
+        cs2Role: step2.cs2Role,
+        playsCs16: (step2 as any).playsCs16 ?? false,
+        cs16Role: (step2 as any).cs16Role ?? null,
+        playsValorant: (step2 as any).playsValorant ?? false,
+        valorantRole: (step2 as any).valorantRole ?? null,
+        playsFc: step2.playsFc,
+        fcTeam: step2.fcTeam.trim() || null,
+        fcFormation: step2.fcFormation,
+        playsTekken: step2.playsTekken,
+        tekkenFavorites: step2.tekkenFavorites,
+        playsFutsal: false,
+        playsIndoorCricket: false,
+        playsPadel: false,
+        playsPickleball: false,
+        futsalPositions: [],
+        indoorCricketRole: null,
+        indoorCricketBowlingStyle: null,
+        indoorCricketBattingStyle: null,
+        padelRole: null,
+        pickleballRole: null,
+      } as any);
+      if (!saveStep2Result.ok) {
+        throw { step: 2, message: saveStep2Result.message };
+      }
+
+      setCurrentSubStep(3);
+      setRegistrationProgress("submitting", 3);
+      if (hasAnyStep3Data) {
         const saveStep3Result = await saveOnboardingStep3Platforms(userId as any, {
           steamProfileUrl: (step3.steamProfileUrl || "").trim() || null,
           faceitProfileUrl: (step3.faceitProfileUrl || "").trim() || null,
@@ -257,13 +266,11 @@ export default function RegisterStep4() {
         }
       }
 
-      if (currentSubStep <= 3) {
-        setCurrentSubStep(4);
-        setRegistrationProgress("submitting", 4);
-        const completeResult = await completeOnboarding(userId as any);
-        if (!completeResult.ok) {
-          throw { step: 4, message: completeResult.message };
-        }
+      setCurrentSubStep(4);
+      setRegistrationProgress("submitting", 4);
+      const completeResult = await completeOnboarding(userId as any);
+      if (!completeResult.ok) {
+        throw { step: 4, message: completeResult.message };
       }
       setCurrentSubStep(5);
       setRegistrationProgress("submitting", 5);
@@ -288,9 +295,9 @@ export default function RegisterStep4() {
       }, 650);
     } catch (error: any) {
       const failedAt = error.step || currentSubStep;
-      setCurrentSubStep(failedAt - 1);
+      setCurrentSubStep(failedAt);
       setPhase("partial-fail");
-      setRegistrationProgress("partial-fail", failedAt - 1);
+      setRegistrationProgress("partial-fail", failedAt);
       setErrorDetails(error.message || "An unexpected error occurred.");
       setSubmitting(false);
       showToast({

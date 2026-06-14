@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
@@ -7,6 +7,8 @@ import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../hooks/useToast";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../theme";
+import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
+import { isAuthenticatedProfileReady } from "../utils/authReadiness";
 import { getUserFacingErrorMessage } from "../utils/userFacingErrors";
 import { AppButton } from "./AppPrimitives";
 import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from "./AppModalPrimitives";
@@ -22,11 +24,21 @@ function getTeamNames(room: any) {
 }
 
 export default function MatchResultGate() {
-  const { user, loading } = useAuth();
+  const { user, authUser, loading } = useAuth();
+  const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const { showToast } = useToast();
   const [selectedWinner, setSelectedWinner] = useState<Winner | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const userId = !loading && user?._id ? String(user._id) : null;
+  const authenticatedProfileReady = isAuthenticatedProfileReady({
+    authLoading: loading,
+    convexAuthLoading,
+    isAuthenticated,
+    authUserId: authUser?.id,
+    profileAuthId: user?.authId,
+    profileUserId: user?._id,
+  });
+  const isPlayer = user ? !isZoneAccount(user) && !isSuperAdminProfile(user) : false;
+  const userId = authenticatedProfileReady && isPlayer && user?._id ? String(user._id) : null;
   const pending = useQuery(
     api.matchrooms.getPendingResultForUser,
     userId ? { userId } : "skip",

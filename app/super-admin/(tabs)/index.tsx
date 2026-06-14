@@ -41,6 +41,7 @@ type MetricConfig = {
   detail: string;
   icon: AppIconName;
   tone: string;
+  route: string;
 };
 
 function formatMoney(value?: number, currency = "PKR") {
@@ -182,6 +183,7 @@ export default function SuperAdminDashboardTab() {
       detail: summary?.users.activeSource === "totalUsersFallback" ? "Using total users until activity data is populated." : "Active in the last 30 days.",
       icon: "players",
       tone: COLORS.accent,
+      route: "/super-admin/users",
     },
     {
       label: "Active Zones",
@@ -189,6 +191,7 @@ export default function SuperAdminDashboardTab() {
       detail: "Approved zones currently active.",
       icon: "business",
       tone: COLORS.success,
+      route: "/super-admin/zones",
     },
     {
       label: "Total Revenue",
@@ -196,6 +199,7 @@ export default function SuperAdminDashboardTab() {
       detail: "Successful paid transactions only.",
       icon: "paymentWallet",
       tone: COLORS.warning,
+      route: "/super-admin/payments",
     },
     {
       label: "Zones Pending",
@@ -203,6 +207,7 @@ export default function SuperAdminDashboardTab() {
       detail: "Waiting for super-admin approval.",
       icon: "pending",
       tone: COLORS.error,
+      route: "/super-admin/zones",
     },
   ], [summary]);
 
@@ -399,6 +404,7 @@ export default function SuperAdminDashboardTab() {
                     iconColor={metric.tone}
                     iconStyle={{ backgroundColor: `${metric.tone}18`, borderColor: `${metric.tone}44` }}
                     style={styles.metricCard}
+                    onPress={() => navigateTo(metric.route)}
                   />
                 ))}
               </View>

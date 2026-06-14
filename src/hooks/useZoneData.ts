@@ -1,8 +1,9 @@
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "../context/AuthContext";
 import { Id } from "../../convex/_generated/dataModel";
+import { isAuthenticatedProfileReady } from "../utils/authReadiness";
 
 const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
 
@@ -79,14 +80,27 @@ function transformZone(zone: any): any {
 }
 
 export function useZoneData() {
-    const { user } = useAuth();
+    const { user, authUser, loading: authLoading } = useAuth();
+    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
+    const protectedQueryReady = isAuthenticatedProfileReady({
+        authLoading,
+        convexAuthLoading,
+        isAuthenticated,
+        authUserId: authUser?.id,
+        profileAuthId: user?.authId,
+        profileUserId: user?._id,
+    });
 
     const rawZone = useQuery(
         api.zones.getByOwner,
-        user?._id ? { ownerUid: user._id as Id<"users"> } : "skip",
+        protectedQueryReady && user?._id ? { ownerUid: user._id as Id<"users"> } : "skip",
     );
 
-    const loading = rawZone === undefined;
+    const loading =
+        authLoading ||
+        convexAuthLoading ||
+        (Boolean(user?._id) && !protectedQueryReady) ||
+        (protectedQueryReady && rawZone === undefined);
     const zone = rawZone ? transformZone(rawZone) : null;
 
     return { zone, loading };

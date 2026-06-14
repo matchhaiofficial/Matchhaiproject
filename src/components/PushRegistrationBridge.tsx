@@ -1,7 +1,10 @@
 import React, { useEffect } from "react";
 
 import { useAuth } from "../context/AuthContext";
-import { syncPushRegistration } from "../services/pushRegistration";
+import {
+  cancelPendingPushRegistrationSync,
+  syncPushRegistration,
+} from "../services/pushRegistration";
 import Logger from "../utils/logger";
 
 export default function PushRegistrationBridge() {
@@ -18,6 +21,10 @@ export default function PushRegistrationBridge() {
       .catch((error) => {
         Logger.warn("PushRegistrationBridge", "Push registration sync failed", error);
       });
+
+    return () => {
+      cancelPendingPushRegistrationSync();
+    };
   }, [loading, user?._id]);
 
   return null;

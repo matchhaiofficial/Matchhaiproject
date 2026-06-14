@@ -1,4 +1,4 @@
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { Link, router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -11,6 +11,7 @@ import { useToast } from "../../src/hooks/useToast";
 import { useStartDiditKyc } from "../../src/hooks/useDiditKyc";
 import { COLORS } from "../../src/theme";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, isKycReviewActive } from "../../src/utils/verificationGate";
+import { isAuthenticatedProfileReady } from "../../src/utils/authReadiness";
 import styles from "./login.styles";
 
 function formatKycReason(reason?: string | null) {
@@ -33,12 +34,24 @@ function isValidAccountEmail(value?: string | null) {
 }
 
 export default function VerificationRequiredScreen() {
-  const { user, refreshUser } = useAuth();
+  const { user, authUser, loading, refreshUser } = useAuth();
+  const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const { showToast } = useToast();
   const [starting, setStarting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const startDiditKyc = useStartDiditKyc();
-  const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+  const protectedQueryReady = isAuthenticatedProfileReady({
+    authLoading: loading,
+    convexAuthLoading,
+    isAuthenticated,
+    authUserId: authUser?.id,
+    profileAuthId: user?.authId,
+    profileUserId: user?._id,
+  });
+  const currentKyc = useQuery(
+    api.kyc.getCurrentUserKyc,
+    protectedQueryReady ? {} : "skip",
+  );
   const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus || "not_started";
   const isRejected = kycStatus === "rejected";

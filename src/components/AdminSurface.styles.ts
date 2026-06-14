@@ -120,6 +120,14 @@ export default StyleSheet.create({
     justifyContent: "space-between",
     padding: SPACING.md + 2,
   },
+  metricCardPressable: {
+    minWidth: 150,
+    minHeight: 102,
+  },
+  metricCardPressableContent: {
+    width: "100%",
+    minHeight: 102,
+  },
   metricCardTop: {
     flexDirection: "row",
     alignItems: "center",

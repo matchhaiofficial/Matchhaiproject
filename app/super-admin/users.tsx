@@ -369,7 +369,7 @@ export default function SuperAdminUsersScreen() {
   return (
     <Screen style={styles.screen} contentStyle={styles.screenContent} scroll={false} edges={["top"]}>
       <AdminPageHeader title="Users" subtitle="Review accounts and manage suspensions." onBack={() => router.back()} inlineTitle />
-      {/* {canManageSuperAdmins ? (
+       {/* {canManageSuperAdmins ? (
         <AppButton
           variant="secondary"
           leadingIcon="person-add"
@@ -379,7 +379,7 @@ export default function SuperAdminUsersScreen() {
         >
           Create Partner Admin Accounts
         </AppButton>
-      ) : null} */}
+      ) : null}  */}
       <AdminSearchFilterBar
         value={search}
         onChangeText={setSearch}

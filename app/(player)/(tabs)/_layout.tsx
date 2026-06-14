@@ -1,5 +1,5 @@
 import { Redirect, Tabs } from "expo-router";
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import React from "react";
 import {
     View,
@@ -22,6 +22,7 @@ import {
 } from "../../../src/utils/accountRouting";
 import { isKycAccessAllowed } from "../../../src/utils/verificationGate";
 import { api } from "../../../convex/_generated/api";
+import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
 
 const HIDE_PLAYER_TAB_BAR = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
 
@@ -134,12 +135,24 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export default function PlayerTabsLayout() {
-    const { user, loading } = useAuth();
+    const { user, authUser, loading } = useAuth();
+    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const insets = useSafeAreaInsets();
 
     const isSuperAdmin = isSuperAdminProfile(user);
     const isZoneUser = isZoneAccount(user);
-    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const protectedQueryReady = isAuthenticatedProfileReady({
+        authLoading: loading,
+        convexAuthLoading,
+        isAuthenticated,
+        authUserId: authUser?.id,
+        profileAuthId: user?.authId,
+        profileUserId: user?._id,
+    });
+    const currentKyc = useQuery(
+        api.kyc.getCurrentUserKyc,
+        protectedQueryReady ? {} : "skip",
+    );
     const verificationDocLoading = Boolean(user?.identityVerificationId) && currentKyc === undefined;
     const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
     const kycAccessAllowed =

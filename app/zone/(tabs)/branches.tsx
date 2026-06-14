@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import React, { useMemo } from "react";
 import {
     ActivityIndicator,
@@ -22,19 +22,32 @@ import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
 import { COLORS, SPACING } from "../../../src/theme";
 import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
+import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
 import styles from "./branches.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
-    const { authUser, user } = useAuth();
+    const { authUser, user, loading: authLoading } = useAuth();
+    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
     const router = useRouter();
     const bottomContentPadding = useTabBarClearance(SPACING.lg);
     const kycVerified = isUserFullyVerified(authUser, user);
-    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const protectedQueryReady = isAuthenticatedProfileReady({
+        authLoading,
+        convexAuthLoading,
+        isAuthenticated,
+        authUserId: authUser?.id,
+        profileAuthId: user?.authId,
+        profileUserId: user?._id,
+    });
+    const currentKyc = useQuery(
+        api.kyc.getCurrentUserKyc,
+        protectedQueryReady ? {} : "skip",
+    );
     const kycStartActionLabel =
         currentKyc?.status === "rejected"
             ? "Retry Verification"

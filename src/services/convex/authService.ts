@@ -9,7 +9,10 @@ import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { isKycAccessAllowed, isKycVerificationBypassEnabled } from "../../utils/verificationGate";
 import { getUserFacingErrorMessage } from "../../utils/userFacingErrors";
-import { deactivateCurrentInstallation } from "../pushRegistration";
+import {
+  cancelPendingPushRegistrationSync,
+  deactivateCurrentInstallation,
+} from "../pushRegistration";
 
 /** Friendly message mapper for common auth errors */
 function mapAuthError(error?: any): string {
@@ -714,6 +717,7 @@ export async function resetPasswordWithToken(
 /** Sign out current user */
 export async function signOutUser(): Promise<SimpleResult> {
   try {
+    cancelPendingPushRegistrationSync();
     await deactivateCurrentInstallation().catch(() => null);
     await markAuthUserOffline(await getCurrentSessionAuthId());
     await clearCachedAuthSession();

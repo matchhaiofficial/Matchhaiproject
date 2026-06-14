@@ -75,6 +75,9 @@ type AppModalBodyProps = {
   scroll?: boolean;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  keyboardAware?: boolean;
+  keyboardFocusKey?: unknown;
+  keyboardExtraClearance?: number;
 };
 
 type AppModalFooterProps = {
@@ -238,11 +241,127 @@ export function AppModalBody({
   scroll = false,
   style,
   contentContainerStyle,
+  keyboardAware = false,
+  keyboardFocusKey,
+  keyboardExtraClearance = SPACING.md,
 }: AppModalBodyProps) {
+  const bodyRef = React.useRef<View | null>(null);
+  const scrollRef = React.useRef<ScrollView | null>(null);
+  const scrollOffsetYRef = React.useRef(0);
+  const keyboardTopRef = React.useRef<number | null>(null);
+  const [keyboardOverlap, setKeyboardOverlap] = React.useState(0);
+
+  const ensureFocusedInputVisible = React.useCallback(() => {
+    if (!scroll || !keyboardAware) return;
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const focusedInput = TextInput.State?.currentlyFocusedInput?.();
+        const scrollView = scrollRef.current;
+        const body = bodyRef.current;
+        if (!focusedInput || !scrollView || !body) return;
+
+        const measurableInput = focusedInput as {
+          measureInWindow?: (
+            callback: (x: number, y: number, width: number, height: number) => void,
+          ) => void;
+        };
+        if (!measurableInput.measureInWindow) return;
+
+        body.measureInWindow((_bodyX, bodyY, _bodyWidth, bodyHeight) => {
+          measurableInput.measureInWindow?.((_inputX, inputY, _inputWidth, inputHeight) => {
+            const bodyBottom = bodyY + bodyHeight;
+            const keyboardTop = keyboardTopRef.current;
+            const visibleBottom =
+              Math.min(bodyBottom, keyboardTop ?? bodyBottom) - keyboardExtraClearance;
+            const visibleTop = bodyY + SPACING.sm;
+            const inputBottom = inputY + inputHeight;
+            let nextOffsetY = scrollOffsetYRef.current;
+
+            if (inputBottom > visibleBottom) {
+              nextOffsetY += inputBottom - visibleBottom;
+            } else if (inputY < visibleTop) {
+              nextOffsetY -= visibleTop - inputY;
+            }
+
+            nextOffsetY = Math.max(0, Math.round(nextOffsetY));
+            if (Math.abs(nextOffsetY - scrollOffsetYRef.current) > 1) {
+              scrollView.scrollTo({ y: nextOffsetY, animated: true });
+            }
+          });
+        });
+      }, 100);
+    });
+  }, [keyboardAware, keyboardExtraClearance, scroll]);
+
+  React.useEffect(() => {
+    if (!scroll || !keyboardAware) {
+      keyboardTopRef.current = null;
+      setKeyboardOverlap(0);
+      return undefined;
+    }
+
+    const handleKeyboardFrame = (event: { endCoordinates?: { screenY?: number } }) => {
+      const keyboardTop = event.endCoordinates?.screenY;
+      keyboardTopRef.current = typeof keyboardTop === "number" ? keyboardTop : null;
+
+      bodyRef.current?.measureInWindow((_x, bodyY, _width, bodyHeight) => {
+        const bodyBottom = bodyY + bodyHeight;
+        const overlap =
+          typeof keyboardTop === "number" ? Math.max(0, bodyBottom - keyboardTop) : 0;
+        setKeyboardOverlap(overlap > 0 ? overlap + keyboardExtraClearance : 0);
+      });
+      ensureFocusedInputVisible();
+    };
+    const handleKeyboardHide = () => {
+      keyboardTopRef.current = null;
+      setKeyboardOverlap(0);
+    };
+
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      handleKeyboardFrame,
+    );
+    const frameSubscription =
+      Platform.OS === "ios"
+        ? Keyboard.addListener("keyboardWillChangeFrame", handleKeyboardFrame)
+        : null;
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      handleKeyboardHide,
+    );
+
+    return () => {
+      showSubscription.remove();
+      frameSubscription?.remove();
+      hideSubscription.remove();
+    };
+  }, [
+    ensureFocusedInputVisible,
+    keyboardAware,
+    keyboardExtraClearance,
+    scroll,
+  ]);
+
+  React.useEffect(() => {
+    if (keyboardFocusKey == null) return;
+    ensureFocusedInputVisible();
+  }, [ensureFocusedInputVisible, keyboardFocusKey]);
+
+  React.useEffect(() => {
+    if (keyboardOverlap <= 0) return;
+    ensureFocusedInputVisible();
+  }, [ensureFocusedInputVisible, keyboardOverlap]);
+
   if (scroll) {
     return (
-      <View style={[styles.bodyScrollWrap, style]}>
+      <View
+        ref={bodyRef}
+        collapsable={false}
+        style={[styles.bodyScrollWrap, style]}
+      >
         <ScrollView
+          ref={scrollRef}
           style={styles.bodyScroll}
           // NOTE: `styles.bodyContent` includes `flexShrink: 1` for non-scroll layouts.
           // In a ScrollView, `flexShrink` on the content container can prevent the
@@ -257,9 +376,16 @@ export function AppModalBody({
           keyboardDismissMode={
             Platform.OS === "ios" ? "interactive" : "on-drag"
           }
+          scrollEventThrottle={16}
+          onScroll={(event) => {
+            scrollOffsetYRef.current = event.nativeEvent.contentOffset.y;
+          }}
           showsVerticalScrollIndicator={false}
         >
           {children}
+          {keyboardAware && keyboardOverlap > 0 ? (
+            <View style={{ height: keyboardOverlap }} />
+          ) : null}
         </ScrollView>
       </View>
     );
