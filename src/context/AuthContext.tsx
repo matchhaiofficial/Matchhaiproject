@@ -1,11 +1,30 @@
 // src/context/AuthContext.tsx
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { AppState } from "react-native";
 import { authClient, AuthUser, AuthSession } from "../lib/auth-client";
 import { clearCachedAuthSession, loadCachedAuthSession, saveCachedAuthSession } from "../lib/authSessionCache";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { Id, Doc } from "../../convex/_generated/dataModel";
+
+const PROFILE_FETCH_RETRY_DELAYS_MS = [0, 350, 900] as const;
+
+async function queryUserProfileWithRetry(authId: string) {
+  let lastError: unknown = null;
+
+  for (const delayMs of PROFILE_FETCH_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    try {
+      return await convex.query(api.users.getByAuthId, { authId });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
 
 // User profile type from Convex
 export type UserProfile = Doc<"users">;
@@ -44,6 +63,7 @@ export default function AuthProvider({ children }: { children: any }) {
   const [userId, setUserId] = useState<Id<"users"> | null>(null);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const profileRequestIdRef = useRef(0);
 
   const applySessionState = useCallback(async (nextSession: AuthSession, persist = true) => {
     setAuthUser(nextSession.user);
@@ -54,6 +74,7 @@ export default function AuthProvider({ children }: { children: any }) {
   }, []);
 
   const clearAuthState = useCallback((clearCache = true) => {
+    profileRequestIdRef.current += 1;
     setAuthUser(null);
     setSession(null);
     setUser(null);
@@ -65,8 +86,10 @@ export default function AuthProvider({ children }: { children: any }) {
 
   // Fetch user profile from Convex
   const fetchUserProfile = useCallback(async (authId: string) => {
+    const requestId = ++profileRequestIdRef.current;
     try {
-      const profile = await convex.query(api.users.getByAuthId, { authId });
+      const profile = await queryUserProfileWithRetry(authId);
+      if (requestId !== profileRequestIdRef.current) return;
       if (profile) {
         // Account was deleted by admin — sign out immediately so the user is
         // not left on the dashboard with an anonymized "Deleted User" profile.
@@ -82,9 +105,10 @@ export default function AuthProvider({ children }: { children: any }) {
         setUserId(null);
       }
     } catch (error) {
-      console.warn("[AuthContext] Failed to fetch user profile:", error);
-      setUser(null);
-      setUserId(null);
+      // Keep the last valid profile during temporary release-network failures.
+      // Clearing it while authenticated leaves mounted dashboards without their
+      // required user and can turn a recoverable refresh into a root render crash.
+      console.warn("[AuthContext] Failed to fetch user profile after retries:", error);
     }
   }, [clearAuthState]);
 

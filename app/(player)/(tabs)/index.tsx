@@ -332,7 +332,18 @@ export default function PlayerDashboard() {
   const startDiditKyc = useStartDiditKyc();
   const { showToast } = useToast();
   const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
-  const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+  const protectedQueriesReady = isAuthenticatedProfileReady({
+    authLoading: loading,
+    convexAuthLoading,
+    isAuthenticated,
+    authUserId: authUser?.id,
+    profileAuthId: user?.authId,
+    profileUserId: user?._id,
+  });
+  const currentKyc = useQuery(
+    api.kyc.getCurrentUserKyc,
+    protectedQueriesReady ? {} : "skip",
+  );
   const kycStatus = currentKyc?.status || user?.kycVerificationStatus;
 
   const verificationDocLoading = Boolean(user?.identityVerificationId) && currentKyc === undefined;
@@ -354,15 +365,6 @@ export default function PlayerDashboard() {
   const [refreshingKyc, setRefreshingKyc] = useState(false);
   const didLogInitialQueryCountRef = useRef(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const protectedQueriesReady = isAuthenticatedProfileReady({
-    authLoading: loading,
-    convexAuthLoading,
-    isAuthenticated,
-    authUserId: authUser?.id,
-    profileAuthId: user?.authId,
-    profileUserId: user?._id,
-  });
-
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
     protectedQueriesReady && user?._id ? { userId: user._id as Id<"users"> } : "skip",

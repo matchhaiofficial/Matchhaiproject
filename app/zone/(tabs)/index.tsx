@@ -132,7 +132,18 @@ export default function ZoneDashboardHome() {
     const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
-    const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
+    const protectedQueriesReady = isAuthenticatedProfileReady({
+        authLoading,
+        convexAuthLoading,
+        isAuthenticated,
+        authUserId: authUser?.id,
+        profileAuthId: user?.authId,
+        profileUserId: user?._id,
+    });
+    const currentKyc = useQuery(
+        api.kyc.getCurrentUserKyc,
+        protectedQueriesReady ? {} : "skip",
+    );
     const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
     const kycVerified = isUserFullyVerified(authUser, user);
     const kycStartActionLabel =
@@ -180,15 +191,6 @@ export default function ZoneDashboardHome() {
     const [resourcesByBranch, setResourcesByBranch] = useState<Record<string, ZoneBranchResource[]>>({});
 
     const { animatedStyle: entranceStyle } = useEntrance({ axis: "y", distance: 14 });
-    const protectedQueriesReady = isAuthenticatedProfileReady({
-        authLoading,
-        convexAuthLoading,
-        isAuthenticated,
-        authUserId: authUser?.id,
-        profileAuthId: user?.authId,
-        profileUserId: user?._id,
-    });
-
     const dashboardNotifications = useQuery(
         api.notifications.listForUser,
         protectedQueriesReady && user?._id
