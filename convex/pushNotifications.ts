@@ -1,6 +1,6 @@
 import { internalMutation, internalQuery, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { requireCurrentUser } from "./authz";
+import { getCurrentUser } from "./authz";
 
 const normalizePermissionStatus = (
   value: string
@@ -62,7 +62,10 @@ export const upsertDevice = mutation({
     permissionStatus: v.string(),
   },
   handler: async (ctx, args) => {
-    const { user } = await requireCurrentUser(ctx);
+    const { user } = await getCurrentUser(ctx);
+    if (!user) {
+      return null;
+    }
     if (String(args.userId) !== String(user._id)) {
       throw new Error("Push device registration must match the authenticated user.");
     }
@@ -128,7 +131,10 @@ export const deactivateDevice = mutation({
     installationId: v.string(),
   },
   handler: async (ctx, args) => {
-    const { user } = await requireCurrentUser(ctx);
+    const { user } = await getCurrentUser(ctx);
+    if (!user) {
+      return false;
+    }
     const ownedDevices = await ctx.db
       .query("pushDevices")
       .withIndex("by_userId", (q) => q.eq("userId", user._id))

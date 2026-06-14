@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -49,6 +49,7 @@ import { type Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
+import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
 import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import styles from "./dashboard.styles";
 
@@ -127,7 +128,8 @@ const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: 
 export default function ZoneDashboardHome() {
     const router = useRouter();
     const { zone, loading } = useZoneData();
-    const { user, authUser, refreshUser } = useAuth();
+    const { user, authUser, loading: authLoading, refreshUser } = useAuth();
+    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
     const currentKyc = useQuery(api.kyc.getCurrentUserKyc);
@@ -178,10 +180,20 @@ export default function ZoneDashboardHome() {
     const [resourcesByBranch, setResourcesByBranch] = useState<Record<string, ZoneBranchResource[]>>({});
 
     const { animatedStyle: entranceStyle } = useEntrance({ axis: "y", distance: 14 });
+    const protectedQueriesReady = isAuthenticatedProfileReady({
+        authLoading,
+        convexAuthLoading,
+        isAuthenticated,
+        authUserId: authUser?.id,
+        profileAuthId: user?.authId,
+        profileUserId: user?._id,
+    });
 
     const dashboardNotifications = useQuery(
         api.notifications.listForUser,
-        user?._id ? { userId: user._id as Id<"users">, limit: 100 } : "skip",
+        protectedQueriesReady && user?._id
+            ? { userId: user._id as Id<"users">, limit: 100 }
+            : "skip",
     );
     const notificationCount = useMemo(
         () => (dashboardNotifications || []).filter(isPendingZoneAdminNotification).length,

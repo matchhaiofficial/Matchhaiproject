@@ -349,6 +349,18 @@ export const getByAuthId = query({
   },
 });
 
+export const getCurrentRegistrationState = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireCurrentUser(ctx);
+    return {
+      userId: user._id,
+      onboardingStep: user.onboardingStep ?? 0,
+      onboardingCompleted: user.onboardingCompleted ?? false,
+    };
+  },
+});
+
 // ============================================
 // AVAILABILITY CHECKS
 // ============================================

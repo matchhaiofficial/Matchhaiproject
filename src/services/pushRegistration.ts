@@ -7,6 +7,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 
 const INSTALLATION_ID_KEY = "push_registration.installation_id.v1";
+let pushRegistrationGeneration = 0;
 
 const createInstallationId = () =>
   `inst_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -35,12 +36,22 @@ const getProjectId = () => {
   );
 };
 
+export function cancelPendingPushRegistrationSync() {
+  pushRegistrationGeneration += 1;
+}
+
 export async function syncPushRegistration(input: {
   userId: Id<"users">;
   enabled?: boolean;
 }) {
+  const generation = ++pushRegistrationGeneration;
+  const isCurrentSync = () => generation === pushRegistrationGeneration;
   const installationId = await getOrCreateInstallationId();
   const enabled = input.enabled !== false;
+
+  if (!isCurrentSync()) {
+    return { ok: true as const, skipped: "cancelled" as const };
+  }
 
   if (!enabled || Platform.OS === "web") {
     await convex.mutation((api as any).pushNotifications.deactivateDevice, { installationId });
@@ -48,6 +59,9 @@ export async function syncPushRegistration(input: {
   }
 
   if (Constants.appOwnership === "expo") {
+    if (!isCurrentSync()) {
+      return { ok: true as const, skipped: "cancelled" as const };
+    }
     await convex.mutation((api as any).pushNotifications.upsertDevice, {
       userId: input.userId,
       installationId,
@@ -63,6 +77,9 @@ export async function syncPushRegistration(input: {
   }
 
   const Notifications = await loadExpoNotifications();
+  if (!isCurrentSync()) {
+    return { ok: true as const, skipped: "cancelled" as const };
+  }
   if (!Notifications) {
     await convex.mutation((api as any).pushNotifications.upsertDevice, {
       userId: input.userId,
@@ -83,6 +100,10 @@ export async function syncPushRegistration(input: {
     permissions = await Notifications.requestPermissionsAsync();
   }
 
+  if (!isCurrentSync()) {
+    return { ok: true as const, skipped: "cancelled" as const };
+  }
+
   const permissionStatus =
     permissions.status === "granted" || permissions.status === "denied"
       ? permissions.status
@@ -97,6 +118,10 @@ export async function syncPushRegistration(input: {
     } catch {
       expoPushToken = "";
     }
+  }
+
+  if (!isCurrentSync()) {
+    return { ok: true as const, skipped: "cancelled" as const };
   }
 
   await convex.mutation((api as any).pushNotifications.upsertDevice, {

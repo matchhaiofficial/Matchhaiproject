@@ -5,7 +5,10 @@
 import { convex } from "../../lib/convex";
 import { api } from "../../../convex/_generated/api";
 import { Id, Doc } from "../../../convex/_generated/dataModel";
-import { currentUser } from "./authService";
+import {
+  retryRegistrationAuthOperation,
+  waitForExpectedRegistrationUser,
+} from "../../utils/registrationAuth";
 
 // Re-export types
 export type UserProfile = Doc<"users">;
@@ -24,6 +27,13 @@ function normalizePhone(raw: string) {
 
 export function normalizePhoneForSave(phone: string) {
   return normalizePhone(phone);
+}
+
+export async function waitForRegistrationSession(userId: Id<"users">) {
+  return await waitForExpectedRegistrationUser(String(userId), async () => {
+    const state = await convex.query(api.users.getCurrentRegistrationState, {});
+    return state?.userId ? String(state.userId) : null;
+  });
 }
 
 // ============================================
@@ -145,10 +155,12 @@ export async function saveOnboardingStep2(
   prefs: OnboardingStep2Prefs
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await convex.mutation(api.users.saveOnboardingStep2, {
-      userId,
-      ...prefs,
-    });
+    await retryRegistrationAuthOperation(() =>
+      convex.mutation(api.users.saveOnboardingStep2, {
+        userId,
+        ...prefs,
+      }),
+    );
     return { ok: true };
   } catch (e) {
     console.log("[userService] saveOnboardingStep2 error", e);
@@ -221,10 +233,12 @@ export async function saveOnboardingStep3Platforms(
   platforms: OnboardingStep3Platforms
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await convex.mutation(api.users.saveOnboardingStep3, {
-      userId,
-      ...platforms,
-    });
+    await retryRegistrationAuthOperation(() =>
+      convex.mutation(api.users.saveOnboardingStep3, {
+        userId,
+        ...platforms,
+      }),
+    );
     return { ok: true };
   } catch (e) {
     console.log("[userService] saveOnboardingStep3Platforms error", e);
@@ -344,7 +358,9 @@ export async function completeOnboarding(
   userId: Id<"users">
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await convex.mutation(api.users.completeOnboarding, { userId });
+    await retryRegistrationAuthOperation(() =>
+      convex.mutation(api.users.completeOnboarding, { userId }),
+    );
     return { ok: true };
   } catch (e) {
     console.log("[userService] completeOnboarding error", e);

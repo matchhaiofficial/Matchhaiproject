@@ -24,6 +24,7 @@ import {
 } from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
 import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
+import { isAuthenticatedProfileReady } from "../utils/authReadiness";
 import { getNotificationResponseKey } from "../utils/notificationResponse";
 
 const LAST_HANDLED_RESPONSE_KEY = "notifications.lastHandledResponse.v1";
@@ -94,7 +95,7 @@ async function handleNotificationResponse(response: any, onHref: (href: string) 
 }
 
 export default function NotificationRuntimeBridge() {
-  const { user } = useAuth();
+  const { user, authUser, loading } = useAuth();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const [appStateTick, setAppStateTick] = useState(0);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -103,17 +104,27 @@ export default function NotificationRuntimeBridge() {
   const userId = user?._id as Id<"users"> | undefined;
   const accountRole = String((user as any)?.role || (user as any)?.accountType || "").toLowerCase();
   const isZoneAdmin = accountRole === "zone" || accountRole === "zone_admin";
+  const isSuperAdmin = isSuperAdminProfile(user);
+  const authenticatedProfileReady = isAuthenticatedProfileReady({
+    authLoading: loading,
+    convexAuthLoading,
+    isAuthenticated,
+    authUserId: authUser?.id,
+    profileAuthId: user?.authId,
+    profileUserId: userId,
+  });
+  const playerQueriesReady = authenticatedProfileReady && !isZoneAdmin && !isSuperAdmin;
   const dashboardSummary = useQuery(
     api.dashboard.getPlayerHomeSummary,
-    userId ? { userId } : "skip"
+    playerQueriesReady && userId ? { userId } : "skip"
   );
   const unreadBadgeCount = useQuery(
     api.notifications.countUnreadFast,
-    userId && !isZoneAdmin ? { userId } : "skip"
+    playerQueriesReady && userId ? { userId } : "skip"
   );
   const zoneUnreadNotifications = useQuery(
     api.notifications.listUnreadForUser,
-    userId && isZoneAdmin ? { userId, limit: 100 } : "skip"
+    authenticatedProfileReady && userId && isZoneAdmin ? { userId, limit: 100 } : "skip"
   );
 
   const upcomingRooms = useMemo(() => dashboardSummary?.upcomingRooms || [], [dashboardSummary?.upcomingRooms]);
@@ -164,9 +175,7 @@ export default function NotificationRuntimeBridge() {
 
   useEffect(() => {
     if (!pendingHref) return;
-    if (!user?._id) return;
-    if (convexAuthLoading) return;
-    if (!isAuthenticated) return;
+    if (!authenticatedProfileReady) return;
 
     const accountKind = isSuperAdminProfile(user)
       ? "super_admin"
@@ -175,7 +184,7 @@ export default function NotificationRuntimeBridge() {
         : "player";
     router.push(resolvePublicAppHref(pendingHref, accountKind) as any);
     setPendingHref(null);
-  }, [convexAuthLoading, isAuthenticated, pendingHref, user?._id]);
+  }, [authenticatedProfileReady, pendingHref, user]);
 
   useEffect(() => {
     if (!cleanupReady) return;
@@ -199,14 +208,14 @@ export default function NotificationRuntimeBridge() {
       void clearLocalBadgeCount();
     }
 
-    if (!user?._id || !isAuthenticated) {
+    if (!authenticatedProfileReady) {
       void clearLocalBadgeCount();
       return;
     }
     if (typeof effectiveBadgeCount !== "number") return;
 
     void setLocalBadgeCount(effectiveBadgeCount);
-  }, [appStateTick, effectiveBadgeCount, isAuthenticated, user?._id]);
+  }, [appStateTick, authenticatedProfileReady, effectiveBadgeCount, user?._id]);
 
   return null;
 }

@@ -154,6 +154,8 @@ export function AdminMetricCard({
   iconColor,
   iconStyle,
   style,
+  onPress,
+  accessibilityLabel,
 }: {
   label: string;
   value: string | number;
@@ -162,9 +164,14 @@ export function AdminMetricCard({
   iconColor?: string;
   iconStyle?: StyleProp<ViewStyle>;
   style?: StyleProp<ViewStyle>;
+  onPress?: () => void;
+  accessibilityLabel?: string;
 }) {
-  return (
-    <AppCard variant="elevated" style={[styles.metricCard, style]}>
+  const content = (
+    <AppCard
+      variant="elevated"
+      style={[styles.metricCard, onPress ? styles.metricCardPressableContent : style]}
+    >
       <View style={styles.metricCardTop}>
         {icon ? (
           <View style={[styles.metricIconWrap, iconStyle]}>
@@ -176,6 +183,19 @@ export function AdminMetricCard({
       <Text style={styles.metricLabel}>{label}</Text>
       {subtitle ? <Text style={styles.metricSubtitle}>{subtitle}</Text> : null}
     </AppCard>
+  );
+
+  if (!onPress) return content;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || `Open ${label}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.metricCardPressable, style, pressed && styles.pressedCard]}
+    >
+      {content}
+    </Pressable>
   );
 }
 

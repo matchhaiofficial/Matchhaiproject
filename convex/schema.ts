@@ -369,10 +369,13 @@ export default defineSchema({
     provider: v.literal("didit"),
     providerSessionId: v.optional(v.string()),
     providerReference: v.optional(v.string()),
+    verificationUrl: v.optional(v.string()),
     vendorData: v.string(),
     workflowId: v.string(),
     startTokenHash: v.optional(v.string()),
     startTokenExpiresAt: v.optional(v.number()),
+    sessionStartLeaseToken: v.optional(v.string()),
+    sessionStartLeaseExpiresAt: v.optional(v.number()),
     status: v.union(
       v.literal("not_started"),
       v.literal("pending"),

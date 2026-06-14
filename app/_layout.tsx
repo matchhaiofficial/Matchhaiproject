@@ -14,6 +14,8 @@ LogBox.ignoreLogs([
   // Easypaisa failures are user-facing via toasts; don't show LogBox overlays for them.
   "[CONVEX A(easypaisa:startCheckout)]",
   "[CONVEX A(easypaisa:syncTransactionStatus)]",
+  // PSN lookup failures are handled by the verification toast.
+  "[CONVEX A(externalApis:verifyPsnProfile)]",
 ]);
 
 if (__DEV__) {
@@ -25,7 +27,8 @@ if (__DEV__) {
     }
     if (
       text.includes("[CONVEX A(easypaisa:startCheckout)]") ||
-      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]")
+      text.includes("[CONVEX A(easypaisa:syncTransactionStatus)]") ||
+      text.includes("[CONVEX A(externalApis:verifyPsnProfile)]")
     ) {
       return;
     }

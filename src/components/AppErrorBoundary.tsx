@@ -13,6 +13,7 @@ type Props = {
 
 type State = {
   hasError: boolean;
+  retryKey: number;
 };
 
 /**
@@ -25,9 +26,9 @@ type State = {
  * errors React would otherwise unmount the whole tree for.
  */
 export default class AppErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false };
+  state: State = { hasError: false, retryKey: 0 };
 
-  static getDerivedStateFromError(): State {
+  static getDerivedStateFromError(): Partial<State> {
     return { hasError: true };
   }
 
@@ -40,12 +41,15 @@ export default class AppErrorBoundary extends React.Component<Props, State> {
   }
 
   reset = (): void => {
-    this.setState({ hasError: false });
+    this.setState((state) => ({
+      hasError: false,
+      retryKey: state.retryKey + 1,
+    }));
   };
 
   render(): React.ReactNode {
     if (!this.state.hasError) {
-      return this.props.children;
+      return <React.Fragment key={this.state.retryKey}>{this.props.children}</React.Fragment>;
     }
 
     if (this.props.fallback) {
