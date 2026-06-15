@@ -15,6 +15,7 @@ import {
 import { GameSkillScore } from "../../../src/services/skillRatingService";
 import { getUserProfile } from "../../../src/services/userService";
 import Logger from "../../../src/utils/logger";
+import { getMatchroomSkillLookupUserIds } from "../../../src/utils/matchroomParticipantIds";
 
 const identityMatches = (
   candidate: unknown,
@@ -84,7 +85,10 @@ export function useMatchroomDetailState({ id }: Params) {
   // ─── Convex data ─────────────────────────────────────────────
   const myJoinRequests = useMyJoinRequests(id);
   const incomingJoinRequests = useIncomingJoinRequests(id, id.length > 0 && (isHostEarly || isAdminEarly));
-  const playerUids = useMemo(() => room?.players?.map((p: any) => p.uid) ?? [], [room?.players]);
+  const playerUids = useMemo(
+    () => getMatchroomSkillLookupUserIds(room),
+    [room],
+  );
   const skillScores = usePlayerSkillScores(playerUids, room?.game);
   const friendsData = useFriendsForInvite();
 

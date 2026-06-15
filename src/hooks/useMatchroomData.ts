@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
+import { normalizeMatchroomParticipantIds } from "../utils/matchroomParticipantIds";
 
 const ACTIVE_BOOKING_INTENT_STATUSES = new Set([
   "approved_pending_payment",
@@ -203,7 +204,7 @@ export function usePlayerSkillScores(
 ) {
   // ✅ FIX: memoize so Convex doesn't get a new args object every render
   const userIds = useMemo(
-    () => playerUids.map((uid) => uid as Id<"users">),
+    () => normalizeMatchroomParticipantIds(playerUids).map((uid) => uid as Id<"users">),
     [playerUids],
   );
 

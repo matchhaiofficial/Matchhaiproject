@@ -60,6 +60,7 @@ export const upsertDevice = mutation({
     deviceName: v.optional(v.string()),
     appVersion: v.optional(v.string()),
     permissionStatus: v.string(),
+    registrationError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { user } = await getCurrentUser(ctx);
@@ -92,7 +93,7 @@ export const upsertDevice = mutation({
       permissionStatus,
       isActive,
       lastRegisteredAt: now,
-      lastError: undefined,
+      lastError: isActive ? undefined : args.registrationError,
       updatedAt: now,
     };
 
