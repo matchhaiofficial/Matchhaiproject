@@ -613,18 +613,34 @@ export const isXboxGamertagAvailable = query({
   },
 });
 
-// Get skill scores for multiple users (by user IDs)
+async function resolveSkillScoreUser(ctx: any, rawUserId: string) {
+  const userId = rawUserId.trim();
+  if (!userId) return null;
+
+  try {
+    const directUser = await ctx.db.get(userId as Id<"users">);
+    if (directUser) return directUser;
+  } catch {}
+
+  return await ctx.db
+    .query("users")
+    .withIndex("by_authId", (q: any) => q.eq("authId", userId))
+    .unique();
+}
+
 export const getSkillScores = query({
   args: {
-    userIds: v.array(v.id("users")),
+    userIds: v.array(v.string()),
     game: v.string(),
   },
   handler: async (ctx, args) => {
     const results: Record<string, { rating: number; tier: string; wins: number; losses: number } | null> = {};
 
     await Promise.all(
-      args.userIds.map(async (userId) => {
-        const user = await ctx.db.get(userId);
+      args.userIds.map(async (rawUserId) => {
+        const userId = rawUserId.trim();
+        if (!userId) return;
+        const user = await resolveSkillScoreUser(ctx, userId);
         if (user && user.skillScores) {
           const scores = user.skillScores as Record<string, { rating: number; tier: string; matchesPlayed: number; wins: number; losses: number; lastUpdated: number } | undefined>;
           const gameScore = scores[args.game];
