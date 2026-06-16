@@ -51,6 +51,7 @@ type EasypaisaPaymentPhase =
   | "failed"
   | "expired";
 type SubmitOptions = {
+  profileOverride?: UserProfile | null;
   skipPaymentPrompt?: boolean;
 };
 
@@ -525,6 +526,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
 
   const submit = useCallback(async (options?: SubmitOptions): Promise<boolean> => {
     if (!user) return false;
+    const profileOverride = options?.profileOverride ?? null;
     const skipPaymentPrompt = options?.skipPaymentPrompt === true;
     if (!isUserFullyVerified(authUser, user) && !isZoneWalkInAdmin) {
       showKycVerificationRequiredAlert();
@@ -636,12 +638,15 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     try {
       Logger.info("CreateMatchroomPayment", "Submit started", {
         locationMode,
+        profileOverride: Boolean(profileOverride),
         selectedGame,
         selectedZoneId,
         skipPaymentPrompt,
       });
       const latestProfileResult =
-        skipPaymentPrompt && userProfile
+        profileOverride
+          ? { ok: true as const, data: profileOverride }
+          : skipPaymentPrompt && userProfile
           ? { ok: true as const, data: userProfile }
           : await withTimeout(
               getUserProfile(user._id as Id<"users">),
@@ -664,6 +669,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setUserProfile(latestProfile);
 
       Logger.info("CreateMatchroomPayment", "Profile ready for submit", {
+        usedProfileOverride: Boolean(profileOverride),
         usedCachedProfile: skipPaymentPrompt && Boolean(userProfile),
         selectedGame,
       });
@@ -1136,7 +1142,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setUserProfile(nextProfile);
       setPendingParticipationProfile(nextProfile);
       setShowActivationPrompt(false);
-      await submit();
+      await submit({ profileOverride: nextProfile });
     } catch (error: any) {
       showToast({
         message: error?.message || "Failed to enable game in your profile.",
@@ -1177,7 +1183,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setHostSkillTier(tier as SkillTier);
       setFormData((prev) => ({ ...prev, skillLevel: tier || prev.skillLevel }));
       setShowAssessment(false);
-      await submit();
+      return await submit({ profileOverride: nextProfile });
     },
     [
       pendingParticipationProfile,

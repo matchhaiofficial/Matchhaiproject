@@ -4,6 +4,7 @@ import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys } from "./chatIdentity";
+import { markUserPresent } from "./presence";
 
 type UserIdString = string;
 
@@ -433,6 +434,8 @@ export const sendMessage = mutation({
     const sender = await getSenderProfile(ctx, userId);
 
     const now = Date.now();
+    await markUserPresent(ctx, userId, now);
+
     const messageType = args.type || "text";
     const trimmedContent = args.content.trim();
     if (messageType === "text" && !trimmedContent) {
@@ -524,6 +527,7 @@ export const sendMessageToMatchroom = mutation({
     const now = Date.now();
     const { userId, matchroom, chatroom } = await syncMatchroomChatroom(ctx, args.matchroomId, now);
     const sender = await getSenderProfile(ctx, userId);
+    await markUserPresent(ctx, userId, now);
 
     const messageType = args.type || "text";
     const trimmedContent = args.content.trim();

@@ -2032,6 +2032,7 @@ export const getCheckoutStatus = query({
     return {
       transactionId: latest._id,
       orderRefNum: latest.orderRefNum,
+      bookingIntentId: latest.bookingIntentId ? String(latest.bookingIntentId) : null,
       kind: latest.kind,
       status: latest.status,
       amount: latest.amount,

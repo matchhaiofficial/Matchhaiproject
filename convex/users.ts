@@ -4,6 +4,7 @@ import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
 import { getCurrentUser, publicUser, requireCurrentUser, requireSelf, requireSelfOrSuperAdmin } from "./authz";
+import { markUserPresent } from "./presence";
 
 // ============================================
 // RATING / PROFILE SECURITY HELPERS
@@ -760,6 +761,7 @@ export const create = mutation({
       phoneNumberHash: args.phoneNumberHash,
       accountType: args.accountType,
       isOnline: true,
+      lastActiveAt: now,
       onboardingCompleted: false,
       onboardingStep: 1,
       kycVerificationStatus: "not_started",
@@ -1130,9 +1132,11 @@ export const updateOnlineStatus = mutation({
   },
   handler: async (ctx, args) => {
     await requireProfileOwner(ctx, args.userId);
+    const now = Date.now();
     await ctx.db.patch(args.userId, {
       isOnline: args.isOnline,
-      updatedAt: Date.now(),
+      ...(args.isOnline ? { lastActiveAt: now } : {}),
+      updatedAt: now,
     });
     return true;
   },
@@ -1143,8 +1147,7 @@ export const touchPresence = mutation({
   handler: async (ctx) => {
     const { user } = await requireCurrentUser(ctx);
     if (!user) return;
-    const now = Date.now();
-    await ctx.db.patch(user._id, { lastActiveAt: now, isOnline: true });
+    await markUserPresent(ctx, user._id);
   },
 });
 

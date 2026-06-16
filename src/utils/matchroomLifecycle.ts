@@ -144,8 +144,74 @@ export function isJoinLocked(room: any, now = new Date()): boolean {
 
     if (isRoomFull(room)) return true;
 
+    if (
+        room?.status === "locked" ||
+        room?.isLocked === true ||
+        room?.venueConfirmedAt ||
+        room?.confirmedZoneId ||
+        room?.zoneAdminApproved === true
+    ) {
+        return true;
+    }
+
     const lockAt = getRoomLockAt(room);
     return Boolean(lockAt && lockAt.getTime() <= now.getTime());
+}
+
+export type MatchroomJoinAvailability =
+    | { available: true; code: "available"; message: null }
+    | {
+        available: false;
+        code: "full" | "locked" | "expired" | "closed";
+        message: string;
+    };
+
+export function getMatchroomJoinAvailability(
+    room: any,
+    now = new Date(),
+): MatchroomJoinAvailability {
+    if (!room) {
+        return {
+            available: false,
+            code: "closed",
+            message: "This matchroom is unavailable.",
+        };
+    }
+
+    const status = String(room.status || "").toLowerCase();
+    if (["completed", "in-progress", "cancelled", "closed", "admin_review", "payment_failed"].includes(status)) {
+        return {
+            available: false,
+            code: "closed",
+            message: "This matchroom is no longer accepting join requests.",
+        };
+    }
+
+    if (isRoomExpired(room, now)) {
+        return {
+            available: false,
+            code: "expired",
+            message: "This matchroom has expired.",
+        };
+    }
+
+    if (isRoomFull(room)) {
+        return {
+            available: false,
+            code: "full",
+            message: "This matchroom is full.",
+        };
+    }
+
+    if (isJoinLocked(room, now)) {
+        return {
+            available: false,
+            code: "locked",
+            message: "This matchroom is locked and no longer accepting join requests.",
+        };
+    }
+
+    return { available: true, code: "available", message: null };
 }
 
 export function isLeaveLocked(room: any, now = new Date()): boolean {

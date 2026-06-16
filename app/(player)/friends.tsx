@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useQuery } from "convex/react";
 import React, { useCallback, useMemo, useState } from "react";
 import {
@@ -18,16 +18,16 @@ import { AppImage } from "../../src/components/AppImage";
 import Screen from "../../src/components/Screen";
 import SegmentedTabs from "../../src/components/SegmentedTabs";
 import { useAuth } from "../../src/context/AuthContext";
+import { isChatUserOnline, useRelativeNow } from "../../src/features/chat/utils";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
-import { getUserFriends } from "../../src/services/userService";
-import { COLORS, FONTS } from "../../src/theme";
-import Logger from "../../src/utils/logger";
+import { COLORS } from "../../src/theme";
 import styles from "./friends.styles";
 
 type FriendListItem = {
   uid: string;
   username: string;
   isOnline: boolean;
+  lastActiveAt?: number | null;
   games: string[];
   avatarUri: string;
 };
@@ -59,11 +59,10 @@ const getGamesFromFriend = (friend?: {
 export default function FriendsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [friends, setFriends] = useState<FriendListItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FriendFilter>("all");
+  const nowMs = useRelativeNow(30_000);
   useRouteLogger("FriendsScreen", {
     activeFilter,
     searchQueryLength: searchQuery.trim().length,
@@ -76,62 +75,37 @@ export default function FriendsScreen() {
     user?._id ? {} : "skip"
   ) || {};
 
-  const loadFriends = useCallback(
-    async (showRefresh = false) => {
-      if (!user?._id) {
-        setFriends([]);
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
-      if (showRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      try {
-        const friendsResult = await getUserFriends(user._id);
-        if (!friendsResult.ok || !friendsResult.data) {
-          setFriends([]);
-          return;
-        }
-
-        const detailedFriends = friendsResult.data.map((friend) => {
-          const username = friend.fullName || friend.username || "Unknown";
-          const avatarUri =
-            friend.photoURL ||
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=42a5f5&color=fff&size=128`;
-          return {
-            uid: friend.uid,
-            username,
-            isOnline: !!friend.isOnline,
-            games: getGamesFromFriend(friend),
-            avatarUri,
-          };
-        });
-
-        detailedFriends.sort((a, b) => {
-          if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-          return a.username.localeCompare(b.username);
-        });
-
-        setFriends(detailedFriends);
-      } catch (error) {
-        Logger.error("Friends", "Failed to load friends", error);
-        setFriends([]);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [user?._id],
+  const rawFriends = useQuery(
+    api.social.listFriends,
+    user?._id ? { userId: user._id } : "skip",
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      loadFriends();
-    }, [loadFriends]),
-  );
+  const friends = useMemo<FriendListItem[]>(() => {
+    const detailedFriends = (rawFriends || []).map((friend: any) => {
+      const username = friend.fullName || friend.username || "Unknown";
+      const lastActiveAt = typeof friend.lastActiveAt === "number" ? friend.lastActiveAt : null;
+      const avatarUri =
+        friend.photoURL ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=42a5f5&color=fff&size=128`;
+      return {
+        uid: String(friend.friendId),
+        username,
+        isOnline: isChatUserOnline(lastActiveAt, friend.isOnline, nowMs),
+        lastActiveAt,
+        games: getGamesFromFriend(friend),
+        avatarUri,
+      };
+    });
+
+    detailedFriends.sort((a, b) => {
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      return a.username.localeCompare(b.username);
+    });
+
+    return detailedFriends;
+  }, [nowMs, rawFriends]);
+
+  const loading = Boolean(user?._id) && rawFriends === undefined;
 
   const onlineCount = useMemo(
     () => friends.filter((friend) => friend.isOnline).length,
@@ -161,8 +135,9 @@ export default function FriendsScreen() {
   }, [router]);
 
   const onRefresh = useCallback(() => {
-    loadFriends(true);
-  }, [loadFriends]);
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 250);
+  }, []);
 
   const keyExtractor = useCallback((item: FriendListItem) => item.uid, []);
 

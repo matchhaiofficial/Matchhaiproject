@@ -15,7 +15,6 @@ import type { ChatThreadMessage } from "../../../src/features/chat/types";
 import { formatChatPresenceLabel, formatVoiceDuration, useRelativeNow } from "../../../src/features/chat/utils";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useChatTyping } from "../../../src/hooks/useChatTyping";
-import { usePresenceHeartbeat } from "../../../src/hooks/usePresenceHeartbeat";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
 import { submitFriendChatMessageReport } from "../../../src/services/convex/reportService";
@@ -101,9 +100,6 @@ export default function FriendChatScreen() {
     // Typing indicator
     const chatKeyForTyping = chatroomId ? String(chatroomId) : null;
     const { typingNames, onInputActivity } = useChatTyping(chatKeyForTyping);
-
-    // Presence heartbeat
-    usePresenceHeartbeat(Boolean(user?._id));
 
     const friendName = friendProfile?.fullName || friendProfile?.username || "Friend";
     const presenceLabel = useMemo(

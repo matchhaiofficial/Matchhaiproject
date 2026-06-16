@@ -197,6 +197,7 @@ export const linkAuthToUser = mutation({
       phone: args.phone,
       accountType: args.accountType,
       isOnline: true,
+      lastActiveAt: now,
       onboardingCompleted: false,
       kycVerificationStatus: "not_started",
       createdAt: now,

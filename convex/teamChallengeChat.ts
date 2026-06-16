@@ -5,6 +5,7 @@ import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { normalizeChatUserKeys, toChatUserKey } from "./chatIdentity";
+import { markUserPresent } from "./presence";
 
 const chatMessageTypeValidator = v.union(
   v.literal("text"),
@@ -281,6 +282,8 @@ export const sendMessage = mutation({
         : challenge.captainBName || "Captain";
 
     const now = Date.now();
+    await markUserPresent(ctx, userId, now);
+
     const messageType = args.type || "text";
     if ((messageType === "image" || messageType === "file") && !args.attachment) {
       throw new Error("Attachment message is missing attachment data");

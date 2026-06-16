@@ -36,6 +36,7 @@ import type * as matchroomPricing from "../matchroomPricing.js";
 import type * as matchrooms from "../matchrooms.js";
 import type * as notifications from "../notifications.js";
 import type * as phoneOtp from "../phoneOtp.js";
+import type * as presence from "../presence.js";
 import type * as psnTokenCache from "../psnTokenCache.js";
 import type * as pushNotifications from "../pushNotifications.js";
 import type * as pushNotificationsActions from "../pushNotificationsActions.js";
@@ -100,6 +101,7 @@ declare const fullApi: ApiFromModules<{
   matchrooms: typeof matchrooms;
   notifications: typeof notifications;
   phoneOtp: typeof phoneOtp;
+  presence: typeof presence;
   psnTokenCache: typeof psnTokenCache;
   pushNotifications: typeof pushNotifications;
   pushNotificationsActions: typeof pushNotificationsActions;

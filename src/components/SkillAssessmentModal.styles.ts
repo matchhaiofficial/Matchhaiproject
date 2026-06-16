@@ -53,6 +53,14 @@ export default StyleSheet.create({
     footer: {
         paddingHorizontal: SPACING.xl,
     },
+    errorText: {
+        color: COLORS.error,
+        fontFamily: FONTS.body,
+        fontSize: TEXT_SIZES.caption,
+        lineHeight: 18,
+        marginBottom: SPACING.sm,
+        textAlign: 'center',
+    },
     submitButton: {
         minHeight: 50,
     },

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
+import { markUserPresent } from "./presence";
 
 const chatMessageTypeValidator = v.union(
   v.literal("text"),
@@ -248,6 +249,8 @@ export const sendMessage = mutation({
     if (!sender) throw new Error("User profile not found");
 
     const now = Date.now();
+    await markUserPresent(ctx, userId, now);
+
     const messageType = args.type || "text";
     const trimmedContent = args.content.trim();
 

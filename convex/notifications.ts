@@ -56,6 +56,15 @@ type NotificationStatus =
   | "expired";
 type RecipientRole = "player" | "zone_admin" | "super_admin";
 type PushPolicy = "none" | "eligible" | "force";
+type PushState =
+  | "queued"
+  | "sending"
+  | "pending"
+  | "sent"
+  | "receipt_ok"
+  | "failed"
+  | "no_device"
+  | "skipped";
 type DedupePolicy = "upsert_active" | "replace_active" | "versioned_new";
 
 type CanonicalInput = {
@@ -295,6 +304,80 @@ function isNotificationActive(notification: any) {
   return notification?.isArchived !== true
     && notification?.status !== "expired"
     && (!notification?.expiresAt || notification.expiresAt > now);
+}
+
+const IN_FLIGHT_PUSH_STATES = new Set<PushState>(["queued", "sending", "pending"]);
+const RETRYABLE_PUSH_STATES = new Set<PushState>(["failed", "no_device"]);
+const COMPLETED_PUSH_STATES = new Set<PushState>(["sent", "receipt_ok"]);
+
+function safePayloadString(value: unknown) {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function hasNotificationPushPayloadChanged(
+  active: any,
+  next: {
+    title?: string;
+    body?: string;
+    route?: string;
+    data?: Record<string, any> | null;
+    pushPolicy: PushPolicy;
+  }
+) {
+  return (
+    active.title !== next.title ||
+    active.body !== next.body ||
+    active.route !== next.route ||
+    active.pushPolicy !== next.pushPolicy ||
+    safePayloadString(active.data || {}) !== safePayloadString(next.data || {})
+  );
+}
+
+function normalizePushState(value: unknown): PushState | undefined {
+  const state = String(value || "");
+  if (
+    state === "queued" ||
+    state === "sending" ||
+    state === "pending" ||
+    state === "sent" ||
+    state === "receipt_ok" ||
+    state === "failed" ||
+    state === "no_device" ||
+    state === "skipped"
+  ) {
+    return state;
+  }
+  return undefined;
+}
+
+function shouldQueuePushAfterActiveUpsert(
+  active: any,
+  pushPolicy: PushPolicy,
+  payloadChanged: boolean
+) {
+  if (pushPolicy === "none" || !isNotificationActive(active)) return false;
+
+  const state = normalizePushState(active.pushState);
+  if (!state) return true;
+  if (IN_FLIGHT_PUSH_STATES.has(state)) return false;
+  if (RETRYABLE_PUSH_STATES.has(state)) return true;
+  if (state === "skipped") return payloadChanged || active.pushPolicy === "none";
+  if (COMPLETED_PUSH_STATES.has(state)) return payloadChanged;
+  return payloadChanged;
+}
+
+async function scheduleNotificationPush(ctx: any, notificationId: any, shouldSchedule: boolean) {
+  if (!shouldSchedule) return false;
+  await ctx.scheduler.runAfter(
+    0,
+    (internal as any).pushNotificationsActions.sendForNotification,
+    { notificationId }
+  );
+  return true;
 }
 
 const HIDDEN_INBOX_TYPES_WHEN_REJECTED = new Set([
@@ -728,30 +811,64 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     const active = await findActiveNotificationByDedupeKey(ctx, baseDedupeKey);
     if (active) {
       if (dedupePolicy === "upsert_active") {
+        const nextTitle = input.title ?? active.title;
+        const nextBody = input.body ?? active.body;
+        const nextData = {
+          ...(active.data || {}),
+          ...(input.data || {}),
+          legacyType: inferLegacyType(type),
+          route,
+          entity,
+          dedupeKey: baseDedupeKey,
+          recipientRole,
+          pushPolicy,
+        };
+        const payloadChanged = hasNotificationPushPayloadChanged(active, {
+          title: nextTitle,
+          body: nextBody,
+          route,
+          data: nextData,
+          pushPolicy,
+        });
+        const shouldQueuePush = shouldQueuePushAfterActiveUpsert(active, pushPolicy, payloadChanged);
+        const currentPushState = normalizePushState(active.pushState);
+        const shouldSkipPendingPush =
+          pushPolicy === "none" &&
+          currentPushState !== "sent" &&
+          currentPushState !== "receipt_ok";
+
         await ctx.db.patch(active._id, {
-          title: input.title ?? active.title,
-          body: input.body ?? active.body,
+          title: nextTitle,
+          body: nextBody,
           route,
           entityKey: input.entityKey ?? active.entityKey ?? baseDedupeKey,
           recipientRole,
+          pushPolicy,
+          ...(shouldQueuePush
+            ? {
+                pushState: "queued" as const,
+                pushAttemptedAt: undefined,
+                pushDeliveredAt: undefined,
+                pushError: undefined,
+              }
+            : shouldSkipPendingPush
+              ? {
+                  pushState: "skipped" as const,
+                  pushAttemptedAt: undefined,
+                  pushDeliveredAt: undefined,
+                  pushError: undefined,
+                }
+              : {}),
           entityId: input.entityId ?? active.entityId,
           teamId: input.teamId ?? active.teamId,
           teamName: input.teamName ?? active.teamName,
           matchroomId: input.matchroomId ?? active.matchroomId,
-          data: {
-            ...(active.data || {}),
-            ...(input.data || {}),
-            legacyType: inferLegacyType(type),
-            route,
-            entity,
-            dedupeKey: baseDedupeKey,
-            recipientRole,
-            pushPolicy,
-          },
+          data: nextData,
           expiresAt: input.expiresAt ?? active.expiresAt,
           updatedAt: now,
         });
-        return { notificationId: active._id, created: false, scheduledPush: false };
+        const scheduledPush = await scheduleNotificationPush(ctx, active._id, shouldQueuePush);
+        return { notificationId: active._id, created: false, scheduledPush };
       }
 
       if (dedupePolicy === "replace_active") {
@@ -800,15 +917,9 @@ async function createCanonicalInternal(ctx: any, input: CanonicalInput, skipAuth
     updatedAt: now,
   });
 
-  if (pushPolicy !== "none") {
-    await ctx.scheduler.runAfter(
-      0,
-      (internal as any).pushNotificationsActions.sendForNotification,
-      { notificationId }
-    );
-  }
+  const scheduledPush = await scheduleNotificationPush(ctx, notificationId, pushPolicy !== "none");
 
-  return { notificationId, created: true, scheduledPush: pushPolicy !== "none" };
+  return { notificationId, created: true, scheduledPush };
 }
 
 export const resolveCanonicalRoute = query({

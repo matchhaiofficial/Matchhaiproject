@@ -6,6 +6,7 @@ import {
   isJoinLocked,
   isLeaveLocked,
   isRoomLocked,
+  getMatchroomJoinAvailability,
   getRoomDisplayStatus,
   canSubmitComplain,
 } from "../../src/utils/matchroomLifecycle";
@@ -84,6 +85,28 @@ describe("isJoinLocked / isRoomLocked", () => {
   it("expired (unfilled past-lock) room is NOT reported as join-locked", () => {
     // Expired short-circuits join-lock so dead rooms read as expired, not locked.
     expect(isJoinLocked(pastLockUnfilledRoom, now)).toBe(false);
+  });
+
+  it("zone-confirmed and explicitly locked rooms are join-locked", () => {
+    expect(isJoinLocked({ ...openRoom, zoneAdminApproved: true }, now)).toBe(true);
+    expect(isJoinLocked({ ...openRoom, status: "locked" }, now)).toBe(true);
+  });
+});
+
+describe("getMatchroomJoinAvailability", () => {
+  it("allows a future room with open seats", () => {
+    expect(getMatchroomJoinAvailability(openRoom, now)).toEqual({
+      available: true,
+      code: "available",
+      message: null,
+    });
+  });
+
+  it("distinguishes full, locked, expired, and closed rooms", () => {
+    expect(getMatchroomJoinAvailability(fullRoom, now).code).toBe("full");
+    expect(getMatchroomJoinAvailability({ ...openRoom, status: "locked" }, now).code).toBe("locked");
+    expect(getMatchroomJoinAvailability(expiredRoom, now).code).toBe("expired");
+    expect(getMatchroomJoinAvailability(completedRoom, now).code).toBe("closed");
   });
 });
 

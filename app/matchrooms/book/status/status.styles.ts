@@ -277,4 +277,8 @@ export default StyleSheet.create({
         fontSize: TEXT_SIZES.body,
         fontFamily: FONTS.heading,
     },
+    notFoundAction: {
+        marginTop: SPACING.lg,
+        minWidth: 220,
+    },
 });

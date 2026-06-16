@@ -66,6 +66,7 @@ type Props = {
   onResetFilters: () => void;
   focusedMatchroomId: string | null;
   buildMatchroomCardData: (item: ZoneMatchroomListItem) => Matchroom;
+  onAllocateResources: (item: ZoneMatchroomListItem) => void;
 };
 
 export function ZoneBookingsMatchroomsSection({
@@ -82,6 +83,7 @@ export function ZoneBookingsMatchroomsSection({
   onResetFilters,
   focusedMatchroomId,
   buildMatchroomCardData,
+  onAllocateResources,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -198,6 +200,7 @@ export function ZoneBookingsMatchroomsSection({
           item={item}
           focused={focusedMatchroomId === item.id}
           buildMatchroomCardData={buildMatchroomCardData}
+          onAllocateResources={onAllocateResources}
         />
       )}
     />
@@ -208,16 +211,25 @@ const MatchroomRow = React.memo(function MatchroomRow({
   item,
   focused,
   buildMatchroomCardData,
+  onAllocateResources,
 }: {
   item: ZoneMatchroomListItem;
   focused: boolean;
   buildMatchroomCardData: (item: ZoneMatchroomListItem) => Matchroom;
+  onAllocateResources: (item: ZoneMatchroomListItem) => void;
 }) {
+  const requiresAllocation =
+    item.bookingSource === "zone_accepted" &&
+    !["in-progress", "completed", "cancelled", "expired"].includes(String(item.status || "").toLowerCase()) &&
+    (!Array.isArray(item.resourceIds) || item.resourceIds.length === 0);
+
   return (
     <View style={focused ? styles.matchroomFocusedWrap : styles.walkinMatchroomItem}>
       <MatchroomCard
         room={buildMatchroomCardData(item)}
         containerStyle={focused ? { marginBottom: 0 } : undefined}
+        onAcceptPress={requiresAllocation ? () => onAllocateResources(item) : undefined}
+        acceptLabel="Allocate"
       />
     </View>
   );

@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "convex/react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Text,
     View,
@@ -508,13 +508,18 @@ export default function ZoneBookingsModule() {
     const [showAllocationSheet, setShowAllocationSheet] = useState(false);
     const [queue, setQueue] = useState<ZoneBookingQueueItem[]>([]);
     const [matchrooms, setMatchrooms] = useState<ZoneMatchroomListItem[]>([]);
+    const [walkInRooms, setWalkInRooms] = useState<ZoneMatchroomListItem[]>([]);
     const [queueCursor, setQueueCursor] = useState<string | null>(null);
     const [matchroomsCursor, setMatchroomsCursor] = useState<string | null>(null);
+    const [walkInsCursor, setWalkInsCursor] = useState<string | null>(null);
     const [queueDone, setQueueDone] = useState(false);
     const [matchroomsDone, setMatchroomsDone] = useState(false);
+    const [walkInsDone, setWalkInsDone] = useState(false);
     const [loadingQueueMore, setLoadingQueueMore] = useState(false);
     const [loadingMatchroomsMore, setLoadingMatchroomsMore] = useState(false);
+    const [loadingWalkInsMore, setLoadingWalkInsMore] = useState(false);
     const [matchroomsTotal, setMatchroomsTotal] = useState(0);
+    const [walkInsTotal, setWalkInsTotal] = useState(0);
     const [allocationBranches, setAllocationBranches] = useState<ZoneBranch[]>([]);
     const [allocationBranchId, setAllocationBranchId] = useState<string | null>(null);
     const [allocationResources, setAllocationResources] = useState<ZoneBranchResource[]>([]);
@@ -524,6 +529,7 @@ export default function ZoneBookingsModule() {
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(true);
     const [loadingMatchrooms, setLoadingMatchrooms] = useState(true);
+    const [loadingWalkIns, setLoadingWalkIns] = useState(true);
     const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
     const [loadingHistoryMore, setLoadingHistoryMore] = useState(false);
     const [processingAction, setProcessingAction] = useState<"accept" | "reject" | "counter" | null>(null);
@@ -553,6 +559,8 @@ export default function ZoneBookingsModule() {
     const [monthCursor, setMonthCursor] = useState(new Date());
     const [timeDraft, setTimeDraft] = useState(parseTimeToDraft(createDefaultScheduleOption().time));
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
+    const matchroomsRequestVersionRef = useRef(0);
+    const walkInsRequestVersionRef = useRef(0);
 
     const zoneOffers = useQuery(
         api.bookings.listOffersByZone,
@@ -669,11 +677,12 @@ export default function ZoneBookingsModule() {
         zone?.id,
     ]);
 
-    const loadMatchroomsPage = useCallback(async (options?: { append?: boolean; sourceOverride?: SourceFilter }) => {
+    const loadMatchroomsPage = useCallback(async (options?: { append?: boolean }) => {
         if (!zone?.id) return;
         const append = options?.append === true;
         if (append && (matchroomsDone || loadingMatchroomsMore)) return;
-        const source = options?.sourceOverride || matchroomSource;
+        const requestVersion = ++matchroomsRequestVersionRef.current;
+        const source = matchroomSource;
         const bookingSource =
             source === "walkin" ? "walkin"
             : source === "admin" ? "admin"
@@ -697,14 +706,17 @@ export default function ZoneBookingsModule() {
                     ...dateRangeBounds(matchroomDateRange),
                 },
             });
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
             setMatchrooms((current) => append ? mergeMatchroomRows(current, result.page) : result.page);
             setMatchroomsCursor(result.continueCursor);
             setMatchroomsDone(result.isDone);
-            setMatchroomsTotal(result.total || result.page.length);
+            setMatchroomsTotal(result.total ?? result.page.length);
         } catch (error) {
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
             Logger.error("ZoneBookingsModule", "Failed to load paginated matchrooms", error);
             setErrorText("Failed to load matchrooms.");
         } finally {
+            if (requestVersion !== matchroomsRequestVersionRef.current) return;
             setLoadingMatchrooms(false);
             setLoadingMatchroomsMore(false);
         }
@@ -722,6 +734,47 @@ export default function ZoneBookingsModule() {
         zone?.id,
     ]);
 
+    const loadWalkInsPage = useCallback(async (options?: { append?: boolean }) => {
+        if (!zone?.id) return;
+        const append = options?.append === true;
+        if (append && (walkInsDone || loadingWalkInsMore)) return;
+        const requestVersion = ++walkInsRequestVersionRef.current;
+        if (append) {
+            setLoadingWalkInsMore(true);
+        } else {
+            setLoadingWalkIns(true);
+        }
+        try {
+            const result = await fetchZoneMatchroomsPage({
+                zoneId: zone.id,
+                limit: ZONE_PAGE_SIZE,
+                cursor: append ? walkInsCursor : null,
+                filters: {
+                    bookingSource: "walkin",
+                },
+            });
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            setWalkInRooms((current) => append ? mergeMatchroomRows(current, result.page) : result.page);
+            setWalkInsCursor(result.continueCursor);
+            setWalkInsDone(result.isDone);
+            setWalkInsTotal(result.total ?? result.page.length);
+        } catch (error) {
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            Logger.error("ZoneBookingsModule", "Failed to load paginated walk-ins", error);
+            setErrorText("Failed to load walk-in matchrooms.");
+        } finally {
+            if (requestVersion !== walkInsRequestVersionRef.current) return;
+            setLoadingWalkIns(false);
+            setLoadingWalkInsMore(false);
+        }
+    }, [
+        loadingWalkInsMore,
+        mergeMatchroomRows,
+        walkInsCursor,
+        walkInsDone,
+        zone?.id,
+    ]);
+
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
     const deepMatchroomId = Array.isArray(params.matchroomId) ? params.matchroomId[0] : params.matchroomId;
@@ -729,8 +782,6 @@ export default function ZoneBookingsModule() {
     const {
         branchAreas,
         primaryBranch,
-        walkInCount,
-        walkInRooms,
         combinedQueue,
         filteredQueue,
         selectedRequest,
@@ -742,7 +793,6 @@ export default function ZoneBookingsModule() {
     } = useZoneBookingsViewModel({
         zone,
         queue,
-        matchrooms,
         gameFilter,
         timeOfDayFilter,
         dateRangeFilter: requestDateRange,
@@ -1007,8 +1057,12 @@ export default function ZoneBookingsModule() {
         if (!zone?.id) {
             setQueue([]);
             setMatchrooms([]);
+            setWalkInRooms([]);
+            setMatchroomsTotal(0);
+            setWalkInsTotal(0);
             setLoadingQueue(false);
             setLoadingMatchrooms(false);
+            setLoadingWalkIns(false);
             return;
         }
         setQueueCursor(null);
@@ -1029,19 +1083,22 @@ export default function ZoneBookingsModule() {
         if (!zone?.id) return;
         setMatchroomsCursor(null);
         setMatchroomsDone(false);
-        void loadMatchroomsPage({
-            append: false,
-            sourceOverride: segment === "walkins" ? "walkin" : undefined,
-        });
+        void loadMatchroomsPage({ append: false });
     }, [
         zone?.id,
-        segment,
         matchroomFilter,
         matchroomDateRange,
         matchroomPayment,
         matchroomSource,
         matchroomSearchQuery,
     ]);
+
+    useEffect(() => {
+        if (!zone?.id) return;
+        setWalkInsCursor(null);
+        setWalkInsDone(false);
+        void loadWalkInsPage({ append: false });
+    }, [zone?.id, segment === "walkins"]);
 
     useEffect(() => {
         if (deepSegment === "matchrooms" || deepSegment === "requests" || deepSegment === "history") {
@@ -1299,6 +1356,7 @@ export default function ZoneBookingsModule() {
 
     const handleAllocationSubmit = async () => {
         if (!selectedRequest || !allocationBranchId) return;
+        const acceptedRequestId = selectedRequest.id;
         const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
         const result = await handleAccept({
             targetRequest: selectedRequest,
@@ -1310,10 +1368,20 @@ export default function ZoneBookingsModule() {
         if (result?.ok) {
             setShowAllocationSheet(false);
             setAllocationSelectedResourceIds([]);
+            setQueue((current) =>
+                current.filter((item) => String(item.id) !== String(acceptedRequestId)),
+            );
+            setSelectedRequestId((current) =>
+                String(current || "") === String(acceptedRequestId) ? null : current,
+            );
+            setSegment("matchrooms");
+            if (result.matchroomId) {
+                setFocusedMatchroomId(result.matchroomId);
+            }
+            void loadQueuePage({ append: false });
+            void loadMatchroomsPage({ append: false });
             if (result.matchroomId) {
                 router.push(`/matchrooms/${result.matchroomId}` as any);
-            } else {
-                setSegment("matchrooms");
             }
         }
     };
@@ -1331,8 +1399,8 @@ export default function ZoneBookingsModule() {
                 items={[
                     { key: "requests", label: "Requests", badge: visibleRequestsQueue.length },
                     { key: "pending", label: "Pending", badge: pendingOffers.length },
-                    { key: "matchrooms", label: "Matchrooms", badge: matchroomsTotal || filteredMatchrooms.length },
-                    { key: "walkins", label: "Walk-ins", badge: segment === "walkins" ? (matchroomsTotal || walkInCount) : walkInCount },
+                    { key: "matchrooms", label: "Matchrooms", badge: matchroomsTotal },
+                    { key: "walkins", label: "Walk-ins", badge: walkInsTotal },
                     {
                         key: "history",
                         label: "History",
@@ -1414,6 +1482,16 @@ export default function ZoneBookingsModule() {
                     loadingMore={loadingMatchroomsMore}
                     onLoadMore={() => loadMatchroomsPage({ append: true })}
                     focusedMatchroomId={focusedMatchroomId}
+                    onAllocateResources={(item) =>
+                        router.push({
+                            pathname: "/zone/modules/resources",
+                            params: {
+                                matchroomId: item.id,
+                                branchId: item.branchId || "",
+                                t: Date.now().toString(),
+                            },
+                        } as any)
+                    }
                     buildMatchroomCardData={(item) =>
                         toMatchroomCardData(
                             item,
@@ -1426,8 +1504,10 @@ export default function ZoneBookingsModule() {
             {segment === "walkins" ? (
                 <ZoneBookingsWalkinsSection
                     walkInRooms={walkInRooms}
-                    loadingMore={loadingMatchroomsMore}
-                    onLoadMore={() => loadMatchroomsPage({ append: true, sourceOverride: "walkin" })}
+                    total={walkInsTotal}
+                    loading={loadingWalkIns}
+                    loadingMore={loadingWalkInsMore}
+                    onLoadMore={() => loadWalkInsPage({ append: true })}
                     processingAction={processingAction}
                     onCreateWalkIn={() =>
                         router.push({

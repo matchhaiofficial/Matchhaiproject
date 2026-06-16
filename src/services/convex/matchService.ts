@@ -215,6 +215,15 @@ function normalizeMatchroomRequestError(error: any) {
   if (message.includes("Request already pending")) {
     return "Your join request is already pending captain approval.";
   }
+  if (/matchroom is full/i.test(message)) {
+    return "This matchroom is full.";
+  }
+  if (/matchroom is locked/i.test(message)) {
+    return "This matchroom is locked and no longer accepting join requests.";
+  }
+  if (/matchroom has expired/i.test(message)) {
+    return "This matchroom has expired.";
+  }
   return message || "Failed to send request";
 }
 
@@ -1039,6 +1048,14 @@ export async function requestJoinMatchroom(
       targetTeam: targetTeam || "Any",
       slotId: slotId || undefined,
     });
+
+    if (result && typeof result === "object" && result.ok === false) {
+      return {
+        ok: false,
+        code: "code" in result && typeof result.code === "string" ? result.code : undefined,
+        message: String(result.message || "Failed to send request"),
+      };
+    }
 
     return {
       ok: true,

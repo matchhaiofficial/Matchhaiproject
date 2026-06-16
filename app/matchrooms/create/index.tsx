@@ -37,6 +37,10 @@ import type { Team } from "../../../src/services/convex/teamService";
 import {
   getUserTeamsForGame,
 } from "../../../src/services/convex/teamService";
+import {
+  MATCHROOM_MIN_LEAD_MS,
+  validateMatchroomScheduleWindow,
+} from "../../../src/constants/timing";
 import type { UserProfile } from "../../../src/services/userService";
 import {
   getUserProfile,
@@ -558,10 +562,8 @@ export default function CreateMatchroom() {
       d.setDate(d.getDate() + 1);
       return d;
     }
-    // Solo player matchroom: at least 3 days in advance.
-    d.setMinutes(0, 0, 0);
-    d.setDate(d.getDate() + 3);
-    return d;
+    // Player matchroom: exact 72-hour lead time, including minutes.
+    return new Date(Date.now() + MATCHROOM_MIN_LEAD_MS);
   }, [isZoneWalkInAdmin]);
   const minAllowedDateLabel = useMemo(
     () =>
@@ -588,7 +590,7 @@ export default function CreateMatchroom() {
     }
     const scheduledStart = new Date(`${formData.date}T${formData.time}`);
     if (isNaN(scheduledStart.getTime())) return false;
-    return scheduledStart.getTime() >= minAllowedDate.getTime();
+    return validateMatchroomScheduleWindow(scheduledStart.getTime(), Date.now()).ok;
   }, [formData.date, formData.time, isZoneWalkInAdmin, minAllowedDate]);
 
   useEffect(() => {

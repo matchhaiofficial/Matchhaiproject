@@ -410,7 +410,7 @@ export async function fetchZoneBookingQueuePage(input: {
         page,
         isDone: Boolean(result?.isDone),
         continueCursor: result?.continueCursor ?? null,
-        total: Number(result?.total || page.length),
+        total: Number(result?.total ?? page.length),
     };
 }
 
@@ -438,7 +438,7 @@ export async function fetchZoneMatchroomsPage(input: {
         page,
         isDone: Boolean(result?.isDone),
         continueCursor: result?.continueCursor ?? null,
-        total: Number(result?.total || page.length),
+        total: Number(result?.total ?? page.length),
     };
 }
 

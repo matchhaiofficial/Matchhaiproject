@@ -55,6 +55,14 @@ function matchroomCreateFailure(message: string, code: string) {
   } as const;
 }
 
+function matchroomJoinFailure(message: string, code: string) {
+  return {
+    ok: false,
+    message,
+    code,
+  } as const;
+}
+
 function isMatchroomCreateFailureResult(value: any) {
   return Boolean(value && typeof value === "object" && value.ok === false);
 }
@@ -876,6 +884,15 @@ function getRoomLockAtMs(room: any) {
 export function isJoinLocked(room: any, now = Date.now()): boolean {
   if (!room || room.status === "cancelled" || room.status === "expired") return true;
   if (isRosterFull(room)) return true;
+  if (
+    room.status === "locked" ||
+    room.isLocked === true ||
+    room.venueConfirmedAt ||
+    room.confirmedZoneId ||
+    room.zoneAdminApproved === true
+  ) {
+    return true;
+  }
   const lockAt = getRoomLockAtMs(room);
   return typeof lockAt === "number" && lockAt <= now;
 }
@@ -4534,8 +4551,18 @@ export const requestToJoinMatchroom = mutation({
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
 
-    if (isRoomExpired(room)) throw new Error("This matchroom has expired.");
-    if (isJoinLocked(room)) throw new Error("This matchroom is locked.");
+    if (isRoomExpired(room)) {
+      return matchroomJoinFailure("This matchroom has expired.", "MATCHROOM_EXPIRED");
+    }
+    if (isRosterFull(room)) {
+      return matchroomJoinFailure("This matchroom is full.", "MATCHROOM_FULL");
+    }
+    if (isJoinLocked(room)) {
+      return matchroomJoinFailure(
+        "This matchroom is locked and no longer accepting join requests.",
+        "MATCHROOM_LOCKED",
+      );
+    }
     if (room.playerUids.includes(actorUid)) throw new Error("You are already in this matchroom.");
     const now = Date.now();
     const role = args.role || "Player";

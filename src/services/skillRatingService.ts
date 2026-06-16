@@ -3,6 +3,7 @@ import { convex } from '../lib/convex';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { SKILL_ASSESSMENT_CONFIG } from '../constants/skillQuestions';
+import { getUserFacingErrorMessage } from '../utils/userFacingErrors';
 import type { UserProfile } from './convex/userService';
 
 // ═══════════════════════════════════════════════════════════════
@@ -10,6 +11,10 @@ import type { UserProfile } from './convex/userService';
 // ═══════════════════════════════════════════════════════════════
 
 export type SkillTier = 'Beginner' | 'Casual' | 'Intermediate' | 'Advanced' | 'Pro' | 'Elite';
+
+export type SaveSelfAssessmentResult =
+    | { ok: true; rating: number; tier: SkillTier }
+    | { ok: false; message: string };
 
 export interface GameSkillScore {
     // Current rating (0-100) — UI projection of the server ELO.
@@ -297,11 +302,16 @@ export async function saveSelfAssessment(
     uid: string,
     gameKey: GameKey,
     answers: Record<string, number>
-): Promise<{ ok: boolean; rating?: number; tier?: SkillTier }> {
+): Promise<SaveSelfAssessmentResult> {
     try {
         const canonicalGameKey = getCanonicalGameKey(gameKey);
         const result = calculateScoreFromAnswers(canonicalGameKey, answers);
-        if (!result) return { ok: false };
+        if (!result) {
+            return {
+                ok: false,
+                message: "Please answer every skill question before continuing.",
+            };
+        }
 
         const normalizedRating = clampRating(result.rating);
         const normalizedTier = result.tier;
@@ -328,7 +338,13 @@ export async function saveSelfAssessment(
 
     } catch (error) {
         console.error('[skillRatingService] saveSelfAssessment error:', error);
-        return { ok: false };
+        return {
+            ok: false,
+            message: getUserFacingErrorMessage(
+                error,
+                "Could not save your skill check. Please try again.",
+            ),
+        };
     }
 }
 

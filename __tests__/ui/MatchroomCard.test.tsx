@@ -68,6 +68,23 @@ describe("MatchroomCard", () => {
     expect(screen.getByText("FULL")).toBeTruthy();
   });
 
+  it("hides the Request button when the room is full", () => {
+    const full = makeCardRoom({
+      maxPlayers: 2,
+      currentPlayers: 2,
+      slotsA: [{ slotId: "a1", status: "confirmed", uid: "u1" }],
+      slotsB: [{ slotId: "b1", status: "confirmed", uid: "u2" }],
+    });
+    render(<MatchroomCard room={full} onJoinPress={jest.fn()} />);
+    expect(screen.queryByText("Request")).toBeNull();
+  });
+
+  it("hides the Request button when the room is locked", () => {
+    render(<MatchroomCard room={makeCardRoom({ status: "locked" })} onJoinPress={jest.fn()} />);
+    expect(screen.getByText("LOCKED")).toBeTruthy();
+    expect(screen.queryByText("Request")).toBeNull();
+  });
+
   it("shows an EXPIRED badge for an unfilled room past its schedule", () => {
     render(<MatchroomCard room={makeCardRoom({ scheduledDate: PAST, scheduledTime: "10:00" })} />);
     expect(screen.getByText("EXPIRED")).toBeTruthy();
