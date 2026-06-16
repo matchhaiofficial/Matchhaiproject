@@ -1,6 +1,6 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import { requireKycVerified } from "./kycGate";
@@ -114,6 +114,41 @@ async function validateBookableResources(
   }
 
   return resources;
+}
+
+async function requireOwnedZoneForResourceAllocation(
+  ctx: MutationCtx,
+  zoneId: Id<"zones">,
+) {
+  const { profile } = await requireKycVerified(ctx);
+  if (!profile) {
+    throw new Error("Signed-in user profile not found.");
+  }
+
+  const zone = await ctx.db.get(zoneId);
+  if (!zone) {
+    throw new Error("Zone not found.");
+  }
+  if (String(zone.ownerUid || "") !== String(profile._id)) {
+    throw new Error("You are not authorized to manage this zone.");
+  }
+
+  return { actorUid: String(profile._id), zone };
+}
+
+function assertRequestCanBeAllocated(
+  request: Doc<"bookingRequests"> | null,
+  zoneId: Id<"zones">,
+): asserts request is Doc<"bookingRequests"> & { matchroomId: Id<"matchrooms"> } {
+  if (!request) {
+    throw new Error("Booking request not found.");
+  }
+  if (String(request.zoneId || "") !== String(zoneId)) {
+    throw new Error("This booking request does not belong to this zone.");
+  }
+  if (String(request.status || "") !== "accepted" || !request.matchroomId) {
+    throw new Error("Only accepted bookings with a matchroom can be allocated.");
+  }
 }
 
 // Update resource lifecycle status
@@ -269,27 +304,32 @@ export const allocateResourcesToRequest = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { actorUid, zone } = await requireOwnedZoneForResourceAllocation(ctx, args.zoneId);
     if (args.resourceIds.length === 0) {
       throw new Error("Select at least one resource.");
     }
 
     const now = Date.now();
+    const request = await ctx.db.get(args.requestId);
+    assertRequestCanBeAllocated(request, args.zoneId);
+    if (request.allocatedResourceIds?.length) {
+      throw new Error("Resources are already allocated. Use reassignment instead.");
+    }
+
     await validateBookableResources(ctx, {
       zoneId: String(args.zoneId),
       branchId: args.branchId,
       resourceIds: args.resourceIds,
     });
-    const request = await ctx.db.get(args.requestId);
 
     // Update each resource to booked status
     for (const resourceId of args.resourceIds) {
       await ctx.db.patch(resourceId, {
         lifecycleStatus: "booked",
         bookingRequestId: args.requestId,
-        matchroomId: request?.matchroomId,
+        matchroomId: request.matchroomId,
         bookedAt: now,
-        bookedByUid: args.adminUid,
+        bookedByUid: actorUid,
         updatedAt: now,
       });
     }
@@ -300,10 +340,19 @@ export const allocateResourcesToRequest = mutation({
       allocatedBranchId: args.branchId,
       allocatedResourceIds: args.resourceIds,
       allocatedAt: now,
-      allocatedByUid: args.adminUid,
+      allocatedByUid: actorUid,
       updatedAt: now,
     });
-    if (request?.userId) {
+    await ctx.db.patch(request.matchroomId, {
+      zoneId: String(args.zoneId),
+      zoneOwnerUid: String(zone.ownerUid || actorUid),
+      branchId: args.branchId,
+      resourceIds: args.resourceIds,
+      bookingSource: "zone_accepted",
+      zoneAdminApproved: true,
+      updatedAt: now,
+    });
+    if (request.userId) {
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "resource.allocation_action",
         toUid: request.userId,
@@ -342,7 +391,7 @@ export const allocateResourcesToRequest = mutation({
       zoneId: String(args.zoneId),
       module: "resources",
       action: "allocate_resources",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Allocated ${args.resourceIds.length} resource(s) to booking request.`,
@@ -350,7 +399,7 @@ export const allocateResourcesToRequest = mutation({
         branchId: args.branchId,
         resourceIds: args.resourceIds.map(String),
         resources: resourceSummaries,
-        requestUserId: request?.userId ? String(request.userId) : null,
+        requestUserId: String(request.userId),
       },
       createdAt: now,
     });
@@ -368,19 +417,14 @@ export const reassignResourcesForRequest = mutation({
     adminUid: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { actorUid, zone } = await requireOwnedZoneForResourceAllocation(ctx, args.zoneId);
     if (!args.newResourceIds.length) {
       throw new Error("Select at least one resource.");
     }
 
     const now = Date.now();
     const request = await ctx.db.get(args.requestId);
-    if (!request) {
-      throw new Error("Booking request not found.");
-    }
-    if (String(request.status || "") !== "accepted" || !request.matchroomId) {
-      throw new Error("Only accepted bookings with a matchroom can be reassigned.");
-    }
+    assertRequestCanBeAllocated(request, args.zoneId);
 
     await validateBookableResources(ctx, {
       zoneId: String(args.zoneId),
@@ -413,7 +457,7 @@ export const reassignResourcesForRequest = mutation({
         bookingRequestId: args.requestId,
         matchroomId: request.matchroomId,
         bookedAt: now,
-        bookedByUid: args.adminUid,
+        bookedByUid: actorUid,
         updatedAt: now,
       });
     }
@@ -422,13 +466,17 @@ export const reassignResourcesForRequest = mutation({
       allocatedBranchId: args.branchId,
       allocatedResourceIds: args.newResourceIds,
       allocatedAt: now,
-      allocatedByUid: args.adminUid,
+      allocatedByUid: actorUid,
       updatedAt: now,
     });
 
     await ctx.db.patch(request.matchroomId, {
+      zoneId: String(args.zoneId),
+      zoneOwnerUid: String(zone.ownerUid || actorUid),
       branchId: args.branchId,
       resourceIds: args.newResourceIds,
+      bookingSource: "zone_accepted",
+      zoneAdminApproved: true,
       updatedAt: now,
     });
 
@@ -436,7 +484,7 @@ export const reassignResourcesForRequest = mutation({
       zoneId: String(args.zoneId),
       module: "resources",
       action: "reassign_allocation",
-      actorUid: args.adminUid,
+      actorUid,
       targetType: "booking_request",
       targetId: String(args.requestId),
       summary: `Reassigned ${args.newResourceIds.length} resource(s) for booking request.`,

@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import React, { useEffect, useState } from "react";
@@ -35,19 +35,29 @@ export default function BookingStatusScreen() {
         orderRefNum?: string;
     };
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
+    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const { showToast } = useToast();
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [cancelling, setCancelling] = useState(false);
     const [refreshingPayment, setRefreshingPayment] = useState(false);
 
+    const hasPaymentRouteContext = Boolean(
+        orderRefNum || gateway === "easypaisa" || paymentStatusParam === "pending"
+    );
+    const protectedIntentReady = Boolean(
+        intentId && user?._id && !authLoading && !convexAuthLoading && isAuthenticated
+    );
+
     // Real-time query for booking intent (replaces onSnapshot)
     const intentData = useQuery(api.bookings.getIntentById,
-        intentId ? { intentId: intentId as Id<"bookingIntents"> } : "skip"
+        protectedIntentReady ? { intentId: intentId as Id<"bookingIntents"> } : "skip"
     );
     const syncCheckoutStatus = useAction((api as any).easypaisa.syncTransactionStatus);
     const intent = intentData as BookingIntent | null | undefined;
     const activeOrderRefNum = orderRefNum || intent?.activePaymentOrderRefNum;
+    const hasEasypaisaAttempt = Boolean(activeOrderRefNum);
+    const hasPaymentRecoveryContext = hasPaymentRouteContext || hasEasypaisaAttempt;
     const checkoutStatus = useQuery(
         api.easypaisa.getCheckoutStatus,
         user?._id && activeOrderRefNum
@@ -58,18 +68,11 @@ export default function BookingStatusScreen() {
         api.matchrooms.getById,
         intent?.matchroomId ? { matchroomId: String(intent.matchroomId) } : "skip"
     ) as any;
+    const intentIsCompleted = intent?.status === "confirmed";
     const settlementSummary = useQuery(
         (api as any).matchrooms.getSettlementSummary,
-        intent?.matchroomId ? { matchroomId: intent.matchroomId as Id<"matchrooms"> } : "skip",
+        intentIsCompleted && intent?.matchroomId ? { matchroomId: intent.matchroomId as Id<"matchrooms"> } : "skip",
     ) as any;
-
-    // Handle not found
-    useEffect(() => {
-        if (intentData === null) {
-            showToast({ type: "error", title: "Error", message: "Booking request not found." });
-            router.replace("/matchrooms" as any);
-        }
-    }, [intentData, router, showToast]);
 
     // Calculate time left when intent data changes
     useEffect(() => {
@@ -174,9 +177,132 @@ export default function BookingStatusScreen() {
         }
     };
 
+    const checkoutState = String(checkoutStatus?.status || "");
+    const checkoutIsActive = ["created", "redirected", "token_received", "pending"].includes(checkoutState);
+
+    const renderPaymentRecovery = () => {
+        const title =
+            checkoutState === "paid"
+                ? "Payment Received"
+                : ["failed", "expired", "cancelled"].includes(checkoutState)
+                    ? "Payment not completed"
+                    : "Payment Processing";
+        const message =
+            checkoutState === "paid"
+                ? "MatchHai received your Easypaisa payment update and is completing the booking check."
+                : ["failed", "expired", "cancelled"].includes(checkoutState)
+                    ? "This Easypaisa attempt did not complete. You can refresh once or contact support with the order number."
+                    : "Please stay on this screen while MatchHai verifies your Easypaisa payment.";
+
+        return (
+            <Screen
+                style={styles.container}
+                variant="stack"
+                scroll={false}
+                edges={["top", "bottom"]}
+                contentStyle={styles.screenContent}
+            >
+                <AppHeader title="Booking Status" onBack={() => router.back()} inlineTitle />
+                <View style={styles.body}>
+                    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+                        <AppCard variant="elevated" style={styles.statusDisplay}>
+                            <View style={styles.statusIconBg}>
+                                {checkoutState === "paid" ? (
+                                    <AppIcon name="check-circle" size={60} color={COLORS.success} />
+                                ) : ["failed", "expired", "cancelled"].includes(checkoutState) ? (
+                                    <AppIcon name="error" size={60} color={COLORS.error} />
+                                ) : checkoutStatus === undefined ? (
+                                    <ActivityIndicator size="large" color={COLORS.accent} />
+                                ) : (
+                                    <AppIcon name="hourglass-top" size={60} color={COLORS.warning} />
+                                )}
+                            </View>
+                            <Text style={styles.statusTitle}>{title}</Text>
+                            <StatusPill
+                                tone={
+                                    checkoutState === "paid"
+                                        ? "success"
+                                        : ["failed", "expired", "cancelled"].includes(checkoutState)
+                                            ? "danger"
+                                            : "warning"
+                                }
+                                label={checkoutState ? checkoutState.replace(/_/g, " ") : "Verifying"}
+                                style={styles.statusPill}
+                            />
+                        </AppCard>
+
+                        <DetailSectionCard title="Payment" style={styles.sectionCardSpacing}>
+                            <Text style={styles.expiredHint}>{message}</Text>
+                            {activeOrderRefNum ? (
+                                <DetailKeyValueRow
+                                    label="Order"
+                                    value={activeOrderRefNum}
+                                    style={styles.orderRow}
+                                    labelStyle={styles.orderLabel}
+                                    valueStyle={styles.orderValue}
+                                />
+                            ) : null}
+                            <Text style={styles.expiredHint}>{PAYMENT_SUPPORT_WITH_ORDER_HINT}</Text>
+                        </DetailSectionCard>
+                    </ScrollView>
+                </View>
+                <BottomActionBar contentStyle={styles.bottomActionContent}>
+                    <View style={styles.footer}>
+                        {activeOrderRefNum && user?._id ? (
+                            <AppButton
+                                size="lg"
+                                onPress={() => void handleRefreshPaymentStatus()}
+                                loading={refreshingPayment}
+                                disabled={refreshingPayment}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                                <Text style={styles.primaryBtnText}>Refresh Payment Status</Text>
+                                {!refreshingPayment ? <AppIcon name="refresh" size={20} color="#FFF" /> : null}
+                            </AppButton>
+                        ) : null}
+                        <AppButton
+                            variant="secondary"
+                            onPress={() => router.push("/(player)/support" as any)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Text style={styles.secondaryBtnText} numberOfLines={1}>Contact Support</Text>
+                        </AppButton>
+                    </View>
+                </BottomActionBar>
+            </Screen>
+        );
+    };
+
+    const renderNotFound = () => (
+        <Screen
+            style={styles.container}
+            variant="stack"
+            scroll={false}
+            edges={["top", "bottom"]}
+            contentStyle={styles.screenContent}
+        >
+            <AppHeader title="Booking Status" onBack={() => router.back()} inlineTitle />
+            <View style={styles.loadingContainer}>
+                <AppIcon name="error" size={60} color={COLORS.error} />
+                <Text style={styles.statusTitle}>Booking not found</Text>
+                <Text style={styles.expiredHint}>
+                    We could not find this booking request. It may have expired or been cancelled.
+                </Text>
+                <AppButton
+                    variant="secondary"
+                    onPress={() => router.replace(buildLegacyMatchroomsHref() as any)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.notFoundAction}
+                >
+                    <Text style={styles.secondaryBtnText}>Back to Matchrooms</Text>
+                </AppButton>
+            </View>
+        </Screen>
+    );
+
     const loading = intent === undefined;
 
-    if (loading && !cancelling) {
+    if (loading && !cancelling && !hasPaymentRecoveryContext) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator color={COLORS.accent} size="large" />
@@ -184,7 +310,17 @@ export default function BookingStatusScreen() {
         );
     }
 
-    if (!intent) return null;
+    if (!intent) {
+        if (hasPaymentRecoveryContext) return renderPaymentRecovery();
+        if (loading) {
+            return (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator color={COLORS.accent} size="large" />
+                </View>
+            );
+        }
+        return renderNotFound();
+    }
 
     const isPendingApproval = intent.status === 'pending_approvals';
     const isApproved = intent.status === 'approved_pending_payment';
@@ -192,10 +328,8 @@ export default function BookingStatusScreen() {
     const isRejected = intent.status === 'rejected';
     const isExpired = intent.status === 'expired';
     const isCancelled = intent.status === 'cancelled';
-    const checkoutState = String(checkoutStatus?.status || "");
-    const hasEasypaisaAttempt = Boolean(activeOrderRefNum);
-    const isCheckoutPending = ["created", "redirected", "token_received", "pending"].includes(checkoutState);
-    const isLoadingActivePayment = Boolean(intent.activePaymentOrderRefNum && checkoutStatus === undefined);
+    const isCheckoutPending = checkoutIsActive;
+    const isLoadingActivePayment = Boolean(activeOrderRefNum && checkoutStatus === undefined);
     const isGatewayPending = hasEasypaisaAttempt
         && !isCompleted
         && (

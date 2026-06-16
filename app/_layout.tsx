@@ -60,6 +60,7 @@ import AuthProvider from "../src/context/AuthContext";
 import AppErrorBoundary from "../src/components/AppErrorBoundary";
 import { initMonitoring } from "../src/lib/monitoring";
 import NotificationRuntimeBridge from "../src/components/NotificationRuntimeBridge";
+import PresenceRuntimeBridge from "../src/components/PresenceRuntimeBridge";
 import PushRegistrationBridge from "../src/components/PushRegistrationBridge";
 import MatchResultGate from "../src/components/MatchResultGate";
 import AuthenticatedConvexProvider from "../src/providers/AuthenticatedConvexProvider";
@@ -197,6 +198,9 @@ export default function RootLayout() {
               <StatusBar style="light" translucent backgroundColor="transparent" />
               <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
                 <NotificationRuntimeBridge />
+              </AppErrorBoundary>
+              <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
+                <PresenceRuntimeBridge />
               </AppErrorBoundary>
               <AppErrorBoundary autoRetry maxAutoRetries={2} fallback={() => null}>
                 <PushRegistrationBridge />

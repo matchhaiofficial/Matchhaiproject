@@ -20,6 +20,7 @@ import { GameKey, GameSkillScore } from "../services/skillRatingService";
 import { getUserProfile, getUserSportRoleLabel } from "../services/userService";
 import { isUserFullyVerified, showKycVerificationRequiredAlert } from "../utils/verificationGate";
 import { Perf, PerfScope } from "../utils/perfInstrumentation";
+import { getMatchroomJoinAvailability } from "../utils/matchroomLifecycle";
 
 type StartJoinArgs = {
   room: Matchroom;
@@ -147,6 +148,21 @@ export function useMatchroomJoinFlow() {
           if (!isUserFullyVerified(authUser, user)) {
             showToastRef.current({ type: "warning", title: "Verify your identity", message: "Please complete CNIC & face verification to unlock MatchHai features." });
             showKycVerificationRequiredAlert();
+            return "blocked";
+          }
+
+          const joinAvailability = getMatchroomJoinAvailability(args.room);
+          if (!joinAvailability.available) {
+            showToastRef.current({
+              type: "warning",
+              title:
+                joinAvailability.code === "full"
+                  ? "Matchroom full"
+                  : joinAvailability.code === "locked"
+                    ? "Matchroom locked"
+                    : "Cannot join matchroom",
+              message: joinAvailability.message,
+            });
             return "blocked";
           }
 

@@ -16,6 +16,8 @@ import { COLORS } from "../../../../src/theme";
 
 type Props = {
   walkInRooms: ZoneMatchroomListItem[];
+  total: number;
+  loading?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
   processingAction: "accept" | "reject" | "counter" | null;
@@ -39,6 +41,8 @@ const WalkinRow = React.memo(function WalkinRow({
 
 export function ZoneBookingsWalkinsSection({
   walkInRooms,
+  total,
+  loading = false,
   loadingMore = false,
   onLoadMore,
   processingAction,
@@ -70,15 +74,19 @@ export function ZoneBookingsWalkinsSection({
             </AppButton>
           </AppCard>
 
-          <AdminSectionHeader title="Existing Walk-ins" subtitle={`${walkInRooms.length}`} compact />
+          <AdminSectionHeader title="Existing Walk-ins" subtitle={`${total}`} compact />
         </>
       }
       ListEmptyComponent={
-        <AdminEmptyStateCard
-          title="No walk-in matchrooms yet."
-          description="Created walk-in sessions will appear here."
-          icon="matchroom"
-        />
+        loading ? (
+          <ActivityIndicator size="small" color={COLORS.accent} />
+        ) : (
+          <AdminEmptyStateCard
+            title="No walk-in matchrooms yet."
+            description="Created walk-in sessions will appear here."
+            icon="matchroom"
+          />
+        )
       }
       ListFooterComponent={
         loadingMore ? (

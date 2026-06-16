@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { getStrictAuthenticatedUserId } from "./chatAuth";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { markUserPresent } from "./presence";
 
 // ============================================
 // TEAM CHAT (private, members-only)
@@ -211,6 +212,8 @@ export const sendMessage = mutation({
   handler: async (ctx, args) => {
     const state = await requireTeamMember(ctx, args.teamId);
     const now = Date.now();
+    await markUserPresent(ctx, state.userId, now);
+
     const messageType = args.type || (args.audioStorageId ? "voice" : args.attachment ? "image" : "text");
 
     const text = String(args.text || "").slice(0, 4000);

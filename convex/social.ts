@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "./_generated/api";
 import { isUserDeleted, isUserHiddenFromPublic } from "./userVisibility";
+import { isRecentlyPresent } from "./presence";
 
 function doesUserPlayGame(friend: any, game: string) {
   switch (game) {
@@ -44,7 +45,6 @@ export const listFriends = query({
 
     // Get friend user data
     const now = Date.now();
-    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
     const friends = await Promise.all(
       friendships.map(async (f) => {
         const friend = await ctx.db.get(f.friendId);
@@ -58,7 +58,8 @@ export const listFriends = query({
               username: f.friendUsername,
               fullName: friend.fullName,
               photoURL: friend.photoURL,
-              isOnline: !!(friend.isOnline && friend.lastActiveAt && (now - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS),
+              isOnline: isRecentlyPresent(friend, now),
+              lastActiveAt: friend.lastActiveAt ?? null,
               playsCs2: !!friend.playsCs2,
               playsCs16: !!friend.playsCs16,
               playsValorant: !!friend.playsValorant,
@@ -91,7 +92,6 @@ export const listFriendsForGame = query({
       .collect();
 
     const now = Date.now();
-    const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000;
     const friends = await Promise.all(
       friendships.map(async (f) => {
         const friend = await ctx.db.get(f.friendId);
@@ -126,7 +126,8 @@ export const listFriendsForGame = query({
           username: f.friendUsername,
           fullName: friend.fullName,
           photoURL: friend.photoURL,
-          isOnline: !!(friend.isOnline && friend.lastActiveAt && (now - friend.lastActiveAt) < PRESENCE_TIMEOUT_MS),
+          isOnline: isRecentlyPresent(friend, now),
+          lastActiveAt: friend.lastActiveAt ?? null,
           inTeam,
           teamName,
           playsCs2: !!friend.playsCs2,

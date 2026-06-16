@@ -26,6 +26,7 @@
     "android": {
       "package": "com.ovaisto.matchhai",
       "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
         "RECORD_AUDIO",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"

@@ -270,6 +270,7 @@ export default function ZoneResourcesModule() {
     const params = useLocalSearchParams<{
         branchId?: string | string[];
         requestId?: string | string[];
+        matchroomId?: string | string[];
         resourceId?: string | string[];
     }>();
     const { user } = useAuth();
@@ -306,6 +307,7 @@ export default function ZoneResourcesModule() {
     const migrationReady = isZoneMigrationReady(zone);
     const deepBranchId = Array.isArray(params.branchId) ? params.branchId[0] : params.branchId;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
+    const deepMatchroomId = Array.isArray(params.matchroomId) ? params.matchroomId[0] : params.matchroomId;
     const deepResourceId = Array.isArray(params.resourceId) ? params.resourceId[0] : params.resourceId;
 
     const legacyBranches = useMemo(
@@ -456,13 +458,17 @@ export default function ZoneResourcesModule() {
 
     useEffect(() => {
         setSelectedRequestId((prev) => {
-            if (prev && queue.some((item) => item.id === prev)) return prev;
             if (deepRequestId && queue.some((item) => item.id === deepRequestId)) {
                 return deepRequestId;
             }
+            if (deepMatchroomId) {
+                const linkedRequest = queue.find((item) => item.matchroomId === deepMatchroomId);
+                if (linkedRequest) return linkedRequest.id;
+            }
+            if (prev && queue.some((item) => item.id === prev)) return prev;
             return queue[0]?.id || null;
         });
-    }, [deepRequestId, queue]);
+    }, [deepMatchroomId, deepRequestId, queue]);
 
     useEffect(() => {
         if (!deepResourceId) return;

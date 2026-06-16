@@ -15,7 +15,6 @@ import type { ChatThreadMessage } from "../../src/features/chat/types";
 import { formatChatPresenceLabel, formatVoiceDuration, useRelativeNow } from "../../src/features/chat/utils";
 import { useAuth } from "../../src/context/AuthContext";
 import { useChatTyping } from "../../src/hooks/useChatTyping";
-import { usePresenceHeartbeat } from "../../src/hooks/usePresenceHeartbeat";
 import { useRouteLogger } from "../../src/hooks/useRouteLogger";
 import { useToast } from "../../src/hooks/useToast";
 import { submitTeamChallengeChatMessageReport } from "../../src/services/convex/reportService";
@@ -95,9 +94,6 @@ export default function TeamChallengeChatScreen() {
 
     // Typing indicator
     const { typingNames, onInputActivity } = useChatTyping(chatId);
-
-    // Presence heartbeat
-    usePresenceHeartbeat(Boolean(user?._id));
 
     const loading =
         !!chatId &&

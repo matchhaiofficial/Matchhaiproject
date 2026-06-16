@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import { useMinuteTicker } from "../../../../src/hooks/useMinuteTicker";
 import {
   type ZoneBookingQueueItem,
-  type ZoneMatchroomListItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
 import { toLocalDateString } from "../../../../src/utils/scheduleTime";
 
@@ -16,7 +15,6 @@ type RequestStatusFilter = "all" | "open" | "pending_payment";
 type Params = {
   zone: any;
   queue: ZoneBookingQueueItem[];
-  matchrooms: ZoneMatchroomListItem[];
   gameFilter: GameFilter;
   timeOfDayFilter: TimeOfDayFilter;
   dateRangeFilter: DateRangeFilter;
@@ -182,7 +180,6 @@ export const isSameDay = (left?: Date | null, right?: Date | null) =>
 export function useZoneBookingsViewModel({
   zone,
   queue,
-  matchrooms,
   gameFilter,
   timeOfDayFilter,
   dateRangeFilter,
@@ -213,16 +210,6 @@ export function useZoneBookingsViewModel({
     const primary = branches.find((item: any) => item?.isPrimary);
     return primary || branches[0] || null;
   }, [zone?.branches]);
-
-  const walkInCount = useMemo(
-    () => matchrooms.filter((item) => item.bookingSource === "walkin").length,
-    [matchrooms],
-  );
-
-  const walkInRooms = useMemo(
-    () => matchrooms.filter((item) => item.bookingSource === "walkin"),
-    [matchrooms],
-  );
 
   const combinedQueue = queue;
 
@@ -317,8 +304,6 @@ export function useZoneBookingsViewModel({
   return {
     branchAreas,
     primaryBranch,
-    walkInCount,
-    walkInRooms,
     combinedQueue,
     filteredQueue,
     selectedRequest,

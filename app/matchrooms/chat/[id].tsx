@@ -15,7 +15,6 @@ import type { ChatThreadMessage } from "../../../src/features/chat/types";
 import { formatVoiceDuration } from "../../../src/features/chat/utils";
 import { useAuth } from "../../../src/context/AuthContext";
 import { useChatTyping } from "../../../src/hooks/useChatTyping";
-import { usePresenceHeartbeat } from "../../../src/hooks/usePresenceHeartbeat";
 import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useToast } from "../../../src/hooks/useToast";
 import { submitMatchroomChatMessageReport } from "../../../src/services/convex/reportService";
@@ -148,9 +147,6 @@ export default function MatchroomChatScreen() {
     // Typing indicator
     const chatKeyForTyping = chatroom?._id ? String(chatroom._id) : null;
     const { typingNames, onInputActivity } = useChatTyping(chatKeyForTyping);
-
-    // Presence heartbeat
-    usePresenceHeartbeat(Boolean(user?._id));
 
     const authorized = accessState?.status === "ok";
 

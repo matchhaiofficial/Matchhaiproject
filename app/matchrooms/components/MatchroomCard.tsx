@@ -6,7 +6,7 @@ import { AppIcon } from "../../../src/components/AppIcon";
 import { useMinuteTicker } from "../../../src/hooks/useMinuteTicker";
 import { Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
-import { getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
+import { getMatchroomJoinAvailability, getRoomExpiresAt, getRoomLockAt, isRoomExpired, isRoomFull, isLeaveLocked } from "../../../src/utils/matchroomLifecycle";
 import { getPrimaryLocationLabel, isBroadcastVenuePending } from "../utils/matchroomLocationDisplay";
 import styles from "../matchrooms.styles";
 
@@ -100,7 +100,8 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     const statusLower = String((room as any).status || "").toLowerCase();
     const isCompleted = statusLower === "completed";
     const isCancelled = statusLower === "cancelled";
-    const isLocked = isLeaveLocked(room);
+    const joinAvailability = getMatchroomJoinAvailability(room);
+    const isLocked = joinAvailability.code === "locked" || isLeaveLocked(room);
     const isFull = isRoomFull(room);
     const isExpired = isRoomExpired(room);
     const nowMs = useMinuteTicker();
@@ -272,7 +273,7 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
                             <Text style={styles.joinedBtnText}>Joined</Text>
                         </View>
                     )}
-                    {!isJoined && !isRequested && onJoinPress && (room.status !== 'in-progress' && room.status !== 'completed') && (
+                    {!isJoined && !isRequested && onJoinPress && joinAvailability.available && (
                         <Pressable
                             style={({ pressed }) => [styles.requestBtn, pressed && localStyles.actionPressed, joining && { opacity: 0.6 }]}
                             onPress={(e) => {

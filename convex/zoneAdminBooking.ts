@@ -656,6 +656,10 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     typeof input.option.startAt === "number" && Number.isFinite(input.option.startAt)
       ? input.option.startAt
       : parseLocalDateTimeMillis(input.option.date, input.option.time);
+  const acceptedZoneId = offer.zoneId || request.zoneId;
+  if (!acceptedZoneId) {
+    throw new Error("Accepted counter-offer is missing its zone.");
+  }
 
   if (request.matchroomId) {
     await ctx.db.patch(request.matchroomId, {
@@ -663,6 +667,12 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
       scheduledTime: input.option.time,
       ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
       location: locationLabel,
+      locationMode: "zone",
+      zoneId: String(acceptedZoneId),
+      ...(offer.zoneOwnerUid ? { zoneOwnerUid: offer.zoneOwnerUid } : {}),
+      ...(offer.branchId ? { branchId: offer.branchId } : {}),
+      bookingSource: "zone_accepted",
+      zoneAdminApproved: true,
       updatedAt: now,
     });
     return request.matchroomId;
@@ -1133,6 +1143,40 @@ export const listBookingHistoryForZone = query({
   },
 });
 
+async function loadAcceptedRequestMatchroomFallbacks(ctx: any, zoneId: string) {
+  const acceptedRequests = await ctx.db
+    .query("bookingRequests")
+    .withIndex("by_zoneId_and_status", (q: any) =>
+      q.eq("zoneId", zoneId as any).eq("status", "accepted"),
+    )
+    .order("desc")
+    .take(200);
+
+  const directAcceptedRequests = acceptedRequests.filter(
+    (request: any) => request.requestKind !== "broadcast_fanout",
+  );
+  const linkedRooms = await Promise.all(
+    directAcceptedRequests.map((request: any) =>
+      request.matchroomId ? ctx.db.get(request.matchroomId).catch(() => null) : null,
+    ),
+  );
+
+  return linkedRooms
+    .map((room: any, index: number) => {
+      if (!room) return null;
+      const request = directAcceptedRequests[index];
+      return {
+        ...room,
+        zoneId,
+        bookingSource: "zone_accepted",
+        zoneAdminApproved: true,
+        branchId: room.branchId || request.allocatedBranchId || undefined,
+        resourceIds: room.resourceIds || request.allocatedResourceIds || undefined,
+      };
+    })
+    .filter(Boolean);
+}
+
 // List matchrooms for zone admin (by zoneId, ownerUid, location)
 export const listMatchroomsForZone = query({
   args: {
@@ -1166,6 +1210,15 @@ export const listMatchroomsForZone = query({
     byZone
       .filter(includeInAdminList)
       .forEach((m) => merged.set(String(m._id), { ...m, id: m._id }));
+
+    // Counter-offers accepted before the lifecycle metadata fix can still have
+    // a correctly linked accepted request but no zoneId on the player-created
+    // matchroom. Surface those rooms immediately; allocating resources persists
+    // the repaired metadata onto the matchroom.
+    const acceptedRequestFallbacks = await loadAcceptedRequestMatchroomFallbacks(ctx, args.zoneId);
+    acceptedRequestFallbacks
+      .filter(includeInAdminList)
+      .forEach((m: any) => merged.set(String(m._id), { ...m, id: m._id }));
 
     return Array.from(merged.values())
       .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -1208,7 +1261,16 @@ export const listMatchroomsPageForZone = query({
           .order("desc")
           .collect();
 
-    const rows = baseRows
+    const acceptedRequestFallbacks = await loadAcceptedRequestMatchroomFallbacks(ctx, args.zoneId);
+    const mergedRows = new Map<string, any>();
+    [...baseRows, ...acceptedRequestFallbacks].forEach((matchroom: any) => {
+      mergedRows.set(String(matchroom._id), matchroom);
+    });
+
+    const rows = Array.from(mergedRows.values())
+      .filter((matchroom: any) =>
+        !source || source === "all" || String(matchroom.bookingSource || "") === source
+      )
       .filter((matchroom: any) =>
         String(matchroom.zoneId || "") === args.zoneId &&
         (matchroom.bookingSource === "zone_accepted" ||
@@ -2141,6 +2203,7 @@ export const respondToCounterOffer = mutation({
 
       await ctx.db.patch(request._id, {
         status: "accepted",
+        zoneId: offer.zoneId,
         matchroomId,
         lifecycleStatus:
           acceptedResponses.length === recipientUids.length

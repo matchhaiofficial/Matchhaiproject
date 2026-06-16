@@ -162,7 +162,11 @@ export const getIntentById = query({
   handler: async (ctx, args) => {
     const intent = await ctx.db.get(args.intentId);
     if (!intent) return null;
-    await requireActorCanAccessIntent(ctx, intent);
+    try {
+      await requireActorCanAccessIntent(ctx, intent);
+    } catch {
+      return null;
+    }
     return serializeBookingIntent(intent);
   },
 });
