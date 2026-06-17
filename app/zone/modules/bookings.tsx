@@ -1109,8 +1109,8 @@ export default function ZoneBookingsModule() {
         }
         if (deepMatchroomId) {
             setFocusedMatchroomId(deepMatchroomId);
-            if (!deepRequestId) {
-                setSegment("requests");
+            if (!deepRequestId && deepSegment !== "history") {
+                setSegment("matchrooms");
             }
         }
     }, [deepMatchroomId, deepRequestId, deepSegment]);
@@ -1144,13 +1144,13 @@ export default function ZoneBookingsModule() {
     }, [deepMatchroomId, deepRequestId, selectedRequestId, zone?.id]);
 
     useEffect(() => {
-        if (!deepMatchroomId || !matchroomLookupDone || selectedRequestId) return;
+        if (!deepMatchroomId || !matchroomLookupDone || selectedRequestId || segment === "matchrooms") return;
         showToast({
             type: "warning",
             title: "No booking request linked",
             message: "This matchroom doesn't have a booking request linked yet. Please select one from the Requests list.",
         });
-    }, [deepMatchroomId, matchroomLookupDone, selectedRequestId, showToast]);
+    }, [deepMatchroomId, matchroomLookupDone, selectedRequestId, segment, showToast]);
 
     useEffect(() => {
         setSelectedRequestId((prev) => {

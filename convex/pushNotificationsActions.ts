@@ -4,12 +4,20 @@ import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { createSign } from "crypto";
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_ENDPOINT = "https://exp.host/--/api/v2/push/getReceipts";
 const EXPO_SEND_CHUNK_SIZE = 100;
 const EXPO_RECEIPT_CHUNK_SIZE = 1000;
 const RECEIPT_CHECK_DELAY_MS = 15 * 60 * 1000;
+const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+const FCM_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const FCM_TOKEN_CACHE_SKEW_MS = 60_000;
+const FCM_SEND_CHUNK_SIZE = 25;
+
+let cachedFcmAccessToken: { token: string; expiresAt: number } | null = null;
+let cachedFcmServiceAccount: FcmServiceAccount | null | undefined;
 
 type ExpoMessage = {
   to: string;
@@ -32,6 +40,20 @@ type ExpoSendSummary = {
   receiptIds: string[];
 };
 
+type FcmServiceAccount = {
+  projectId: string;
+  clientEmail: string;
+  privateKey: string;
+};
+
+type FcmSendTarget = {
+  deviceId: Id<"pushDevices">;
+  token: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+};
+
 const sanitizeExpoError = (value: unknown) => {
   const text = String(value || "").slice(0, 240);
   return text.replace(/ExponentPushToken\[[^\]]+\]/g, "ExponentPushToken[redacted]");
@@ -48,6 +70,246 @@ const chunkArray = <T,>(items: T[], size: number) => {
 const expoErrorCode = (item: any) => {
   return sanitizeExpoError(item?.details?.error || item?.message || "expo_push_error");
 };
+
+const normalizeStringValue = (value: unknown) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const base64UrlEncode = (value: string | Buffer) => {
+  return Buffer.from(value)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+};
+
+const decodePrivateKey = (value: string) => {
+  return value.replace(/\\n/g, "\n").trim();
+};
+
+function loadFcmServiceAccount(): FcmServiceAccount | null {
+  if (cachedFcmServiceAccount !== undefined) {
+    return cachedFcmServiceAccount;
+  }
+
+  const json = normalizeStringValue(process.env.FCM_SERVICE_ACCOUNT_JSON || "");
+  if (json) {
+    try {
+      const parsed = JSON.parse(json);
+      const projectId = normalizeStringValue(parsed.project_id || parsed.projectId || "");
+      const clientEmail = normalizeStringValue(parsed.client_email || parsed.clientEmail || "");
+      const privateKey = normalizeStringValue(parsed.private_key || parsed.privateKey || "");
+      if (projectId && clientEmail && privateKey) {
+        cachedFcmServiceAccount = {
+          projectId,
+          clientEmail,
+          privateKey: decodePrivateKey(privateKey),
+        };
+        return cachedFcmServiceAccount;
+      }
+    } catch {
+      // Fall back to the split env vars below.
+    }
+  }
+
+  const projectId = normalizeStringValue(process.env.FCM_PROJECT_ID || "");
+  const clientEmail = normalizeStringValue(process.env.FCM_CLIENT_EMAIL || "");
+  const privateKey = normalizeStringValue(process.env.FCM_PRIVATE_KEY || "");
+  if (!projectId || !clientEmail || !privateKey) {
+    cachedFcmServiceAccount = null;
+    return null;
+  }
+
+  cachedFcmServiceAccount = {
+    projectId,
+    clientEmail,
+    privateKey: decodePrivateKey(privateKey),
+  };
+  return cachedFcmServiceAccount;
+}
+
+function createSignedJwt(serviceAccount: FcmServiceAccount) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64UrlEncode(
+    JSON.stringify({
+      iss: serviceAccount.clientEmail,
+      scope: FCM_SCOPE,
+      aud: FCM_TOKEN_ENDPOINT,
+      iat: now,
+      exp: now + 3600,
+    })
+  );
+  const unsignedToken = `${header}.${claims}`;
+  const signer = createSign("RSA-SHA256");
+  signer.update(unsignedToken);
+  signer.end();
+  const signature = signer.sign(serviceAccount.privateKey);
+  return `${unsignedToken}.${base64UrlEncode(signature)}`;
+}
+
+async function getFcmAccessToken() {
+  const now = Date.now();
+  if (cachedFcmAccessToken && cachedFcmAccessToken.expiresAt - FCM_TOKEN_CACHE_SKEW_MS > now) {
+    return cachedFcmAccessToken.token;
+  }
+
+  const serviceAccount = loadFcmServiceAccount();
+  if (!serviceAccount) {
+    return null;
+  }
+
+  const assertion = createSignedJwt(serviceAccount);
+  const response = await fetch(FCM_TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const parsed = await response.json().catch(() => null);
+  const token = normalizeStringValue(parsed?.access_token || "");
+  const expiresInSeconds = Number(parsed?.expires_in || 3600);
+  if (!token) {
+    return null;
+  }
+
+  cachedFcmAccessToken = {
+    token,
+    expiresAt: now + Math.max(60, expiresInSeconds) * 1000,
+  };
+  return token;
+}
+
+function buildFcmDataPayload(data: Record<string, unknown>) {
+  const payload: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    const normalized = normalizeStringValue(value);
+    if (normalized.length > 0) {
+      payload[key] = normalized;
+    }
+  }
+  return payload;
+}
+
+async function sendFcmMessages(
+  ctx: any,
+  targets: FcmSendTarget[],
+  pushKind: "notification" | "chat",
+  notificationId?: Id<"notifications">
+): Promise<{ accepted: number; failed: number }> {
+  const summary = { accepted: 0, failed: 0 };
+  if (targets.length === 0) {
+    return summary;
+  }
+
+  const serviceAccount = loadFcmServiceAccount();
+  if (!serviceAccount) {
+    await Promise.all(
+      targets.map((target) =>
+        ctx.runMutation((internal as any).pushNotifications.markDeviceDeliveryResult, {
+          deviceId: target.deviceId,
+          delivered: false,
+          error: "fcm_service_account_missing",
+        })
+      )
+    );
+    return { accepted: 0, failed: targets.length };
+  }
+
+  const accessToken = await getFcmAccessToken();
+  if (!accessToken) {
+    await Promise.all(
+      targets.map((target) =>
+        ctx.runMutation((internal as any).pushNotifications.markDeviceDeliveryResult, {
+          deviceId: target.deviceId,
+          delivered: false,
+          error: "fcm_access_token_unavailable",
+        })
+      )
+    );
+    return { accepted: 0, failed: targets.length };
+  }
+
+  const sendUrl = `https://fcm.googleapis.com/v1/projects/${serviceAccount.projectId}/messages:send`;
+  for (const chunk of chunkArray(targets, FCM_SEND_CHUNK_SIZE)) {
+    await Promise.all(
+      chunk.map(async (target) => {
+        let response: Response;
+        let parsed: any = null;
+        try {
+          response = await fetch(sendUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              message: {
+                token: target.token,
+                notification: {
+                  title: target.title,
+                  body: target.body,
+                },
+                android: {
+                  priority: "HIGH",
+                  notification: {
+                    channelId: "default",
+                  },
+                },
+                apns: {
+                  payload: {
+                    aps: {
+                      sound: "default",
+                    },
+                  },
+                },
+                data: target.data,
+              },
+            }),
+          });
+          const rawText = await response.text();
+          try {
+            parsed = rawText ? JSON.parse(rawText) : null;
+          } catch {
+            parsed = null;
+          }
+        } catch {
+          response = new Response(null, { status: 599 });
+        }
+
+        if (!response.ok) {
+          summary.failed += 1;
+          await ctx.runMutation((internal as any).pushNotifications.markDeviceDeliveryResult, {
+            deviceId: target.deviceId,
+            delivered: false,
+            error: `fcm_http_${response.status}`,
+          });
+          return;
+        }
+
+        const messageName = normalizeStringValue(parsed?.name || "");
+        summary.accepted += 1;
+        await ctx.runMutation((internal as any).pushNotifications.markDeviceDeliveryResult, {
+          deviceId: target.deviceId,
+          delivered: true,
+          ticketId: messageName || undefined,
+        });
+      })
+    );
+  }
+
+  return summary;
+}
 
 async function sendExpoMessages(
   ctx: any,
@@ -166,6 +428,10 @@ const inferHref = (notification: any, accountType?: string) => {
       : "/zone/modules/bookings?segment=requests";
   }
   if (type === "booking.counter_offer_result") {
+    if (String(meta.decision || "").toLowerCase() === "accepted" && matchroomId) {
+      const requestParam = requestId ? `&requestId=${encodeURIComponent(requestId)}` : "";
+      return `/zone/modules/bookings?segment=matchrooms&matchroomId=${encodeURIComponent(matchroomId)}${requestParam}`;
+    }
     return requestId
       ? `/zone/modules/bookings?segment=requests&requestId=${encodeURIComponent(requestId)}&expandedRequestId=${encodeURIComponent(requestId)}&focusRequestId=${encodeURIComponent(requestId)}`
       : "/zone/modules/bookings?segment=requests";
@@ -208,6 +474,20 @@ const inferHref = (notification: any, accountType?: string) => {
 
   return "/(player)/inbox";
 };
+
+function buildNotificationData(notification: any, href: string) {
+  return buildFcmDataPayload({
+    href,
+    route: href,
+    notificationId: notification._id,
+    type: notification.type,
+    canonicalType: notification.type,
+    dedupeKey: notification.dedupeKey || "",
+    matchroomId: notification.matchroomId || notification.data?.matchroomId || "",
+    teamId: notification.teamId || notification.data?.teamId || "",
+    challengeId: notification.data?.challengeId || "",
+  });
+}
 
 export const sendForNotification = internalAction({
   args: {
@@ -263,38 +543,58 @@ export const sendForNotification = internalAction({
       const href = inferHref(notification, notification.recipientRole || recipient?.role || recipient?.accountType);
       const title = String(notification.title || "New update");
       const body = String(notification.body || "Open MatchHai to view details.");
-      const targets: ExpoSendTarget[] = devices.map((device: any) => ({
-        deviceId: device._id,
-        message: {
-          to: device.expoPushToken,
-          sound: "default",
-          title,
-          body,
-          channelId: "default",
-          priority: "high",
-          data: {
-            href,
-            route: href,
-            notificationId: notification._id,
-            type: notification.type,
-            dedupeKey: notification.dedupeKey || null,
-            matchroomId: notification.matchroomId || notification.data?.matchroomId || null,
-            teamId: notification.teamId || notification.data?.teamId || null,
-            challengeId: notification.data?.challengeId || null,
-          },
-        },
-      }));
+      const fcmTargets: FcmSendTarget[] = [];
+      const expoTargets: ExpoSendTarget[] = [];
 
-      const summary = await sendExpoMessages(ctx, targets, "notification", args.notificationId);
-      const accepted = summary.accepted > 0;
+      for (const device of devices) {
+        const effectiveToken = String(device.pushToken || device.expoPushToken || "").trim();
+        if (!effectiveToken) continue;
+        if (String(device.provider || "").toLowerCase() === "fcm") {
+          fcmTargets.push({
+            deviceId: device._id,
+            token: effectiveToken,
+            title,
+            body,
+            data: buildNotificationData(notification, href),
+          });
+        } else {
+          expoTargets.push({
+            deviceId: device._id,
+            message: {
+              to: effectiveToken,
+              sound: "default",
+              title,
+              body,
+              channelId: "default",
+              priority: "high",
+              data: {
+                href,
+                route: href,
+                notificationId: notification._id,
+                type: notification.type,
+                dedupeKey: notification.dedupeKey || null,
+                matchroomId: notification.matchroomId || notification.data?.matchroomId || null,
+                teamId: notification.teamId || notification.data?.teamId || null,
+                challengeId: notification.data?.challengeId || null,
+              },
+            },
+          });
+        }
+      }
+
+      const [fcmSummary, expoSummary] = await Promise.all([
+        sendFcmMessages(ctx, fcmTargets, "notification", args.notificationId),
+        sendExpoMessages(ctx, expoTargets, "notification", args.notificationId),
+      ]);
+      const accepted = fcmSummary.accepted + expoSummary.accepted > 0;
       await ctx.runMutation((internal as any).notifications.markPushState, {
         notificationId: args.notificationId,
         state: accepted ? "sent" : "failed",
         attemptedAt: now,
-        error: accepted ? undefined : "expo_push_delivery_failed",
+        error: accepted ? undefined : "push_delivery_failed",
       });
 
-      return { ok: accepted, sent: summary.accepted };
+      return { ok: accepted, sent: fcmSummary.accepted + expoSummary.accepted };
     } catch {
       await ctx.runMutation((internal as any).notifications.markPushState, {
         notificationId: args.notificationId,
@@ -321,7 +621,7 @@ export const sendChatPush = internalAction({
       return { ok: true, sent: 0 };
     }
 
-    const allDevices: Array<{ expoPushToken: string; _id: Id<"pushDevices"> }> = [];
+    const allDevices: Array<{ _id: Id<"pushDevices">; provider?: string; pushToken?: string; expoPushToken?: string }> = [];
 
     for (const recipientId of args.recipientUserIds) {
       // Check if this user has muted this chat
@@ -353,28 +653,57 @@ export const sendChatPush = internalAction({
       href = "/(player)/chatrooms";
     }
 
-    const targets: ExpoSendTarget[] = allDevices.map((device) => ({
-      deviceId: device._id,
-      message: {
-        to: device.expoPushToken,
-        sound: "default",
-        title: args.senderName,
-        body: args.messagePreview,
-        channelId: "default",
-        priority: "high",
-        data: {
-          href,
-          route: href,
-          type: "chat_message",
-          chatKey: args.chatKey,
-          matchroomId: args.matchroomId || null,
-          challengeId: args.challengeId || null,
-        },
-      },
-    }));
+    const fcmTargets: FcmSendTarget[] = [];
+    const expoTargets: ExpoSendTarget[] = [];
+    const messageData = buildFcmDataPayload({
+      href,
+      route: href,
+      type: "chat_message",
+      chatKey: args.chatKey,
+      matchroomId: args.matchroomId || "",
+      challengeId: args.challengeId || "",
+    });
 
-    const summary = await sendExpoMessages(ctx, targets, "chat");
-    return { ok: summary.accepted > 0, sent: summary.accepted };
+    for (const device of allDevices) {
+      const effectiveToken = String(device.pushToken || device.expoPushToken || "").trim();
+      if (!effectiveToken) continue;
+      if (String(device.provider || "").toLowerCase() === "fcm") {
+        fcmTargets.push({
+          deviceId: device._id,
+          token: effectiveToken,
+          title: args.senderName,
+          body: args.messagePreview,
+          data: messageData,
+        });
+      } else {
+        expoTargets.push({
+          deviceId: device._id,
+          message: {
+            to: effectiveToken,
+            sound: "default",
+            title: args.senderName,
+            body: args.messagePreview,
+            channelId: "default",
+            priority: "high",
+            data: {
+              href,
+              route: href,
+              type: "chat_message",
+              chatKey: args.chatKey,
+              matchroomId: args.matchroomId || null,
+              challengeId: args.challengeId || null,
+            },
+          },
+        });
+      }
+    }
+
+    const [fcmSummary, expoSummary] = await Promise.all([
+      sendFcmMessages(ctx, fcmTargets, "chat"),
+      sendExpoMessages(ctx, expoTargets, "chat"),
+    ]);
+    const sent = fcmSummary.accepted + expoSummary.accepted;
+    return { ok: sent > 0, sent };
   },
 });
 

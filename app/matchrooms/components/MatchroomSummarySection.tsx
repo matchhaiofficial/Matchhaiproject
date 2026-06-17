@@ -131,7 +131,7 @@ export function MatchroomSummarySection({
 
   return (
     <>
-      {canViewCheckIn && isLocked && qrValue ? (
+      {canViewCheckIn && qrValue ? (
         <View style={styles.qrCard}>
           <View style={styles.qrHeader}>
             <Text style={styles.qrTitle}>Matchroom QR</Text>

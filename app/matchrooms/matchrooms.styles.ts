@@ -319,22 +319,30 @@ export default StyleSheet.create({
     nearbyDistance: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+        minWidth: 0,
     },
     nearbyDistanceText: {
         color: COLORS.textSecondary,
         fontSize: 12,
         fontFamily: FONTS.interRegular,
         marginLeft: 4,
+        flexShrink: 1,
     },
     nearbyTime: {
         flexDirection: 'row',
         alignItems: 'center',
+        minWidth: 0,
+        flexShrink: 1,
+        justifyContent: 'flex-end',
     },
     nearbyTimeText: {
         color: COLORS.textSecondary,
         fontSize: 12,
         fontFamily: FONTS.interRegular,
         marginLeft: 4,
+        flexShrink: 1,
+        textAlign: 'right',
     },
     nearbyBottomRow: {
         flexDirection: 'row',

@@ -683,7 +683,7 @@ export default StyleSheet.create({
     },
     memberDialogContent: {
         paddingTop: SPACING.lg,
-        paddingBottom: SPACING.md,
+        paddingBottom: SPACING.lg + SPACING.sm,
         gap: SPACING.sm,
     },
     confirmationDialogContent: {

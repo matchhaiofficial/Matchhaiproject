@@ -1150,7 +1150,7 @@ export default function TeamDetails() {
                     subtitle="Choose an action for this teammate."
                     onClose={() => setMemberActionTarget(null)}
                 />
-                <AppModalBody contentContainerStyle={styles.memberDialogContent}>
+                <AppModalBody scroll contentContainerStyle={styles.memberDialogContent}>
                     <AppButton
                         variant="secondary"
                         onPress={() => {

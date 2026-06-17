@@ -91,6 +91,9 @@ export default StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.overlayLight,
   },
+  headerCentered: {
+    alignItems: "center",
+  },
   headerTight: {
     paddingTop: SPACING.md,
   },

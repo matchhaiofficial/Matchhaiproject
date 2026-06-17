@@ -290,6 +290,16 @@ export default function ZoneNotificationsModule() {
         const meta = item.data || {};
         const type = String(item.type || "").toLowerCase();
         const requestId = String(meta.requestId || meta.requestRef || "").trim();
+        const matchroomId = String(meta.matchroomId || item.matchroomId || "").trim();
+        const counterOfferDecision = String(meta.decision || item.status || "").toLowerCase();
+        if (type === "booking.counter_offer_result" && counterOfferDecision === "accepted" && matchroomId) {
+            openBookings({
+                segment: "matchrooms",
+                matchroomId,
+                requestId: requestId || undefined,
+            });
+            return;
+        }
         if (requestId && (ZONE_DECISION_TYPES.has(type) || type.includes("booking"))) {
             openBookings({
                 segment: "requests",

@@ -61,6 +61,26 @@ export async function adjustLocalBadgeCount(delta: number) {
   }
 }
 
+export async function presentImmediateLocalNotification(input: {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}) {
+  try {
+    return await scheduleNotificationAsync({
+      content: {
+        title: input.title,
+        body: input.body,
+        sound: true,
+        data: input.data || {},
+      },
+      trigger: null as any,
+    });
+  } catch {
+    return null;
+  }
+}
+
 const runSerializedForKey = async <T>(key: string, task: () => Promise<T>): Promise<T> => {
   const previous = reminderOps.get(key) || Promise.resolve();
   const next = previous.catch(() => undefined).then(task);

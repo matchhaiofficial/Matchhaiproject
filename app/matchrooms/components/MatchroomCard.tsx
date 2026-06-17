@@ -219,7 +219,6 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
     // Format Location (Mock distance for now, or use location name)
     const locationDisplay = getPrimaryLocationLabel(room);
     const isBroadcastPending = isBroadcastVenuePending(room);
-    const distanceDisplay = locationDisplay.length > 15 ? locationDisplay.substring(0, 15) + '...' : locationDisplay;
 
     return (
         <Pressable
@@ -318,13 +317,13 @@ const MatchroomCard = memo(({ room, onJoinPress, onCancelJoinPress, isRequested,
             <View style={styles.nearbyInfoRow}>
                 <View style={styles.nearbyDistance}>
                     <AppIcon name="location-on" size={12} color={COLORS.textSecondary} />
-                    <Text style={styles.nearbyDistanceText}>
-                        {isBroadcastPending ? `Areas: ${distanceDisplay}` : distanceDisplay}
+                    <Text style={styles.nearbyDistanceText} numberOfLines={1} ellipsizeMode="tail">
+                        {isBroadcastPending ? `Areas: ${locationDisplay}` : locationDisplay}
                     </Text>
                 </View>
                 <View style={styles.nearbyTime}>
                     <AppIcon name="schedule" size={12} color={COLORS.textSecondary} />
-                    <Text style={styles.nearbyTimeText} numberOfLines={1}>
+                    <Text style={styles.nearbyTimeText} numberOfLines={1} ellipsizeMode="tail">
                         {scheduleDisplay.dateLabel
                             ? `${scheduleDisplay.dateLabel} · ${scheduleDisplay.timeLabel}`
                             : scheduleDisplay.timeLabel}

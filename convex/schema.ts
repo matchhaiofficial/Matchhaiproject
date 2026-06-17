@@ -1657,7 +1657,8 @@ export default defineSchema({
   pushDevices: defineTable({
     userId: v.id("users"),
     installationId: v.string(),
-    provider: v.union(v.literal("expo")),
+    provider: v.union(v.literal("expo"), v.literal("fcm")),
+    pushToken: v.optional(v.string()),
     platform: v.union(
       v.literal("ios"),
       v.literal("android"),
@@ -1684,6 +1685,7 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_installationId", ["installationId"])
+    .index("by_pushToken", ["pushToken"])
     .index("by_expoPushToken", ["expoPushToken"]),
 
   pushTickets: defineTable({
