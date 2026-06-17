@@ -107,10 +107,11 @@ export function buildZoneBookingRequestHref(requestId?: unknown) {
   });
 }
 
-export function buildZoneBookingMatchroomHref(matchroomId?: unknown) {
+export function buildZoneBookingMatchroomHref(matchroomId?: unknown, requestId?: unknown) {
   return withQuery(APP_ROUTES.zoneBookings, {
     segment: "matchrooms",
     matchroomId,
+    requestId,
   });
 }
 
@@ -154,7 +155,11 @@ export function buildNotificationRoute(input: NotificationRouteInput) {
   if (type === "booking.request_submitted") {
     return role === "zone_admin" ? buildZoneBookingRequestHref(requestId) : buildMatchroomHref(matchroomId);
   }
-  if (type === "booking.counter_offer_result") return buildZoneBookingRequestHref(requestId);
+  if (type === "booking.counter_offer_result") {
+    return String(data.decision || "").toLowerCase() === "accepted" && matchroomId
+      ? buildZoneBookingMatchroomHref(matchroomId, requestId)
+      : buildZoneBookingRequestHref(requestId);
+  }
   if (type === "booking.counter_offer") return APP_ROUTES.playerInbox;
   if (type === "booking.request_accepted" || type === "booking.request_rejected" || type === "booking.request_closed_elsewhere") {
     return buildMatchroomHref(matchroomId);

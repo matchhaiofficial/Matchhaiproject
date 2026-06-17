@@ -53,7 +53,8 @@ export const upsertDevice = mutation({
   args: {
     userId: v.id("users"),
     installationId: v.string(),
-    provider: v.union(v.literal("expo")),
+    provider: v.union(v.literal("expo"), v.literal("fcm")),
+    pushToken: v.optional(v.string()),
     platform: v.string(),
     expoPushToken: v.optional(v.string()),
     projectId: v.optional(v.string()),
@@ -74,7 +75,8 @@ export const upsertDevice = mutation({
     const now = Date.now();
     const permissionStatus = normalizePermissionStatus(args.permissionStatus);
     const platform = normalizePlatform(args.platform);
-    const isActive = permissionStatus === "granted" && Boolean(args.expoPushToken);
+    const token = args.pushToken || args.expoPushToken;
+    const isActive = permissionStatus === "granted" && Boolean(token);
     const ownedDevices = await ctx.db
       .query("pushDevices")
       .withIndex("by_userId", (q) => q.eq("userId", user._id))
@@ -85,6 +87,7 @@ export const upsertDevice = mutation({
       userId: user._id,
       installationId: args.installationId,
       provider: args.provider,
+      pushToken: args.pushToken,
       platform,
       expoPushToken: args.expoPushToken,
       projectId: args.projectId,
@@ -97,17 +100,26 @@ export const upsertDevice = mutation({
       updatedAt: now,
     };
 
-    if (args.expoPushToken) {
-      const tokenRows = await ctx.db
+    const duplicateTokens = new Set<string>();
+    if (args.pushToken) duplicateTokens.add(args.pushToken);
+    if (args.expoPushToken) duplicateTokens.add(args.expoPushToken);
+
+    for (const tokenValue of duplicateTokens) {
+      const pushTokenRows = await ctx.db
         .query("pushDevices")
-        .withIndex("by_expoPushToken", (q) => q.eq("expoPushToken", args.expoPushToken))
+        .withIndex("by_pushToken", (q) => q.eq("pushToken", tokenValue))
+        .take(20);
+      const expoTokenRows = await ctx.db
+        .query("pushDevices")
+        .withIndex("by_expoPushToken", (q) => q.eq("expoPushToken", tokenValue))
         .take(20);
 
-      for (const row of tokenRows) {
+      for (const row of [...pushTokenRows, ...expoTokenRows]) {
         const sameDevice = row.installationId === args.installationId && String(row.userId) === String(user._id);
         if (!sameDevice) {
           await ctx.db.patch(row._id, {
             isActive: false,
+            pushToken: undefined,
             expoPushToken: undefined,
             updatedAt: now,
           });
@@ -146,6 +158,7 @@ export const deactivateDevice = mutation({
 
     await ctx.db.patch(existing._id, {
       isActive: false,
+      pushToken: undefined,
       expoPushToken: undefined,
       updatedAt: Date.now(),
     });
@@ -163,7 +176,7 @@ export const getActiveDevicesForUser = internalQuery({
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .collect();
 
-    return devices.filter((device) => device.isActive && !!device.expoPushToken);
+    return devices.filter((device) => device.isActive && Boolean(device.pushToken || device.expoPushToken));
   },
 });
 
@@ -223,6 +236,7 @@ export const markDeviceDeliveryResult = internalMutation({
 
     if (args.deactivate) {
       patch.isActive = false;
+      patch.pushToken = undefined;
       patch.expoPushToken = undefined;
     }
 

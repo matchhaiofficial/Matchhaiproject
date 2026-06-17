@@ -823,8 +823,20 @@ export default function PlayerProfile() {
                 {selectedGame === 'cs2' && (
                     <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.divider }}>
                         <StatRow icon="person" label="Role" value={profile.cs2Role || 'N/A'} />
-                        {profile.faceitElo && (
-                            <StatRow icon="emoji-events" label="Faceit Level" value={`Level ${getFaceitLevel(profile.faceitElo)}`} />
+                        {(
+                            typeof profile.faceitSkillLevel === 'number' && profile.faceitSkillLevel > 0
+                                ? profile.faceitSkillLevel
+                                : typeof profile.faceitElo === 'number' && profile.faceitElo > 0
+                                    ? getFaceitLevel(profile.faceitElo)
+                                    : null
+                        ) && (
+                            <StatRow
+                                icon="emoji-events"
+                                label="Faceit Level"
+                                value={`Level ${typeof profile.faceitSkillLevel === 'number' && profile.faceitSkillLevel > 0
+                                    ? profile.faceitSkillLevel
+                                    : getFaceitLevel(profile.faceitElo || 0)}`}
+                            />
                         )}
                         {profile.steamCs2Hours && (
                             <StatRow icon="schedule" label="Playtime" value={`${profile.steamCs2Hours.toLocaleString()}h`} />
@@ -940,9 +952,12 @@ export default function PlayerProfile() {
                 displayName: profile.fullName || profile.username,
                 gameLabels,
                 rating: typeof ratingSource === "number" ? ratingSource : null,
-                faceitLevel: profile.faceitElo
-                    ? getFaceitLevel(profile.faceitElo)
-                    : null,
+                faceitLevel:
+                    typeof profile.faceitSkillLevel === "number" && profile.faceitSkillLevel > 0
+                        ? profile.faceitSkillLevel
+                        : typeof profile.faceitElo === "number" && profile.faceitElo > 0
+                            ? getFaceitLevel(profile.faceitElo)
+                            : null,
             });
             await Share.share({ message });
         } catch (error) {

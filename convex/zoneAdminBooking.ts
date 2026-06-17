@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import {
@@ -515,9 +516,10 @@ async function resolveBroadcastCaptainApprovalState(ctx: any, request: any) {
     };
   }
 
-  const requiresTwoCaptains = String(matchroom.teamMode || request.teamMode || "").toLowerCase() === "team";
   const captainAValue = String(matchroom.captainUidA || matchroom.hostUid || "").trim();
   const captainBValue = String(matchroom.captainUidB || "").trim();
+  const explicitlyTeamMode = String(matchroom.teamMode || request.teamMode || "").toLowerCase() === "team";
+  const requiresTwoCaptains = explicitlyTeamMode || Boolean(captainBValue);
 
   if (!captainAValue) {
     return {
@@ -570,6 +572,33 @@ async function resolveBroadcastCaptainApprovalState(ctx: any, request: any) {
   };
 }
 
+async function cancelMatchroomAndReturnPayments(
+  ctx: any,
+  input: {
+    matchroomId?: Id<"matchrooms"> | null;
+    reason: string;
+    now: number;
+  },
+) {
+  if (!input.matchroomId) return;
+
+  await ctx.db.patch(input.matchroomId, {
+    status: "cancelled",
+    isLocked: true,
+    cancelledAt: input.now,
+    cancelReason: input.reason,
+    updatedAt: input.now,
+  });
+  await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+    matchroomId: input.matchroomId,
+    reason: input.reason,
+  });
+  await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+    matchroomId: input.matchroomId,
+    reason: input.reason,
+  });
+}
+
 async function patchOfferNotifications(ctx: any, input: {
   offerId: string;
   recipientUids: string[];
@@ -605,6 +634,7 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
   title: string;
   body: string;
   reason?: string | null;
+  matchroomId?: any;
 }) {
   if (!input.offer?.zoneOwnerUid) return;
 
@@ -612,6 +642,14 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
   if (!zoneOwner) return;
 
   const requestId = String(input.request?._id || input.offer.requestId || "");
+  const matchroomId = input.status === "accepted"
+    ? String(input.matchroomId || input.request?.matchroomId || "").trim()
+    : "";
+  const requestRoute = `/zone/modules/bookings?segment=requests&requestId=${encodeURIComponent(requestId)}`;
+  const matchroomRoute = matchroomId
+    ? `/zone/modules/bookings?segment=matchrooms&matchroomId=${encodeURIComponent(matchroomId)}&requestId=${encodeURIComponent(requestId)}`
+    : "";
+  const route = matchroomRoute || requestRoute;
   await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
     type: "booking.counter_offer_result",
     toUid: zoneOwner._id,
@@ -619,7 +657,8 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
     recipientRole: "zone_admin",
     dedupeKey: `booking.counter_offer_result:${String(input.offer._id)}:${input.status}`,
     dedupePolicy: "replace_active",
-    route: `/zone/modules/bookings?segment=requests&requestId=${requestId}`,
+    route,
+    matchroomId: matchroomId || undefined,
     title: input.title,
     body: input.body,
     entity: { kind: "booking_offer", id: String(input.offer._id) },
@@ -627,13 +666,14 @@ async function notifyZoneOfferOutcome(ctx: any, input: {
     data: {
       offerId: String(input.offer._id),
       requestId,
+      matchroomId: matchroomId || null,
       zoneId: String(input.offer.zoneId || input.request?.zoneId || ""),
       zoneName: input.offer.zoneName || null,
       branchId: input.offer.branchId || null,
       branchName: input.offer.branchName || null,
       decision: input.status,
       reason: input.reason || null,
-      href: `/zone/modules/bookings?segment=requests&requestId=${requestId}`,
+      href: route,
     },
   });
 }
@@ -2081,6 +2121,11 @@ export const respondToCounterOffer = mutation({
           closedReason: "counter_offer_rejected",
           now,
         });
+        await cancelMatchroomAndReturnPayments(ctx, {
+          matchroomId: request.matchroomId,
+          reason: "broadcast_counter_offer_rejected",
+          now,
+        });
         await patchOfferNotifications(ctx, {
           offerId: String(args.offerId),
           recipientUids,
@@ -2159,6 +2204,7 @@ export const respondToCounterOffer = mutation({
           title: "Counter-offer accepted",
           body: "Both captains accepted the broadcast counter-offer and the venue is now confirmed.",
           reason: "captains_accepted",
+          matchroomId,
         });
       }
 
@@ -2177,7 +2223,10 @@ export const respondToCounterOffer = mutation({
       };
     }
 
-    if (acceptedResponses.length > 0) {
+    // Require unanimous acceptance for counter-offer to proceed
+    // Any rejection results in cancellation and refund
+    if (acceptedResponses.length === recipientUids.length) {
+      // All recipients accepted - proceed with the counter-offer
       const chosenOption = scheduleOptions[
         acceptedResponses[0].selectedOptionIndex ?? 0
       ];
@@ -2192,7 +2241,7 @@ export const respondToCounterOffer = mutation({
       patch.resolvedMatchroomId = matchroomId;
       finalStatus = "accepted";
 
-      if (acceptedResponses.length === recipientUids.length && matchroomId) {
+      if (matchroomId) {
         await ctx.db.patch(matchroomId, {
           status: "locked",
           isLocked: true,
@@ -2205,10 +2254,7 @@ export const respondToCounterOffer = mutation({
         status: "accepted",
         zoneId: offer.zoneId,
         matchroomId,
-        lifecycleStatus:
-          acceptedResponses.length === recipientUids.length
-            ? "zone_accepted_locked"
-            : "zone_accepted",
+        lifecycleStatus: "zone_accepted_locked",
         updatedAt: now,
       });
       await notifyZoneOfferOutcome(ctx, {
@@ -2218,8 +2264,10 @@ export const respondToCounterOffer = mutation({
         title: "Counter-offer accepted",
         body: "Your counter-offer was accepted.",
         reason: "accepted",
+        matchroomId,
       });
-    } else if (rejectedResponses.length === recipientUids.length) {
+    } else {
+      // Any rejection - cancel the matchroom and refund payments
       patch.status = "rejected";
       finalStatus = "rejected";
       await ctx.db.patch(request._id, {
@@ -2228,17 +2276,10 @@ export const respondToCounterOffer = mutation({
         updatedAt: now,
       });
       if (request.matchroomId) {
-        await ctx.db.patch(request.matchroomId, {
-          status: "cancelled",
-          updatedAt: now,
-        });
-        await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
+        await cancelMatchroomAndReturnPayments(ctx, {
           matchroomId: request.matchroomId,
           reason: "zone_schedule_rejected",
-        });
-        await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
-          matchroomId: request.matchroomId,
-          reason: "zone_schedule_rejected",
+          now,
         });
       }
       await patchOfferNotifications(ctx, {
@@ -2251,7 +2292,7 @@ export const respondToCounterOffer = mutation({
         request,
         status: "rejected",
         title: "Counter-offer rejected",
-        body: "All recipients rejected the counter-offer.",
+        body: "At least one recipient rejected the counter-offer.",
         reason: "rejected",
       });
     }

@@ -3,6 +3,7 @@ import React, { useEffect } from "react";
 import { AppState } from "react-native";
 
 import { useAuth } from "../context/AuthContext";
+import { loadFirebaseMessaging } from "../services/firebaseMessaging";
 import {
   cancelPendingPushRegistrationSync,
   syncPushRegistration,
@@ -30,6 +31,7 @@ export default function PushRegistrationBridge() {
     let syncInFlight = false;
     let retryAttempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribeTokenRefresh: (() => void) | null = null;
 
     const clearRetryTimer = () => {
       if (!retryTimer) return;
@@ -74,6 +76,22 @@ export default function PushRegistrationBridge() {
     };
 
     void runSync();
+
+    void loadFirebaseMessaging()
+      .then((module) => {
+        if (!active || !module?.default) return;
+        try {
+          unsubscribeTokenRefresh = module.default().onTokenRefresh(() => {
+            if (!active) return;
+            clearRetryTimer();
+            void runSync();
+          });
+        } catch {
+          // No-op: token refresh is best-effort.
+        }
+      })
+      .catch(() => null);
+
     const appStateSubscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       clearRetryTimer();
@@ -83,6 +101,7 @@ export default function PushRegistrationBridge() {
     return () => {
       active = false;
       clearRetryTimer();
+      unsubscribeTokenRefresh?.();
       appStateSubscription.remove();
       cancelPendingPushRegistrationSync();
     };

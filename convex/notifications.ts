@@ -488,10 +488,11 @@ function zoneBookingRequestRoute(requestId: unknown) {
   });
 }
 
-function zoneBookingMatchroomRoute(matchroomId: unknown) {
+function zoneBookingMatchroomRoute(matchroomId: unknown, requestId?: unknown) {
   return routeWithQuery("/zone/modules/bookings", {
     segment: "matchrooms",
     matchroomId,
+    requestId,
   });
 }
 
@@ -542,7 +543,11 @@ function buildCanonicalRoute(source: {
   if (type === "booking.request_submitted") {
     return recipientRole === "zone_admin" ? zoneBookingRequestRoute(requestId) : matchroomRoute(matchroomId);
   }
-  if (type === "booking.counter_offer_result") return zoneBookingRequestRoute(requestId);
+  if (type === "booking.counter_offer_result") {
+    return String(rawData.decision || "").toLowerCase() === "accepted" && matchroomId
+      ? zoneBookingMatchroomRoute(matchroomId, requestId)
+      : zoneBookingRequestRoute(requestId);
+  }
   if (type === "booking.counter_offer") return "/(player)/inbox";
   if (
     type === "booking.request_accepted" ||

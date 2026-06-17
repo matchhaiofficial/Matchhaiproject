@@ -49,6 +49,7 @@ type HeaderProps = {
   closeDisabled?: boolean;
   rightAccessory?: React.ReactNode;
   compact?: boolean;
+  alignItems?: "flex-start" | "center";
 };
 
 export type AppDialogProps = BaseProps & {
@@ -206,9 +207,10 @@ export function AppModalHeader({
   closeDisabled,
   rightAccessory,
   compact = false,
+  alignItems = "flex-start",
 }: HeaderProps) {
   return (
-    <View style={[styles.header, compact && styles.headerTight]}>
+    <View style={[styles.header, compact && styles.headerTight, alignItems === "center" && styles.headerCentered]}>
       <View style={styles.titleWrap}>
         <Text
           style={styles.title}

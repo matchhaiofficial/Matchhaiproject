@@ -5,6 +5,7 @@ import { Platform } from "react-native";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { loadFirebaseMessaging } from "./firebaseMessaging";
 
 const INSTALLATION_ID_KEY = "push_registration.installation_id.v1";
 let pushRegistrationGeneration = 0;
@@ -12,7 +13,8 @@ let pushRegistrationGeneration = 0;
 export type PushRegistrationSyncResult = {
   ok: true;
   permissionStatus?: "granted" | "denied" | "undetermined";
-  expoPushToken?: string;
+  provider?: "expo" | "fcm";
+  pushToken?: string;
   registrationError?: string;
   retryable: boolean;
   skipped?: "cancelled" | "disabled" | "expo_go";
@@ -58,6 +60,8 @@ const getRegistrationErrorMessage = (error: unknown) => {
 async function upsertPushDevice(args: {
   userId: Id<"users">;
   installationId: string;
+  provider: "expo" | "fcm";
+  pushToken?: string;
   expoPushToken?: string;
   projectId?: string;
   permissionStatus: "granted" | "denied" | "undetermined";
@@ -66,8 +70,9 @@ async function upsertPushDevice(args: {
   return await convex.mutation((api as any).pushNotifications.upsertDevice, {
     userId: args.userId,
     installationId: args.installationId,
-    provider: "expo",
+    provider: args.provider,
     platform: Platform.OS,
+    pushToken: args.pushToken,
     expoPushToken: args.expoPushToken,
     projectId: args.projectId,
     deviceName: String(Constants.deviceName || ""),
@@ -106,6 +111,7 @@ export async function syncPushRegistration(input: {
     await upsertPushDevice({
       userId: input.userId,
       installationId,
+      provider: "expo",
       projectId: getProjectId() || undefined,
       permissionStatus: "undetermined",
       registrationError: "Push notifications are unavailable in Expo Go.",
@@ -122,6 +128,7 @@ export async function syncPushRegistration(input: {
     await upsertPushDevice({
       userId: input.userId,
       installationId,
+      provider: "expo",
       projectId: getProjectId() || undefined,
       permissionStatus: "undetermined",
       registrationError: "Push notifications are unavailable in Expo Go.",
@@ -153,21 +160,50 @@ export async function syncPushRegistration(input: {
       ? permissions.status
       : "undetermined";
 
-  let expoPushToken = "";
+  let pushToken = "";
+  let provider: "expo" | "fcm" = "expo";
   const projectId = getProjectId();
   let registrationError: string | undefined;
-  if (permissionStatus === "granted" && projectId) {
-    try {
-      const token = await Notifications.getExpoPushTokenAsync({ projectId });
-      expoPushToken = token.data;
-    } catch (error) {
-      expoPushToken = "";
-      registrationError = getRegistrationErrorMessage(error);
-    }
-  } else if (permissionStatus === "granted" && !projectId) {
-    registrationError = "Expo project ID is missing from this build.";
-  } else if (permissionStatus === "denied") {
+  if (permissionStatus === "denied") {
     registrationError = "Push notification permission was denied.";
+  }
+
+  if (permissionStatus === "granted") {
+    const FirebaseMessaging = await loadFirebaseMessaging();
+    if (!isCurrentSync()) {
+      return { ok: true, skipped: "cancelled", retryable: false };
+    }
+
+    if (FirebaseMessaging?.default) {
+      try {
+        const messaging = FirebaseMessaging.default;
+        await messaging().registerDeviceForRemoteMessages();
+        const fcmToken = await messaging().getToken();
+        if (fcmToken) {
+          pushToken = fcmToken;
+          provider = "fcm";
+        }
+      } catch (error) {
+        if (!registrationError) {
+          registrationError = getRegistrationErrorMessage(error);
+        }
+      }
+    }
+
+    if (!pushToken && projectId) {
+      try {
+        const token = await Notifications.getExpoPushTokenAsync({ projectId });
+        pushToken = token.data;
+        provider = "expo";
+      } catch (error) {
+        pushToken = "";
+        if (!registrationError) {
+          registrationError = getRegistrationErrorMessage(error);
+        }
+      }
+    } else if (!pushToken && !projectId && !registrationError) {
+      registrationError = "Expo project ID is missing from this build.";
+    }
   }
 
   if (!isCurrentSync()) {
@@ -177,7 +213,9 @@ export async function syncPushRegistration(input: {
   const registeredDeviceId = await upsertPushDevice({
     userId: input.userId,
     installationId,
-    expoPushToken: expoPushToken || undefined,
+    provider,
+    pushToken: pushToken || undefined,
+    expoPushToken: provider === "expo" ? pushToken || undefined : undefined,
     projectId: projectId || undefined,
     permissionStatus,
     registrationError,
@@ -186,11 +224,12 @@ export async function syncPushRegistration(input: {
   return {
     ok: true,
     permissionStatus,
-    expoPushToken,
+    provider,
+    pushToken,
     registrationError,
     retryable:
       !registeredDeviceId ||
-      (permissionStatus === "granted" && !expoPushToken && Boolean(projectId)),
+      (permissionStatus === "granted" && !pushToken && Boolean(projectId)),
   };
 }
 

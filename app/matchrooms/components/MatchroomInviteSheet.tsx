@@ -193,6 +193,7 @@ export function MatchroomInviteSheet({
         title="Invite Teammate"
         onClose={onClose}
         closeDisabled={invitingAll}
+        alignItems="center"
         rightAccessory={friends.length > 0 ? (
           <AppButton
             size="sm"

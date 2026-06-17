@@ -11,6 +11,7 @@ import {
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "../context/AuthContext";
+import { loadFirebaseMessaging } from "../services/firebaseMessaging";
 import { isVisibleZoneAdminNotification } from "../features/zoneAdmin/notificationFilters";
 import { buildNotificationRoute } from "../navigation/routes";
 import { resolvePublicAppHref } from "../navigation/publicLinks";
@@ -21,6 +22,7 @@ import {
   runOneTimeReminderCleanupIfNeeded,
   clearLocalBadgeCount,
   setLocalBadgeCount,
+  presentImmediateLocalNotification,
 } from "../services/localNotifications";
 import { reconcileUpcomingMatchReminders } from "../services/reminderManager";
 import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
@@ -42,8 +44,7 @@ function parseHandledResponseKeys(value: string | null) {
   return [value];
 }
 
-function getHrefFromResponse(response: any) {
-  const data: any = response?.notification?.request?.content?.data || {};
+function getHrefFromNotificationData(data: any) {
   const hasRoutingSignal = [
     data?.type,
     data?.canonicalType,
@@ -73,25 +74,80 @@ function getHrefFromResponse(response: any) {
   });
 }
 
-async function handleNotificationResponse(response: any, onHref: (href: string) => void) {
-  const key = getNotificationResponseKey(response);
-  const href = getHrefFromResponse(response);
-  if (!key || responsesBeingHandled.has(key)) return;
+function getNotificationEventKey(data: any, fallbackKey?: string | null) {
+  const candidate = [
+    fallbackKey,
+    data?.notificationId,
+    data?.dedupeKey,
+    data?.route,
+    data?.href,
+    data?.matchroomId,
+    data?.teamId,
+    data?.challengeId,
+    data?.requestId,
+    data?.requestRef,
+    data?.intentId,
+    data?.offerId,
+    data?.reportId,
+    data?.ticketId,
+    data?.supportTicketId,
+  ]
+    .map((value) => String(value ?? "").trim())
+    .find((value) => value.length > 0);
+  return candidate || null;
+}
 
-  responsesBeingHandled.add(key);
+async function handleNotificationData(
+  data: any,
+  onHref: (href: string) => void,
+  key?: string | null
+) {
+  const eventKey = getNotificationEventKey(data, key);
+  const href = getHrefFromNotificationData(data);
+  if (!eventKey || responsesBeingHandled.has(eventKey)) return;
+
+  responsesBeingHandled.add(eventKey);
   try {
     const stored = await AsyncStorage.getItem(LAST_HANDLED_RESPONSE_KEY);
     const handledKeys = parseHandledResponseKeys(stored);
-    if (handledKeys.includes(key)) return;
+    if (handledKeys.includes(eventKey)) return;
 
     await AsyncStorage.setItem(
       LAST_HANDLED_RESPONSE_KEY,
-      JSON.stringify([...handledKeys, key].slice(-MAX_HANDLED_RESPONSE_KEYS)),
+      JSON.stringify([...handledKeys, eventKey].slice(-MAX_HANDLED_RESPONSE_KEYS)),
     );
     if (href) onHref(href);
   } finally {
-    responsesBeingHandled.delete(key);
+    responsesBeingHandled.delete(eventKey);
   }
+}
+
+async function handleNotificationResponse(response: any, onHref: (href: string) => void) {
+  const data: any = response?.notification?.request?.content?.data || {};
+  const key = getNotificationResponseKey(response);
+  await handleNotificationData(data, onHref, key);
+}
+
+async function handleFirebaseNotification(message: any, onHref: (href: string) => void) {
+  const data: any = message?.data || {};
+  const key = String(message?.messageId || message?.message_id || data?.notificationId || "").trim() || null;
+  await handleNotificationData(data, onHref, key);
+}
+
+async function handleRemoteForegroundMessage(message: any) {
+  const data: any = message?.data || {};
+  const title = String(message?.notification?.title || data?.title || "New update");
+  const body = String(message?.notification?.body || data?.body || "Open MatchHai to view details.");
+  const href = getHrefFromNotificationData(data) || "/(player)/inbox";
+  await presentImmediateLocalNotification({
+    title,
+    body,
+    data: {
+      ...data,
+      href,
+      route: href,
+    },
+  }).catch(() => null);
 }
 
 export default function NotificationRuntimeBridge() {
@@ -146,6 +202,10 @@ export default function NotificationRuntimeBridge() {
     // immediately wipe freshly scheduled reminders.
     void runOneTimeReminderCleanupIfNeeded().finally(() => setCleanupReady(true));
 
+    let active = true;
+    let unsubscribeMessageOpened: (() => void) | null = null;
+    let unsubscribeForegroundMessage: (() => void) | null = null;
+
     const responseSub = addNotificationResponseReceivedListener((response) => {
       void handleNotificationResponse(response, (href) => setPendingHref(href))
         .finally(() => clearLastNotificationResponseAsync().catch(() => null));
@@ -161,6 +221,35 @@ export default function NotificationRuntimeBridge() {
       })
       .catch(() => null);
 
+    void loadFirebaseMessaging()
+      .then((module) => {
+        if (!active || !module?.default) return null;
+        try {
+          const messaging = module.default();
+          unsubscribeForegroundMessage = messaging.onMessage((message: any) => {
+            void handleRemoteForegroundMessage(message);
+          });
+          unsubscribeMessageOpened = messaging.onNotificationOpenedApp((message: any) => {
+            void handleFirebaseNotification(message, (href) => {
+              if (active) setPendingHref(href);
+            });
+          });
+          const initialNotification = messaging.getInitialNotification?.();
+          if (initialNotification && typeof initialNotification.then === "function") {
+            void initialNotification.then((message: any) => {
+              if (!message) return null;
+              return handleFirebaseNotification(message, (href) => {
+                if (active) setPendingHref(href);
+              });
+            });
+          }
+        } catch {
+          // No-op: Firebase is best-effort and may not be configured in every build.
+        }
+        return null;
+      })
+      .catch(() => null);
+
     const appStateSub = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         setAppStateTick((value) => value + 1);
@@ -168,7 +257,10 @@ export default function NotificationRuntimeBridge() {
     });
 
     return () => {
+      active = false;
       responseSub.remove();
+      unsubscribeForegroundMessage?.();
+      unsubscribeMessageOpened?.();
       appStateSub.remove();
     };
   }, []);
