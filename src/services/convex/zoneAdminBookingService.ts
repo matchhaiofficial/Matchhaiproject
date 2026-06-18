@@ -768,7 +768,14 @@ export async function respondToZoneCounterOffer(input: {
     responderUid: string;
     decision: "accepted" | "rejected";
     selectedOptionIndex?: number;
-}): Promise<{ ok: true; matchroomId?: string; locked?: boolean } | { ok: false; message: string }> {
+}): Promise<{
+    ok: true;
+    status?: string;
+    matchroomId?: string;
+    locked?: boolean;
+    alreadyClosed?: boolean;
+    message?: string;
+} | { ok: false; message: string }> {
     try {
         const result = await convex.mutation(api.zoneAdminBooking.respondToCounterOffer, {
             offerId: input.offerId as Id<"zoneOffers">,
@@ -776,14 +783,18 @@ export async function respondToZoneCounterOffer(input: {
             decision: input.decision,
             selectedOptionIndex: input.selectedOptionIndex,
         });
+        const response = result as any;
 
         return {
             ok: true,
-            matchroomId: result?.matchroomId,
-            locked: result?.locked === true,
+            status: response?.status,
+            matchroomId: response?.matchroomId,
+            locked: response?.locked === true,
+            alreadyClosed: response?.alreadyClosed === true,
+            message: response?.message,
         };
     } catch (error: any) {
-        logBookingActionError("Failed to respond to counter offer", error);
+        Logger.warn("zoneAdminBooking", "Failed to respond to counter offer", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to respond to time options.") };
     }
 }

@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
@@ -1302,12 +1302,20 @@ async function releaseHeldBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"
     .collect();
 
   let releasedCount = 0;
+  const errors: Array<{ intentId: string; message: string }> = [];
   for (const intent of intents) {
-    const result = await releaseBookingIntentHold(ctx, intent, reason);
-    if (result.released) releasedCount += 1;
+    try {
+      const result = await releaseBookingIntentHold(ctx, intent, reason);
+      if (result.released) releasedCount += 1;
+    } catch (error: any) {
+      errors.push({
+        intentId: String(intent._id),
+        message: String(error?.message || error || "Failed to release booking hold."),
+      });
+    }
   }
 
-  return { releasedCount };
+  return { releasedCount, errors };
 }
 
 async function refundCapturedBookingIntentHold(ctx: any, intent: any, reason: string) {
@@ -1353,12 +1361,145 @@ async function refundCapturedBookingIntentsForMatchroom(ctx: any, matchroomId: I
     .collect();
 
   let refundedCount = 0;
+  const errors: Array<{ intentId: string; message: string }> = [];
   for (const intent of intents) {
-    const result = await refundCapturedBookingIntentHold(ctx, intent, reason);
-    if (result.refunded) refundedCount += 1;
+    try {
+      const result = await refundCapturedBookingIntentHold(ctx, intent, reason);
+      if (result.refunded) refundedCount += 1;
+    } catch (error: any) {
+      errors.push({
+        intentId: String(intent._id),
+        message: String(error?.message || error || "Failed to refund captured booking hold."),
+      });
+    }
   }
 
-  return { refundedCount };
+  return { refundedCount, errors };
+}
+
+type MatchroomCreateRefundResult = {
+  refunded: boolean;
+  reason?: string;
+  alreadyApplied?: boolean;
+  reference?: string;
+  amount?: number;
+  usedFallback?: boolean;
+};
+
+function isRefundableCreatePaymentTransaction(transaction: any, matchroomId: Id<"matchrooms">) {
+  const amount = Number(transaction?.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  if (transaction?.status !== "completed") return false;
+  if (transaction?.type !== "withdrawal" && transaction?.type !== "booking_payment") return false;
+
+  const reference = String(transaction?.reference || "");
+  const metadataMatchroomId = String(transaction?.metadata?.matchroomId || "");
+  return reference === `matchroom_create:${String(matchroomId)}` || metadataMatchroomId === String(matchroomId);
+}
+
+async function getMatchroomCreateRefundContext(ctx: any, matchroomId: Id<"matchrooms">) {
+  const room = await ctx.db.get(matchroomId);
+  const createReference = `matchroom_create:${String(matchroomId)}`;
+  const refundReference = `matchroom_create_refund:${String(matchroomId)}`;
+  const exactCreateTransactions = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_reference", (q: any) => q.eq("reference", createReference))
+    .collect();
+  const existingRefunds = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_reference", (q: any) => q.eq("reference", refundReference))
+    .collect();
+
+  let hostUser: any = null;
+  let hostRecentTransactions: any[] = [];
+  let originalPayment = exactCreateTransactions.find((transaction: any) =>
+    isRefundableCreatePaymentTransaction(transaction, matchroomId),
+  );
+
+  if (room?.hostUid) {
+    hostUser = await resolveUserByAnyId(ctx, String(room.hostUid));
+  }
+
+  if (!originalPayment && hostUser?._id) {
+    hostRecentTransactions = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_userId", (q: any) => q.eq("userId", hostUser._id))
+      .order("desc")
+      .take(250);
+    originalPayment = hostRecentTransactions.find((transaction: any) =>
+      isRefundableCreatePaymentTransaction(transaction, matchroomId),
+    );
+  }
+
+  return {
+    room,
+    hostUser,
+    originalPayment,
+    exactCreateTransactions,
+    existingRefunds,
+    hostRecentTransactions,
+    createReference,
+    refundReference,
+  };
+}
+
+async function refundDirectMatchroomCreatePayment(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  reason: string,
+  options?: { allowFallback?: boolean },
+): Promise<MatchroomCreateRefundResult> {
+  const context = await getMatchroomCreateRefundContext(ctx, matchroomId);
+  if (context.existingRefunds.length > 0) {
+    const existingRefund = context.existingRefunds[0];
+    return {
+      refunded: false,
+      alreadyApplied: true,
+      reference: context.refundReference,
+      amount: Number(existingRefund?.amount || 0) || undefined,
+    };
+  }
+
+  const fallbackAmount = Math.max(0, Math.ceil(Number(context.room?.paymentAmount || 0)));
+  const originalAmount = Number(context.originalPayment?.amount || 0);
+  const amount = Number.isFinite(originalAmount) && originalAmount > 0 ? originalAmount : fallbackAmount;
+  const refundUserId = context.originalPayment?.userId || context.hostUser?._id;
+  const usedFallback = !context.originalPayment;
+
+  if (!refundUserId) {
+    return { refunded: false, reason: "create_payment_user_not_found" };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { refunded: false, reason: "create_payment_amount_not_found" };
+  }
+  if (usedFallback && options?.allowFallback === false) {
+    return { refunded: false, reason: "create_payment_not_found" };
+  }
+  if (usedFallback && String(context.room?.paymentStatus || "") !== "paid") {
+    return { refunded: false, reason: "create_payment_not_found" };
+  }
+
+  const result: { alreadyApplied?: boolean } = await ctx.runMutation(internal.wallet.refundFunds, {
+    userId: refundUserId,
+    amount,
+    reference: context.refundReference,
+    metadata: {
+      source: "matchroom_create_refund",
+      matchroomId: String(matchroomId),
+      originalTransactionId: context.originalPayment?._id ? String(context.originalPayment._id) : null,
+      originalReference: context.originalPayment?.reference || context.createReference,
+      usedFallback,
+      reason,
+    },
+  });
+
+  return {
+    refunded: !result?.alreadyApplied,
+    alreadyApplied: Boolean(result?.alreadyApplied),
+    reference: context.refundReference,
+    amount,
+    usedFallback,
+  };
 }
 
 const PLAYER_WALLET_ROUTE = "/(player)/wallet";
@@ -5819,5 +5960,255 @@ export const refundCapturedHoldsForMatchroom = internalMutation({
   },
   handler: async (ctx, args) => {
     return await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+  },
+});
+
+export const refundCreatePaymentForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args): Promise<MatchroomCreateRefundResult> => {
+    return await refundDirectMatchroomCreatePayment(ctx, args.matchroomId, args.reason);
+  },
+});
+
+export const returnPaymentsForCancelledMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const errors: Array<{ stage: string; message: string }> = [];
+
+    let creatorRefund: MatchroomCreateRefundResult | null = null;
+    try {
+      creatorRefund = await refundDirectMatchroomCreatePayment(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "creator_refund",
+        message: String(error?.message || error || "Failed to refund matchroom creator payment."),
+      });
+    }
+
+    let releaseResult: any = null;
+    try {
+      releaseResult = await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "booking_hold_release",
+        message: String(error?.message || error || "Failed to release booking holds."),
+      });
+    }
+
+    let capturedRefundResult: any = null;
+    try {
+      capturedRefundResult = await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "booking_capture_refund",
+        message: String(error?.message || error || "Failed to refund captured booking holds."),
+      });
+    }
+
+    let teamChallengeResult: any = null;
+    try {
+      teamChallengeResult = await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+        matchroomId: args.matchroomId,
+        action: "release",
+        reason: args.reason,
+      });
+    } catch (error: any) {
+      errors.push({
+        stage: "team_challenge_release",
+        message: String(error?.message || error || "Failed to release team challenge holds."),
+      });
+    }
+
+    return {
+      ok: errors.length === 0,
+      creatorRefund,
+      releaseResult,
+      capturedRefundResult,
+      teamChallengeResult,
+      errors,
+    };
+  },
+});
+
+function summarizeWalletTransaction(transaction: any) {
+  if (!transaction) return null;
+  return {
+    id: String(transaction._id),
+    userId: String(transaction.userId || ""),
+    type: transaction.type,
+    amount: transaction.amount,
+    status: transaction.status,
+    reference: transaction.reference || null,
+    metadata: transaction.metadata || null,
+    createdAt: transaction.createdAt || null,
+  };
+}
+
+export const diagnoseMatchroomRefundState = internalQuery({
+  args: {
+    matchroomId: v.id("matchrooms"),
+  },
+  handler: async (ctx, args) => {
+    const context = await getMatchroomCreateRefundContext(ctx, args.matchroomId);
+    const intents = await ctx.db
+      .query("bookingIntents")
+      .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", args.matchroomId))
+      .collect();
+
+    return {
+      matchroom: context.room
+        ? {
+            id: String(context.room._id),
+            status: context.room.status,
+            cancelReason: context.room.cancelReason || null,
+            hostUid: context.room.hostUid,
+            paymentStatus: context.room.paymentStatus || null,
+            paymentAmount: context.room.paymentAmount || null,
+            refundStatus: context.room.refundStatus || null,
+            refundCompletedAt: context.room.refundCompletedAt || null,
+          }
+        : null,
+      hostUser: context.hostUser
+        ? {
+            id: String(context.hostUser._id),
+            username: context.hostUser.username || null,
+            email: context.hostUser.email || null,
+            walletBalance: context.hostUser.walletBalance || 0,
+            walletHeldBalance: context.hostUser.walletHeldBalance || 0,
+          }
+        : null,
+      createReference: context.createReference,
+      refundReference: context.refundReference,
+      originalCreatePayment: summarizeWalletTransaction(context.originalPayment),
+      exactCreateTransactions: context.exactCreateTransactions.map(summarizeWalletTransaction),
+      existingCreateRefunds: context.existingRefunds.map(summarizeWalletTransaction),
+      hostMatchroomTransactions: context.hostRecentTransactions
+        .filter((transaction: any) => String(transaction?.metadata?.matchroomId || "") === String(args.matchroomId))
+        .map(summarizeWalletTransaction),
+      bookingIntents: intents.map((intent: any) => ({
+        id: String(intent._id),
+        createdByUid: String(intent.createdByUid || ""),
+        status: intent.status || null,
+        paymentStatus: intent.paymentStatus || null,
+        heldStatus: intent.heldStatus || null,
+        heldAmount: intent.heldAmount || null,
+        heldReference: intent.heldReference || null,
+        pricingTotalCost: intent.pricing?.totalCost || null,
+        selectedSlotIds: intent.selectedSlotIds || [],
+      })),
+    };
+  },
+});
+
+export const repairMissingCreateRefundForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    confirm: v.string(),
+    reason: v.optional(v.string()),
+    allowFallback: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<MatchroomCreateRefundResult & { ok: boolean }> => {
+    if (args.confirm !== "REFUND_MATCHROOM_CREATE_PAYMENT") {
+      throw new Error('Pass confirm: "REFUND_MATCHROOM_CREATE_PAYMENT" to repair this matchroom refund.');
+    }
+
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) {
+      return { ok: false, refunded: false, reason: "matchroom_not_found" };
+    }
+    if (room.status !== "cancelled") {
+      return { ok: false, refunded: false, reason: "matchroom_not_cancelled" };
+    }
+    if (String(room.paymentStatus || "") !== "paid") {
+      return { ok: false, refunded: false, reason: "matchroom_payment_not_paid" };
+    }
+
+    const result = await refundDirectMatchroomCreatePayment(
+      ctx,
+      args.matchroomId,
+      args.reason || String(room.cancelReason || "manual_repair_missing_create_refund"),
+      { allowFallback: args.allowFallback !== false },
+    );
+
+    if (result.refunded || result.alreadyApplied) {
+      await ctx.db.patch(args.matchroomId, {
+        refundStatus: "completed",
+        refundCompletedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+
+    return { ok: result.refunded || Boolean(result.alreadyApplied), ...result };
+  },
+});
+
+export const repairRecentMissingCreateRefundsForCancelledMatchrooms = internalMutation({
+  args: {
+    confirm: v.string(),
+    limit: v.optional(v.number()),
+    allowFallback: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    if (args.confirm !== "REFUND_RECENT_CANCELLED_MATCHROOM_CREATE_PAYMENTS") {
+      throw new Error(
+        'Pass confirm: "REFUND_RECENT_CANCELLED_MATCHROOM_CREATE_PAYMENTS" to repair recent cancelled matchroom refunds.',
+      );
+    }
+
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(args.limit || 25))));
+    const rooms = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_status", (q: any) => q.eq("status", "cancelled"))
+      .order("desc")
+      .take(limit);
+
+    const results: Array<{
+      matchroomId: string;
+      hostUid: string;
+      result: MatchroomCreateRefundResult;
+    }> = [];
+
+    for (const room of rooms) {
+      if (String(room.paymentStatus || "") !== "paid") continue;
+      const amount = Number(room.paymentAmount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+
+      const result = await refundDirectMatchroomCreatePayment(
+        ctx,
+        room._id,
+        String(room.cancelReason || "manual_recent_cancelled_refund_repair"),
+        { allowFallback: args.allowFallback === true },
+      );
+
+      if (result.refunded || result.alreadyApplied) {
+        await ctx.db.patch(room._id, {
+          refundStatus: "completed",
+          refundCompletedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
+
+      results.push({
+        matchroomId: String(room._id),
+        hostUid: String(room.hostUid || ""),
+        result,
+      });
+    }
+
+    return {
+      ok: true,
+      scanned: rooms.length,
+      touched: results.length,
+      refunded: results.filter((entry) => entry.result.refunded).length,
+      alreadyApplied: results.filter((entry) => entry.result.alreadyApplied).length,
+      skipped: results.filter((entry) => !entry.result.refunded && !entry.result.alreadyApplied).length,
+      results,
+    };
   },
 });

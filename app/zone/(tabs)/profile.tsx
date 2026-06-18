@@ -31,10 +31,10 @@ import { useZoneData } from "../../../src/hooks/useZoneData";
 import { useEntrance } from "../../../src/motion/useEntrance";
 import { signOutUser } from "../../../src/services/authService";
 import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
+import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import { requestZoneWithdrawal } from "../../../src/services/convex/zoneWithdrawalService";
 import { COLORS, SPACING } from "../../../src/theme";
 import { getBottomChromeClearance } from "../../../src/utils/bottomChrome";
-import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
 import { getZoneBranchDisplayName, getZoneBranchId } from "../../../src/utils/zoneBranch";
@@ -129,16 +129,21 @@ export default function ZoneProfile() {
     const params = useLocalSearchParams<{ withdraw?: string | string[]; branchId?: string | string[] }>();
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
-    const { user, authUser } = useAuth();
+    const { user } = useAuth();
     const { zone, loading } = useZoneData();
     const { showToast } = useToast();
     const [loggingOut, setLoggingOut] = useState(false);
     const startDiditKyc = useStartDiditKyc();
+    const {
+        currentKyc,
+        status: effectiveKycStatus,
+        accessAllowed: kycVerified,
+    } = useEffectiveKycStatus();
     const kycStartActionLabel =
-        user?.kycVerificationStatus === "rejected"
+        effectiveKycStatus === "rejected"
             ? "Retry CNIC & Face Verification"
-            : user?.identityVerificationId &&
-                (user?.kycVerificationStatus === "not_started" || user?.kycVerificationStatus === "expired")
+            : currentKyc?._id &&
+                (effectiveKycStatus === "not_started" || effectiveKycStatus === "expired")
                 ? "Try Again"
                 : "Start CNIC & Face Verification";
     const { animatedStyle: entranceStyle } = useEntrance({
@@ -166,7 +171,6 @@ export default function ZoneProfile() {
     const [showLogoutDialog, setShowLogoutDialog] = useState(false);
     const tabBarScrollClearance = useTabBarClearance(SPACING.xxl);
     const profileBottomPadding = Math.max(bottomChromeClearance + SPACING.xxl, tabBarScrollClearance);
-    const kycVerified = isUserFullyVerified(authUser, user);
 
     const branches = useMemo(() => {
         if (!Array.isArray(zone?.branches)) return [];
@@ -186,7 +190,7 @@ export default function ZoneProfile() {
         if (shouldOpen === "1") {
             if (!kycVerified) {
                 showToast({
-                    type: "info",
+                    type: "error",
                     title: "Verify your identity",
                     message: "Please complete CNIC & face verification before requesting withdrawal.",
                 });
@@ -246,7 +250,7 @@ export default function ZoneProfile() {
     const submitWithdrawRequest = async () => {
         if (!kycVerified) {
             showToast({
-                type: "info",
+                type: "error",
                 title: "Verify your identity",
                 message: "Please complete CNIC & face verification before requesting withdrawal.",
             });
@@ -412,7 +416,7 @@ export default function ZoneProfile() {
                         </View>
                         <StatusPill
                             tone={kycVerified ? "success" : "warning"}
-                            label={kycVerified ? "Verified" : String(user?.kycVerificationStatus || "Not started").replace(/_/g, " ")}
+                            label={kycVerified ? "Verified" : String(effectiveKycStatus || "Not started").replace(/_/g, " ")}
                         />
                     </View>
                     {!kycVerified ? (
@@ -438,7 +442,7 @@ export default function ZoneProfile() {
                             onPress={() => {
                                 if (!kycVerified) {
                                     showToast({
-                                        type: "info",
+                                        type: "error",
                                         title: "Verify your identity",
                                         message: "Please complete CNIC & face verification before requesting withdrawal.",
                                     });

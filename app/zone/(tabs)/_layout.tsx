@@ -11,10 +11,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
 import { AppIcon, type AppIconName } from "../../../src/components/AppIcon";
-import { useAuth } from "../../../src/context/AuthContext";
+import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import { COLORS, FONTS } from "../../../src/theme";
 import { getSystemBottomInset } from "../../../src/utils/bottomChrome";
-import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 
 // Responsive helpers (mirrors PlayerTabsLayout)
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -126,9 +125,8 @@ function ZoneCustomTabBar({ state, descriptors, navigation }: BottomTabBarProps)
 
 // Layout
 export default function ZoneTabsLayout() {
-    const { authUser, user } = useAuth();
     const insets = useSafeAreaInsets();
-    const kycVerified = isUserFullyVerified(authUser, user);
+    const { accessAllowed: kycVerified } = useEffectiveKycStatus();
     const hideZoneTabBar = process.env.EXPO_PUBLIC_HIDE_TAB_BAR === "1";
     const bottomPad = Math.max(getSystemBottomInset(insets.bottom), 8);
     const tabBarClearance = hideZoneTabBar ? 0 : TAB_BAR_H + bottomPad;

@@ -554,7 +554,10 @@ export default function ZoneBookingsModule() {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [editingOptionIndex, setEditingOptionIndex] = useState<number | null>(null);
-    const [editingTimeField, setEditingTimeField] = useState<"start" | "end">("start");
+    const [activeTimePicker, setActiveTimePicker] = useState<{
+        optionIndex: number;
+        field: "start" | "end";
+    } | null>(null);
     const [dateDraft, setDateDraft] = useState<Date | null>(new Date());
     const [monthCursor, setMonthCursor] = useState(new Date());
     const [timeDraft, setTimeDraft] = useState(parseTimeToDraft(createDefaultScheduleOption().time));
@@ -1018,26 +1021,26 @@ export default function ZoneBookingsModule() {
         setCounterOptions((prev) =>
             prev.map((option, optionIndex) => {
                 if (optionIndex !== index) return option;
-                if (patch.time) {
+                if (Object.prototype.hasOwnProperty.call(patch, "time")) {
                     const startRaw = toClockMinutes(patch.time);
                     const start = startRaw === null
                         ? null
                         : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
                     return {
                         ...option,
-                        ...patch,
-                        time: start === null ? patch.time : fromClockMinutes(start),
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
+                        time: start === null ? patch.time || "" : fromClockMinutes(start),
                         endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
                     };
                 }
-                if (patch.endTime) {
+                if (Object.prototype.hasOwnProperty.call(patch, "endTime")) {
                     const endRaw = toClockMinutes(patch.endTime);
                     const end = endRaw === null
                         ? null
                         : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
                     return {
                         ...option,
-                        ...patch,
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
                         endTime: end === null ? patch.endTime : fromClockMinutes(end),
                     };
                 }
@@ -1566,8 +1569,8 @@ export default function ZoneBookingsModule() {
                 daysInMonth={daysInMonth}
                 monthYearLabel={monthYearLabel}
                 parseTimeToDraft={parseTimeToDraft}
-                editingTimeField={editingTimeField}
-                setEditingTimeField={setEditingTimeField}
+                activeTimePicker={activeTimePicker}
+                setActiveTimePicker={setActiveTimePicker}
                 validationMessage={counterValidationMessage}
             />
             <ZoneBookingsAllocationSheet

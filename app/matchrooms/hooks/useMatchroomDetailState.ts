@@ -170,7 +170,8 @@ export function useMatchroomDetailState({ id }: Params) {
   useFocusEffect(
     useCallback(() => {
       void refreshSessionRef.current();
-    }, []),
+      void fetchRoom();
+    }, [fetchRoom]),
   );
 
   useEffect(() => {

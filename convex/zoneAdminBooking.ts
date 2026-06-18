@@ -582,21 +582,121 @@ async function cancelMatchroomAndReturnPayments(
 ) {
   if (!input.matchroomId) return;
 
-  await ctx.db.patch(input.matchroomId, {
-    status: "cancelled",
-    isLocked: true,
-    cancelledAt: input.now,
-    cancelReason: input.reason,
+  const matchroom = await ctx.db.get(input.matchroomId);
+  if (!matchroom) return;
+  if (matchroom.status === "completed") {
+    throw new Error("Completed matchrooms cannot be cancelled.");
+  }
+
+  if (matchroom.status !== "cancelled") {
+    await ctx.db.patch(input.matchroomId, {
+      status: "cancelled",
+      isLocked: true,
+      cancelledAt: input.now,
+      cancelReason: input.reason,
+      updatedAt: input.now,
+    });
+  }
+  await ctx.runMutation(internal.matchrooms.returnPaymentsForCancelledMatchroom, {
+    matchroomId: input.matchroomId,
+    reason: input.reason,
+  });
+}
+
+async function markCounterOfferUnavailable(ctx: any, input: {
+  offerId: Id<"zoneOffers">;
+  request: any;
+  recipientUids: string[];
+  responderUid: string;
+  matchroomId?: Id<"matchrooms"> | null;
+  message: string;
+  now: number;
+  closeRequest?: boolean;
+}) {
+  await ctx.db.patch(input.offerId, {
+    status: "expired",
     updatedAt: input.now,
   });
-  await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
-    matchroomId: input.matchroomId,
-    reason: input.reason,
+
+  if (input.closeRequest) {
+    await closeBroadcastOfferRequest(ctx, {
+      request: input.request,
+      offerId: input.offerId,
+      offerStatus: "expired",
+      lifecycleStatus: "broadcast_counter_offer_unavailable",
+      closedReason: "counter_offer_unavailable",
+      now: input.now,
+    });
+  }
+
+  await patchOfferNotifications(ctx, {
+    offerId: String(input.offerId),
+    recipientUids: input.recipientUids,
+    status: "expired",
+    responderUid: input.responderUid,
   });
-  await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
-    matchroomId: input.matchroomId,
-    reason: input.reason,
-  });
+
+  return {
+    status: "expired",
+    matchroomId: input.matchroomId ? String(input.matchroomId) : undefined,
+    locked: false,
+    alreadyClosed: true,
+    message: input.message,
+  };
+}
+
+async function getBroadcastCounterOfferUnavailableMessage(
+  ctx: any,
+  input: {
+    request: any;
+    matchroomId: Id<"matchrooms">;
+  },
+) {
+  const room = await ctx.db.get(input.matchroomId);
+  if (!room) return "This matchroom is no longer available.";
+
+  const roomStatus = String(room.status || "").toLowerCase();
+  if (["cancelled", "completed", "expired"].includes(roomStatus)) {
+    return "This matchroom is no longer available.";
+  }
+  const requestStatus = String(input.request.status || "").toLowerCase();
+  if (["cancelled", "expired"].includes(requestStatus)) {
+    return "This time option is no longer available.";
+  }
+  const broadcastStatus = String(room.broadcastRequestStatus || "").toLowerCase();
+  if (["cancelled", "expired", "failed"].includes(broadcastStatus)) {
+    return "This venue search is no longer available.";
+  }
+
+  if (broadcastStatus === "zone_confirmed") {
+    const latestRequest = await ctx.db.get(input.request._id);
+    if (
+      latestRequest &&
+      String(latestRequest.status || "") === "accepted" &&
+      String(latestRequest.lifecycleStatus || "") === "zone_confirmed"
+    ) {
+      return null;
+    }
+    return "Another venue has already been confirmed for this matchroom.";
+  }
+
+  const resourceIds = Array.isArray(input.request.allocatedResourceIds)
+    ? input.request.allocatedResourceIds
+    : [];
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId);
+    if (!resource) {
+      return "The selected venue resources are no longer available.";
+    }
+    const belongsToRequest =
+      String(resource.bookingRequestId || "") === String(input.request._id);
+    const resourceStatus = String(resource.lifecycleStatus || "");
+    if (!belongsToRequest || !["held", "booked"].includes(resourceStatus)) {
+      return "The selected venue resources are no longer available.";
+    }
+  }
+
+  return null;
 }
 
 async function patchOfferNotifications(ctx: any, input: {
@@ -1738,11 +1838,7 @@ export const rejectBookingRequest = mutation({
         now,
       });
     } else if (request?.matchroomId) {
-      await ctx.runMutation(internal.matchrooms.releaseHoldsForMatchroom, {
-        matchroomId: request.matchroomId,
-        reason: "booking_request_rejected",
-      });
-      await ctx.runMutation(internal.matchrooms.refundCapturedHoldsForMatchroom, {
+      await ctx.runMutation(internal.matchrooms.returnPaymentsForCancelledMatchroom, {
         matchroomId: request.matchroomId,
         reason: "booking_request_rejected",
       });
@@ -2035,34 +2131,60 @@ export const respondToCounterOffer = mutation({
     const now = Date.now();
     const offer = await ctx.db.get(args.offerId);
     if (!offer) throw new Error("Offer not found.");
-    if (offer.status !== "pending" && offer.status !== "accepted") {
-      throw new Error("This negotiation is already closed.");
-    }
-    if (offer.expiresAt && offer.expiresAt < now && offer.status === "pending") {
-      await ctx.db.patch(args.offerId, { status: "expired", updatedAt: now });
-      throw new Error("This negotiation has expired.");
-    }
 
     const request = await ctx.db.get(offer.requestId);
     if (!request) throw new Error("Booking request not found.");
+
+    const recipientUids = Array.isArray(offer.recipientUids)
+      ? offer.recipientUids.map((uid: string) => String(uid))
+      : [];
+    let matchroomId = offer.resolvedMatchroomId || request.matchroomId || undefined;
 
     // Authz: derive the responder from the authenticated session, never from the
     // client-passed responderUid (CR-01 / IDOR). The recipient check below then
     // confirms this signed-in user is actually an invited recipient.
     const responder = await requireAuthenticatedActor(ctx);
 
-    const recipientUids = Array.isArray(offer.recipientUids)
-      ? offer.recipientUids.map((uid: string) => String(uid))
-      : [];
     if (!recipientUids.includes(String(responder._id))) {
       throw new Error("You are not allowed to respond to this negotiation.");
+    }
+
+    if (offer.status !== "pending" && offer.status !== "accepted") {
+      const closedMatchroomId = offer.resolvedMatchroomId
+        ? String(offer.resolvedMatchroomId)
+        : request.matchroomId
+          ? String(request.matchroomId)
+          : undefined;
+      return {
+        status: String(offer.status || "rejected"),
+        ...(closedMatchroomId ? { matchroomId: closedMatchroomId } : {}),
+        locked: false,
+        alreadyClosed: true,
+        message: "This time option is no longer available.",
+      };
+    }
+    if (offer.expiresAt && offer.expiresAt < now && offer.status === "pending") {
+      return await markCounterOfferUnavailable(ctx, {
+        offerId: args.offerId,
+        request,
+        recipientUids,
+        responderUid: String(responder._id),
+        matchroomId,
+        message: "This time option has expired.",
+        now,
+      });
     }
 
     const scheduleOptions = Array.isArray(offer.scheduleOptions) ? offer.scheduleOptions : [];
     const selectedOptionIndex =
       typeof args.selectedOptionIndex === "number" ? args.selectedOptionIndex : 0;
     if (args.decision === "accepted" && !scheduleOptions[selectedOptionIndex]) {
-      throw new Error("Please choose a valid time option.");
+      return {
+        status: "invalid",
+        matchroomId: matchroomId ? String(matchroomId) : undefined,
+        locked: false,
+        message: "Please choose a valid time option.",
+      };
     }
 
     const responses = Array.isArray(offer.responses) ? [...offer.responses] : [];
@@ -2098,7 +2220,6 @@ export const respondToCounterOffer = mutation({
     };
 
     let finalStatus: "pending" | "accepted" | "rejected" | "expired" = offer.status;
-    let matchroomId = offer.resolvedMatchroomId || request.matchroomId || undefined;
     const isBroadcastRequest = request.requestKind === "broadcast_fanout";
 
     if (isBroadcastRequest && request.matchroomId) {
@@ -2157,6 +2278,23 @@ export const respondToCounterOffer = mutation({
         const chosenOption = scheduleOptions[
           acceptedResponses[0].selectedOptionIndex ?? 0
         ];
+        const unavailableMessage = await getBroadcastCounterOfferUnavailableMessage(ctx, {
+          request,
+          matchroomId: request.matchroomId,
+        });
+        if (unavailableMessage) {
+          return await markCounterOfferUnavailable(ctx, {
+            offerId: args.offerId,
+            request,
+            recipientUids,
+            responderUid: String(responder._id),
+            matchroomId: request.matchroomId,
+            message: unavailableMessage,
+            now,
+            closeRequest: true,
+          });
+        }
+
         const confirmation = await confirmBroadcastVenue(ctx, {
           matchroomId: request.matchroomId,
           winningRequestId: request._id,
@@ -2266,7 +2404,7 @@ export const respondToCounterOffer = mutation({
         reason: "accepted",
         matchroomId,
       });
-    } else {
+    } else if (rejectedResponses.length > 0) {
       // Any rejection - cancel the matchroom and refund payments
       patch.status = "rejected";
       finalStatus = "rejected";

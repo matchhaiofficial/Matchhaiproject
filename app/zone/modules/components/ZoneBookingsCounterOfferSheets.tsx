@@ -25,6 +25,11 @@ type TimeDraft = {
   period: "AM" | "PM";
 };
 
+type ActiveTimePicker = {
+  optionIndex: number;
+  field: "start" | "end";
+} | null;
+
 const HOURS_12 = Array.from({ length: 12 }, (_, index) => index + 1);
 const MINUTES = [0, 15, 30, 45];
 const PERIODS = ["AM", "PM"] as const;
@@ -67,8 +72,8 @@ type Props = {
   daysInMonth: number;
   monthYearLabel: string;
   parseTimeToDraft: (value?: string | null) => TimeDraft;
-  editingTimeField: "start" | "end";
-  setEditingTimeField: React.Dispatch<React.SetStateAction<"start" | "end">>;
+  activeTimePicker: ActiveTimePicker;
+  setActiveTimePicker: React.Dispatch<React.SetStateAction<ActiveTimePicker>>;
   validationMessage?: string;
 };
 
@@ -99,12 +104,16 @@ export function ZoneBookingsCounterOfferSheets({
   daysInMonth,
   monthYearLabel,
   parseTimeToDraft,
-  editingTimeField,
-  setEditingTimeField,
+  activeTimePicker,
+  setActiveTimePicker,
   validationMessage,
 }: Props) {
   const option = counterOptions[0] || createDefaultScheduleOption();
   const canSend = processingAction === null && !validationMessage;
+  const closeTimePicker = () => {
+    setShowTimePicker(false);
+    setActiveTimePicker(null);
+  };
 
   return (
     <>
@@ -148,8 +157,7 @@ export function ZoneBookingsCounterOfferSheets({
                 <Pressable
                   style={styles.dateField}
                   onPress={() => {
-                    setEditingOptionIndex(0);
-                    setEditingTimeField("start");
+                    setActiveTimePicker({ optionIndex: 0, field: "start" });
                     setTimeDraft(parseTimeToDraft(option.time));
                     setShowTimePicker(true);
                   }}
@@ -163,8 +171,7 @@ export function ZoneBookingsCounterOfferSheets({
                   <Pressable
                     style={styles.dateField}
                     onPress={() => {
-                      setEditingOptionIndex(0);
-                      setEditingTimeField("end");
+                      setActiveTimePicker({ optionIndex: 0, field: "end" });
                       setTimeDraft(parseTimeToDraft(option.endTime));
                       setShowTimePicker(true);
                     }}
@@ -298,25 +305,26 @@ export function ZoneBookingsCounterOfferSheets({
 
       <AppPickerSheet
         visible={showTimePicker}
-        onClose={() => setShowTimePicker(false)}
+        onClose={closeTimePicker}
         sheetStyle={styles.pickerSheet}
       >
         <View style={styles.pickerHeader}>
-          <Pressable onPress={() => setShowTimePicker(false)}>
+          <Pressable onPress={closeTimePicker}>
             <Text style={styles.pickerAction}>Cancel</Text>
           </Pressable>
           <Text style={styles.pickerTitle}>Select Time</Text>
           <Pressable
             onPress={() => {
-              if (editingOptionIndex !== null) {
+              if (activeTimePicker) {
+                const nextTime = draftToTimeString(timeDraft);
                 updateCounterOption(
-                  editingOptionIndex,
-                  editingTimeField === "start"
-                    ? { time: draftToTimeString(timeDraft) }
-                    : { endTime: draftToTimeString(timeDraft) },
+                  activeTimePicker.optionIndex,
+                  activeTimePicker.field === "start"
+                    ? { time: nextTime }
+                    : { endTime: nextTime },
                 );
               }
-              setShowTimePicker(false);
+              closeTimePicker();
             }}
           >
             <Text style={styles.pickerAction}>Done</Text>
