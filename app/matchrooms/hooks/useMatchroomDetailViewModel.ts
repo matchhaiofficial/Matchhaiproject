@@ -74,7 +74,10 @@ export function useMatchroomDetailViewModel({
   // accept players: open status, not expired, and not yet join-locked
   // (locked/full/completed/cancelled rooms must not surface invite actions).
   const canInviteToRoom =
-    room?.status === "open" && !isExpired && !joinLocked;
+    room?.status === "open" &&
+    !isExpired &&
+    !joinLocked &&
+    !lobbyState.isWalkInRoom;
   // The host can invite to either team's open slots and each team captain can
   // invite to their own team. Until Team B has a captain, any joined player
   // can help fill its open slots.

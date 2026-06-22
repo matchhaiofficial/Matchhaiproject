@@ -5,31 +5,26 @@ import type { SkillTier } from "../../../../src/services/skillRatingService";
 export type WalkInSeatPlayerDraft = {
   seatNumber: number;
   name: string;
-  skillTier: SkillTier;
+  skillTier: SkillTier | "";
   favouriteClub?: string;
   formation?: string;
   character?: string;
 };
 
 type Params = {
-  format: string;
   isZoneWalkInAdmin: boolean;
   maxPlayers: number;
   selectedGame: string | null;
 };
 
-const DEFAULT_SEAT_COUNT = "10";
+const DEFAULT_SEAT_COUNT = "0";
 const DEFAULT_TEAM_A_CAPTAIN_SEAT = 1;
 const DEFAULT_TEAM_B_CAPTAIN_SEAT = 6;
-
-const isHeadToHeadRosterGame = (gameKey: string | null | undefined) =>
-  gameKey === "fc26" || gameKey === "tekken8";
 
 const isCsStyleGame = (gameKey: string | null | undefined) =>
   gameKey === "cs2" || gameKey === "cs16" || gameKey === "valorant";
 
 export function useMatchroomCreateWalkInRoster({
-  format,
   isZoneWalkInAdmin,
   maxPlayers,
   selectedGame,
@@ -104,41 +99,6 @@ export function useMatchroomCreateWalkInRoster({
   }, []);
 
   useEffect(() => {
-    if (!isHeadToHeadRosterGame(selectedGame)) return;
-
-    let targetSeats = 0;
-    if (format === "1v1") {
-      targetSeats = 2;
-    } else if (format === "2v2") {
-      targetSeats = 4;
-    }
-
-    if (targetSeats <= 0) return;
-
-    setWalkInSeatCount(String(targetSeats));
-    setWalkInSeatPlayers((prev) => {
-      if (prev.length === targetSeats) return prev;
-
-      const nextPlayers = [...prev];
-      if (nextPlayers.length < targetSeats) {
-        for (let i = nextPlayers.length; i < targetSeats; i += 1) {
-          nextPlayers.push({
-            seatNumber: i + 1,
-            name: "",
-            skillTier: "Beginner",
-            favouriteClub: "",
-            formation: "",
-            character: "",
-          });
-        }
-      } else {
-        nextPlayers.splice(targetSeats);
-      }
-      return nextPlayers;
-    });
-  }, [format, selectedGame]);
-
-  useEffect(() => {
     if (!isZoneWalkInAdmin) return;
 
     const seats = Math.max(0, walkInBookedSeatCount);
@@ -151,7 +111,7 @@ export function useMatchroomCreateWalkInRoster({
         return {
           seatNumber: idx + 1,
           name: "",
-          skillTier: "Beginner",
+          skillTier: "",
         };
       }),
     );
@@ -165,7 +125,7 @@ export function useMatchroomCreateWalkInRoster({
 
     setWalkInTeamBCaptainSeatNumber((prev) => {
       const teamBStart = isCsStyleGame(selectedGame)
-        ? DEFAULT_TEAM_B_CAPTAIN_SEAT
+        ? Math.ceil(seats / 2) + 1
         : Math.ceil(seats / 2) + 1;
       if (
         seats >= teamBStart &&

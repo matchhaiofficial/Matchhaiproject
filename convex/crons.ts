@@ -17,6 +17,13 @@ crons.interval(
   { batchSize: 50 },
 );
 
+crons.interval(
+  "zone booking request expiry sweep",
+  { minutes: 2 },
+  (internal as any).zoneAdminBooking.expireStaleBookingRequests,
+  { batchSize: 50 },
+);
+
 // Reconcile stale/abandoned Easypaisa transactions that the client poll/IPN
 // never resolved (e.g. app killed after payment, IPN dropped). Re-inquires the
 // provider and applies the result through the idempotent applyProviderUpdate

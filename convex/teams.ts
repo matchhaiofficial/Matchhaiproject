@@ -105,6 +105,11 @@ function assertActiveTeam<T>(team: T | null | undefined, message = "Team not fou
 
 const TEAM_REMOVED_MESSAGE = "The team was removed or deleted.";
 
+function buildTeamNotificationHref(teamId: unknown) {
+  const id = String(teamId || "").trim();
+  return id ? `/teams/${encodeURIComponent(id)}?source=notification` : "/teams";
+}
+
 async function getNextRosterRole(ctx: any, team: any) {
   const mainSize = getTeamMainRosterSize(team);
   const members = await ctx.db
@@ -186,10 +191,11 @@ export const getById = query({
 
 // Get team with members
 export const getWithMembers = query({
-  args: { teamId: v.id("teams") },
+  args: { teamId: v.id("teams"), includeDeleted: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const team = await ctx.db.get(args.teamId);
     if (!team) return null;
+    if (!args.includeDeleted && isTeamDeleted(team)) return null;
 
     const members = await ctx.db
       .query("teamMembers")
@@ -605,14 +611,14 @@ export const transferCaptain = mutation({
       dedupePolicy: "versioned_new",
       teamId: args.teamId,
       teamName: team.name,
-      route: `/teams/${args.teamId}`,
+      route: buildTeamNotificationHref(args.teamId),
       title: "You are now captain",
       body: `Captaincy for ${team.name} was transferred to you.`,
       data: {
         teamId: String(args.teamId),
         teamName: team.name,
         game: team.game,
-        href: `/teams/${args.teamId}`,
+        href: buildTeamNotificationHref(args.teamId),
       },
     });
 
@@ -627,14 +633,14 @@ export const transferCaptain = mutation({
         dedupePolicy: "versioned_new",
         teamId: args.teamId,
         teamName: team.name,
-        route: `/teams/${args.teamId}`,
+        route: buildTeamNotificationHref(args.teamId),
         title: "Captaincy transferred",
         body: `You transferred captaincy of ${team.name} to ${args.newCaptainUsername}.`,
         data: {
           teamId: String(args.teamId),
           teamName: team.name,
           game: team.game,
-          href: `/teams/${args.teamId}`,
+          href: buildTeamNotificationHref(args.teamId),
         },
       });
     }
@@ -717,14 +723,14 @@ export const remove = mutation({
         dedupePolicy: "versioned_new",
         teamId: args.teamId,
         teamName: team.name,
-        route: `/teams/${String(args.teamId)}`,
+        route: buildTeamNotificationHref(args.teamId),
         title: "Team deleted",
         body: `${team.name} was deleted.`,
         data: {
           teamId: String(args.teamId),
           teamName: team.name,
           game: team.game,
-          href: `/teams/${String(args.teamId)}`,
+          href: buildTeamNotificationHref(args.teamId),
         },
       });
     }
@@ -894,10 +900,10 @@ export const inviteToTeam = mutation({
       dedupePolicy: "replace_active",
       teamId: args.teamId,
       teamName: team.name,
-      route: `/teams/${args.teamId}`,
+      route: buildTeamNotificationHref(args.teamId),
       title: "Team Invite",
       body: `You've been invited to join ${team.name}`,
-      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: `/teams/${args.teamId}` },
+      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: buildTeamNotificationHref(args.teamId) },
       expiresAt: now + sevenDaysMs,
     });
 
@@ -948,7 +954,7 @@ export const respondToTeamInvite = mutation({
           dedupePolicy: "replace_active",
           teamId: notif.teamId,
           teamName: notif.teamName,
-          route: `/teams/${String(notif.teamId)}`,
+          route: buildTeamNotificationHref(notif.teamId),
           title: "Team Invite Declined",
           body: `${inviteeName} declined your invite to ${notif.teamName || "the team"}.`,
           data: {
@@ -956,7 +962,7 @@ export const respondToTeamInvite = mutation({
             teamName: notif.teamName || null,
             decision: "declined",
             inviteNotificationId: String(args.notificationId),
-            href: `/teams/${String(notif.teamId || "")}`,
+            href: buildTeamNotificationHref(notif.teamId),
           },
         });
       }
@@ -1036,7 +1042,7 @@ export const respondToTeamInvite = mutation({
         dedupePolicy: "replace_active",
         teamId,
         teamName: team.name,
-        route: `/teams/${teamId}`,
+        route: buildTeamNotificationHref(teamId),
         title: "Team Invite Accepted",
         body: `${username} accepted your invite to join ${team.name}.`,
         data: {
@@ -1044,7 +1050,7 @@ export const respondToTeamInvite = mutation({
           teamName: team.name,
           decision: "accepted",
           inviteNotificationId: String(args.notificationId),
-          href: `/teams/${teamId}`,
+          href: buildTeamNotificationHref(teamId),
         },
       });
     }
@@ -1089,10 +1095,10 @@ export const respondToJoinRequest = mutation({
           teamName: team.name,
           dedupeKey: `team.join_request_decision:${teamId}:${String(notif.fromUid)}:rejected`,
           dedupePolicy: "replace_active",
-          route: `/teams/${teamId}`,
+          route: buildTeamNotificationHref(teamId),
           title: "Join Request Rejected",
           body: `Your request to join ${team.name} was declined.`,
-          data: { teamId, teamName: team.name, game: team.game, decision: "rejected", href: `/teams/${teamId}` },
+          data: { teamId, teamName: team.name, game: team.game, decision: "rejected", href: buildTeamNotificationHref(teamId) },
         });
       }
       return { ok: true };
@@ -1160,10 +1166,10 @@ export const respondToJoinRequest = mutation({
       teamName: team.name,
       dedupeKey: `team.join_request_decision:${teamId}:${requesterUid}:accepted`,
       dedupePolicy: "replace_active",
-      route: `/teams/${teamId}`,
+      route: buildTeamNotificationHref(teamId),
       title: "Join Request Accepted",
       body: `Your request to join ${team.name} was accepted!`,
-      data: { teamId, teamName: team.name, game: team.game, decision: "accepted", href: `/teams/${teamId}` },
+      data: { teamId, teamName: team.name, game: team.game, decision: "accepted", href: buildTeamNotificationHref(teamId) },
     });
 
     return { ok: true };
@@ -1272,10 +1278,10 @@ export const requestToJoinTeam = mutation({
       dedupePolicy: "upsert_active",
       teamId: args.teamId,
       teamName: team.name,
-      route: `/teams/${args.teamId}`,
+      route: buildTeamNotificationHref(args.teamId),
       title: "Join Request",
       body: `${args.fromUsername} wants to join ${team.name}`,
-      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: `/teams/${args.teamId}` },
+      data: { teamId: args.teamId, teamName: team.name, game: team.game, href: buildTeamNotificationHref(args.teamId) },
       expiresAt: now + sevenDaysMs,
     });
 

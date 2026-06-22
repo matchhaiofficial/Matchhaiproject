@@ -26,6 +26,7 @@ import {
     type ZoneMatchroomListItem,
 } from "../../../src/services/convex/zoneAdminBookingService";
 import {
+    releaseStaleHeldBranchResources,
     subscribeBranchResources,
     subscribeZoneBranches,
     type ZoneBranch,
@@ -221,7 +222,7 @@ const resourceMatchesAllocationProfile = (
     if (!resource.isActive) return false;
     if (resource.lifecycleStatus === "held") {
         const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
-        if (linkedRequestId && linkedRequestId !== String(request?.id || "")) {
+        if (!linkedRequestId || linkedRequestId !== String(request?.id || "")) {
             return false;
         }
     }
@@ -1180,9 +1181,10 @@ export default function ZoneBookingsModule() {
         rejectAlternative,
         createDefaultScheduleOption,
     });
+    const allocationConsumerVisible = showAllocationSheet || showCounterModal;
 
     useEffect(() => {
-        if (!showAllocationSheet || !zone?.id) {
+        if (!allocationConsumerVisible || !zone?.id) {
             setAllocationBranches([]);
             setAllocationResources([]);
             setAllocationSelectedResourceIds([]);
@@ -1209,38 +1211,51 @@ export default function ZoneBookingsModule() {
         );
 
         return () => unsub();
-    }, [primaryBranch, selectedRequest, showAllocationSheet, zone?.id]);
+    }, [allocationConsumerVisible, primaryBranch, selectedRequest, zone?.id]);
 
     useEffect(() => {
-        if (!showAllocationSheet || !zone?.id || !allocationBranchId) {
+        if (!allocationConsumerVisible || !zone?.id || !allocationBranchId) {
             setAllocationResources([]);
             setLoadingAllocationResources(false);
             return;
         }
 
+        let disposed = false;
+        let unsubscribe: (() => void) | null = null;
         setLoadingAllocationResources(true);
-        const unsub = subscribeBranchResources(
-            zone.id,
-            allocationBranchId,
-            (rows) => {
-                setAllocationResources(
-                    rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
-                );
-                setLoadingAllocationResources(false);
-            },
-            () => {
-                setLoadingAllocationResources(false);
-                setErrorText("Failed to load branch resources.");
-            },
-        );
+        void (async () => {
+            await releaseStaleHeldBranchResources({
+                zoneId: zone.id,
+                branchId: allocationBranchId,
+                currentRequestId: selectedRequest?.id || null,
+            });
+            if (disposed) return;
+            unsubscribe = subscribeBranchResources(
+                zone.id,
+                allocationBranchId,
+                (rows) => {
+                    setAllocationResources(
+                        rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
+                    );
+                    setLoadingAllocationResources(false);
+                },
+                () => {
+                    setLoadingAllocationResources(false);
+                    setErrorText("Failed to load branch resources.");
+                },
+            );
+        })();
 
-        return () => unsub();
-    }, [allocationBranchId, showAllocationSheet, zone?.id]);
+        return () => {
+            disposed = true;
+            unsubscribe?.();
+        };
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id, zone?.id]);
 
     useEffect(() => {
-        if (!showAllocationSheet) return;
+        if (!allocationConsumerVisible) return;
         setAllocationSelectedResourceIds([]);
-    }, [allocationBranchId, selectedRequest?.id, showAllocationSheet]);
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id]);
 
     const allocationResourceOptions = useMemo(
         () => buildAllocationResourceOptions(selectedRequest, allocationResources),
@@ -1351,6 +1366,10 @@ export default function ZoneBookingsModule() {
                 time: start,
                 endTime: fromClockMinutes(explicitEndMinutes ?? startMinutes + durationMinutes),
             }]);
+            setAllocationSelectedResourceIds([]);
+            setAllocationBranchId(
+                getRequestFixedBranch(request, allocationBranches, primaryBranch)?.id || primaryBranch?.id || null,
+            );
         } else {
             setCounterOptions([createDefaultScheduleOption()]);
         }
@@ -1386,6 +1405,27 @@ export default function ZoneBookingsModule() {
             if (result.matchroomId) {
                 router.push(`/matchrooms/${result.matchroomId}` as any);
             }
+        }
+    };
+
+    const handleCounterOfferSubmit = async () => {
+        if (!selectedRequest || !allocationBranchId) return;
+        const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
+        const result = await handleCounterOffer({
+            branchId: allocationBranchId,
+            branchName: branch?.branchDisplayName || null,
+            location: branch?.areaLabel || zone?.primaryBranch?.areaLabel || zone?.venueBrandName || null,
+            resourceIds: allocationSelectedResourceIds,
+        });
+        if (result && !result.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            return;
+        }
+        if (result?.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            void loadMatchroomsPage({ append: false });
         }
     };
 
@@ -1550,7 +1590,7 @@ export default function ZoneBookingsModule() {
                 setCounterOptions={setCounterOptions}
                 createDefaultScheduleOption={createDefaultScheduleOption}
                 removeCounterOption={removeCounterOption}
-                handleCounterOffer={handleCounterOffer}
+                handleCounterOffer={handleCounterOfferSubmit}
                 showDatePicker={showDatePicker}
                 setShowDatePicker={setShowDatePicker}
                 showTimePicker={showTimePicker}
@@ -1572,6 +1612,18 @@ export default function ZoneBookingsModule() {
                 activeTimePicker={activeTimePicker}
                 setActiveTimePicker={setActiveTimePicker}
                 validationMessage={counterValidationMessage}
+                request={selectedRequest}
+                branches={allocationBranchesForSheet}
+                selectedBranchId={allocationBranchId}
+                loadingResources={loadingAllocationBranches || loadingAllocationResources}
+                resources={allocationResourceOptions}
+                selectedResourceIds={allocationSelectedResourceIds}
+                onToggleResource={toggleAllocationResourceOption}
+                selectedCount={allocationSelectedUnitCount}
+                requiredCount={getRequiredResourceCount(selectedRequest)}
+                allocationSummary={allocationSelectionSummary}
+                allocationValidationMessage={allocationValidationMessage}
+                allocationCanSubmit={allocationCanSubmit}
             />
             <ZoneBookingsAllocationSheet
                 visible={showAllocationSheet}

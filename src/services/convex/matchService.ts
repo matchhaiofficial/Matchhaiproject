@@ -224,6 +224,9 @@ function normalizeMatchroomRequestError(error: any) {
   if (/matchroom has expired/i.test(message)) {
     return "This matchroom has expired.";
   }
+  if (/selected slot|slot is no longer available|slot was not found|no available slot/i.test(message)) {
+    return "This seat is no longer available. Please choose another slot.";
+  }
   return message || "Failed to send request";
 }
 
@@ -504,6 +507,7 @@ export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
     requestedResourceSurface: roomData.requestedResourceSurface,
     requestedResourceTier: roomData.requestedResourceTier,
     selectedZoneRateKey: roomData.selectedZoneRateKey,
+    matchCode: roomData.matchCode ?? undefined,
     // P1: server-side price-validation inputs (recomputed authoritatively on the
     // backend; not all are persisted on the room).
     branchId: roomData.branchId ?? undefined,

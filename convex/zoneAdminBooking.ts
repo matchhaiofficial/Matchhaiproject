@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { internalMutation, query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
@@ -11,6 +11,7 @@ import {
 } from "./matchroomBroadcast";
 import { requireKycVerified } from "./kycGate";
 import { getMatchroomLockAt, validateMatchroomScheduleWindow, validateWalkInScheduleWindow, COUNTER_OFFER_TIME_WINDOW_MS } from "./timing";
+import { deductWalletFunds } from "./wallet";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -38,6 +39,28 @@ function parseLocalDateTimeMillis(dateValue?: string | null, timeValue?: string 
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeMatchCodePrefix(value?: string | null) {
+  const prefix = String(value || "")
+    .replace(/[^A-Za-z]/g, "")
+    .slice(0, 3)
+    .toUpperCase();
+  return prefix || "MH";
+}
+
+async function generateUniqueMatchCode(ctx: any, label?: string | null) {
+  const prefix = normalizeMatchCodePrefix(label);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const random = Math.floor(100000 + Math.random() * 900000);
+    const matchCode = `${prefix}-${random}`;
+    const existing = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_matchCode", (q: any) => q.eq("matchCode", matchCode))
+      .unique();
+    if (!existing) return matchCode;
+  }
+  return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+}
+
 function getScheduledStartMillis(dateValue: unknown, timeValue: unknown) {
   const time = String(timeValue || "").trim();
   if (!time) return null;
@@ -55,21 +78,56 @@ function getScheduledStartMillis(dateValue: unknown, timeValue: unknown) {
   return parseLocalDateTimeMillis(String(dateValue || ""), time);
 }
 
-function isExpiredForZoneDecision(request: any, linkedRoom: any, now = Date.now()) {
-  const requestStatus = String(request?.status || "").toLowerCase();
-  if (["expired", "cancelled"].includes(requestStatus)) return true;
+function getPositiveTimestamp(value: unknown) {
+  const timestamp = Number(value || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
 
-  const responseExpiresAt = Number(request?.responseExpiresAt || 0);
-  if (Number.isFinite(responseExpiresAt) && responseExpiresAt > 0 && responseExpiresAt <= now) {
-    return true;
+function getLinkedRoomStartMillis(linkedRoom: any) {
+  return (
+    getPositiveTimestamp(linkedRoom?.scheduledStartAt) ||
+    getPositiveTimestamp(linkedRoom?.startTime) ||
+    getScheduledStartMillis(linkedRoom?.scheduledDate, linkedRoom?.scheduledTime)
+  );
+}
+
+function getLinkedRoomLockAtMillis(linkedRoom: any) {
+  return getPositiveTimestamp(linkedRoom?.lockAt) || getMatchroomLockAt(getLinkedRoomStartMillis(linkedRoom));
+}
+
+function isLinkedRoomAwaitingZoneDecision(linkedRoom: any) {
+  if (!linkedRoom) return false;
+  const mode = String(linkedRoom.locationMode || "").toLowerCase();
+  if (mode === "broadcast") {
+    return !(linkedRoom.venueConfirmedAt || linkedRoom.confirmedZoneId);
+  }
+  if (mode === "zone" || linkedRoom.zoneId || linkedRoom.confirmedZoneId) {
+    return !(linkedRoom.venueConfirmedAt || linkedRoom.confirmedZoneId || linkedRoom.zoneAdminApproved === true);
+  }
+  return false;
+}
+
+function getZoneDecisionExpiryReason(request: any, linkedRoom: any, now = Date.now()) {
+  const requestStatus = String(request?.status || "").toLowerCase();
+  if (["expired", "cancelled"].includes(requestStatus)) return "request_terminal";
+
+  const responseExpiresAt = getPositiveTimestamp(request?.responseExpiresAt);
+  if (responseExpiresAt !== null && responseExpiresAt <= now) {
+    return "response_window_elapsed";
   }
 
   const requestStartAt = getScheduledStartMillis(request?.preferredDate, request?.preferredTime);
-  if (requestStartAt !== null && requestStartAt <= now) return true;
+  if (requestStartAt !== null) {
+    const requestLockAt = getMatchroomLockAt(requestStartAt);
+    if (requestStatus !== "accepted" && requestLockAt !== null && requestLockAt <= now) {
+      return "request_lock_elapsed";
+    }
+    if (requestStartAt <= now) return "request_start_elapsed";
+  }
 
-  if (!linkedRoom) return false;
+  if (!linkedRoom) return null;
   const roomStatus = String(linkedRoom.status || "").toLowerCase();
-  if (["expired", "cancelled", "completed"].includes(roomStatus)) return true;
+  if (["expired", "cancelled", "completed"].includes(roomStatus)) return "linked_matchroom_terminal";
 
   const maxPlayers = Number(linkedRoom.maxPlayers || 0);
   const confirmedSlots = [...(linkedRoom.slotsA || []), ...(linkedRoom.slotsB || [])]
@@ -78,23 +136,31 @@ function isExpiredForZoneDecision(request: any, linkedRoom: any, now = Date.now(
   const roomIsFull =
     maxPlayers > 0 &&
     Math.max(Number(linkedRoom.currentPlayers || 0), confirmedSlots) >= maxPlayers;
-  const expiresAt = Number(linkedRoom.expiresAt || 0);
-  if (!roomIsFull && Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
-    return true;
-  }
-  const broadcastExpiresAt = Number(linkedRoom.broadcastRequestExpiresAt || 0);
+  const lockAt = getLinkedRoomLockAtMillis(linkedRoom);
   if (
-    Number.isFinite(broadcastExpiresAt) &&
-    broadcastExpiresAt > 0 &&
-    broadcastExpiresAt <= now
+    lockAt !== null &&
+    lockAt <= now &&
+    (!roomIsFull || isLinkedRoomAwaitingZoneDecision(linkedRoom))
   ) {
-    return true;
+    return "linked_matchroom_lock_elapsed";
+  }
+  const expiresAt = getPositiveTimestamp(linkedRoom.expiresAt);
+  if (!roomIsFull && expiresAt !== null && expiresAt <= now) {
+    return "linked_matchroom_expired";
+  }
+  const broadcastExpiresAt = getPositiveTimestamp(linkedRoom.broadcastRequestExpiresAt);
+  if (broadcastExpiresAt !== null && broadcastExpiresAt <= now) {
+    return "broadcast_response_window_elapsed";
   }
 
-  const roomStartAt =
-    Number(linkedRoom.scheduledStartAt || linkedRoom.startTime || 0) ||
-    getScheduledStartMillis(linkedRoom.scheduledDate, linkedRoom.scheduledTime);
-  return roomStartAt !== null && roomStartAt > 0 && roomStartAt <= now;
+  const roomStartAt = getLinkedRoomStartMillis(linkedRoom);
+  if (roomStartAt !== null && roomStartAt <= now) return "linked_matchroom_start_elapsed";
+
+  return null;
+}
+
+function isExpiredForZoneDecision(request: any, linkedRoom: any, now = Date.now()) {
+  return getZoneDecisionExpiryReason(request, linkedRoom, now) !== null;
 }
 
 async function filterActionableZoneRequests(ctx: any, requests: any[], now = Date.now()) {
@@ -135,6 +201,76 @@ async function assertActionableZoneRequest(
   }
   return request;
 }
+
+async function markZoneBookingRequestExpired(
+  ctx: any,
+  request: any,
+  now: number,
+  reason: string,
+) {
+  if (!request?._id || ["expired", "cancelled"].includes(String(request.status || ""))) {
+    return { expired: false, expiredOffers: 0 };
+  }
+
+  await ctx.db.patch(request._id, {
+    status: "expired",
+    lifecycleStatus: reason,
+    closedReason: reason,
+    updatedAt: now,
+  });
+  await releaseHeldResourcesForRequest(ctx, request, now);
+
+  let expiredOffers = 0;
+  const offers = await ctx.db
+    .query("zoneOffers")
+    .withIndex("by_requestId", (q: any) => q.eq("requestId", request._id))
+    .take(50);
+  for (const offer of offers) {
+    if (String(offer.status || "") !== "pending") continue;
+    await ctx.db.patch(offer._id, {
+      status: "expired",
+      updatedAt: now,
+    });
+    expiredOffers += 1;
+  }
+
+  return { expired: true, expiredOffers };
+}
+
+export const expireStaleBookingRequests = internalMutation({
+  args: {
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const batchSize = Math.max(1, Math.min(100, Math.floor(Number(args.batchSize || 50))));
+    const statuses = ["open", "pending_payment", "accepted"] as const;
+    let inspected = 0;
+    let expired = 0;
+    let expiredOffers = 0;
+
+    for (const status of statuses) {
+      const requests = await ctx.db
+        .query("bookingRequests")
+        .withIndex("by_status", (q: any) => q.eq("status", status))
+        .take(batchSize);
+
+      for (const request of requests) {
+        inspected += 1;
+        const linkedRoom = request.matchroomId
+          ? await ctx.db.get(request.matchroomId).catch(() => null)
+          : null;
+        const reason = getZoneDecisionExpiryReason(request, linkedRoom, now);
+        if (!reason) continue;
+        const result = await markZoneBookingRequestExpired(ctx, request, now, reason);
+        if (result.expired) expired += 1;
+        expiredOffers += result.expiredOffers;
+      }
+    }
+
+    return { inspected, expired, expiredOffers };
+  },
+});
 
 function inferResourceTier(resource: any) {
   const explicit = normalizeResourceToken(resource?.tier);
@@ -216,6 +352,12 @@ function validateSelectedResourceFit(request: any, selectedResources: any[]) {
   });
 }
 
+function isResourceHeldForRequest(resource: any, request: any) {
+  const requestId = String(request?._id || "");
+  if (!requestId || String(resource?.lifecycleStatus || "") !== "held") return false;
+  return String(resource?.bookingRequestId || "") === requestId;
+}
+
 async function holdResourcesForBroadcastOffer(ctx: any, input: {
   request: any;
   matchroomId: any;
@@ -237,7 +379,7 @@ async function holdResourcesForBroadcastOffer(ctx: any, input: {
       throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
     }
     const status = String(resource.lifecycleStatus || "");
-    const heldForSameRequest = status === "held" && String(resource.bookingRequestId || "") === String(input.request._id);
+    const heldForSameRequest = isResourceHeldForRequest(resource, input.request);
     if (status !== "available" && !heldForSameRequest) {
       throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
     }
@@ -253,6 +395,146 @@ async function holdResourcesForBroadcastOffer(ctx: any, input: {
       updatedAt: input.now,
     });
   }
+}
+
+async function holdResourcesForZoneCounterOffer(ctx: any, input: {
+  request: any;
+  matchroomId?: any;
+  resourceIds: any[];
+  zoneId: string;
+  branchId: string;
+  adminUid: string;
+  now: number;
+}) {
+  if (!input.branchId) {
+    throw new Error("Select a branch before sending an alternative time.");
+  }
+  if (!input.resourceIds.length) {
+    throw new Error("Select resources before sending an alternative time.");
+  }
+
+  const resources = await Promise.all(input.resourceIds.map((resourceId) => ctx.db.get(resourceId)));
+  resources.forEach((resource, index) => {
+    if (!resource) {
+      throw new Error("One or more selected resources no longer exist.");
+    }
+    if (String(resource.zoneId) !== input.zoneId) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to this venue.`);
+    }
+    if (String(resource.branchId || "") !== String(input.branchId)) {
+      throw new Error(`${resource.name || "Selected resource"} does not belong to the selected branch.`);
+    }
+    const status = String(resource.lifecycleStatus || "");
+    const heldForSameRequest = isResourceHeldForRequest(resource, input.request);
+    if (status !== "available" && !heldForSameRequest) {
+      throw new Error(`${resource.name || `Resource ${index + 1}`} is no longer available.`);
+    }
+  });
+
+  validateSelectedResourceFit(input.request, resources);
+
+  for (const resourceId of input.resourceIds) {
+    await ctx.db.patch(resourceId, {
+      lifecycleStatus: "held",
+      bookingRequestId: input.request._id,
+      matchroomId: input.matchroomId || undefined,
+      bookedAt: undefined,
+      bookedByUid: undefined,
+      updatedAt: input.now,
+    });
+  }
+}
+
+function getOfferResourceIds(offer: any, request: any) {
+  if (Array.isArray(offer?.resourceIds) && offer.resourceIds.length) {
+    return offer.resourceIds;
+  }
+  if (Array.isArray(request?.allocatedResourceIds) && request.allocatedResourceIds.length) {
+    return request.allocatedResourceIds;
+  }
+  return [];
+}
+
+async function releaseHeldResourcesForRequest(ctx: any, request: any, now = Date.now()) {
+  const resourceIds = Array.isArray(request?.allocatedResourceIds) ? request.allocatedResourceIds : [];
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId);
+    if (!resource) continue;
+    if (
+      String(resource.bookingRequestId || "") === String(request?._id || "") &&
+      String(resource.lifecycleStatus || "") === "held"
+    ) {
+      await ctx.db.patch(resource._id, {
+        lifecycleStatus: "available",
+        bookingRequestId: undefined,
+        matchroomId: undefined,
+        bookedAt: undefined,
+        bookedByUid: undefined,
+        updatedAt: now,
+      });
+    }
+  }
+}
+
+async function getCounterOfferResourceUnavailableMessage(ctx: any, input: {
+  request: any;
+  offer: any;
+}) {
+  const resourceIds = getOfferResourceIds(input.offer, input.request);
+  if (!resourceIds.length) {
+    return "Selected venue resources are missing for this counter-offer.";
+  }
+
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId);
+    if (!resource) {
+      return "The selected venue resources are no longer available.";
+    }
+    const belongsToRequest = String(resource.bookingRequestId || "") === String(input.request._id);
+    const resourceStatus = String(resource.lifecycleStatus || "");
+    if (!belongsToRequest || !["held", "booked"].includes(resourceStatus)) {
+      return "The selected venue resources are no longer available.";
+    }
+  }
+
+  return null;
+}
+
+async function bookHeldResourcesForAcceptedCounterOffer(ctx: any, input: {
+  request: any;
+  offer: any;
+  matchroomId: any;
+  now: number;
+}) {
+  const resourceIds = getOfferResourceIds(input.offer, input.request);
+  if (!resourceIds.length) {
+    throw new Error("Confirmed matchrooms require selected resources.");
+  }
+
+  for (const resourceId of resourceIds) {
+    const resource = await ctx.db.get(resourceId);
+    if (!resource) {
+      throw new Error("One or more selected resources no longer exist.");
+    }
+    const belongsToRequest = String(resource.bookingRequestId || "") === String(input.request._id);
+    const status = String(resource.lifecycleStatus || "");
+    if (!belongsToRequest || !["held", "booked"].includes(status)) {
+      throw new Error(`${resource.name || "Selected resource"} is no longer held for this offer.`);
+    }
+    if (status === "booked" && String(resource.matchroomId || "") === String(input.matchroomId)) {
+      continue;
+    }
+    await ctx.db.patch(resource._id, {
+      lifecycleStatus: "booked",
+      bookingRequestId: input.request._id,
+      matchroomId: input.matchroomId,
+      bookedAt: input.now,
+      bookedByUid: input.offer.zoneOwnerUid || input.request.allocatedByUid || undefined,
+      updatedAt: input.now,
+    });
+  }
+
+  return resourceIds;
 }
 
 function getConfirmedSlotCount(room: any) {
@@ -617,6 +899,7 @@ async function markCounterOfferUnavailable(ctx: any, input: {
     status: "expired",
     updatedAt: input.now,
   });
+  await releaseHeldResourcesForRequest(ctx, input.request, input.now);
 
   if (input.closeRequest) {
     await closeBroadcastOfferRequest(ctx, {
@@ -1908,6 +2191,7 @@ export const sendCounterOffer = mutation({
     adminUid: v.optional(v.string()),
     branchId: v.optional(v.string()),
     branchName: v.optional(v.string()),
+    resourceIds: v.optional(v.array(v.id("zoneResources"))),
     scheduleOptions: v.array(v.object({
       date: v.string(),
       time: v.string(),
@@ -2016,6 +2300,21 @@ export const sendCounterOffer = mutation({
       throw new Error("The broadcast counter-offer response window has expired.");
     }
     const primaryOption = scheduleOptions[0];
+    const branchId = String(args.branchId || "").trim();
+    const resourceIds = Array.isArray(args.resourceIds) ? args.resourceIds : [];
+    if (!branchId || !resourceIds.length) {
+      throw new Error("Select a branch and resources before sending an alternative time.");
+    }
+
+    await holdResourcesForZoneCounterOffer(ctx, {
+      request,
+      matchroomId: request.matchroomId || undefined,
+      resourceIds,
+      zoneId: String(args.zoneId),
+      branchId,
+      adminUid: actorUid,
+      now,
+    });
 
     // Create zone offer
     const offerId = await ctx.db.insert("zoneOffers", {
@@ -2035,8 +2334,9 @@ export const sendCounterOffer = mutation({
       expiresAt,
       zoneName: args.zoneName,
       zoneOwnerUid: args.zoneOwnerUid,
-      branchId: args.branchId,
+      branchId,
       branchName: args.branchName,
+      resourceIds,
       requestOwnerUid: args.requestOwnerUid,
       requestKind: request.requestKind || "direct_zone",
       responseExpiresAt: expiresAt,
@@ -2047,6 +2347,11 @@ export const sendCounterOffer = mutation({
 
     // Update request status
     await ctx.db.patch(args.requestId, {
+      allocatedBranchId: branchId,
+      allocatedResourceIds: resourceIds,
+      allocatedAt: now,
+      allocatedByUid: actorUid,
+      lifecycleStatus: isBroadcastRequest ? "broadcast_counter_offer_pending" : "counter_offer_pending_captains",
       updatedAt: now,
     });
 
@@ -2067,7 +2372,7 @@ export const sendCounterOffer = mutation({
             requestId: String(args.requestId),
             zoneId: String(args.zoneId),
             zoneName: args.zoneName,
-            branchId: args.branchId || null,
+            branchId,
             branchName: args.branchName || null,
             offerId: String(offerId),
             proposedDate: primaryOption.date,
@@ -2102,8 +2407,9 @@ export const sendCounterOffer = mutation({
       summary: `Sent counter-offer with ${scheduleOptions.length} time option${scheduleOptions.length === 1 ? "" : "s"}.`,
       details: {
         offerId: String(offerId),
-        branchId: args.branchId || null,
+        branchId,
         branchName: args.branchName || null,
+        resourceCount: resourceIds.length,
         location: args.location || null,
         zoneName: args.zoneName,
         pricePerPlayer: args.pricePerPlayer,
@@ -2294,6 +2600,19 @@ export const respondToCounterOffer = mutation({
             closeRequest: true,
           });
         }
+        const winningResourceIds = getOfferResourceIds(offer, request);
+        if (!winningResourceIds.length) {
+          return await markCounterOfferUnavailable(ctx, {
+            offerId: args.offerId,
+            request,
+            recipientUids,
+            responderUid: String(responder._id),
+            matchroomId: request.matchroomId,
+            message: "Selected venue resources are missing for this counter-offer.",
+            now,
+            closeRequest: true,
+          });
+        }
 
         const confirmation = await confirmBroadcastVenue(ctx, {
           matchroomId: request.matchroomId,
@@ -2305,7 +2624,7 @@ export const respondToCounterOffer = mutation({
           branchId: offer.branchId || null,
           branchName: offer.branchName || null,
           locationLabel: offer.branchName || offer.zoneName || undefined,
-          resourceIds: Array.isArray(request.allocatedResourceIds) ? request.allocatedResourceIds : undefined,
+          resourceIds: winningResourceIds,
         });
         matchroomId = confirmation.matchroomId;
         patch.status = "accepted";
@@ -2368,11 +2687,33 @@ export const respondToCounterOffer = mutation({
       const chosenOption = scheduleOptions[
         acceptedResponses[0].selectedOptionIndex ?? 0
       ];
+      const unavailableMessage = await getCounterOfferResourceUnavailableMessage(ctx, {
+        request,
+        offer,
+      });
+      if (unavailableMessage) {
+        return await markCounterOfferUnavailable(ctx, {
+          offerId: args.offerId,
+          request,
+          recipientUids,
+          responderUid: String(responder._id),
+          matchroomId,
+          message: unavailableMessage,
+          now,
+        });
+      }
       matchroomId = await ensureMatchroomForAcceptedOffer(ctx, {
         request,
         offer,
         option: chosenOption,
       });
+      const acceptedResourceIds = await bookHeldResourcesForAcceptedCounterOffer(ctx, {
+        request,
+        offer,
+        matchroomId,
+        now,
+      });
+      const acceptedBranchId = String(offer.branchId || request.allocatedBranchId || "");
 
       patch.status = "accepted";
       patch.selectedOptionIndex = acceptedResponses[0].selectedOptionIndex ?? 0;
@@ -2384,6 +2725,9 @@ export const respondToCounterOffer = mutation({
           status: "locked",
           isLocked: true,
           lockedAt: now,
+          ...(acceptedBranchId ? { branchId: acceptedBranchId } : {}),
+          resourceIds: acceptedResourceIds,
+          ...(offer.branchName || offer.zoneName ? { location: offer.branchName || offer.zoneName } : {}),
           updatedAt: now,
         });
       }
@@ -2392,6 +2736,10 @@ export const respondToCounterOffer = mutation({
         status: "accepted",
         zoneId: offer.zoneId,
         matchroomId,
+        ...(acceptedBranchId ? { allocatedBranchId: acceptedBranchId } : {}),
+        allocatedResourceIds: acceptedResourceIds,
+        allocatedAt: request.allocatedAt || now,
+        allocatedByUid: offer.zoneOwnerUid || request.allocatedByUid || undefined,
         lifecycleStatus: "zone_accepted_locked",
         updatedAt: now,
       });
@@ -2420,6 +2768,7 @@ export const respondToCounterOffer = mutation({
           now,
         });
       }
+      await releaseHeldResourcesForRequest(ctx, request, now);
       await patchOfferNotifications(ctx, {
         offerId: String(args.offerId),
         recipientUids,
@@ -2451,9 +2800,7 @@ export const respondToCounterOffer = mutation({
   },
 });
 
-// Create a walk-in matchroom
-export const createWalkInMatchroom = mutation({
-  args: {
+const createWalkInMatchroomArgsValidator = {
     zoneId: v.string(),
     zoneOwnerUid: v.string(),
     branchId: v.optional(v.string()),
@@ -2468,7 +2815,7 @@ export const createWalkInMatchroom = mutation({
     seriesType: v.optional(v.string()),
     seatCount: v.number(),
     bookedSeatCount: v.optional(v.number()),
-    paymentMode: v.union(v.literal("venue_pay"), v.literal("guest_pay")),
+    paymentMode: v.optional(v.union(v.literal("venue_pay"), v.literal("guest_pay"), v.literal("matchhai_pay"))),
     pricePerPlayer: v.optional(v.number()),
     currency: v.optional(v.string()),
     captainSeatNumber: v.optional(v.number()),
@@ -2487,24 +2834,89 @@ export const createWalkInMatchroom = mutation({
     players: v.array(playerValidator),
     playerUids: v.array(v.string()),
     currentPlayers: v.number(),
-    paymentStatus: v.union(v.literal("paid"), v.literal("unpaid")),
+    paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("unpaid"))),
+    paymentAmount: v.optional(v.number()),
+    paymentReservedSlots: v.optional(v.number()),
+    paymentMethod: v.optional(v.string()),
+    clientCreateRequestId: v.optional(v.string()),
+    sourcePaymentOrderRefNum: v.optional(v.string()),
     walkIn: v.any(),
-  },
-  handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    // Authz: caller must own this zone (CR-01).
-    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+};
+
+async function requireZoneOwnerByUserId(ctx: any, zoneId: string, userId: Id<"users">) {
+  const actor = await ctx.db.get(userId);
+  if (!actor) throw new Error("Signed-in user profile not found.");
+
+  let zone: any = null;
+  try {
+    zone = await ctx.db.get(zoneId as any);
+  } catch {
+    zone = null;
+  }
+  if (!zone) throw new Error("Zone not found.");
+  if (String(zone.ownerUid || "") !== String(actor._id)) {
+    throw new Error("You are not authorized to manage this zone.");
+  }
+
+  return { actor, zone };
+}
+
+async function createWalkInMatchroomFromValidatedArgs(ctx: any, args: any, actor: any) {
     const actorUid = String(actor._id);
     const now = Date.now();
     const pricePerPlayer = args.pricePerPlayer ?? 0;
+    const bookedSeatCount = Math.max(0, Math.floor(Number(args.bookedSeatCount ?? args.currentPlayers ?? 0)));
+    const paymentMode = String(args.paymentMode || "matchhai_pay") as "venue_pay" | "guest_pay" | "matchhai_pay";
+    const paymentAmount = Number.isFinite(args.paymentAmount)
+      ? Math.max(0, Math.ceil(Number(args.paymentAmount)))
+      : Math.max(0, Math.ceil(Number(pricePerPlayer || 0) * bookedSeatCount));
+    const paymentReservedSlots = Number.isFinite(args.paymentReservedSlots)
+      ? Math.max(0, Math.floor(Number(args.paymentReservedSlots)))
+      : bookedSeatCount;
+    const paymentStatus =
+      args.paymentStatus === "paid" || args.paymentStatus === "unpaid"
+        ? args.paymentStatus
+        : paymentMode === "venue_pay" || paymentAmount <= 0
+          ? "paid"
+          : "unpaid";
+    const sourcePaymentOrderRefNum = String(args.sourcePaymentOrderRefNum || "").trim();
+
+    if (sourcePaymentOrderRefNum) {
+      const existing = await ctx.db
+        .query("matchrooms")
+        .withIndex("by_sourcePaymentOrderRefNum", (q: any) => q.eq("sourcePaymentOrderRefNum", sourcePaymentOrderRefNum))
+        .unique();
+      if (existing) {
+        return existing._id;
+      }
+    }
+
+    const clientCreateRequestId = String(args.clientCreateRequestId || "").trim();
+    if (clientCreateRequestId) {
+      const existingByRequest = await ctx.db
+        .query("matchrooms")
+        .withIndex("by_hostUid_and_clientCreateRequestId", (q: any) =>
+          q.eq("hostUid", actorUid).eq("clientCreateRequestId", clientCreateRequestId),
+        )
+        .first();
+      if (existingByRequest) {
+        return existingByRequest._id;
+      }
+    }
+
     const scheduledStartAt = parseLocalDateTimeMillis(args.scheduledDate, args.scheduledTime);
     const scheduleValidation = validateWalkInScheduleWindow(scheduledStartAt, now);
     if (!scheduleValidation.ok) {
       throw new Error(scheduleValidation.message);
     }
+    const locationLabel =
+      String(args.branchName || "").trim() ||
+      String(args.walkIn?.branchName || "").trim() ||
+      "Zone Venue";
+    const matchCode = await generateUniqueMatchCode(ctx, locationLabel);
 
     const matchroomId = await ctx.db.insert("matchrooms", {
-      hostUid: args.adminUid,
+      hostUid: actorUid,
       hostName: args.adminName || "Zone Admin",
       game: args.gameKey,
       title: args.title.trim() || "Walk-in Matchroom",
@@ -2515,9 +2927,11 @@ export const createWalkInMatchroom = mutation({
       currentPlayers: args.currentPlayers,
       players: args.players,
       playerUids: args.playerUids,
+      location: locationLabel,
       locationMode: "zone",
       zoneId: args.zoneId,
-      zoneOwnerUid: args.zoneOwnerUid,
+      zoneOwnerUid: actorUid,
+      branchId: args.branchId || undefined,
       scheduledDate: args.scheduledDate,
       scheduledTime: args.scheduledTime,
       scheduledStartAt: scheduledStartAt || undefined,
@@ -2532,11 +2946,44 @@ export const createWalkInMatchroom = mutation({
         perPlayer: pricePerPlayer,
         currency: args.currency || "PKR",
       },
-      paymentStatus: args.paymentStatus,
-      walkIn: args.walkIn,
+      paymentStatus,
+      paymentAmount,
+      paymentReservedSlots,
+      paymentCurrency: args.currency || "PKR",
+      sourcePaymentOrderRefNum: sourcePaymentOrderRefNum || undefined,
+      clientCreateRequestId: clientCreateRequestId || undefined,
+      matchCode,
+      zoneAdminApproved: true,
+      skipBookingRequest: true,
+      walkIn: {
+        ...(args.walkIn || {}),
+        paymentMode,
+        paymentStatus,
+        paymentAmount,
+        paymentReservedSlots,
+        paymentMethod: args.paymentMethod || args.walkIn?.paymentMethod || null,
+      },
       createdAt: now,
       updatedAt: now,
     });
+
+    if (
+      paymentMode === "matchhai_pay" &&
+      paymentStatus === "paid" &&
+      paymentAmount > 0 &&
+      !sourcePaymentOrderRefNum
+    ) {
+      await deductWalletFunds(ctx, {
+        amount: paymentAmount,
+        metadata: {
+          flow: "zone_walkin_matchroom_create",
+          matchroomId: String(matchroomId),
+        },
+        reference: `matchroom_create:${String(matchroomId)}`,
+        source: "matchroom_create",
+        userId: actor._id,
+      });
+    }
 
     await recordZoneAuditEvent(ctx, {
       zoneId: args.zoneId,
@@ -2554,16 +3001,228 @@ export const createWalkInMatchroom = mutation({
         scheduledTime: args.scheduledTime,
         durationMinutes: args.durationMinutes,
         seatCount: args.seatCount,
-        bookedSeatCount: args.bookedSeatCount || null,
-        paymentMode: args.paymentMode,
+        bookedSeatCount,
+        paymentMode,
         pricePerPlayer,
         currency: args.currency || "PKR",
-        paymentStatus: args.paymentStatus,
+        paymentStatus,
+        paymentAmount,
+        paymentReservedSlots,
         playerCount: args.currentPlayers,
       },
       createdAt: now,
     });
 
+    return matchroomId;
+}
+
+// Create a walk-in matchroom
+export const createWalkInMatchroom = mutation({
+  args: createWalkInMatchroomArgsValidator,
+  handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
+    // Authz: caller must own this zone (CR-01).
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, args.zoneId);
+    const matchroomId = await createWalkInMatchroomFromValidatedArgs(ctx, args, actor);
     return String(matchroomId);
+  },
+});
+
+export const finalizePaidWalkInCreateFromProvider = internalMutation({
+  args: {
+    orderRefNum: v.string(),
+    userId: v.id("users"),
+    amount: v.number(),
+    zoneWalkInCreateArgs: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const createArgs = args.zoneWalkInCreateArgs || {};
+    const expectedAmount = Number(createArgs.paymentAmount || 0);
+    if (expectedAmount > 0 && Math.ceil(expectedAmount) !== Math.ceil(Number(args.amount || 0))) {
+      throw new Error("Payment amount does not match walk-in request.");
+    }
+
+    const { actor } = await requireZoneOwnerByUserId(ctx, String(createArgs.zoneId || ""), args.userId);
+    const matchroomId = await createWalkInMatchroomFromValidatedArgs(
+      ctx,
+      {
+        ...createArgs,
+        adminUid: String(args.userId),
+        paymentAmount: Math.max(0, Math.ceil(Number(args.amount || 0))),
+        paymentMethod: "easypaisa",
+        paymentMode: "matchhai_pay",
+        paymentStatus: "paid",
+        sourcePaymentOrderRefNum: args.orderRefNum,
+      },
+      actor,
+    );
+    return { ok: true, matchroomId };
+  },
+});
+
+export const bookWalkInSeat = mutation({
+  args: {
+    matchroomId: v.string(),
+    team: v.union(v.literal("A"), v.literal("B")),
+    slotId: v.string(),
+    mode: v.optional(v.union(v.literal("book"), v.literal("reserve"))),
+    playerName: v.optional(v.string()),
+    skillTier: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireKycVerified(ctx);
+    const room = await ctx.db.get(args.matchroomId as Id<"matchrooms">);
+    if (!room) throw new Error("Matchroom not found.");
+    if (String(room.bookingSource || "").toLowerCase() !== "walkin") {
+      throw new Error("Seats can only be booked for walk-in matchrooms.");
+    }
+    if (!room.zoneId) throw new Error("Zone context missing for this walk-in matchroom.");
+    if (["completed", "cancelled", "expired"].includes(String(room.status || ""))) {
+      throw new Error("This walk-in matchroom is no longer active.");
+    }
+
+    const { actor } = await requireAuthenticatedZoneOwner(ctx, String(room.zoneId));
+    const now = Date.now();
+    const mode = args.mode || "book";
+    const selectedSlots = args.team === "A" ? [...(room.slotsA || [])] : [...(room.slotsB || [])];
+    const slotIndex = selectedSlots.findIndex((slot: any) => String(slot?.slotId || "") === args.slotId);
+    if (slotIndex < 0) throw new Error("Seat not found.");
+
+    const currentSlot = selectedSlots[slotIndex] as any;
+    const state = String(currentSlot?.status || "open").toLowerCase();
+    const slotOccupied = Boolean(
+      currentSlot?.uid ||
+        currentSlot?.user?.uid ||
+        currentSlot?.reservedForUid ||
+        currentSlot?.reservedFor?.uid ||
+        state === "reserved" ||
+        state === "confirmed",
+    );
+    if (slotOccupied) throw new Error("This seat is already booked.");
+
+    const allExistingSlots = [...(room.slotsA || []), ...(room.slotsB || [])];
+    const occupiedCount = allExistingSlots.filter((slot: any) => {
+      const slotState = String(slot?.status || "open").toLowerCase();
+      return Boolean(
+        slot?.uid ||
+          slot?.user?.uid ||
+          slot?.reservedForUid ||
+          slot?.reservedFor?.uid ||
+          slotState === "reserved" ||
+          slotState === "confirmed",
+      );
+    }).length;
+    const maxPlayers = Math.max(1, Number(room.maxPlayers || 0));
+    if (occupiedCount >= maxPlayers) throw new Error("This walk-in matchroom is already full.");
+
+    const allowedSkillTiers = new Set(["Beginner", "Casual", "Intermediate", "Advanced", "Pro", "Elite"]);
+    const normalizedSkillTier = allowedSkillTiers.has(String(args.skillTier || ""))
+      ? String(args.skillTier)
+      : "Beginner";
+    const seatNumber = Math.max(1, occupiedCount + 1);
+    const playerUid = `walkin_${String(actor._id)}_${now}_${args.team}${args.slotId.replace(/[^A-Za-z0-9]/g, "")}`;
+    const playerName = String(args.playerName || "").trim() || `Walk-in Player ${seatNumber}`;
+
+    const nextSlot =
+      mode === "reserve"
+        ? {
+            ...currentSlot,
+            status: "reserved" as const,
+            role: "Booked",
+          }
+        : {
+            ...currentSlot,
+            uid: playerUid,
+            user: {
+              uid: playerUid,
+              username: playerName,
+              skillTier: normalizedSkillTier,
+            },
+            status: "confirmed" as const,
+            role: "Player",
+          };
+
+    selectedSlots[slotIndex] = nextSlot;
+
+    const nextSlotsA = args.team === "A" ? selectedSlots : room.slotsA || [];
+    const nextSlotsB = args.team === "B" ? selectedSlots : room.slotsB || [];
+    const nextAllSlots = [...nextSlotsA, ...nextSlotsB];
+    const nextCurrentPlayers = Math.min(
+      maxPlayers,
+      nextAllSlots.filter((slot: any) => {
+        const slotState = String(slot?.status || "open").toLowerCase();
+        return Boolean(
+          slot?.uid ||
+            slot?.user?.uid ||
+            slot?.reservedForUid ||
+            slot?.reservedFor?.uid ||
+            slotState === "reserved" ||
+            slotState === "confirmed",
+        );
+      }).length,
+    );
+
+    const nextPlayers = Array.isArray(room.players) ? [...room.players] : [];
+    const nextPlayerUids = Array.isArray(room.playerUids) ? [...room.playerUids] : [];
+    const walkIn = room.walkIn && typeof room.walkIn === "object" ? { ...room.walkIn } : {};
+    const roster = Array.isArray(walkIn.roster) ? [...walkIn.roster] : [];
+
+    if (mode === "book") {
+      nextPlayers.push({
+        uid: playerUid,
+        username: playerName,
+        joinedAt: now,
+        role: "Player",
+        skillTier: normalizedSkillTier,
+      });
+      nextPlayerUids.push(playerUid);
+      roster.push({
+        uid: playerUid,
+        username: playerName,
+        skillTier: normalizedSkillTier,
+        seatNumber,
+        isCaptain: false,
+      });
+    }
+
+    walkIn.bookedSeatCount = nextCurrentPlayers;
+    walkIn.knownPlayerCount = roster.length;
+    walkIn.unknownSeatCount = Math.max(0, nextCurrentPlayers - roster.length);
+    walkIn.roster = roster;
+    walkIn.updatedAt = now;
+
+    await ctx.db.patch(room._id, {
+      slotsA: nextSlotsA,
+      slotsB: nextSlotsB,
+      players: nextPlayers,
+      playerUids: Array.from(new Set(nextPlayerUids)),
+      currentPlayers: nextCurrentPlayers,
+      walkIn,
+      updatedAt: now,
+    });
+
+    await recordZoneAuditEvent(ctx, {
+      zoneId: String(room.zoneId),
+      module: "bookings",
+      action: mode === "reserve" ? "reserve_walk_in_seat" : "book_walk_in_seat",
+      actorUid: String(actor._id),
+      targetType: "matchroom",
+      targetId: String(room._id),
+      summary:
+        mode === "reserve"
+          ? `Reserved a walk-in seat for "${room.title}".`
+          : `Booked ${playerName} into walk-in matchroom "${room.title}".`,
+      details: {
+        slotId: args.slotId,
+        team: args.team,
+        playerName: mode === "book" ? playerName : null,
+      },
+      createdAt: now,
+    });
+
+    return {
+      ok: true,
+      message: mode === "reserve" ? "Seat reserved." : "Seat booked.",
+    };
   },
 });

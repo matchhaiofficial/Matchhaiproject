@@ -174,6 +174,72 @@ async function getBroadcastNotificationRecipients(
   return Array.from(recipients.values());
 }
 
+function getBroadcastMatchroomParticipantRefs(room: any) {
+  const slotRefs = [...(room?.slotsA || []), ...(room?.slotsB || [])]
+    .flatMap((slot: any) => [slot?.uid, slot?.user?.uid]);
+  const playerRefs = Array.isArray(room?.players)
+    ? room.players.flatMap((player: any) => [player?.uid, player?.user?.uid])
+    : [];
+  return normalizeStringList([
+    ...(Array.isArray(room?.playerUids) ? room.playerUids : []),
+    ...playerRefs,
+    room?.hostUid,
+    room?.captainUidA,
+    room?.captainUidB,
+    ...slotRefs,
+  ]);
+}
+
+async function getBroadcastMatchroomParticipantRecipients(ctx: any, room: any) {
+  const recipients = new Map<string, Id<"users">>();
+  for (const participantRef of getBroadcastMatchroomParticipantRefs(room)) {
+    const recipientId = await resolveUserId(ctx, participantRef);
+    if (recipientId) recipients.set(String(recipientId), recipientId);
+  }
+  return Array.from(recipients.values());
+}
+
+async function notifyBroadcastMatchroomCancelledParticipants(
+  ctx: any,
+  room: any,
+  input: {
+    reason: string;
+    responseExpiresAt?: number | null;
+  },
+) {
+  const matchroomId = room._id as Id<"matchrooms">;
+  const route = `/matchrooms/${String(matchroomId)}`;
+  const recipients = await getBroadcastMatchroomParticipantRecipients(ctx, room);
+  for (const recipientId of recipients) {
+    const dedupeKey = `match.cancelled:${String(matchroomId)}:${input.reason}:${String(recipientId)}`;
+    await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+      type: "match.cancelled",
+      toUid: recipientId,
+      recipientRole: "player",
+      status: "pending",
+      dedupeKey,
+      dedupePolicy: "upsert_active",
+      pushPolicy: "force",
+      matchroomId,
+      entity: { kind: "matchroom", id: String(matchroomId) },
+      route,
+      title: "Matchroom cancelled",
+      body: `The matchroom "${room.title || "Matchroom"}" was cancelled because no venue responded in time.`,
+      data: {
+        matchroomId: String(matchroomId),
+        matchroomTitle: room.title || "Matchroom",
+        reason: input.reason,
+        note: "No venue responded in time.",
+        route,
+        href: route,
+        dedupeKey,
+        responseExpiresAt: input.responseExpiresAt || null,
+        expiresAt: input.responseExpiresAt || null,
+      },
+    });
+  }
+}
+
 async function notifyBroadcastParticipants(
   ctx: any,
   room: any,
@@ -617,17 +683,24 @@ export async function finalizeBroadcastFailure(
     }
   }
 
-  await notifyBroadcastParticipants(ctx, { ...room, _id: matchroomId }, {
-    type: nextBroadcastStatus === "failed" ? "broadcast.failed" : "broadcast.expired",
-    status: "expired",
-    title: nextBroadcastStatus === "failed" ? "Broadcast venue search failed" : "Broadcast venue search expired",
-    body: reason === "no_eligible_zones"
-      ? NO_ELIGIBLE_ZONES_MESSAGE
-      : "No venue was confirmed for your broadcast matchroom.",
-    reason,
-    responseExpiresAt,
-    includeCaptains: reason !== "no_eligible_zones",
-  });
+  if (reason === "no_zone_response") {
+    await notifyBroadcastMatchroomCancelledParticipants(ctx, { ...room, _id: matchroomId }, {
+      reason,
+      responseExpiresAt,
+    });
+  } else {
+    await notifyBroadcastParticipants(ctx, { ...room, _id: matchroomId }, {
+      type: nextBroadcastStatus === "failed" ? "broadcast.failed" : "broadcast.expired",
+      status: "expired",
+      title: nextBroadcastStatus === "failed" ? "Broadcast venue search failed" : "Broadcast venue search expired",
+      body: reason === "no_eligible_zones"
+        ? NO_ELIGIBLE_ZONES_MESSAGE
+        : "No venue was confirmed for your broadcast matchroom.",
+      reason,
+      responseExpiresAt,
+      includeCaptains: reason !== "no_eligible_zones",
+    });
+  }
 
   return { changed: true, reason, broadcastRequestStatus: nextBroadcastStatus };
 }
@@ -715,14 +788,9 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
       broadcastRequestExpiresAt: lockAt || now,
       updatedAt: now,
     });
-    await notifyBroadcastParticipants(ctx, { ...room, _id: matchroomId }, {
-      type: "broadcast.expired",
-      status: "expired",
-      title: "Broadcast venue search expired",
-      body: "No venue was confirmed for your broadcast matchroom.",
+    await notifyBroadcastMatchroomCancelledParticipants(ctx, { ...room, _id: matchroomId }, {
       reason: "lock_time_elapsed",
       responseExpiresAt: lockAt || now,
-      includeCaptains: true,
     });
     return { dispatched: false, reason: "lock_time_elapsed" };
   }
@@ -890,6 +958,9 @@ export async function confirmBroadcastVenue(
   const winningResourceIds =
     input.resourceIds ||
     (Array.isArray(winningRequest.allocatedResourceIds) ? winningRequest.allocatedResourceIds : []);
+  if (!winningResourceIds.length) {
+    throw new Error("Confirmed venues require selected resources.");
+  }
   const locationLabel =
     input.locationLabel ||
     input.branchName ||

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { useMinuteTicker } from "../../../../src/hooks/useMinuteTicker";
+import { getMatchroomLockAtMs } from "../../../../src/constants/timing";
 import {
   type ZoneBookingQueueItem,
 } from "../../../../src/services/convex/zoneAdminBookingService";
@@ -117,6 +118,23 @@ const matchesRequestStatus = (item: ZoneBookingQueueItem, statusFilter: RequestS
   return normalizeBranchToken(item.status) === statusFilter;
 };
 
+const toScheduledDateTimeMillis = (dateValue: any, timeValue: any) => {
+  const date = toDateString(dateValue);
+  let time = String(timeValue || "").trim();
+  if (!date || !time) return 0;
+  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]);
+    const minute = Number(twelveHour[2]);
+    const period = twelveHour[3].toUpperCase();
+    if (period === "PM" && hour !== 12) hour += 12;
+    if (period === "AM" && hour === 12) hour = 0;
+    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+  const scheduledStartAt = new Date(`${date}T${time}`).getTime();
+  return Number.isFinite(scheduledStartAt) ? scheduledStartAt : 0;
+};
+
 export const getRequestMatchroomId = (item?: ZoneBookingQueueItem | null) => {
   if (!item) return null;
   if (item.matchroomId) return item.matchroomId;
@@ -135,20 +153,21 @@ export const isZoneBookingRequestExpired = (
   const responseExpiresAt = toScheduleMillis(item.responseExpiresAt);
   if (responseExpiresAt > 0 && responseExpiresAt <= now) return true;
 
-  const date = toDateString(item.preferredDate);
-  let time = String(item.preferredTime || "").trim();
-  if (!date || !time) return false;
-  const twelveHour = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time);
-  if (twelveHour) {
-    let hour = Number(twelveHour[1]);
-    const minute = Number(twelveHour[2]);
-    const period = twelveHour[3].toUpperCase();
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
-    time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-  const scheduledStartAt = new Date(`${date}T${time}`).getTime();
-  return Number.isFinite(scheduledStartAt) && scheduledStartAt <= now;
+  const raw = item.raw || {};
+  const rawMatchroom = raw.matchroom || {};
+  const explicitLockAt =
+    toScheduleMillis(raw.lockAt) ||
+    toScheduleMillis(rawMatchroom.lockAt);
+  if (explicitLockAt > 0 && explicitLockAt <= now) return true;
+
+  const scheduledStartAt =
+    toScheduleMillis(raw.scheduledStartAt) ||
+    toScheduleMillis(rawMatchroom.scheduledStartAt) ||
+    toScheduledDateTimeMillis(item.preferredDate, item.preferredTime) ||
+    toScheduledDateTimeMillis(rawMatchroom.scheduledDate, rawMatchroom.scheduledTime);
+  const lockAt = getMatchroomLockAtMs(scheduledStartAt);
+  if (lockAt !== null && lockAt <= now) return true;
+  return scheduledStartAt > 0 && scheduledStartAt <= now;
 };
 
 export const formatDate = (value: any) => {

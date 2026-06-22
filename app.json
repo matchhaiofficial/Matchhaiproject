@@ -21,14 +21,15 @@
         "NSMicrophoneUsageDescription": "MatchHai uses your microphone so you can send voice messages and communicate during gameplay coordination.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.ovaisto.matchhai"
+      "bundleIdentifier": "com.ovaisto.matchhai",
+      "googleServicesFile": "./firebase/GoogleService-Info.plist"
     },
     "android": {
       "package": "com.ovaisto.matchhai",
       "googleServicesFile": "./firebase/google-services.json",
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
-        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
@@ -72,9 +73,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "cda2020c-8a2a-43d6-bd46-ffdbbf8de273"
+        "projectId": "cc63aac8-7e68-4dbc-9e95-c59e145fb7b4"
       }
     },
-    "owner": "baaasim"
+    "owner": "basimmmmm"
   }
 }

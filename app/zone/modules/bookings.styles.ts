@@ -869,6 +869,10 @@ export default StyleSheet.create({
     allocateBranchWrap: {
         gap: SPACING.sm,
     },
+    allocateBranchChipRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+    },
     allocateSectionLabel: {
         color: COLORS.text,
         fontFamily: FONTS.heading,

@@ -18,6 +18,7 @@ import {
 } from "../../../src/services/convex/matchroomActionService";
 import { submitMatchroomComplain } from "../../../src/services/convex/reportService";
 import {
+  bookZoneWalkInSeat,
   rejectZoneBookingRequest,
   sendZoneCounterOffer,
 } from "../../../src/services/convex/zoneAdminBookingService";
@@ -575,6 +576,66 @@ export function useMatchroomDetailActions({
       isRequestingRef.current = false;
     }
   }, [user, id, startJoin, fetchRoom, showToast])
+
+  const handleBookWalkInSeat = useCallback(async (team: "A" | "B", slotId: string) => {
+    if (isRequestingRef.current) return;
+    const activeRoom = roomRef.current;
+    if (!activeRoom || !id || !isZoneAdmin) {
+      showToast({
+        message: "Walk-in lobby is not ready. Please refresh and try again.",
+        title: "Not ready",
+        type: "warning",
+      });
+      return;
+    }
+
+    if (String(activeRoom.bookingSource || "").toLowerCase() !== "walkin") {
+      showToast({
+        message: "Seats can only be booked from walk-in matchrooms.",
+        title: "Unavailable",
+        type: "warning",
+      });
+      return;
+    }
+
+    isRequestingRef.current = true;
+    setJoining(true);
+    try {
+      const result = await bookZoneWalkInSeat({
+        matchroomId: String(id),
+        team,
+        slotId,
+        mode: "book",
+      });
+
+      if (result.ok) {
+        showToast({
+          message: result.message || "Seat booked.",
+          title: "Seat booked",
+          type: "success",
+        });
+        await fetchRoom();
+        return;
+      }
+
+      showToast({
+        message: result.message || "Unable to book this seat.",
+        title: "Booking failed",
+        type: "error",
+      });
+    } catch (error) {
+      Logger.error("MatchroomDetails", "Walk-in seat booking failed", error);
+      showToast({
+        message: "Unable to book this seat. Please try again.",
+        title: "Booking failed",
+        type: "error",
+      });
+    } finally {
+      setJoining(false);
+      isRequestingRef.current = false;
+    }
+  }, [fetchRoom, id, isZoneAdmin, setJoining, showToast]);
+
   const handleShare = async () => {
     if (!room) return;
     try {
@@ -1031,6 +1092,7 @@ export function useMatchroomDetailActions({
     handleAdminForceCancel,
     handleInvitePress,
     handleSendInvite,
+    handleBookWalkInSeat,
     handleManagePlayer,
   };
 }

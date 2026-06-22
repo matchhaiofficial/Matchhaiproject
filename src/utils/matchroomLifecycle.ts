@@ -62,6 +62,10 @@ export function getRoomExpiresAt(room: any): Date | null {
     return parseScheduledStartAt(room);
 }
 
+export function isWalkInMatchroom(room: any): boolean {
+    return String(room?.bookingSource || "").toLowerCase() === "walkin";
+}
+
 /**
  * Get the creation date of a matchroom.
  * @param room The matchroom object
@@ -119,6 +123,10 @@ export function isRoomExpired(room: any, now = new Date()): boolean {
     // "expired" regardless of roster.
     if (room.status === "completed" || room.status === "in-progress") return false;
     if (isRoomFull(room)) return false;
+    if (isWalkInMatchroom(room)) {
+        const start = parseScheduledStartAt(room);
+        return Boolean(start && start.getTime() <= now.getTime());
+    }
     // Joins close at lockAt (24h before start). An unfilled room that has passed
     // its join-lock can never fill, so it is expired/dead — not merely "locked".
     const lockAt = getRoomLockAt(room);
@@ -143,6 +151,11 @@ export function isJoinLocked(room: any, now = new Date()): boolean {
     if (isRoomExpired(room, now)) return false;
 
     if (isRoomFull(room)) return true;
+
+    if (isWalkInMatchroom(room)) {
+        const start = parseScheduledStartAt(room);
+        return Boolean(start && start.getTime() <= now.getTime());
+    }
 
     if (
         room?.status === "locked" ||

@@ -73,6 +73,63 @@ const resourceNamePrefix = (assetType: string, tier: string) => {
   return assetType === "pc" ? `${label} PCs` : `${label} Consoles`;
 };
 
+const RELEASEABLE_REQUEST_STATUSES = new Set(["expired", "cancelled", "completed", "rejected"]);
+const STALE_ORPHAN_HOLD_MS = 2 * 60 * 60 * 1000;
+
+async function hasActivePendingOfferForRequest(
+  ctx: MutationCtx,
+  requestId: Id<"bookingRequests">,
+  now: number,
+) {
+  const offers = await ctx.db
+    .query("zoneOffers")
+    .withIndex("by_requestId", (q) => q.eq("requestId", requestId))
+    .take(20);
+
+  return offers.some((offer) => {
+    if (String(offer.status || "") !== "pending") return false;
+    const expiresAt = Number(offer.expiresAt || offer.responseExpiresAt || 0);
+    return !Number.isFinite(expiresAt) || expiresAt <= 0 || expiresAt > now;
+  });
+}
+
+async function shouldReleaseHeldResource(
+  ctx: MutationCtx,
+  resource: Doc<"zoneResources">,
+  currentRequestId: Id<"bookingRequests"> | undefined,
+  now: number,
+) {
+  if (String(resource.lifecycleStatus || "") !== "held") return false;
+
+  if (currentRequestId && String(resource.bookingRequestId || "") === String(currentRequestId)) {
+    return false;
+  }
+
+  if (!resource.bookingRequestId) {
+    return Number(resource.updatedAt || 0) > 0 && now - Number(resource.updatedAt || 0) >= STALE_ORPHAN_HOLD_MS;
+  }
+
+  const request = await ctx.db.get(resource.bookingRequestId);
+  if (!request) return true;
+
+  const requestStatus = String(request.status || "").toLowerCase();
+  if (RELEASEABLE_REQUEST_STATUSES.has(requestStatus)) return true;
+
+  if (await hasActivePendingOfferForRequest(ctx, resource.bookingRequestId, now)) {
+    return false;
+  }
+
+  if (request.matchroomId) {
+    const matchroom = await ctx.db.get(request.matchroomId).catch(() => null);
+    const matchroomStatus = String(matchroom?.status || "").toLowerCase();
+    if (["cancelled", "expired", "completed"].includes(matchroomStatus)) {
+      return true;
+    }
+  }
+
+  return true;
+}
+
 async function validateBookableResources(
   ctx: any,
   input: {
@@ -198,6 +255,61 @@ export const updateResourceLifecycleStatus = mutation({
     });
 
     return true;
+  },
+});
+
+export const releaseStaleHeldResourcesForBranch = mutation({
+  args: {
+    zoneId: v.id("zones"),
+    branchId: v.string(),
+    currentRequestId: v.optional(v.id("bookingRequests")),
+  },
+  handler: async (ctx, args) => {
+    const { actorUid } = await requireOwnedZoneForResourceAllocation(ctx, args.zoneId);
+    const now = Date.now();
+    const resources = await ctx.db
+      .query("zoneResources")
+      .withIndex("by_zoneId_and_branchId", (q) =>
+        q.eq("zoneId", args.zoneId).eq("branchId", args.branchId)
+      )
+      .take(200);
+
+    let released = 0;
+    for (const resource of resources) {
+      if (!(await shouldReleaseHeldResource(ctx, resource, args.currentRequestId, now))) {
+        continue;
+      }
+
+      await ctx.db.patch(resource._id, {
+        lifecycleStatus: "available",
+        bookingRequestId: undefined,
+        matchroomId: undefined,
+        bookedAt: undefined,
+        bookedByUid: undefined,
+        updatedAt: now,
+      });
+      released += 1;
+    }
+
+    if (released > 0) {
+      await recordZoneAuditEvent(ctx, {
+        zoneId: String(args.zoneId),
+        module: "resources",
+        action: "release_stale_held_resources",
+        actorUid,
+        targetType: "branch",
+        targetId: args.branchId,
+        summary: `Released ${released} stale held resource${released === 1 ? "" : "s"}.`,
+        details: {
+          branchId: args.branchId,
+          currentRequestId: args.currentRequestId ? String(args.currentRequestId) : null,
+          released,
+        },
+        createdAt: now,
+      });
+    }
+
+    return { ok: true, released };
   },
 });
 

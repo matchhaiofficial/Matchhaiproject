@@ -11,6 +11,16 @@ import {
 } from "../../../../src/components/AppModalPrimitives";
 import { isSameDay } from "../hooks/useZoneBookingsViewModel";
 import { AppButton } from "../../../../src/components/AppPrimitives";
+import {
+  type ZoneBookingQueueItem,
+} from "../../../../src/services/convex/zoneAdminBookingService";
+import {
+  type ZoneBranch,
+} from "../../../../src/services/convex/zoneAdminResourceService";
+import {
+  type ZoneBookingAllocationResourceOption,
+} from "./ZoneBookingsAllocationSheet";
+import { COLORS } from "../../../../src/theme";
 import styles from "../bookings.styles";
 
 type CounterOption = {
@@ -75,6 +85,18 @@ type Props = {
   activeTimePicker: ActiveTimePicker;
   setActiveTimePicker: React.Dispatch<React.SetStateAction<ActiveTimePicker>>;
   validationMessage?: string;
+  request: ZoneBookingQueueItem | null;
+  branches: ZoneBranch[];
+  selectedBranchId: string | null;
+  loadingResources: boolean;
+  resources: ZoneBookingAllocationResourceOption[];
+  selectedResourceIds: string[];
+  onToggleResource: (resourceIds: string[]) => void;
+  selectedCount: number;
+  requiredCount: number;
+  allocationSummary: string;
+  allocationValidationMessage: string | null;
+  allocationCanSubmit: boolean;
 };
 
 export function ZoneBookingsCounterOfferSheets({
@@ -107,9 +129,22 @@ export function ZoneBookingsCounterOfferSheets({
   activeTimePicker,
   setActiveTimePicker,
   validationMessage,
+  request,
+  branches,
+  selectedBranchId,
+  loadingResources,
+  resources,
+  selectedResourceIds,
+  onToggleResource,
+  selectedCount,
+  requiredCount,
+  allocationSummary,
+  allocationValidationMessage,
+  allocationCanSubmit,
 }: Props) {
   const option = counterOptions[0] || createDefaultScheduleOption();
-  const canSend = processingAction === null && !validationMessage;
+  const selectedBranch = branches.find((branch) => branch.id === selectedBranchId);
+  const canSend = processingAction === null && !validationMessage && allocationCanSubmit;
   const closeTimePicker = () => {
     setShowTimePicker(false);
     setActiveTimePicker(null);
@@ -188,6 +223,78 @@ export function ZoneBookingsCounterOfferSheets({
           </Text>
           {validationMessage ? (
             <Text style={styles.validationText}>{validationMessage}</Text>
+          ) : null}
+
+          <View style={styles.allocateSummaryCard}>
+            <Text style={styles.allocateSheetTitle}>{request?.title || "Booking request"}</Text>
+            <Text style={styles.allocateSheetMeta}>
+              {String(request?.gameKey || "").toUpperCase()} | {allocationSummary}
+            </Text>
+            <Text style={styles.allocateSheetMeta}>
+              {option.time || request?.preferredTime || "Time TBD"} | {selectedBranch?.areaLabel || "Zone venue"}
+            </Text>
+          </View>
+
+          <View style={styles.allocateBranchWrap}>
+            <Text style={styles.allocateSectionLabel}>Branch fixed for this request</Text>
+            <View style={styles.allocateBranchChipRow}>
+              <View style={[styles.allocateBranchChip, selectedBranch && styles.allocateBranchChipActive]}>
+                <Text
+                  style={[
+                    styles.allocateBranchChipText,
+                    selectedBranch && styles.allocateBranchChipTextActive,
+                  ]}
+                >
+                  {selectedBranch?.branchDisplayName || "Loading branch..."}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.allocateResourcesWrap}>
+            <View style={styles.allocateResourcesHeader}>
+              <Text style={styles.allocateSectionLabel}>Resources</Text>
+              <Text style={styles.allocateSelectionCount}>
+                {selectedCount}/{requiredCount}
+              </Text>
+            </View>
+            {loadingResources ? (
+              <View style={styles.allocateLoadingWrap}>
+                <ActivityIndicator size="small" color={COLORS.accent} />
+              </View>
+            ) : resources.length ? (
+              <View style={styles.allocateResourceList}>
+                {resources.map((item) => {
+                  const selected = item.resourceIds.every((resourceId) =>
+                    selectedResourceIds.includes(resourceId),
+                  );
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => onToggleResource(item.resourceIds)}
+                      style={[styles.allocateResourceCard, selected && styles.allocateResourceCardActive]}
+                    >
+                      <View style={styles.allocateResourceInfo}>
+                        <Text style={styles.allocateResourceLabel}>{item.label}</Text>
+                        <Text style={styles.allocateResourceMeta}>{item.meta}</Text>
+                      </View>
+                      <View style={[styles.allocateResourceTick, selected && styles.allocateResourceTickActive]}>
+                        {selected ? <AppIcon name="check" size="sm" color="#FFF" /> : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.allocateEmptyText}>No available resources found for this branch.</Text>
+            )}
+          </View>
+
+          {allocationValidationMessage ? (
+            <View style={styles.allocateWarningCard}>
+              <AppIcon name="info-outline" size="sm" color={COLORS.warning} />
+              <Text style={styles.allocateWarningText}>{allocationValidationMessage}</Text>
+            </View>
           ) : null}
         </AppModalBody>
 

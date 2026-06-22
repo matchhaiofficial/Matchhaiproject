@@ -275,9 +275,6 @@ export default function CreateMatchroom() {
     "BO1" | "BO3" | "BO5" | "BO10" | "BO7" | "BO20" | "BO40"
   >("BO1");
   const [duration, setDuration] = useState<number>(1); // Duration in hours (for Futsal)
-  const [walkInPaymentMode, setWalkInPaymentMode] = useState<
-    "venue_pay" | "guest_pay"
-  >("venue_pay");
   const [walkInBranchId, setWalkInBranchId] = useState<string | null>(
     typeof params.branchId === "string" && params.branchId.trim().length
       ? params.branchId
@@ -382,7 +379,6 @@ export default function CreateMatchroom() {
     walkInTeamACaptainSeatNumber,
     walkInTeamBCaptainSeatNumber,
   } = useMatchroomCreateWalkInRoster({
-    format: formData.format,
     isZoneWalkInAdmin,
     maxPlayers: formData.maxPlayers,
     selectedGame,
@@ -1222,7 +1218,6 @@ export default function CreateMatchroom() {
     user,
     userProfile,
     walkInBranchId,
-    walkInPaymentMode,
     walkInSeatCount,
     walkInSeatPlayers,
     walkInTeamACaptainSeatNumber,
@@ -1518,36 +1513,6 @@ export default function CreateMatchroom() {
                   })}
                 </View>
               )}
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>
-                Payment Mode<Text style={styles.requiredAsterisk}>*</Text>
-              </Text>
-              <View style={styles.chipRow}>
-                {(["venue_pay", "guest_pay"] as const).map((mode) => {
-                  const active = walkInPaymentMode === mode;
-                  return (
-                    <Pressable
-                      key={mode}
-                      style={[
-                        styles.optionChip,
-                        active && styles.optionChipActive,
-                      ]}
-                      onPress={() => setWalkInPaymentMode(mode)}
-                    >
-                      <Text
-                        style={[
-                          styles.optionChipText,
-                          active && styles.optionChipTextActive,
-                        ]}
-                      >
-                        {mode === "venue_pay" ? "Paid by Venue" : "Guests Pay"}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
             </View>
 
             {zoneRateOptions.length > 0 ? (

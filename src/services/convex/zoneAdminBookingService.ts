@@ -24,11 +24,31 @@ import { getUserFacingErrorMessage, isAuthSessionError } from "../../utils/userF
  * message via getUserFacingErrorMessage at the call site.
  */
 function logBookingActionError(message: string, error: unknown) {
-    if (isAuthSessionError(error)) {
+    if (isAuthSessionError(error) || isExpectedBookingActionError(error)) {
         Logger.warn("zoneAdminBooking", message, error);
         return;
     }
     Logger.error("zoneAdminBooking", message, error);
+}
+
+function getRawBookingErrorMessage(error: unknown): string {
+    if (typeof error === "string") return error;
+    if (error instanceof Error) return error.message;
+    if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+    ) {
+        return String((error as { message: string }).message);
+    }
+    return error == null ? "" : String(error);
+}
+
+function isExpectedBookingActionError(error: unknown): boolean {
+    return /no longer available|selected resources are missing|select (?:a branch|resources|at least one resource)|add at least one date|alternative time|no captains found|booking request (?:can no longer be updated|has expired|not found)|does not (?:belong|support|match)|requires exactly|seat (?:not found|is already booked)|walk-in matchroom is already full/i.test(
+        getRawBookingErrorMessage(error),
+    );
 }
 
 export type ZoneBookingAssetType = "pc" | "console" | "court" | "mixed" | "unknown";
@@ -722,6 +742,7 @@ export async function sendZoneCounterOffer(input: {
     adminUid?: string;
     branchId?: string;
     branchName?: string;
+    resourceIds?: string[];
     scheduleOptions: Array<{
         date: string;
         time: string;
@@ -746,6 +767,7 @@ export async function sendZoneCounterOffer(input: {
             adminUid: input.adminUid,
             branchId: input.branchId,
             branchName: input.branchName,
+            resourceIds: (input.resourceIds || []) as Id<"zoneResources">[],
             scheduleOptions: input.scheduleOptions,
             pricePerPlayer: input.pricePerPlayer,
             currency: input.currency,
@@ -814,7 +836,13 @@ export async function createZoneWalkInMatchroom(input: {
     seriesType?: string | null;
     seatCount: number;
     bookedSeatCount?: number;
-    paymentMode: "venue_pay" | "guest_pay";
+    paymentMode?: "venue_pay" | "guest_pay" | "matchhai_pay";
+    paymentStatus?: "paid" | "unpaid";
+    paymentAmount?: number;
+    paymentReservedSlots?: number;
+    paymentMethod?: "wallet" | "easypaisa" | "free" | string;
+    clientCreateRequestId?: string;
+    sourcePaymentOrderRefNum?: string;
     pricePerPlayer?: number;
     currency?: string;
     captainSeatNumber?: number | null;
@@ -856,9 +884,20 @@ export async function createZoneWalkInMatchroom(input: {
         const pricePerPlayer = Number.isFinite(input.pricePerPlayer)
             ? Math.max(0, Number(input.pricePerPlayer))
             : 0;
+        const paymentMode = input.paymentMode || "matchhai_pay";
+        const paymentAmount = Number.isFinite(input.paymentAmount)
+            ? Math.max(0, Math.ceil(Number(input.paymentAmount)))
+            : Math.max(0, Math.ceil(pricePerPlayer * bookedSeatCount));
+        const paymentReservedSlots = Number.isFinite(input.paymentReservedSlots)
+            ? Math.max(0, Math.floor(Number(input.paymentReservedSlots)))
+            : bookedSeatCount;
 
         const paymentStatus: "paid" | "unpaid" =
-            input.paymentMode === "venue_pay" ? "paid" : "unpaid";
+            input.paymentStatus === "paid" || input.paymentStatus === "unpaid"
+                ? input.paymentStatus
+                : paymentMode === "venue_pay" || paymentAmount <= 0
+                    ? "paid"
+                    : "unpaid";
         const isPaymentSuccessful = paymentStatus === "paid";
 
         const createOpenSlot = (slotId: string) => ({
@@ -941,11 +980,15 @@ export async function createZoneWalkInMatchroom(input: {
         }));
 
         const walkInData = {
-            paymentMode: input.paymentMode,
+            paymentMode,
+            paymentAmount,
+            paymentReservedSlots,
+            paymentStatus,
+            paymentMethod: input.paymentMethod || null,
             seatCount: totalSeats,
             bookedSeatCount,
             knownPlayerCount: knownPlayers.length,
-            unknownSeatCount: Math.max(0, totalSeats - knownPlayers.length),
+            unknownSeatCount: Math.max(0, bookedSeatCount - knownPlayers.length),
             captainSeatNumber: captainsByFlag[0]?.seatNumber || null,
             captainUid: captainsByFlag[0]?.uid || null,
             roster: knownPlayers.map((player) => ({
@@ -976,7 +1019,7 @@ export async function createZoneWalkInMatchroom(input: {
             seriesType: input.seriesType || undefined,
             seatCount: totalSeats,
             bookedSeatCount: bookedSeatCount,
-            paymentMode: input.paymentMode,
+            paymentMode,
             pricePerPlayer,
             currency: input.currency,
             captainSeatNumber: input.captainSeatNumber ?? undefined,
@@ -995,6 +1038,11 @@ export async function createZoneWalkInMatchroom(input: {
             playerUids: knownPlayers.map((p) => p.uid),
             currentPlayers: bookedSeatCount,
             paymentStatus,
+            paymentAmount,
+            paymentReservedSlots,
+            paymentMethod: input.paymentMethod || undefined,
+            clientCreateRequestId: input.clientCreateRequestId || undefined,
+            sourcePaymentOrderRefNum: input.sourcePaymentOrderRefNum || undefined,
             walkIn: walkInData,
         });
 
@@ -1002,5 +1050,33 @@ export async function createZoneWalkInMatchroom(input: {
     } catch (error: any) {
         logBookingActionError("Failed to create walk-in matchroom", error);
         return { ok: false, message: getUserFacingErrorMessage(error, "Failed to create walk-in booking.") };
+    }
+}
+
+export async function bookZoneWalkInSeat(input: {
+    matchroomId: string;
+    team: "A" | "B";
+    slotId: string;
+    mode?: "book" | "reserve";
+    playerName?: string;
+    skillTier?: "Beginner" | "Casual" | "Intermediate" | "Advanced" | "Pro" | "Elite";
+}): Promise<{ ok: true; message?: string } | { ok: false; message: string }> {
+    try {
+        const result = await convex.mutation(api.zoneAdminBooking.bookWalkInSeat, {
+            matchroomId: input.matchroomId,
+            team: input.team,
+            slotId: input.slotId,
+            mode: input.mode || "book",
+            playerName: input.playerName,
+            skillTier: input.skillTier,
+        });
+
+        return {
+            ok: true,
+            message: result?.message || "Seat booked.",
+        };
+    } catch (error: any) {
+        logBookingActionError("Failed to book walk-in seat", error);
+        return { ok: false, message: getUserFacingErrorMessage(error, "Failed to book walk-in seat.") };
     }
 }

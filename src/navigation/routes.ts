@@ -83,6 +83,11 @@ export function buildMatchroomHref(matchroomId: unknown) {
   return id ? `/matchrooms/${encodeURIComponent(id)}` : APP_ROUTES.playerInbox;
 }
 
+export function buildSuperAdminMatchroomHref(matchroomId: unknown) {
+  const id = asRouteString(matchroomId);
+  return id ? `/super-admin/matchroom/${encodeURIComponent(id)}` : APP_ROUTES.superAdminHome;
+}
+
 export function buildMatchroomPaymentHref(intentId: unknown, matchroomId?: unknown) {
   const id = asRouteString(intentId);
   return id ? `/matchrooms/book/pay/${encodeURIComponent(id)}` : buildMatchroomHref(matchroomId);
@@ -91,6 +96,11 @@ export function buildMatchroomPaymentHref(intentId: unknown, matchroomId?: unkno
 export function buildTeamHref(teamId: unknown) {
   const id = asRouteString(teamId);
   return id ? `/teams/${encodeURIComponent(id)}` : "/teams";
+}
+
+export function buildTeamNotificationHref(teamId: unknown) {
+  const id = asRouteString(teamId);
+  return id ? withQuery(`/teams/${encodeURIComponent(id)}`, { source: "notification" }) : "/teams";
 }
 
 export function buildTeamChallengeHref(challengeId: unknown) {
@@ -178,11 +188,16 @@ export function buildNotificationRoute(input: NotificationRouteInput) {
   ) {
     return buildTeamChallengeHref(challengeId);
   }
-  if (type.startsWith("team.")) return buildTeamHref(teamId);
+  if (type.startsWith("team.")) return buildTeamNotificationHref(teamId);
 
   if (type.startsWith("withdrawal.")) {
     if (role === "super_admin" || role === "super-admin") return APP_ROUTES.superAdminWithdrawals;
     return APP_ROUTES.zoneWallet;
+  }
+
+  if (type === "payments.booking_credit") {
+    if (role === "super_admin" || role === "super-admin") return buildSuperAdminMatchroomHref(matchroomId);
+    return explicitRoute || buildMatchroomHref(matchroomId);
   }
 
   if (type === "kyc.review_needed") return APP_ROUTES.superAdminIdentityVerifications;
@@ -202,8 +217,11 @@ export function buildNotificationRoute(input: NotificationRouteInput) {
   if (challengeId) return buildTeamChallengeHref(challengeId);
   if (offerId && role === "zone_admin") return buildZoneBookingRequestHref(requestId);
   if (requestId && role === "zone_admin") return buildZoneBookingRequestHref(requestId);
-  if (matchroomId) return buildMatchroomHref(matchroomId);
-  if (teamId) return buildTeamHref(teamId);
+  if (matchroomId) {
+    if (role === "super_admin" || role === "super-admin") return buildSuperAdminMatchroomHref(matchroomId);
+    return buildMatchroomHref(matchroomId);
+  }
+  if (teamId) return buildTeamNotificationHref(teamId);
   if (explicitRoute) return explicitRoute;
   if (role === "zone_admin") return APP_ROUTES.zoneNotifications;
   if (role === "super_admin" || role === "super-admin") return APP_ROUTES.superAdminHome;

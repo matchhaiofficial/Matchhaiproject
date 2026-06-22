@@ -313,12 +313,13 @@ function isActiveCheckoutTransaction(transaction: any, now: number) {
 const WALLET_TOPUP_REUSE_WINDOW_MS = 2 * 60 * 1000;
 
 function hasDomainCheckoutArgs(args: any) {
-  return Boolean(args?.matchroomCreateArgs || args?.teamChallengeHold);
+  return Boolean(args?.matchroomCreateArgs || args?.zoneWalkInCreateArgs || args?.teamChallengeHold);
 }
 
 function hasDomainCheckoutContext(transaction: any) {
   return Boolean(
     transaction?.providerPayload?.checkoutContext?.matchroomCreateArgs
+    || transaction?.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
     || transaction?.providerPayload?.checkoutContext?.teamChallengeHold,
   );
 }
@@ -330,6 +331,10 @@ function shouldIgnoreActiveWalletTopupForRequest(transaction: any, args: any, no
   if (hasDomainCheckoutArgs(args) && !hasDomainCheckoutContext(transaction)) {
     return true;
   }
+  const checkoutContext = transaction?.providerPayload?.checkoutContext || {};
+  if (args?.matchroomCreateArgs && !checkoutContext.matchroomCreateArgs) return true;
+  if (args?.zoneWalkInCreateArgs && !checkoutContext.zoneWalkInCreateArgs) return true;
+  if (args?.teamChallengeHold && !checkoutContext.teamChallengeHold) return true;
 
   // Polling can keep updatedAt fresh, but it does not resend the mobile-account
   // approval request. After this window, a new payment attempt should be allowed.
@@ -945,6 +950,7 @@ export const getStartCheckoutContext = internalQuery({
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
     matchroomCreateArgs: v.optional(v.any()),
+    zoneWalkInCreateArgs: v.optional(v.any()),
     teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
@@ -1199,6 +1205,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
     phoneSource: v.optional(v.string()),
     checkoutPhoneMasked: v.optional(v.string()),
     matchroomCreateArgs: v.optional(v.any()),
+    zoneWalkInCreateArgs: v.optional(v.any()),
     teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
@@ -1327,6 +1334,7 @@ export const createCheckoutTransactionWithLock = internalMutation({
           phoneSource: args.phoneSource || "profile",
           checkoutPhoneMasked: args.checkoutPhoneMasked || null,
           matchroomCreateArgs: args.matchroomCreateArgs || null,
+          zoneWalkInCreateArgs: args.zoneWalkInCreateArgs || null,
           teamChallengeHold: args.teamChallengeHold || null,
         },
         checkoutDebug: {
@@ -1505,6 +1513,7 @@ export const startCheckout = action({
     phone: v.optional(v.string()),
     forceNew: v.optional(v.boolean()),
     matchroomCreateArgs: v.optional(v.any()),
+    zoneWalkInCreateArgs: v.optional(v.any()),
     teamChallengeHold: v.optional(v.any()),
   },
   handler: async (ctx, args): Promise<any> => {
@@ -1519,6 +1528,7 @@ export const startCheckout = action({
       phone: args.phone,
       forceNew: args.forceNew,
       matchroomCreateArgs: args.matchroomCreateArgs,
+      zoneWalkInCreateArgs: args.zoneWalkInCreateArgs,
       teamChallengeHold: args.teamChallengeHold,
     });
     const userId = context.userId as Id<"users">;
@@ -1595,6 +1605,7 @@ export const startCheckout = action({
       phoneSource: args.phone ? "checkout_override" : "profile",
       checkoutPhoneMasked: maskPhone(userPhone),
       matchroomCreateArgs: args.matchroomCreateArgs,
+      zoneWalkInCreateArgs: args.zoneWalkInCreateArgs,
       teamChallengeHold: args.teamChallengeHold,
     });
     const transaction = checkoutStart.transaction;
@@ -2313,6 +2324,9 @@ export const applyProviderUpdate = internalMutation({
       const matchroomCreateArgs = row.kind === "wallet_topup"
         ? row.providerPayload?.checkoutContext?.matchroomCreateArgs
         : null;
+      const zoneWalkInCreateArgs = row.kind === "wallet_topup"
+        ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
+        : null;
       if (matchroomCreateArgs && !row.providerPayload?.matchroomCreate?.matchroomId) {
         const finalizeResult: any = await ctx.runMutation(
           internal.matchrooms.finalizePaidCreateFromProvider,
@@ -2331,6 +2345,40 @@ export const applyProviderUpdate = internalMutation({
               flow: String(matchroomCreateArgs.locationMode || "") === "broadcast"
                 ? "broadcast_matchroom_create"
                 : "zone_matchroom_create",
+              matchroomId: String(matchroomId),
+              provider: "easypaisa",
+              orderRefNum: row.orderRefNum,
+              transactionId: String(row._id),
+            },
+            reference: `matchroom_create:${String(matchroomId)}`,
+            source: "matchroom_create",
+            userId: row.userId,
+          });
+          sourcePayload = {
+            ...sourcePayload,
+            matchroomCreate: {
+              finalizedAt: now,
+              matchroomId: String(matchroomId),
+            },
+          };
+        }
+      }
+      if (zoneWalkInCreateArgs && !sourcePayload?.matchroomCreate?.matchroomId) {
+        const finalizeResult: any = await ctx.runMutation(
+          (internal as any).zoneAdminBooking.finalizePaidWalkInCreateFromProvider,
+          {
+            orderRefNum: row.orderRefNum,
+            userId: row.userId,
+            amount: row.amount,
+            zoneWalkInCreateArgs,
+          },
+        );
+        const matchroomId = finalizeResult?.matchroomId;
+        if (matchroomId) {
+          await ctx.runMutation(internal.wallet.deductFundsInternal, {
+            amount: row.amount,
+            metadata: {
+              flow: "zone_walkin_matchroom_create",
               matchroomId: String(matchroomId),
               provider: "easypaisa",
               orderRefNum: row.orderRefNum,
@@ -2493,6 +2541,7 @@ export const applyProviderUpdate = internalMutation({
 
     let walletCreditApplied = false;
     let walletTopupMatchroomCreateArgs: any = null;
+    let walletTopupZoneWalkInCreateArgs: any = null;
     let walletTopupTeamChallengeHold: any = null;
     let createdWalletTopupMatchroomId: string | null = null;
 
@@ -2581,6 +2630,51 @@ export const applyProviderUpdate = internalMutation({
         }
       }
 
+      walletTopupZoneWalkInCreateArgs = row.kind === "wallet_topup"
+        ? row.providerPayload?.checkoutContext?.zoneWalkInCreateArgs
+        : null;
+      if (walletTopupZoneWalkInCreateArgs) {
+        logGatewayDebug("reconcile.zone_walkin_create.begin", {
+          transactionId: String(row._id),
+          orderRefNum: row.orderRefNum,
+          userId: String(row.userId),
+          amount: row.amount,
+        });
+        const finalizeResult: any = await ctx.runMutation(
+          (internal as any).zoneAdminBooking.finalizePaidWalkInCreateFromProvider,
+          {
+            orderRefNum: row.orderRefNum,
+            userId: row.userId,
+            amount: row.amount,
+            zoneWalkInCreateArgs: walletTopupZoneWalkInCreateArgs,
+          },
+        );
+        const matchroomId = finalizeResult?.matchroomId;
+        if (matchroomId) {
+          createdWalletTopupMatchroomId = String(matchroomId);
+          await ctx.runMutation(internal.wallet.deductFundsInternal, {
+            amount: row.amount,
+            metadata: {
+              flow: "zone_walkin_matchroom_create",
+              matchroomId: String(matchroomId),
+              provider: "easypaisa",
+              orderRefNum: row.orderRefNum,
+              transactionId: String(row._id),
+            },
+            reference: `matchroom_create:${String(matchroomId)}`,
+            source: "matchroom_create",
+            userId: row.userId,
+          });
+          sourcePayload = {
+            ...sourcePayload,
+            matchroomCreate: {
+              finalizedAt: now,
+              matchroomId: String(matchroomId),
+            },
+          };
+        }
+      }
+
       // Team Challenge captain payment: the wallet was topped up by addFunds
       // above; now move that exact amount into an escrow hold for the captain's
       // team side. holdSideFromProvider is defensive (never throws on a
@@ -2633,7 +2727,7 @@ export const applyProviderUpdate = internalMutation({
         // money as MatchHai wallet credit (addFunds already committed in this
         // same transaction). Tell the payer it landed in their wallet rather
         // than the generic "top-up successful" so the policy is honoured.
-        const createWasAttempted = Boolean(walletTopupMatchroomCreateArgs);
+        const createWasAttempted = Boolean(walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs);
         const createFinalized = Boolean((sourcePayload as any)?.matchroomCreate?.matchroomId);
         const decision = createWasAttempted && !createFinalized ? "wallet_credit_only" : "paid";
         await notifyPlayerPaymentOutcome(ctx, {
@@ -2663,7 +2757,7 @@ export const applyProviderUpdate = internalMutation({
       const walletTopupCompletionFellBackToWallet =
         row.kind === "wallet_topup"
         && walletCreditApplied
-        && (walletTopupMatchroomCreateArgs || walletTopupTeamChallengeHold)
+        && (walletTopupMatchroomCreateArgs || walletTopupZoneWalkInCreateArgs || walletTopupTeamChallengeHold)
         && !createdWalletTopupMatchroomId;
 
       if (walletCreditedBookingFailure) {
@@ -2700,6 +2794,13 @@ export const applyProviderUpdate = internalMutation({
       if (walletTopupCompletionFellBackToWallet) {
         const fallbackPayload: any = { ...sourcePayload };
         if (walletTopupMatchroomCreateArgs) {
+          fallbackPayload.matchroomCreate = {
+            ...(fallbackPayload.matchroomCreate || {}),
+            completionFailedAt: now,
+            completionError: message,
+          };
+        }
+        if (walletTopupZoneWalkInCreateArgs) {
           fallbackPayload.matchroomCreate = {
             ...(fallbackPayload.matchroomCreate || {}),
             completionFailedAt: now,
