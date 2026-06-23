@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useAction, useConvexAuth, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -33,6 +33,7 @@ import { useRouteLogger } from "../../../src/hooks/useRouteLogger";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { signOutUser } from "../../../src/services/authService";
 import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
+import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import {
     subscribeZoneBookingQueue,
     subscribeZoneMatchrooms,
@@ -49,8 +50,6 @@ import { type Matchroom } from "../../../src/services/convex/matchService";
 import { COLORS } from "../../../src/theme";
 import { getZoneLifecycleLabel } from "../../../src/utils/zoneLifecycle";
 import { getZoneStatusTone } from "../../../src/utils/statusLabels";
-import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
-import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import styles from "./dashboard.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
@@ -128,24 +127,15 @@ const mapZoneRoomToMatchroom = (room: ZoneMatchroomListItem, fallbackLocation?: 
 export default function ZoneDashboardHome() {
     const router = useRouter();
     const { zone, loading } = useZoneData();
-    const { user, authUser, loading: authLoading, refreshUser } = useAuth();
-    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
+    const { user, refreshUser } = useAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
-    const protectedQueriesReady = isAuthenticatedProfileReady({
-        authLoading,
-        convexAuthLoading,
-        isAuthenticated,
-        authUserId: authUser?.id,
-        profileAuthId: user?.authId,
-        profileUserId: user?._id,
-    });
-    const currentKyc = useQuery(
-        api.kyc.getCurrentUserKyc,
-        protectedQueriesReady ? {} : "skip",
-    );
+    const {
+        currentKyc,
+        accessAllowed: kycVerified,
+        protectedQueryReady: protectedQueriesReady,
+    } = useEffectiveKycStatus();
     const refreshDiditStatus = useAction(api.kyc.refreshDiditVerificationStatus);
-    const kycVerified = isUserFullyVerified(authUser, user);
     const kycStartActionLabel =
         currentKyc?.status === "rejected"
             ? "Retry Verification"
@@ -409,7 +399,7 @@ export default function ZoneDashboardHome() {
 
     const handleLockedAction = () => {
         showToast({
-            type: "info",
+            type: "error",
             title: "Verify your identity",
             message: ZONE_KYC_VERIFICATION_MESSAGE,
         });

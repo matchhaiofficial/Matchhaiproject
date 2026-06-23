@@ -1,9 +1,14 @@
-import { query, mutation } from "./_generated/server";
+import { internalMutation, query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
+import { isUserHiddenFromPublic } from "./userVisibility";
+
+const ZONE_LIVE_NEARBY_NOTIFICATION_TYPE = "zone.live_nearby";
+const ZONE_LIVE_NEARBY_NOTIFICATION_BATCH_SIZE = 75;
 
 function toPositiveNumber(value: unknown) {
   const parsed = Number(value);
@@ -49,6 +54,90 @@ function getBranchCapacity(branch: any) {
             ? "xbox"
             : undefined,
   };
+}
+
+function normalizeAudienceToken(value?: string | null) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function addAudienceLabel(targets: Map<string, string>, value?: string | null) {
+  const label = String(value || "").trim();
+  const key = normalizeAudienceToken(label);
+  if (key && !targets.has(key)) targets.set(key, label);
+}
+
+function getZoneVenueLabel(zone: any) {
+  return (
+    String(zone?.venueBrandName || "").trim() ||
+    String(zone?.name || "").trim() ||
+    String(zone?.primaryBranch?.branchDisplayName || "").trim() ||
+    "A new MatchHai zone"
+  );
+}
+
+function getZoneAudienceContext(zone: any) {
+  const areas = new Map<string, string>();
+  addAudienceLabel(areas, zone?.primaryBranch?.areaLabel);
+  for (const branch of Array.isArray(zone?.branches) ? zone.branches : []) {
+    addAudienceLabel(areas, branch?.areaLabel);
+  }
+
+  const branchCity = (Array.isArray(zone?.branches) ? zone.branches : [])
+    .map((branch: any) => String(branch?.city || "").trim())
+    .find(Boolean);
+  const city = String(zone?.primaryBranch?.city || zone?.city || branchCity || "").trim();
+  const areaLabels = Array.from(areas.values());
+  const locationLabel = areaLabels[0]
+    ? city && normalizeAudienceToken(city) !== normalizeAudienceToken(areaLabels[0])
+      ? `${areaLabels[0]}, ${city}`
+      : areaLabels[0]
+    : city;
+
+  return {
+    areaLabels,
+    city,
+    locationLabel,
+    venueLabel: getZoneVenueLabel(zone),
+  };
+}
+
+function shouldNotifyUserForLiveZone(user: any, input: {
+  targetAreaKeys: Set<string>;
+  targetCityKey: string;
+}) {
+  if (!user) return false;
+  if (isUserHiddenFromPublic(user)) return false;
+  if (String(user.accountStatus || "").toLowerCase() === "suspended") return false;
+  if (user.onboardingCompleted !== true) return false;
+
+  const userCityKey = normalizeAudienceToken(user.city);
+  if (input.targetCityKey && userCityKey && userCityKey !== input.targetCityKey) {
+    return false;
+  }
+
+  if (input.targetAreaKeys.size === 0) {
+    return Boolean(input.targetCityKey && userCityKey === input.targetCityKey);
+  }
+
+  const userAreaKeys = new Set(
+    (Array.isArray(user.areasPreferred) ? user.areasPreferred : [])
+      .map((area: any) => normalizeAudienceToken(area))
+      .filter(Boolean),
+  );
+  for (const key of input.targetAreaKeys) {
+    if (userAreaKeys.has(key)) return true;
+  }
+  return false;
+}
+
+async function scheduleZoneLiveNearbyNotifications(ctx: any, zoneId: Id<"zones">) {
+  await ctx.scheduler.runAfter(0, internal.zones.notifyZoneLiveNearbyPlayersBatch, {
+    zoneId,
+    cursor: null,
+  });
 }
 
 function buildAggregateCapacity(branches: any[]) {
@@ -175,6 +264,82 @@ export const listPendingReview = query({
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "pending-review"))
       .collect();
+  },
+});
+
+export const notifyZoneLiveNearbyPlayersBatch = internalMutation({
+  args: {
+    zoneId: v.id("zones"),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) return { notified: 0, skipped: "missing_zone" };
+    if (zone.status !== "active") return { notified: 0, skipped: "zone_not_active" };
+
+    const context = getZoneAudienceContext(zone);
+    const targetAreaKeys = new Set(
+      context.areaLabels.map((area) => normalizeAudienceToken(area)).filter(Boolean),
+    );
+    const targetCityKey = normalizeAudienceToken(context.city);
+    if (targetAreaKeys.size === 0 && !targetCityKey) {
+      return { notified: 0, skipped: "missing_location" };
+    }
+
+    const page = await ctx.db
+      .query("users")
+      .withIndex("by_accountType_updatedAt", (q: any) => q.eq("accountType", "player"))
+      .order("desc")
+      .paginate({
+        numItems: ZONE_LIVE_NEARBY_NOTIFICATION_BATCH_SIZE,
+        cursor: args.cursor || null,
+      });
+
+    let notified = 0;
+    const notificationErrors: Array<{ userId: string; message: string }> = [];
+    for (const user of page.page) {
+      if (!shouldNotifyUserForLiveZone(user, { targetAreaKeys, targetCityKey })) continue;
+
+      try {
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: ZONE_LIVE_NEARBY_NOTIFICATION_TYPE,
+          toUid: user._id,
+          recipientRole: "player",
+          status: "pending",
+          dedupeKey: `${ZONE_LIVE_NEARBY_NOTIFICATION_TYPE}:${String(args.zoneId)}:${String(user._id)}`,
+          dedupePolicy: "upsert_active",
+          pushPolicy: "eligible",
+          route: `/(player)/zones/${String(args.zoneId)}`,
+          entity: { kind: "zone", id: String(args.zoneId) },
+          entityId: String(args.zoneId),
+          title: "New zone is live near you",
+          body: `${context.venueLabel} is live now${context.locationLabel ? ` in ${context.locationLabel}` : ""}.`,
+          data: {
+            zoneId: String(args.zoneId),
+            zoneName: context.venueLabel,
+            locationLabel: context.locationLabel,
+            targetAreas: context.areaLabels,
+            targetCity: context.city || null,
+            href: `/(player)/zones/${String(args.zoneId)}`,
+          },
+        });
+        notified += 1;
+      } catch (error: any) {
+        notificationErrors.push({
+          userId: String(user._id),
+          message: String(error?.message || error || "Failed to notify player."),
+        });
+      }
+    }
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.zones.notifyZoneLiveNearbyPlayersBatch, {
+        zoneId: args.zoneId,
+        cursor: page.continueCursor,
+      });
+    }
+
+    return { notified, notificationErrors, isDone: page.isDone };
   },
 });
 
@@ -459,11 +624,16 @@ export const approve = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
     await requireKycVerified(ctx);
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
     await ctx.db.patch(args.zoneId, {
       status: "active",
       approvedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    if (["pending-review", "approved_pending_migration"].includes(String(zone.status || ""))) {
+      await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
+    }
     return true;
   },
 });

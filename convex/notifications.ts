@@ -130,6 +130,9 @@ function canonicalizeType(rawType: string) {
     case "match_payment_required":
     case "match.payment_required":
       return "match.payment_required";
+    case "match_created_nearby":
+    case "match.created_nearby":
+      return "match.created_nearby";
     case "match_cancelled_admin":
     case "match.cancelled":
       return "match.cancelled";
@@ -184,6 +187,9 @@ function canonicalizeType(rawType: string) {
       return "zone.registration_submitted";
     case "zone.status_updated":
       return "zone.status_updated";
+    case "zone_live_nearby":
+    case "zone.live_nearby":
+      return "zone.live_nearby";
     case "wallet.topup_result":
       return "wallet.topup_result";
     case "account.role_changed":
@@ -224,6 +230,10 @@ function inferLegacyType(type: string) {
       return "match_seat_invitation";
     case "match.payment_required":
       return "match_seat_invitation";
+    case "match.created_nearby":
+      return "match_created_nearby";
+    case "zone.live_nearby":
+      return "zone_live_nearby";
     case "match.cancelled":
       return "match_cancelled_admin";
     case "booking.request_submitted":
@@ -266,6 +276,7 @@ function defaultDedupePolicy(type: string): DedupePolicy {
     case "team.join_request":
     case "match.join_request":
     case "match.payment_required":
+    case "match.created_nearby":
     case "match.cancelled":
     case "booking.request_submitted":
     case "booking.counter_offer":
@@ -274,6 +285,7 @@ function defaultDedupePolicy(type: string): DedupePolicy {
     case "moderation.report_submitted":
     case "moderation.review_needed":
     case "payments.attention_required":
+    case "zone.live_nearby":
       return "upsert_active";
     case "team.invite":
     case "team.invite_response":
@@ -464,6 +476,11 @@ function matchroomRoute(matchroomId: unknown) {
   return id ? `/matchrooms/${encodeURIComponent(id)}` : "/(player)/inbox";
 }
 
+function superAdminMatchroomRoute(matchroomId: unknown) {
+  const id = routeValue(matchroomId);
+  return id ? `/super-admin/matchroom/${encodeURIComponent(id)}` : "/super-admin";
+}
+
 function matchroomPaymentRoute(intentId: unknown, matchroomId: unknown) {
   const id = routeValue(intentId);
   return id ? `/matchrooms/book/pay/${encodeURIComponent(id)}` : matchroomRoute(matchroomId);
@@ -577,6 +594,13 @@ function buildCanonicalRoute(source: {
     return "/zone/wallet";
   }
 
+  if (type === "payments.booking_credit") {
+    if (recipientRole === "super_admin" || recipientRole === "super-admin") {
+      return superAdminMatchroomRoute(matchroomId);
+    }
+    return explicitRoute || matchroomRoute(matchroomId);
+  }
+
   if (type === "kyc.review_needed") return "/super-admin/identity-verifications";
   if (type === "kyc.status_updated") {
     return recipientRole === "zone_admin" ? "/zone/(tabs)/profile" : "/auth/verification-required";
@@ -598,7 +622,12 @@ function buildCanonicalRoute(source: {
   if (challengeId) return teamChallengeRoute(challengeId);
   if (offerId && recipientRole === "zone_admin") return zoneBookingRequestRoute(requestId);
   if (requestId && recipientRole === "zone_admin") return zoneBookingRequestRoute(requestId);
-  if (matchroomId) return matchroomRoute(matchroomId);
+  if (matchroomId) {
+    if (recipientRole === "super_admin" || recipientRole === "super-admin") {
+      return superAdminMatchroomRoute(matchroomId);
+    }
+    return matchroomRoute(matchroomId);
+  }
   if (teamId) return teamRoute(teamId);
   if (explicitRoute) return explicitRoute;
 

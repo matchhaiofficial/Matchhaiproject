@@ -385,7 +385,13 @@ export default function BookingStatusScreen() {
         >
             <AppHeader
                 title="Booking Status"
-                onBack={() => router.back()}
+                onBack={() => {
+                    if (isCompleted) {
+                        router.replace(buildLegacyMatchroomsHref() as any);
+                        return;
+                    }
+                    router.back();
+                }}
                 inlineTitle
             />
 

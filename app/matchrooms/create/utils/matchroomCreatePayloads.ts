@@ -5,7 +5,7 @@ import type { UserProfile } from "../../../../src/services/userService";
 type TeamMode = "solo" | "team";
 type TeamPaymentMode = "captain_pays_all" | "captain_pays_self";
 type LocationMode = "zone" | "broadcast";
-type WalkInPaymentMode = "venue_pay" | "guest_pay";
+type WalkInPaymentMode = "venue_pay" | "guest_pay" | "matchhai_pay";
 
 type WalkInSeatPlayerDraft = {
   character?: string;
@@ -68,10 +68,16 @@ export function buildZoneWalkInPayload(params: {
   gameKey: string;
   pricePerPlayer: number;
   seatCountInput: string;
+  selectedZoneRateKey: string | null;
+  selectedZoneRateResourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  } | null;
   seriesType: "BO1" | "BO3" | "BO5";
   userId: string;
   userName: string;
-  walkInPaymentMode: WalkInPaymentMode;
+  walkInPaymentMode?: WalkInPaymentMode;
   walkInSeatPlayers: WalkInSeatPlayerDraft[];
   walkInSeed: number;
   walkInTeamACaptainSeatNumber: number | null;
@@ -97,9 +103,13 @@ export function buildZoneWalkInPayload(params: {
   }>;
   paymentMode: WalkInPaymentMode;
   pricePerPlayer: number;
+  requestedResourceAssetType?: string;
+  requestedResourceSurface?: string;
+  requestedResourceTier?: string;
   scheduledDate: string;
   scheduledTime: string;
   seatCount: number;
+  selectedZoneRateKey?: string;
   seriesType: "BO1" | "BO3" | "BO5";
   title: string;
   zoneId: string;
@@ -113,6 +123,8 @@ export function buildZoneWalkInPayload(params: {
     gameKey,
     pricePerPlayer,
     seatCountInput,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     seriesType,
     userId,
     walkInPaymentMode,
@@ -151,9 +163,7 @@ export function buildZoneWalkInPayload(params: {
     return 60;
   })();
 
-  const totalSeats = isCsStyleGame(gameKey)
-    ? 10
-    : Math.max(1, Number(formData.maxPlayers || 0));
+  const totalSeats = Math.max(1, Number(formData.maxPlayers || 0));
   const parsedSeatCount = Number.parseInt(seatCountInput, 10);
   const bookedSeats = Number.isFinite(parsedSeatCount)
     ? Math.max(0, Math.min(totalSeats, Math.floor(parsedSeatCount)))
@@ -176,7 +186,7 @@ export function buildZoneWalkInPayload(params: {
   return {
     adminName,
     adminUid,
-    bookedSeatCount: knownPlayers.length,
+    bookedSeatCount: bookedSeats,
     branchId: branch?.id || null,
     branchName: branch?.label || null,
     captainSeatNumber: walkInTeamACaptainSeatNumber,
@@ -184,11 +194,15 @@ export function buildZoneWalkInPayload(params: {
     durationMinutes,
     gameKey,
     knownPlayers,
-    paymentMode: walkInPaymentMode,
+    paymentMode: walkInPaymentMode || "matchhai_pay",
     pricePerPlayer,
+    requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || undefined,
+    requestedResourceSurface: selectedZoneRateResourceContext?.surface || undefined,
+    requestedResourceTier: selectedZoneRateResourceContext?.tier || undefined,
     scheduledDate: formData.date,
     scheduledTime: formData.time,
     seatCount: totalSeats,
+    selectedZoneRateKey: selectedZoneRateKey || undefined,
     seriesType,
     title: formData.title.trim() || "Walk-in Matchroom",
     zoneId,

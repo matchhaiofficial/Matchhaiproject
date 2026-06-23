@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
@@ -33,6 +33,10 @@ import {
   DEFAULT_ELO,
 } from "./ratingEngine";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
+import {
+  assertNoParticipantTimeConflict,
+  assertZoneResourceCapacityAvailable,
+} from "./bookingConflicts";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -41,11 +45,13 @@ const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_requ
 export const MATCHROOM_LOCKED_MESSAGE =
   "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.";
 const MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE =
-  "This venue already has a matchroom for the same game at the same scheduled time. Please choose a different time or venue.";
+  "This venue does not have enough available resources for that time slot. Please choose a different time or venue.";
 const INSUFFICIENT_WALLET_BALANCE_MESSAGE =
   "Insufficient wallet balance. Please add funds from Wallet.";
 const MATCHROOM_CREATE_INSUFFICIENT_WALLET_CODE =
   "INSUFFICIENT_WALLET_BALANCE";
+const NEW_MATCHROOM_AREA_NOTIFICATION_TYPE = "match.created_nearby";
+const NEW_MATCHROOM_AREA_NOTIFICATION_BATCH_SIZE = 75;
 
 function matchroomCreateFailure(message: string, code: string) {
   return {
@@ -61,6 +67,32 @@ function matchroomJoinFailure(message: string, code: string) {
     message,
     code,
   } as const;
+}
+
+function walkInJoinFailureFromError(error: any) {
+  const message = String(error?.message || error || "").trim();
+  if (/already in/i.test(message)) {
+    return matchroomJoinFailure("You are already in this matchroom.", "ALREADY_JOINED");
+  }
+  if (/slot/i.test(message) && /(available|found|selected)/i.test(message)) {
+    return matchroomJoinFailure("This seat is no longer available. Please choose another slot.", "SLOT_UNAVAILABLE");
+  }
+  if (/team a has no open slots/i.test(message)) {
+    return matchroomJoinFailure("Team A has no open seats.", "TEAM_FULL");
+  }
+  if (/team b has no open slots/i.test(message)) {
+    return matchroomJoinFailure("Team B has no open seats.", "TEAM_FULL");
+  }
+  if (/no available slot/i.test(message)) {
+    return matchroomJoinFailure("No seats are available in this walk-in matchroom.", "MATCHROOM_FULL");
+  }
+  if (/already started|locked/i.test(message)) {
+    return matchroomJoinFailure("This walk-in matchroom is no longer accepting joins.", "MATCHROOM_LOCKED");
+  }
+  return matchroomJoinFailure(
+    message || "Unable to join this walk-in matchroom. Please try again.",
+    "WALKIN_JOIN_FAILED",
+  );
 }
 
 function isMatchroomCreateFailureResult(value: any) {
@@ -90,12 +122,33 @@ function getMatchroomPlayerUids(room: any): string[] {
   return Array.from(new Set([...fromPlayerUids, ...fromPlayers]));
 }
 
+function getMatchroomNotificationRecipientUids(room: any): string[] {
+  const slotUids = getAllMatchroomSlots(room).map(getSlotUserUid).filter(Boolean);
+  return Array.from(
+    new Set(
+      [
+        ...getMatchroomPlayerUids(room),
+        room?.hostUid,
+        room?.captainUidA,
+        room?.captainUidB,
+        ...slotUids,
+      ]
+        .map((uid) => String(uid || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function getSlotUserUid(slot: any): string {
   return String(slot?.uid || slot?.user?.uid || "").trim();
 }
 
 function getAllMatchroomSlots(room: any): any[] {
   return [...(room?.slotsA || []), ...(room?.slotsB || [])];
+}
+
+function isWalkInMatchroom(room: any): boolean {
+  return String(room?.bookingSource || "").toLowerCase() === "walkin";
 }
 
 function getRequiredPlayerCount(room: any): number {
@@ -144,6 +197,10 @@ function shouldExpireForNotFull(room: any, now = Date.now()): boolean {
   if (!room) return false;
   if (!["open", "locked"].includes(String(room.status || ""))) return false;
   if (isRosterFull(room)) return false;
+  if (isWalkInMatchroom(room)) {
+    const startMs = getScheduleRoomStartMs(room);
+    return typeof startMs === "number" && startMs <= now;
+  }
   // Joins close at lockAt (24h before start). An open/locked room that is not
   // full once its join-lock has passed can never fill, so it is dead and must
   // expire (releasing any held funds via the standard lifecycle path) rather
@@ -231,6 +288,120 @@ function canEnterResultVerification(room: any) {
     return { ok: false, reason: "missing_result_captains" };
   }
   return { ok: true, reason: "valid" };
+}
+
+async function completeMatchroomForResultVerification(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  room: any,
+  now = Date.now(),
+) {
+  const validation = canCompleteMatchroom(room, now);
+  if (!validation.ok) {
+    return { ok: false, changed: false, reason: validation.reason };
+  }
+
+  const captains = resolveResultCaptains(room, room.resultVerification || {});
+  if (!captains.team1Captain || !captains.team2Captain) {
+    return { ok: false, changed: false, reason: "missing_result_captains" };
+  }
+
+  const existingVerification = room.resultVerification || null;
+  const resultVerification = existingVerification
+    ? {
+        ...existingVerification,
+        team1Captain: existingVerification.team1Captain || captains.team1Captain,
+        team2Captain: existingVerification.team2Captain || captains.team2Captain,
+        captainReports: existingVerification.captainReports || {},
+      }
+    : {
+        status: "pending" as const,
+        team1Captain: captains.team1Captain,
+        team2Captain: captains.team2Captain,
+        captainReports: {},
+      };
+
+  await ctx.db.patch(matchroomId, {
+    status: "completed",
+    completedAt: now,
+    resultVerification,
+    updatedAt: now,
+  });
+
+  const completedRoom = await ctx.db.get(matchroomId);
+  await captureHeldBookingIntentsForMatchroom(ctx, matchroomId);
+  await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+    matchroomId,
+    action: "capture",
+    reason: "matchroom_completed",
+  });
+  await payVenueWalletForCompletedMatchroom(ctx, matchroomId, completedRoom);
+
+  return { ok: true, changed: true, status: "completed" as const };
+}
+
+function getActorUidCandidates(actor: any) {
+  return Array.from(
+    new Set(
+      [
+        actor?.user?._id,
+        actor?.user?.authId,
+        actor?.identity?.tokenIdentifier,
+        actor?.identity?.subject,
+      ]
+        .filter(Boolean)
+        .map(String),
+    ),
+  );
+}
+
+async function getRecentRoomsForUidCandidates(
+  ctx: any,
+  uidCandidates: string[],
+  statuses: Set<string>,
+  perUidLimit = 40,
+) {
+  const rooms: any[] = [];
+  const seen = new Set<string>();
+
+  const addRoom = async (roomId: Id<"matchrooms">) => {
+    const key = String(roomId);
+    if (seen.has(key)) return;
+    const room = await ctx.db.get(roomId);
+    if (!room || !statuses.has(String(room.status || ""))) return;
+    seen.add(key);
+    rooms.push(room);
+  };
+
+  for (const uid of uidCandidates) {
+    const memberRows = await ctx.db
+      .query("matchroomMembers")
+      .withIndex("by_uid", (q: any) => q.eq("uid", uid))
+      .order("desc")
+      .take(perUidLimit);
+    for (const row of memberRows) {
+      await addRoom(row.matchroomId);
+    }
+
+    const hostedRooms = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_hostUid", (q: any) => q.eq("hostUid", uid))
+      .order("desc")
+      .take(perUidLimit);
+    for (const room of hostedRooms) {
+      if (!statuses.has(String(room.status || ""))) continue;
+      const key = String(room._id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rooms.push(room);
+    }
+  }
+
+  return rooms.sort((a, b) => {
+    const left = Number(a.scheduledStartAt || a.startTime || a.updatedAt || a.createdAt || 0);
+    const right = Number(b.scheduledStartAt || b.startTime || b.updatedAt || b.createdAt || 0);
+    return left - right;
+  });
 }
 
 function resolveResultCaptains(room: any, rv: any = {}) {
@@ -884,6 +1055,10 @@ function getRoomLockAtMs(room: any) {
 export function isJoinLocked(room: any, now = Date.now()): boolean {
   if (!room || room.status === "cancelled" || room.status === "expired") return true;
   if (isRosterFull(room)) return true;
+  if (isWalkInMatchroom(room)) {
+    const startMs = getScheduleRoomStartMs(room);
+    return typeof startMs === "number" && startMs <= now;
+  }
   if (
     room.status === "locked" ||
     room.isLocked === true ||
@@ -922,6 +1097,25 @@ function getCappedMatchroomExpiryOrThrow(
     throw new Error(`${label} cannot be created because this matchroom is locked.`);
   }
   return expiry;
+}
+
+function getPaymentIntentExpiryOrThrow(
+  room: any,
+  ttlMs: number,
+  label: string,
+  now = Date.now(),
+) {
+  if (!isWalkInMatchroom(room)) {
+    return getCappedMatchroomExpiryOrThrow(room, ttlMs, label, now);
+  }
+
+  const desiredExpiry = now + ttlMs;
+  const startMs = getScheduleRoomStartMs(room);
+  const expiry = typeof startMs === "number"
+    ? Math.min(desiredExpiry, startMs)
+    : desiredExpiry;
+  if (expiry > now) return expiry;
+  throw new Error(`${label} cannot be created because this walk-in matchroom has already started.`);
 }
 
 // Slot validator (matching new schema)
@@ -1053,6 +1247,176 @@ function isGameEnabledForUser(user: any, game?: string | null) {
     default:
       return true;
   }
+}
+
+function normalizeAudienceToken(value?: string | null) {
+  return String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function getCanonicalGameLabel(game?: string | null) {
+  switch (normalizeGameKey(game)) {
+    case "cs2":
+      return "CS2";
+    case "cs16":
+      return "CS 1.6";
+    case "valorant":
+      return "Valorant";
+    case "fc25":
+    case "fc26":
+      return "FC26";
+    case "tekken8":
+      return "Tekken 8";
+    case "futsal":
+      return "Futsal";
+    case "indoor_cricket":
+      return "Indoor Cricket";
+    case "padel":
+      return "Padel";
+    case "pickleball":
+      return "Pickleball";
+    default:
+      return String(game || "Matchroom").trim() || "Matchroom";
+  }
+}
+
+function formatMatchroomScheduleLabel(room: any) {
+  const dateText = String(room?.scheduledDate || "").trim();
+  const timeText = String(room?.scheduledTime || "").trim();
+  if (dateText) {
+    const parsed = new Date(`${dateText}T00:00:00`);
+    const dateLabel = Number.isNaN(parsed.getTime())
+      ? dateText
+      : parsed.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+    return timeText ? `${dateLabel} at ${timeText}` : dateLabel;
+  }
+  const scheduledStartAt = Number(room?.scheduledStartAt || 0);
+  if (Number.isFinite(scheduledStartAt) && scheduledStartAt > 0) {
+    return new Date(scheduledStartAt).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return "Date TBD";
+}
+
+function pickZoneBranch(zone: any, branchId?: string | null) {
+  const branches = Array.isArray(zone?.branches) ? zone.branches : [];
+  const wantedBranchId = String(branchId || "").trim();
+  if (wantedBranchId) {
+    const matched = branches.find((branch: any) => String(branch?.id || "") === wantedBranchId);
+    if (matched) return matched;
+  }
+  return zone?.primaryBranch || branches[0] || null;
+}
+
+function addAudienceLabel(targets: Map<string, string>, value?: string | null) {
+  const label = String(value || "").trim();
+  const key = normalizeAudienceToken(label);
+  if (key && !targets.has(key)) targets.set(key, label);
+}
+
+async function buildNewMatchroomAreaNotificationContext(ctx: any, room: any, args: any) {
+  if (!room || room.isPrivate === true || String(room.bookingSource || "").toLowerCase() === "walkin") {
+    return null;
+  }
+
+  const targetAreas = new Map<string, string>();
+  let targetCity = "";
+  let venueLabel = String(room.location || "").trim();
+
+  if (String(room.locationMode || "") === "broadcast") {
+    for (const area of args.broadcastAreas || room.broadcastAreas || []) {
+      addAudienceLabel(targetAreas, area);
+    }
+    venueLabel = venueLabel || "a venue in your area";
+  } else if (String(room.locationMode || "") === "zone" && room.zoneId) {
+    const zone = await ctx.db.get(String(room.zoneId) as Id<"zones">);
+    const branch = pickZoneBranch(zone, args.branchId || room.branchId || room.confirmedBranchId);
+    addAudienceLabel(targetAreas, branch?.areaLabel || zone?.primaryBranch?.areaLabel);
+    targetCity = String(branch?.city || zone?.city || zone?.primaryBranch?.city || "").trim();
+    venueLabel =
+      String(branch?.branchDisplayName || branch?.name || "").trim() ||
+      String(zone?.venueBrandName || zone?.name || "").trim() ||
+      venueLabel ||
+      "the selected venue";
+  }
+
+  const areaLabels = Array.from(targetAreas.values());
+  if (areaLabels.length === 0) return null;
+
+  return {
+    targetAreas: areaLabels,
+    targetCity: targetCity || undefined,
+    venueLabel,
+    gameLabel: getCanonicalGameLabel(room.game),
+    scheduleLabel: formatMatchroomScheduleLabel(room),
+  };
+}
+
+async function scheduleNewMatchroomAreaNotifications(ctx: any, matchroomId: Id<"matchrooms">, room: any, args: any) {
+  const context = await buildNewMatchroomAreaNotificationContext(ctx, room, args);
+  if (!context) return;
+
+  await ctx.scheduler.runAfter(0, internal.matchrooms.notifyAreaPlayersOfNewMatchroomBatch, {
+    matchroomId,
+    ...context,
+    cursor: null,
+  });
+}
+
+async function notifyMatchroomCancelledPlayers(
+  ctx: any,
+  room: any,
+  matchroomId: Id<"matchrooms">,
+  reason: string,
+  note?: string,
+) {
+  const recipients = getMatchroomNotificationRecipientUids(room);
+  let notified = 0;
+  const errors: Array<{ uid: string; message: string }> = [];
+  for (const rawUid of recipients) {
+    try {
+      const user = await resolveUserByAnyId(ctx, rawUid);
+      if (!user) continue;
+      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+        type: "match.cancelled",
+        toUid: user._id,
+        status: "pending",
+        dedupeKey: `match.cancelled:${String(matchroomId)}:${String(user._id)}`,
+        dedupePolicy: "upsert_active",
+        pushPolicy: "force",
+        matchroomId,
+        route: `/matchrooms/${String(matchroomId)}`,
+        title: "Matchroom cancelled",
+        body: `The matchroom "${room.title || "Matchroom"}" was cancelled. Reason: ${reason}`,
+        data: {
+          matchroomId,
+          matchroomTitle: room.title || "Matchroom",
+          reason,
+          note: note || "",
+          href: `/matchrooms/${String(matchroomId)}`,
+        },
+      });
+      notified += 1;
+    } catch (error: any) {
+      errors.push({
+        uid: rawUid,
+        message: String(error?.message || error || "Failed to notify player."),
+      });
+    }
+  }
+  return { notified, errors };
 }
 
 function getDefaultResourceAssetType(game?: string | null) {
@@ -1302,12 +1666,20 @@ async function releaseHeldBookingIntentsForMatchroom(ctx: any, matchroomId: Id<"
     .collect();
 
   let releasedCount = 0;
+  const errors: Array<{ intentId: string; message: string }> = [];
   for (const intent of intents) {
-    const result = await releaseBookingIntentHold(ctx, intent, reason);
-    if (result.released) releasedCount += 1;
+    try {
+      const result = await releaseBookingIntentHold(ctx, intent, reason);
+      if (result.released) releasedCount += 1;
+    } catch (error: any) {
+      errors.push({
+        intentId: String(intent._id),
+        message: String(error?.message || error || "Failed to release booking hold."),
+      });
+    }
   }
 
-  return { releasedCount };
+  return { releasedCount, errors };
 }
 
 async function refundCapturedBookingIntentHold(ctx: any, intent: any, reason: string) {
@@ -1353,12 +1725,145 @@ async function refundCapturedBookingIntentsForMatchroom(ctx: any, matchroomId: I
     .collect();
 
   let refundedCount = 0;
+  const errors: Array<{ intentId: string; message: string }> = [];
   for (const intent of intents) {
-    const result = await refundCapturedBookingIntentHold(ctx, intent, reason);
-    if (result.refunded) refundedCount += 1;
+    try {
+      const result = await refundCapturedBookingIntentHold(ctx, intent, reason);
+      if (result.refunded) refundedCount += 1;
+    } catch (error: any) {
+      errors.push({
+        intentId: String(intent._id),
+        message: String(error?.message || error || "Failed to refund captured booking hold."),
+      });
+    }
   }
 
-  return { refundedCount };
+  return { refundedCount, errors };
+}
+
+type MatchroomCreateRefundResult = {
+  refunded: boolean;
+  reason?: string;
+  alreadyApplied?: boolean;
+  reference?: string;
+  amount?: number;
+  usedFallback?: boolean;
+};
+
+function isRefundableCreatePaymentTransaction(transaction: any, matchroomId: Id<"matchrooms">) {
+  const amount = Number(transaction?.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  if (transaction?.status !== "completed") return false;
+  if (transaction?.type !== "withdrawal" && transaction?.type !== "booking_payment") return false;
+
+  const reference = String(transaction?.reference || "");
+  const metadataMatchroomId = String(transaction?.metadata?.matchroomId || "");
+  return reference === `matchroom_create:${String(matchroomId)}` || metadataMatchroomId === String(matchroomId);
+}
+
+async function getMatchroomCreateRefundContext(ctx: any, matchroomId: Id<"matchrooms">) {
+  const room = await ctx.db.get(matchroomId);
+  const createReference = `matchroom_create:${String(matchroomId)}`;
+  const refundReference = `matchroom_create_refund:${String(matchroomId)}`;
+  const exactCreateTransactions = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_reference", (q: any) => q.eq("reference", createReference))
+    .collect();
+  const existingRefunds = await ctx.db
+    .query("walletTransactions")
+    .withIndex("by_reference", (q: any) => q.eq("reference", refundReference))
+    .collect();
+
+  let hostUser: any = null;
+  let hostRecentTransactions: any[] = [];
+  let originalPayment = exactCreateTransactions.find((transaction: any) =>
+    isRefundableCreatePaymentTransaction(transaction, matchroomId),
+  );
+
+  if (room?.hostUid) {
+    hostUser = await resolveUserByAnyId(ctx, String(room.hostUid));
+  }
+
+  if (!originalPayment && hostUser?._id) {
+    hostRecentTransactions = await ctx.db
+      .query("walletTransactions")
+      .withIndex("by_userId", (q: any) => q.eq("userId", hostUser._id))
+      .order("desc")
+      .take(250);
+    originalPayment = hostRecentTransactions.find((transaction: any) =>
+      isRefundableCreatePaymentTransaction(transaction, matchroomId),
+    );
+  }
+
+  return {
+    room,
+    hostUser,
+    originalPayment,
+    exactCreateTransactions,
+    existingRefunds,
+    hostRecentTransactions,
+    createReference,
+    refundReference,
+  };
+}
+
+async function refundDirectMatchroomCreatePayment(
+  ctx: any,
+  matchroomId: Id<"matchrooms">,
+  reason: string,
+  options?: { allowFallback?: boolean },
+): Promise<MatchroomCreateRefundResult> {
+  const context = await getMatchroomCreateRefundContext(ctx, matchroomId);
+  if (context.existingRefunds.length > 0) {
+    const existingRefund = context.existingRefunds[0];
+    return {
+      refunded: false,
+      alreadyApplied: true,
+      reference: context.refundReference,
+      amount: Number(existingRefund?.amount || 0) || undefined,
+    };
+  }
+
+  const fallbackAmount = Math.max(0, Math.ceil(Number(context.room?.paymentAmount || 0)));
+  const originalAmount = Number(context.originalPayment?.amount || 0);
+  const amount = Number.isFinite(originalAmount) && originalAmount > 0 ? originalAmount : fallbackAmount;
+  const refundUserId = context.originalPayment?.userId || context.hostUser?._id;
+  const usedFallback = !context.originalPayment;
+
+  if (!refundUserId) {
+    return { refunded: false, reason: "create_payment_user_not_found" };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { refunded: false, reason: "create_payment_amount_not_found" };
+  }
+  if (usedFallback && options?.allowFallback === false) {
+    return { refunded: false, reason: "create_payment_not_found" };
+  }
+  if (usedFallback && String(context.room?.paymentStatus || "") !== "paid") {
+    return { refunded: false, reason: "create_payment_not_found" };
+  }
+
+  const result: { alreadyApplied?: boolean } = await ctx.runMutation(internal.wallet.refundFunds, {
+    userId: refundUserId,
+    amount,
+    reference: context.refundReference,
+    metadata: {
+      source: "matchroom_create_refund",
+      matchroomId: String(matchroomId),
+      originalTransactionId: context.originalPayment?._id ? String(context.originalPayment._id) : null,
+      originalReference: context.originalPayment?.reference || context.createReference,
+      usedFallback,
+      reason,
+    },
+  });
+
+  return {
+    refunded: !result?.alreadyApplied,
+    alreadyApplied: Boolean(result?.alreadyApplied),
+    reference: context.refundReference,
+    amount,
+    usedFallback,
+  };
 }
 
 const PLAYER_WALLET_ROUTE = "/(player)/wallet";
@@ -1378,6 +1883,30 @@ function getBookingWalletCreditReasonText(reason: string): string {
     case "zone_rejected":
     case "zone_admin_rejected":
       return "because the venue could not confirm the booking";
+    case "zone_schedule_rejected":
+      return "because the proposed venue schedule was rejected";
+    case "missing_matchroom":
+      return "because the matchroom is no longer available";
+    default:
+      return "because the matchroom did not become final";
+  }
+}
+
+function getBookingWalletCreditAdminReasonText(reason: string): string {
+  switch (reason) {
+    case "left_before_lock":
+      return "because the player left before the matchroom locked";
+    case "matchroom_expired":
+    case "expired":
+      return "because the matchroom expired before it became final";
+    case "matchroom_cancelled":
+    case "cancelled":
+      return "because the matchroom was cancelled";
+    case "zone_rejected":
+    case "zone_admin_rejected":
+      return "because the venue could not confirm the booking";
+    case "zone_schedule_rejected":
+      return "because the proposed venue schedule was rejected";
     case "missing_matchroom":
       return "because the matchroom is no longer available";
     default:
@@ -1429,7 +1958,9 @@ async function notifyBookingWalletCredit(
   }
 
   const superAdmins = await listSuperAdminNotificationRecipients(ctx);
-  const adminRoute = "/super-admin";
+  const adminRoute = `/super-admin/matchroom/${encodeURIComponent(String(matchroomId))}`;
+  const adminReasonText = getBookingWalletCreditAdminReasonText(reason);
+  const playerName = intent.createdByUsername || "a player";
   for (const superAdmin of superAdmins) {
     const adminDedupe = `payments.booking_credit:${intentId}:${kind}:${String(superAdmin._id)}`;
     if (await notificationExistsByDedupeKey(ctx, adminDedupe)) continue;
@@ -1444,13 +1975,15 @@ async function notifyBookingWalletCredit(
       matchroomId,
       route: adminRoute,
       title: kind === "refunded" ? "Booking payment returned to wallet" : "Booking hold released to wallet",
-      body: `PKR ${creditAmount} was returned to ${intent.createdByUsername || "a player"}'s MatchHai wallet (${reason}).`,
+      body: `PKR ${creditAmount} was returned to ${playerName}'s MatchHai wallet ${adminReasonText}.`,
       data: {
         intentId,
         matchroomId: String(matchroomId),
         playerUid: String(playerUid),
+        playerName,
         amount: creditAmount,
         reason,
+        reasonText: adminReasonText,
         kind,
         href: adminRoute,
       },
@@ -1825,32 +2358,43 @@ function assignPlayerToTeamSlots(
     role,
   });
 
-  const isOpen = (slot: any) => !slot?.uid && !slot?.user?.uid;
-  const normalizedTargetTeam = String(targetTeam || "").trim().toUpperCase();
+  const isOpen = isSelectableOpenSlot;
+  const targetSide = normalizeTargetTeamSide(targetTeam);
 
   if (requestedSlotId) {
-    const idxA = slotsA.findIndex((slot: any) => slot.slotId === requestedSlotId);
-    if (idxA !== -1) {
-      if (!isOpen(slotsA[idxA])) {
-        return { ok: false, message: "Selected slot is no longer available." };
+    const findSlotIndex = (slots: any[]) =>
+      slots.findIndex((slot: any) => String(slot?.slotId || "") === String(requestedSlotId || ""));
+
+    if (targetSide !== "B") {
+      const idxA = findSlotIndex(slotsA);
+      if (idxA !== -1) {
+        if (!isOpen(slotsA[idxA])) {
+          return { ok: false, message: "Selected slot is no longer available." };
+        }
+        slotsA[idxA] = buildFilledSlot(slotsA[idxA]);
+        return { ok: true, slotsA, slotsB, team: "A", updateData: {} as Record<string, any> };
       }
-      slotsA[idxA] = buildFilledSlot(slotsA[idxA]);
-      return { ok: true, slotsA, slotsB, team: "A", updateData: {} as Record<string, any> };
     }
 
-    const idxB = slotsB.findIndex((slot: any) => slot.slotId === requestedSlotId);
-    if (idxB !== -1) {
-      if (!isOpen(slotsB[idxB])) {
-        return { ok: false, message: "Selected slot is no longer available." };
+    if (targetSide !== "A") {
+      const idxB = findSlotIndex(slotsB);
+      if (idxB !== -1) {
+        if (!isOpen(slotsB[idxB])) {
+          return { ok: false, message: "Selected slot is no longer available." };
+        }
+        slotsB[idxB] = buildFilledSlot(slotsB[idxB]);
+        return {
+          ok: true,
+          slotsA,
+          slotsB,
+          team: "B",
+          updateData: room.captainUidB ? {} : { captainUidB: requesterUid },
+        };
       }
-      slotsB[idxB] = buildFilledSlot(slotsB[idxB]);
-      return {
-        ok: true,
-        slotsA,
-        slotsB,
-        team: "B",
-        updateData: room.captainUidB ? {} : { captainUidB: requesterUid },
-      };
+    }
+
+    if (targetSide === "A" || targetSide === "B") {
+      return { ok: false, message: "Selected slot is no longer available." };
     }
 
     return { ok: false, message: "Selected slot was not found." };
@@ -1858,7 +2402,7 @@ function assignPlayerToTeamSlots(
 
   const assignFirstOpen = (slots: any[]) => slots.findIndex((slot: any) => isOpen(slot));
 
-  if (normalizedTargetTeam === "TEAM A" || normalizedTargetTeam === "A") {
+  if (targetSide === "A") {
     const idxA = assignFirstOpen(slotsA);
     if (idxA === -1) {
       return { ok: false, message: "Team A has no open slots." };
@@ -1867,7 +2411,7 @@ function assignPlayerToTeamSlots(
     return { ok: true, slotsA, slotsB, team: "A", updateData: {} as Record<string, any> };
   }
 
-  if (normalizedTargetTeam === "TEAM B" || normalizedTargetTeam === "B") {
+  if (targetSide === "B") {
     const idxB = assignFirstOpen(slotsB);
     if (idxB === -1) {
       return { ok: false, message: "Team B has no open slots." };
@@ -2010,14 +2554,32 @@ function getSlotListForTeam(room: any, side: "A" | "B") {
   return side === "A" ? [...(room.slotsA || [])] : [...(room.slotsB || [])];
 }
 
-function getOpenSlotSelection(room: any, targetTeam?: string | null, requestedSlotId?: string | null) {
+function normalizeTargetTeamSide(targetTeam?: string | null): "A" | "B" | null {
   const normalizedTargetTeam = String(targetTeam || "").trim().toUpperCase();
+  if (normalizedTargetTeam === "TEAM A" || normalizedTargetTeam === "A") return "A";
+  if (normalizedTargetTeam === "TEAM B" || normalizedTargetTeam === "B") return "B";
+  return null;
+}
+
+function isSelectableOpenSlot(slot: any) {
+  const status = String(slot?.status || "open").toLowerCase();
+  return (
+    !slot?.uid &&
+    !slot?.user?.uid &&
+    !slot?.reservedForUid &&
+    !slot?.reservedFor?.uid &&
+    (status === "open" || status === "available")
+  );
+}
+
+function getOpenSlotSelection(room: any, targetTeam?: string | null, requestedSlotId?: string | null) {
+  const targetSide = normalizeTargetTeamSide(targetTeam);
   const slotsA = getSlotListForTeam(room, "A");
   const slotsB = getSlotListForTeam(room, "B");
 
   const findOpenBySlotId = (slots: any[], side: "A" | "B") => {
     const index = slots.findIndex((slot: any) =>
-      slot.slotId === requestedSlotId && !slot?.uid && !slot?.user?.uid
+      String(slot?.slotId || "") === String(requestedSlotId || "") && isSelectableOpenSlot(slot)
     );
     if (index === -1) {
       return null;
@@ -2030,17 +2592,19 @@ function getOpenSlotSelection(room: any, targetTeam?: string | null, requestedSl
   };
 
   if (requestedSlotId) {
+    if (targetSide === "A") return findOpenBySlotId(slotsA, "A");
+    if (targetSide === "B") return findOpenBySlotId(slotsB, "B");
     return findOpenBySlotId(slotsA, "A") || findOpenBySlotId(slotsB, "B");
   }
 
-  const firstOpenIndex = (slots: any[]) => slots.findIndex((slot: any) => !slot?.uid && !slot?.user?.uid);
+  const firstOpenIndex = (slots: any[]) => slots.findIndex(isSelectableOpenSlot);
 
-  if (normalizedTargetTeam === "TEAM A" || normalizedTargetTeam === "A") {
+  if (targetSide === "A") {
     const index = firstOpenIndex(slotsA);
     return index === -1 ? null : { side: "A" as const, slotId: String(slotsA[index].slotId), selectedSlots: [index] };
   }
 
-  if (normalizedTargetTeam === "TEAM B" || normalizedTargetTeam === "B") {
+  if (targetSide === "B") {
     const index = firstOpenIndex(slotsB);
     return index === -1 ? null : { side: "B" as const, slotId: String(slotsB[index].slotId), selectedSlots: [index] };
   }
@@ -2073,6 +2637,14 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     throw new Error("Selected slot is no longer available.");
   }
 
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: [String(args.createdByUid)],
+    scheduledStartAt: args.room.scheduledStartAt || args.room.startTime || null,
+    durationMinutes: args.room.durationMinutes || 60,
+    excludeMatchroomId: String(args.room._id),
+    message: "You already have a matchroom or booking request scheduled at this time.",
+  });
+
   const existingIntents = await ctx.db
     .query("bookingIntents")
     .withIndex("by_createdByUid_matchroomId", (q: any) =>
@@ -2081,7 +2653,7 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     .collect();
 
   const now = Date.now();
-  const expiresAt = getCappedMatchroomExpiryOrThrow(
+  const expiresAt = getPaymentIntentExpiryOrThrow(
     args.room,
     PAYMENT_INTENT_TTL_MS,
     "Payment intent",
@@ -2153,6 +2725,14 @@ async function createPendingApprovalBookingIntent(ctx: any, args: {
   if (!selection) {
     throw new Error("Selected slot is no longer available.");
   }
+
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: [String(args.createdByUid)],
+    scheduledStartAt: args.room.scheduledStartAt || args.room.startTime || null,
+    durationMinutes: args.room.durationMinutes || 60,
+    excludeMatchroomId: String(args.room._id),
+    message: "You already have a matchroom or booking request scheduled at this time.",
+  });
 
   const existingIntents = await ctx.db
     .query("bookingIntents")
@@ -2246,19 +2826,55 @@ async function closePendingJoinRequestsForJoinedUser(
 // Non-throwing access check for matchroom check-in details (QR + match code).
 // Authorized: host, either captain, any joined participant (playerUids or slots),
 // the owning zone's admin, and super admins. Everyone else is an "outsider".
+function addIdentityValue(values: Set<string>, value: unknown) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return;
+  values.add(normalized);
+  if (normalized.includes("|")) {
+    const suffix = normalized.split("|").pop();
+    if (suffix) values.add(suffix);
+  }
+}
+
+function getViewerIdentityValues(actor: any, viewer: any) {
+  const values = new Set<string>();
+  addIdentityValue(values, viewer?._id);
+  addIdentityValue(values, viewer?.authId);
+  addIdentityValue(values, actor?.identity?.tokenIdentifier);
+  addIdentityValue(values, actor?.identity?.subject);
+  addIdentityValue(values, actor?.authUser?.userId);
+  addIdentityValue(values, actor?.authUser?.id);
+  addIdentityValue(values, actor?.authUser?._id);
+  for (const candidate of actor?.candidateAuthIds || []) {
+    addIdentityValue(values, candidate);
+  }
+  return values;
+}
+
+function matchesViewerIdentity(values: Set<string>, candidate: unknown) {
+  const normalized = String(candidate || "").trim();
+  if (!normalized) return false;
+  if (values.has(normalized)) return true;
+  if (normalized.includes("|")) {
+    const suffix = normalized.split("|").pop();
+    return Boolean(suffix && values.has(suffix));
+  }
+  return false;
+}
+
 async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
   try {
     const actor = await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
-    const viewerId = String(viewer._id);
+    const viewerValues = getViewerIdentityValues(actor, viewer);
 
-    if (String(room.hostUid || "") === viewerId) return true;
-    if (String(room.captainUidA || "") === viewerId) return true;
-    if (String(room.captainUidB || "") === viewerId) return true;
+    if (matchesViewerIdentity(viewerValues, room.hostUid)) return true;
+    if (matchesViewerIdentity(viewerValues, room.captainUidA)) return true;
+    if (matchesViewerIdentity(viewerValues, room.captainUidB)) return true;
     if (
       Array.isArray(room.playerUids) &&
-      room.playerUids.map(String).includes(viewerId)
+      room.playerUids.some((uid: any) => matchesViewerIdentity(viewerValues, uid))
     ) {
       return true;
     }
@@ -2267,7 +2883,7 @@ async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
       .map((slot: any) => slot?.user?._id || slot?.user?.uid || slot?.uid)
       .filter(Boolean)
       .map(String);
-    if (slotUids.includes(viewerId)) return true;
+    if (slotUids.some((uid: any) => matchesViewerIdentity(viewerValues, uid))) return true;
 
     if (isSuperAdminProfile(viewer, actor.authUser?.email || actor.identity?.email)) {
       return true;
@@ -2275,7 +2891,7 @@ async function resolveCheckInAccess(ctx: any, room: any): Promise<boolean> {
 
     if (room.zoneId) {
       const zone = await ctx.db.get(room.zoneId as Id<"zones">);
-      if (zone && String(zone.ownerUid || "") === viewerId) return true;
+      if (zone && matchesViewerIdentity(viewerValues, zone.ownerUid)) return true;
     }
 
     return false;
@@ -2301,12 +2917,12 @@ async function viewerMayViewPrivateMatchroom(
     const actor = await getCurrentUser(ctx);
     const viewer = actor.user;
     if (!viewer) return false;
-    const viewerId = String(viewer._id);
+    const viewerValues = getViewerIdentityValues(actor, viewer);
 
     if (
       Array.isArray(room.assignedTeamMembers) &&
       room.assignedTeamMembers.some(
-        (m: any) => String(m?.uid || "") === viewerId,
+        (m: any) => matchesViewerIdentity(viewerValues, m?.uid),
       )
     ) {
       return true;
@@ -2318,7 +2934,7 @@ async function viewerMayViewPrivateMatchroom(
       .collect();
     return invites.some(
       (n: any) =>
-        String(n?.toUid || "") === viewerId &&
+        matchesViewerIdentity(viewerValues, n?.toUid) &&
         String(n?.type || "").startsWith("match.") &&
         n?.status === "pending",
     );
@@ -2340,6 +2956,45 @@ function buildPublicMatchroomView(room: any): any {
         skillTier: p?.skillTier,
       }))
     : [];
+  const playerNameByUid = new Map<string, any>();
+  if (Array.isArray(room.players)) {
+    for (const player of room.players) {
+      const uid = String(player?.uid || "").trim();
+      if (uid) playerNameByUid.set(uid, player);
+    }
+  }
+  const isWalkIn = isWalkInMatchroom(room);
+  const sanitizePublicSlot = (slot: any) => {
+    const slotUid = getSlotUserUid(slot);
+    const player = slotUid ? playerNameByUid.get(slotUid) : null;
+    const hasPlayer = Boolean(slotUid);
+    const rawStatus = String(slot?.status || (hasPlayer ? "confirmed" : "open")).toLowerCase();
+    const safeSlot: any = {
+      slotId: String(slot?.slotId || ""),
+      status: hasPlayer
+        ? "confirmed"
+        : rawStatus === "reserved"
+          ? "reserved"
+          : "open",
+      role: slot?.role || (hasPlayer ? player?.role : "Player"),
+    };
+    if (hasPlayer) {
+      const publicSlotUid = `public:${String(slot?.slotId || slotUid || "slot")}`;
+      safeSlot.uid = publicSlotUid;
+      safeSlot.user = {
+        uid: publicSlotUid,
+        username: String(slot?.user?.username || player?.username || "Player"),
+        skillTier: slot?.user?.skillTier || player?.skillTier,
+      };
+    }
+    return safeSlot;
+  };
+  const walkInBranchName = String(room.walkIn?.branchName || room.branchName || "").trim();
+  const locationRaw = String(room.location || "").trim();
+  const publicLocation =
+    isWalkIn && (!locationRaw || locationRaw === "Zone Venue")
+      ? walkInBranchName || locationRaw || "Zone Venue"
+      : room.location;
   return {
     id: room._id,
     _id: room._id,
@@ -2359,9 +3014,9 @@ function buildPublicMatchroomView(room: any): any {
     // Internal identifiers, raw slots, GPS, and all payment/payout/settlement
     // fields are intentionally omitted for non-members.
     playerUids: [],
-    slotsA: [],
-    slotsB: [],
-    location: room.location,
+    slotsA: isWalkIn ? (room.slotsA || []).map(sanitizePublicSlot) : [],
+    slotsB: isWalkIn ? (room.slotsB || []).map(sanitizePublicSlot) : [],
+    location: publicLocation,
     locationMode: room.locationMode,
     broadcastAreas: room.broadcastAreas,
     scheduledDate: room.scheduledDate,
@@ -2377,6 +3032,19 @@ function buildPublicMatchroomView(room: any): any {
     hostUid: "",
     isPrivate: Boolean(room.isPrivate),
     isLocked: Boolean(room.isLocked),
+    bookingSource: isWalkIn ? "walkin" : undefined,
+    skipBookingRequest: isWalkIn ? Boolean(room.skipBookingRequest) : undefined,
+    zoneAdminApproved: isWalkIn ? Boolean(room.zoneAdminApproved) : undefined,
+    walkIn: isWalkIn
+      ? {
+          branchName: walkInBranchName || null,
+          paymentMode: room.walkIn?.paymentMode || null,
+          seatCount: room.walkIn?.seatCount ?? room.maxPlayers ?? null,
+          bookedSeatCount: room.walkIn?.bookedSeatCount ?? room.currentPlayers ?? null,
+          knownPlayerCount: room.walkIn?.knownPlayerCount ?? sanitizedPlayers.length,
+          unknownSeatCount: room.walkIn?.unknownSeatCount ?? null,
+        }
+      : null,
     createdAt: room.createdAt,
     canViewCheckIn: false,
     matchCode: null,
@@ -2933,8 +3601,14 @@ export const checkCreateAvailability = query({
   args: {
     locationMode: v.optional(v.string()),
     zoneId: v.optional(v.string()),
+    branchId: v.optional(v.string()),
     game: v.string(),
     scheduledStartAt: v.number(),
+    durationMinutes: v.optional(v.number()),
+    requestedResourceAssetType: v.optional(v.string()),
+    requestedResourceSurface: v.optional(v.string()),
+    requestedResourceTier: v.optional(v.string()),
+    selectedZoneRateKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -2960,6 +3634,26 @@ export const checkCreateAvailability = query({
           conflictId: String(conflict._id),
           message: MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE,
           reason: "venue_time_conflict",
+        };
+      }
+
+      try {
+        await assertZoneResourceCapacityAvailable(ctx, {
+          zoneId: args.zoneId,
+          branchId: args.branchId,
+          game: args.game,
+          requestedResourceAssetType: args.requestedResourceAssetType,
+          requestedResourceSurface: args.requestedResourceSurface,
+          requestedResourceTier: args.requestedResourceTier,
+          selectedZoneRateKey: args.selectedZoneRateKey,
+          scheduledStartAt: args.scheduledStartAt,
+          durationMinutes: args.durationMinutes || 60,
+        });
+      } catch (error: any) {
+        return {
+          available: false,
+          message: String(error?.message || MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE),
+          reason: "resource_capacity_conflict",
         };
       }
     }
@@ -3209,6 +3903,17 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     if (conflict) {
       throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
     }
+    await assertZoneResourceCapacityAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      game: args.game,
+      requestedResourceAssetType: args.requestedResourceAssetType,
+      requestedResourceSurface: args.requestedResourceSurface,
+      requestedResourceTier: args.requestedResourceTier,
+      selectedZoneRateKey: args.selectedZoneRateKey,
+      scheduledStartAt: args.scheduledStartAt,
+      durationMinutes: args.durationMinutes || 60,
+    });
   }
 
   const normalizedPlayers = await Promise.all(
@@ -3224,6 +3929,12 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     ),
   );
   const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: normalizedPlayerUids.length ? normalizedPlayerUids : [actorUid],
+    scheduledStartAt: args.scheduledStartAt,
+    durationMinutes: args.durationMinutes || 60,
+    message: "One or more players already have a matchroom or booking request scheduled at this time.",
+  });
   const hostSkill = await requireUserGameSkill(ctx, actorUid, args.game);
   const skillStats = await buildRoomSkillStats(ctx, args.game, normalizedPlayerUids);
   const walletFailure = options?.walletPrecheckHostUser
@@ -3253,6 +3964,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
         : undefined,
     zoneId: args.zoneId,
     zoneOwnerUid: args.zoneOwnerUid,
+    branchId: args.branchId || undefined,
     scheduledDate: args.scheduledDate,
     scheduledTime: args.scheduledTime,
     scheduledStartAt: args.scheduledStartAt,
@@ -3297,6 +4009,10 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
   });
 
   await syncMatchroomMembers(ctx, matchroomId, normalizedPlayerUids);
+  const insertedRoom = await ctx.db.get(matchroomId);
+  if (insertedRoom) {
+    await scheduleNewMatchroomAreaNotifications(ctx, matchroomId, insertedRoom, args);
+  }
 
   if (
     args.locationMode === "broadcast" &&
@@ -3787,6 +4503,14 @@ export const updateStatus = mutation({
     if (!room) throw new Error("Matchroom not found");
     await requireRoomActor(ctx, room, args.status === "cancelled" ? ["host", "captain", "zoneOwner"] : ["host", "captain"]);
 
+    if (args.status === "completed") {
+      const result = await completeMatchroomForResultVerification(ctx, args.matchroomId, room);
+      if (!result.ok) {
+        throw new Error(`Matchroom cannot complete: ${result.reason}`);
+      }
+      return true;
+    }
+
     if (args.status === "in-progress") {
       const validation = canStartMatchroom(room, Date.now());
       if (!validation.ok) {
@@ -3801,41 +4525,12 @@ export const updateStatus = mutation({
       updateData.startedPlayerCount = getConfirmedPlayerCount(room);
       updateData.captainUidA = room.captainUidA || room.hostUid;
     }
-    if (args.status === "completed") {
-      const validation = canCompleteMatchroom(room, Date.now());
-      if (!validation.ok) {
-        throw new Error(`Matchroom cannot complete: ${validation.reason}`);
-      }
-      const captains = room ? resolveResultCaptains(room, room.resultVerification) : { team1Captain: "", team2Captain: "" };
-      if (!captains.team1Captain || !captains.team2Captain) {
-        throw new Error("Matchroom cannot complete: missing_result_captains");
-      }
-      updateData.completedAt = Date.now();
-      updateData.resultVerification = room?.resultVerification || {
-        status: "pending",
-        team1Captain: captains.team1Captain,
-        team2Captain: captains.team2Captain,
-        captainReports: {},
-      };
-    }
     if (args.status === "locked") {
       updateData.isLocked = true;
       updateData.lockedAt = Date.now();
     }
 
     await ctx.db.patch(args.matchroomId, updateData);
-    if (args.status === "completed") {
-      const completedRoom = await ctx.db.get(args.matchroomId);
-      await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
-      // Team Challenge: capture both captains' held funds on completion (no-op
-      // for non-challenge rooms). Zone payout below is shared with solo rooms.
-      await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
-        matchroomId: args.matchroomId,
-        action: "capture",
-        reason: "matchroom_completed",
-      });
-      await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
-    }
     if (args.status === "cancelled" || args.status === "expired") {
       await expireBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
@@ -3847,6 +4542,9 @@ export const updateStatus = mutation({
         action: "release",
         reason: `matchroom_${args.status}`,
       });
+      if (args.status === "cancelled") {
+        await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, `matchroom_${args.status}`);
+      }
     }
     return true;
   },
@@ -4116,20 +4814,12 @@ export const getPendingResultForUser = query({
   },
   handler: async (ctx, args) => {
     const actor = await requireCurrentUser(ctx);
-    const identity = actor.user;
-    const uidCandidates = Array.from(
-      new Set([
-        String(actor.user._id),
-        actor.user.authId,
-        actor.identity?.tokenIdentifier,
-        actor.identity?.subject,
-      ].filter(Boolean).map(String)),
+    const uidCandidates = getActorUidCandidates(actor);
+    const completedRooms = await getRecentRoomsForUidCandidates(
+      ctx,
+      uidCandidates,
+      new Set(["completed"]),
     );
-
-    const completedRooms = await ctx.db
-      .query("matchrooms")
-      .withIndex("by_status", (q: any) => q.eq("status", "completed"))
-      .collect();
 
     for (const room of completedRooms) {
       const participantUids = getMatchroomPlayerUids(room);
@@ -4206,33 +4896,7 @@ export async function performAdminCancel(
     reason: "admin_cancel",
   });
 
-  // Create notifications for all players
-  for (const uid of room.playerUids) {
-    const users = await ctx.db
-      .query("users")
-      .withIndex("by_authId", (q: any) => q.eq("authId", uid))
-      .take(1);
-
-    if (users.length > 0) {
-      await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
-        type: "match.cancelled",
-        toUid: users[0]._id,
-        status: "pending",
-        dedupeKey: `match.cancelled:${String(args.matchroomId)}:${String(users[0]._id)}`,
-        dedupePolicy: "upsert_active",
-        matchroomId: args.matchroomId,
-        route: `/matchrooms/${String(args.matchroomId)}`,
-        title: "Matchroom Closed",
-        body: `The matchroom "${room.title}" was closed. Reason: ${args.reason}`,
-        data: {
-          matchroomId: args.matchroomId,
-          reason: args.reason,
-          note: args.note || "",
-          href: `/matchrooms/${String(args.matchroomId)}`,
-        },
-      });
-    }
-  }
+  await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, args.reason, args.note);
 
   return { ok: true, message: "Lobby cancelled and players notified.", alreadyCancelled: false };
 }
@@ -4510,23 +5174,54 @@ export const syncLifecycleIfDue = mutation({
         return { changed: true, status: "admin_review" };
       }
 
-      await ctx.db.patch(args.matchroomId, {
-        status: "completed",
-        completedAt: now,
-        resultVerification: refreshedRoom.resultVerification || {
-          status: "pending",
-          team1Captain: refreshedRoom.captainUidA || refreshedRoom.hostUid,
-          team2Captain: teamTwoCaptain,
-        },
-        updatedAt: now,
-      });
-      await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
-      const completedRoom = await ctx.db.get(args.matchroomId);
-      await payVenueWalletForCompletedMatchroom(ctx, args.matchroomId, completedRoom);
-      changed = true;
+      const result = await completeMatchroomForResultVerification(ctx, args.matchroomId, refreshedRoom, now);
+      if (!result.ok) {
+        await markInvalidResultVerificationForAdminReview(
+          ctx,
+          args.matchroomId,
+          refreshedRoom,
+          result.reason || "completion_failed",
+        );
+        return { changed: true, status: "admin_review" };
+      }
+      changed = result.changed;
     }
 
     return { changed };
+  },
+});
+
+export const syncPendingResultLifecycleForCurrentUser = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireCurrentUser(ctx);
+    const uidCandidates = getActorUidCandidates(actor);
+    const rooms = await getRecentRoomsForUidCandidates(
+      ctx,
+      uidCandidates,
+      new Set(["in-progress"]),
+    );
+    const now = Date.now();
+    let inspected = 0;
+    let changed = 0;
+
+    for (const room of rooms) {
+      inspected += 1;
+      const captains = resolveResultCaptains(room, room.resultVerification || {});
+      const isCaptain =
+        uidCandidates.includes(String(captains.team1Captain || "")) ||
+        uidCandidates.includes(String(captains.team2Captain || ""));
+      if (!isCaptain) continue;
+
+      const validation = canCompleteMatchroom(room, now);
+      if (!validation.ok) continue;
+
+      const result = await completeMatchroomForResultVerification(ctx, room._id, room, now);
+      if (result.changed) changed += 1;
+      if (changed >= 3) break;
+    }
+
+    return { ok: true, inspected, changed };
   },
 });
 
@@ -4563,10 +5258,83 @@ export const requestToJoinMatchroom = mutation({
         "MATCHROOM_LOCKED",
       );
     }
-    if (room.playerUids.includes(actorUid)) throw new Error("You are already in this matchroom.");
+    if ((room.playerUids || []).includes(actorUid)) {
+      return matchroomJoinFailure("You are already in this matchroom.", "ALREADY_JOINED");
+    }
     const now = Date.now();
     const role = args.role || "Player";
     const targetTeam = args.targetTeam || "Any";
+
+    if (isWalkInMatchroom(room)) {
+      try {
+        const amount = Number(room.pricing?.perPlayer || 0);
+        const paymentMode = String(room.walkIn?.paymentMode || "guest_pay").toLowerCase();
+
+        if (paymentMode === "venue_pay" || amount <= 0) {
+          await assertNoParticipantTimeConflict(ctx, {
+            userIds: [actorUid],
+            scheduledStartAt: room.scheduledStartAt || room.startTime || null,
+            durationMinutes: room.durationMinutes || 60,
+            excludeMatchroomId: String(room._id),
+            message: "You already have a matchroom or booking request scheduled at this time.",
+          });
+          const rosterPatch = await buildMatchroomRosterPatch(
+            ctx,
+            room,
+            actorUid,
+            args.fromUsername,
+            role,
+            targetTeam,
+            args.slotId || null,
+          );
+
+          await ctx.db.patch(args.matchroomId, rosterPatch.patch);
+          await syncMatchroomMembers(
+            ctx,
+            args.matchroomId,
+            (rosterPatch.patch.playerUids || []) as string[],
+          );
+          await addUserToMatchroomChatroom(ctx, args.matchroomId, actorUid, now);
+
+          return {
+            ok: true,
+            approvalRequested: false,
+            paymentRequired: false,
+            joined: true,
+            message: "You joined this walk-in matchroom.",
+          };
+        }
+
+        const intentId = await createSingleSeatBookingIntent(ctx, {
+          room,
+          createdByUid: actor.convexUser._id,
+          createdByUsername: args.fromUsername,
+          role,
+          targetTeam,
+          requestedSlotId: args.slotId || null,
+          source: "direct_join",
+        });
+
+        return {
+          ok: true,
+          approvalRequested: false,
+          paymentRequired: true,
+          joined: false,
+          intentId,
+          message: "Complete payment to confirm this walk-in seat.",
+        };
+      } catch (error: any) {
+        console.warn("[matchrooms] walk-in join failed", {
+          matchroomId: String(args.matchroomId),
+          actorUid,
+          targetTeam,
+          slotId: args.slotId || null,
+          message: String(error?.message || error || "Unknown error"),
+        });
+        return walkInJoinFailureFromError(error);
+      }
+    }
+
     const approvalGroupKey = `match_join_request_${args.matchroomId}_${actorUid}`;
     const roomNotifications = await ctx.db
       .query("notifications")
@@ -5195,6 +5963,14 @@ async function confirmMatchroomSeatIntentForUser(
       throw new Error("This matchroom is locked.");
     }
 
+    await assertNoParticipantTimeConflict(ctx, {
+      userIds: [payerUid],
+      scheduledStartAt: room.scheduledStartAt || room.startTime || null,
+      durationMinutes: room.durationMinutes || 60,
+      excludeMatchroomId: String(room._id),
+      message: "You already have a matchroom or booking request scheduled at this time.",
+    });
+
     const amount = Number(intent.pricing?.totalCost || room.pricing?.perPlayer || 0);
     const walletBalance = Number(payer.walletBalance || 0);
     const isExternalPayment = Boolean(args.externalPaymentReference);
@@ -5299,7 +6075,7 @@ async function confirmMatchroomSeatIntentForUser(
       },
     });
 
-    if (rosterPatch.willBeFull) {
+    if (rosterPatch.willBeFull && !isWalkInMatchroom(room)) {
       if (room.locationMode === "broadcast") {
         await dispatchBroadcastZoneRequestsForMatchroom(ctx, intent.matchroomId);
       } else if (room.locationMode === "zone") {
@@ -5693,6 +6469,11 @@ export const runLifecycleSweep = internalMutation({
               `invalid_in_progress_${validation.reason}`,
             );
             if (result.changed) changedRooms += 1;
+            continue;
+          }
+          if (validation.ok) {
+            const result = await completeMatchroomForResultVerification(ctx, room._id, room, now);
+            if (result.changed) changedRooms += 1;
           }
           continue;
         }
@@ -5819,5 +6600,397 @@ export const refundCapturedHoldsForMatchroom = internalMutation({
   },
   handler: async (ctx, args) => {
     return await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+  },
+});
+
+export const refundCreatePaymentForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args): Promise<MatchroomCreateRefundResult> => {
+    return await refundDirectMatchroomCreatePayment(ctx, args.matchroomId, args.reason);
+  },
+});
+
+export const notifyPlayersOfMatchroomCancellation = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { notified: 0, skipped: "missing_matchroom" };
+    return await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, args.reason, args.note);
+  },
+});
+
+export const notifyAreaPlayersOfNewMatchroomBatch = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    targetAreas: v.array(v.string()),
+    targetCity: v.optional(v.string()),
+    venueLabel: v.string(),
+    gameLabel: v.string(),
+    scheduleLabel: v.string(),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) return { notified: 0, skipped: "missing_matchroom" };
+    if (["cancelled", "expired", "completed"].includes(String(room.status || ""))) {
+      return { notified: 0, skipped: "terminal_matchroom" };
+    }
+    if (room.isPrivate === true || String(room.bookingSource || "").toLowerCase() === "walkin") {
+      return { notified: 0, skipped: "private_or_walkin_matchroom" };
+    }
+
+    const targetAreaKeys = new Set(
+      args.targetAreas.map((area) => normalizeAudienceToken(area)).filter(Boolean),
+    );
+    if (targetAreaKeys.size === 0) return { notified: 0, skipped: "missing_area" };
+
+    const targetCityKey = normalizeAudienceToken(args.targetCity);
+    const joinedUids = new Set(getMatchroomNotificationRecipientUids(room));
+    const page = await ctx.db
+      .query("users")
+      .withIndex("by_accountType_updatedAt", (q: any) => q.eq("accountType", "player"))
+      .order("desc")
+      .paginate({
+        numItems: NEW_MATCHROOM_AREA_NOTIFICATION_BATCH_SIZE,
+        cursor: args.cursor || null,
+      });
+
+    let notified = 0;
+    const notificationErrors: Array<{ userId: string; message: string }> = [];
+    for (const user of page.page) {
+      if (!user || joinedUids.has(String(user._id))) continue;
+      if (isUserHiddenFromPublic(user)) continue;
+      if (user.accountStatus === "suspended") continue;
+      if (user.onboardingCompleted !== true) continue;
+      if (!isGameEnabledForUser(user, room.game)) continue;
+      if (targetCityKey) {
+        const userCityKey = normalizeAudienceToken(user.city);
+        if (userCityKey && userCityKey !== targetCityKey) continue;
+      }
+      const userAreaKeys = new Set(
+        (Array.isArray(user.areasPreferred) ? user.areasPreferred : [])
+          .map((area: any) => normalizeAudienceToken(area))
+          .filter(Boolean),
+      );
+      let areaMatches = false;
+      for (const key of targetAreaKeys) {
+        if (userAreaKeys.has(key)) {
+          areaMatches = true;
+          break;
+        }
+      }
+      if (!areaMatches) continue;
+
+      try {
+        await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
+          type: NEW_MATCHROOM_AREA_NOTIFICATION_TYPE,
+          toUid: user._id,
+          status: "pending",
+          dedupeKey: `${NEW_MATCHROOM_AREA_NOTIFICATION_TYPE}:${String(args.matchroomId)}:${String(user._id)}`,
+          dedupePolicy: "upsert_active",
+          pushPolicy: "eligible",
+          matchroomId: args.matchroomId,
+          entity: { kind: "matchroom", id: String(args.matchroomId) },
+          route: `/matchrooms/${String(args.matchroomId)}`,
+          title: `${args.gameLabel} matchroom created near you`,
+          body: `${room.title || "A matchroom"} at ${args.venueLabel} is scheduled for ${args.scheduleLabel}.`,
+          data: {
+            matchroomId: args.matchroomId,
+            matchroomTitle: room.title || "Matchroom",
+            game: room.game,
+            gameLabel: args.gameLabel,
+            venueLabel: args.venueLabel,
+            scheduleLabel: args.scheduleLabel,
+            targetAreas: args.targetAreas,
+            href: `/matchrooms/${String(args.matchroomId)}`,
+          },
+        });
+        notified += 1;
+      } catch (error: any) {
+        notificationErrors.push({
+          userId: String(user._id),
+          message: String(error?.message || error || "Failed to notify player."),
+        });
+      }
+    }
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.matchrooms.notifyAreaPlayersOfNewMatchroomBatch, {
+        matchroomId: args.matchroomId,
+        targetAreas: args.targetAreas,
+        targetCity: args.targetCity,
+        venueLabel: args.venueLabel,
+        gameLabel: args.gameLabel,
+        scheduleLabel: args.scheduleLabel,
+        cursor: page.continueCursor,
+      });
+    }
+
+    return { notified, notificationErrors, isDone: page.isDone };
+  },
+});
+
+export const returnPaymentsForCancelledMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const errors: Array<{ stage: string; message: string }> = [];
+
+    let creatorRefund: MatchroomCreateRefundResult | null = null;
+    try {
+      creatorRefund = await refundDirectMatchroomCreatePayment(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "creator_refund",
+        message: String(error?.message || error || "Failed to refund matchroom creator payment."),
+      });
+    }
+
+    let releaseResult: any = null;
+    try {
+      releaseResult = await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "booking_hold_release",
+        message: String(error?.message || error || "Failed to release booking holds."),
+      });
+    }
+
+    let capturedRefundResult: any = null;
+    try {
+      capturedRefundResult = await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, args.reason);
+    } catch (error: any) {
+      errors.push({
+        stage: "booking_capture_refund",
+        message: String(error?.message || error || "Failed to refund captured booking holds."),
+      });
+    }
+
+    let teamChallengeResult: any = null;
+    try {
+      teamChallengeResult = await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
+        matchroomId: args.matchroomId,
+        action: "release",
+        reason: args.reason,
+      });
+    } catch (error: any) {
+      errors.push({
+        stage: "team_challenge_release",
+        message: String(error?.message || error || "Failed to release team challenge holds."),
+      });
+    }
+
+    let cancellationNotificationResult: any = null;
+    let cancellationNotificationError: string | null = null;
+    try {
+      const room = await ctx.db.get(args.matchroomId);
+      if (room?.status === "cancelled") {
+        cancellationNotificationResult = await notifyMatchroomCancelledPlayers(
+          ctx,
+          room,
+          args.matchroomId,
+          args.reason,
+        );
+      }
+    } catch (error: any) {
+      cancellationNotificationError = String(error?.message || error || "Failed to notify cancelled matchroom players.");
+    }
+
+    return {
+      ok: errors.length === 0,
+      creatorRefund,
+      releaseResult,
+      capturedRefundResult,
+      teamChallengeResult,
+      cancellationNotificationResult,
+      cancellationNotificationError,
+      errors,
+    };
+  },
+});
+
+function summarizeWalletTransaction(transaction: any) {
+  if (!transaction) return null;
+  return {
+    id: String(transaction._id),
+    userId: String(transaction.userId || ""),
+    type: transaction.type,
+    amount: transaction.amount,
+    status: transaction.status,
+    reference: transaction.reference || null,
+    metadata: transaction.metadata || null,
+    createdAt: transaction.createdAt || null,
+  };
+}
+
+export const diagnoseMatchroomRefundState = internalQuery({
+  args: {
+    matchroomId: v.id("matchrooms"),
+  },
+  handler: async (ctx, args) => {
+    const context = await getMatchroomCreateRefundContext(ctx, args.matchroomId);
+    const intents = await ctx.db
+      .query("bookingIntents")
+      .withIndex("by_matchroomId", (q: any) => q.eq("matchroomId", args.matchroomId))
+      .collect();
+
+    return {
+      matchroom: context.room
+        ? {
+            id: String(context.room._id),
+            status: context.room.status,
+            cancelReason: context.room.cancelReason || null,
+            hostUid: context.room.hostUid,
+            paymentStatus: context.room.paymentStatus || null,
+            paymentAmount: context.room.paymentAmount || null,
+            refundStatus: context.room.refundStatus || null,
+            refundCompletedAt: context.room.refundCompletedAt || null,
+          }
+        : null,
+      hostUser: context.hostUser
+        ? {
+            id: String(context.hostUser._id),
+            username: context.hostUser.username || null,
+            email: context.hostUser.email || null,
+            walletBalance: context.hostUser.walletBalance || 0,
+            walletHeldBalance: context.hostUser.walletHeldBalance || 0,
+          }
+        : null,
+      createReference: context.createReference,
+      refundReference: context.refundReference,
+      originalCreatePayment: summarizeWalletTransaction(context.originalPayment),
+      exactCreateTransactions: context.exactCreateTransactions.map(summarizeWalletTransaction),
+      existingCreateRefunds: context.existingRefunds.map(summarizeWalletTransaction),
+      hostMatchroomTransactions: context.hostRecentTransactions
+        .filter((transaction: any) => String(transaction?.metadata?.matchroomId || "") === String(args.matchroomId))
+        .map(summarizeWalletTransaction),
+      bookingIntents: intents.map((intent: any) => ({
+        id: String(intent._id),
+        createdByUid: String(intent.createdByUid || ""),
+        status: intent.status || null,
+        paymentStatus: intent.paymentStatus || null,
+        heldStatus: intent.heldStatus || null,
+        heldAmount: intent.heldAmount || null,
+        heldReference: intent.heldReference || null,
+        pricingTotalCost: intent.pricing?.totalCost || null,
+        selectedSlotIds: intent.selectedSlotIds || [],
+      })),
+    };
+  },
+});
+
+export const repairMissingCreateRefundForMatchroom = internalMutation({
+  args: {
+    matchroomId: v.id("matchrooms"),
+    confirm: v.string(),
+    reason: v.optional(v.string()),
+    allowFallback: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<MatchroomCreateRefundResult & { ok: boolean }> => {
+    if (args.confirm !== "REFUND_MATCHROOM_CREATE_PAYMENT") {
+      throw new Error('Pass confirm: "REFUND_MATCHROOM_CREATE_PAYMENT" to repair this matchroom refund.');
+    }
+
+    const room = await ctx.db.get(args.matchroomId);
+    if (!room) {
+      return { ok: false, refunded: false, reason: "matchroom_not_found" };
+    }
+    if (room.status !== "cancelled") {
+      return { ok: false, refunded: false, reason: "matchroom_not_cancelled" };
+    }
+    if (String(room.paymentStatus || "") !== "paid") {
+      return { ok: false, refunded: false, reason: "matchroom_payment_not_paid" };
+    }
+
+    const result = await refundDirectMatchroomCreatePayment(
+      ctx,
+      args.matchroomId,
+      args.reason || String(room.cancelReason || "manual_repair_missing_create_refund"),
+      { allowFallback: args.allowFallback !== false },
+    );
+
+    if (result.refunded || result.alreadyApplied) {
+      await ctx.db.patch(args.matchroomId, {
+        refundStatus: "completed",
+        refundCompletedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+
+    return { ok: result.refunded || Boolean(result.alreadyApplied), ...result };
+  },
+});
+
+export const repairRecentMissingCreateRefundsForCancelledMatchrooms = internalMutation({
+  args: {
+    confirm: v.string(),
+    limit: v.optional(v.number()),
+    allowFallback: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    if (args.confirm !== "REFUND_RECENT_CANCELLED_MATCHROOM_CREATE_PAYMENTS") {
+      throw new Error(
+        'Pass confirm: "REFUND_RECENT_CANCELLED_MATCHROOM_CREATE_PAYMENTS" to repair recent cancelled matchroom refunds.',
+      );
+    }
+
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(args.limit || 25))));
+    const rooms = await ctx.db
+      .query("matchrooms")
+      .withIndex("by_status", (q: any) => q.eq("status", "cancelled"))
+      .order("desc")
+      .take(limit);
+
+    const results: Array<{
+      matchroomId: string;
+      hostUid: string;
+      result: MatchroomCreateRefundResult;
+    }> = [];
+
+    for (const room of rooms) {
+      if (String(room.paymentStatus || "") !== "paid") continue;
+      const amount = Number(room.paymentAmount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+
+      const result = await refundDirectMatchroomCreatePayment(
+        ctx,
+        room._id,
+        String(room.cancelReason || "manual_recent_cancelled_refund_repair"),
+        { allowFallback: args.allowFallback === true },
+      );
+
+      if (result.refunded || result.alreadyApplied) {
+        await ctx.db.patch(room._id, {
+          refundStatus: "completed",
+          refundCompletedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
+
+      results.push({
+        matchroomId: String(room._id),
+        hostUid: String(room.hostUid || ""),
+        result,
+      });
+    }
+
+    return {
+      ok: true,
+      scanned: rooms.length,
+      touched: results.length,
+      refunded: results.filter((entry) => entry.result.refunded).length,
+      alreadyApplied: results.filter((entry) => entry.result.alreadyApplied).length,
+      skipped: results.filter((entry) => !entry.result.refunded && !entry.result.alreadyApplied).length,
+      results,
+    };
   },
 });

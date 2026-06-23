@@ -119,6 +119,8 @@ function ReportIconButton({ onPress }: { onPress: () => void }) {
 export default function TeamDetails() {
     const params = useLocalSearchParams();
     const { id } = params;
+    const sourceParam = Array.isArray(params.source) ? params.source[0] : params.source;
+    const allowDeletedReadOnly = sourceParam === "notification";
     const router = useRouter();
     const { user, authUser } = useAuth();
     const { showToast } = useToast();
@@ -157,7 +159,7 @@ export default function TeamDetails() {
     // Team with members (real-time)
     const teamWithMembers = useQuery(
         api.teams.getWithMembers,
-        id ? { teamId: id as Id<"teams"> } : "skip"
+        id ? { teamId: id as Id<"teams">, includeDeleted: allowDeletedReadOnly } : "skip"
     );
 
     // Captain's teams (for challenge button)

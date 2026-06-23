@@ -224,6 +224,9 @@ function normalizeMatchroomRequestError(error: any) {
   if (/matchroom has expired/i.test(message)) {
     return "This matchroom has expired.";
   }
+  if (/selected slot|slot is no longer available|slot was not found|no available slot/i.test(message)) {
+    return "This seat is no longer available. Please choose another slot.";
+  }
   return message || "Failed to send request";
 }
 
@@ -504,6 +507,7 @@ export function buildMatchroomCreateMutationArgs(roomData: Matchroom) {
     requestedResourceSurface: roomData.requestedResourceSurface,
     requestedResourceTier: roomData.requestedResourceTier,
     selectedZoneRateKey: roomData.selectedZoneRateKey,
+    matchCode: roomData.matchCode ?? undefined,
     // P1: server-side price-validation inputs (recomputed authoritatively on the
     // backend; not all are persisted on the room).
     branchId: roomData.branchId ?? undefined,
@@ -591,6 +595,12 @@ export async function checkMatchroomCreateAvailability(input: {
   scheduledDate?: string;
   scheduledTime?: string;
   zoneId?: string | null;
+  branchId?: string | null;
+  durationMinutes?: number | null;
+  requestedResourceAssetType?: string | null;
+  requestedResourceSurface?: string | null;
+  requestedResourceTier?: string | null;
+  selectedZoneRateKey?: string | null;
 }): Promise<Result<{ available: boolean; message?: string | null; reason?: string | null }>> {
   try {
     const scheduledStartAt = parseScheduledStartAt(input.scheduledDate, input.scheduledTime);
@@ -615,6 +625,12 @@ export async function checkMatchroomCreateAvailability(input: {
       locationMode: input.locationMode,
       scheduledStartAt,
       zoneId: input.zoneId || undefined,
+      branchId: input.branchId || undefined,
+      durationMinutes: input.durationMinutes || undefined,
+      requestedResourceAssetType: input.requestedResourceAssetType || undefined,
+      requestedResourceSurface: input.requestedResourceSurface || undefined,
+      requestedResourceTier: input.requestedResourceTier || undefined,
+      selectedZoneRateKey: input.selectedZoneRateKey || undefined,
     });
 
     return {

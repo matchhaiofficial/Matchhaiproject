@@ -257,6 +257,28 @@ export function useInboxActions({
         return;
       }
 
+      const outcomeStatus = String(result.status || "").toLowerCase();
+      if (outcomeStatus === "invalid") {
+        showToast({
+          type: "warning",
+          title: "Select a time",
+          message: result.message || "Please choose a valid time option.",
+        });
+        return;
+      }
+      if (["expired", "unavailable", "cancelled"].includes(outcomeStatus) || result.alreadyClosed) {
+        await updateStatus(
+          item.id,
+          outcomeStatus === "rejected" ? "rejected" : outcomeStatus === "accepted" ? "accepted" : "expired",
+        );
+        showToast({
+          type: "warning",
+          title: "Offer unavailable",
+          message: result.message || "This time option is no longer available.",
+        });
+        return;
+      }
+
       await updateStatus(item.id, decision === "accepted" ? "accepted" : "rejected");
 
       if (decision === "accepted") {

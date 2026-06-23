@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1015520088969",
+    "project_id": "matchhai-official",
+    "storage_bucket": "matchhai-official.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1015520088969:android:f630733db3e24aeea60758",
+        "android_client_info": {
+          "package_name": "com.ovaisto.matchhai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBqJ7XS6MGHol84bkPaIXpBeFN1McB7MQw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

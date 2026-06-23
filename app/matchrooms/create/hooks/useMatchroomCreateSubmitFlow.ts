@@ -39,7 +39,6 @@ import {
 
 type TeamMode = "solo" | "team";
 type TeamPaymentMode = "captain_pays_all" | "captain_pays_self";
-type WalkInPaymentMode = "venue_pay" | "guest_pay";
 type WalkInSeriesType = "BO1" | "BO3" | "BO5";
 type EasypaisaPaymentPhase =
   | "idle"
@@ -133,7 +132,6 @@ type Params = {
   user: any;
   userProfile: UserProfile | null;
   walkInBranchId: string | null;
-  walkInPaymentMode: WalkInPaymentMode;
   walkInSeatCount: string;
   walkInSeatPlayers: any[];
   walkInTeamACaptainSeatNumber: number | null;
@@ -210,7 +208,6 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     user,
     userProfile,
     walkInBranchId,
-    walkInPaymentMode,
     walkInSeatCount,
     walkInSeatPlayers,
     walkInTeamACaptainSeatNumber,
@@ -243,6 +240,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
   const finalizedEasypaisaOrderRef = useRef<string | null>(null);
   const walletCreditedEasypaisaOrderRef = useRef<string | null>(null);
   const pendingPaidMatchroomCreateArgsRef = useRef<any | null>(null);
+  const pendingPaidZoneWalkInCreateArgsRef = useRef<any | null>(null);
   // P1 FIX 4: stable per-attempt idempotency key for the direct wallet/free create
   // path. Generated lazily for a create attempt and persisted across in-attempt
   // retries (double-tap, network-timeout replay) so the backend returns the same
@@ -426,6 +424,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
         transactionType: "MA",
         forceNew,
         matchroomCreateArgs: pendingPaidMatchroomCreateArgsRef.current || undefined,
+        zoneWalkInCreateArgs: pendingPaidZoneWalkInCreateArgsRef.current || undefined,
       });
 
       const orderRefNum = String(checkout.orderRefNum || "");
@@ -567,6 +566,36 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           });
           return false;
         }
+        const availability = await withTimeout(
+          checkMatchroomCreateAvailability({
+            game: selectedGame || "unknown",
+            locationMode: "zone",
+            scheduledDate: formData.date,
+            scheduledTime: formData.time,
+            zoneId: adminZone.id,
+            branchId: branch?.id || selectedBranchId || null,
+            durationMinutes: duration,
+            requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || null,
+            requestedResourceSurface: selectedZoneRateResourceContext?.surface || null,
+            requestedResourceTier: selectedZoneRateResourceContext?.tier || null,
+            selectedZoneRateKey,
+          }),
+          "Checking venue availability",
+          10000,
+        );
+        const availabilityMessage = availability.ok
+          ? availability.data?.message
+          : availability.message;
+        if (!availability.ok || availability.data?.available === false) {
+          showToast({
+            message:
+              availabilityMessage ||
+              "This time slot is no longer available. Please choose a different time.",
+            title: availability.ok ? "Time unavailable" : "Could not verify slot",
+            type: "error",
+          });
+          return false;
+        }
         const walkInPayload = buildZoneWalkInPayload({
           adminName: user.fullName || adminZone.ownerFullName || "Zone Admin",
           adminUid: user._id,
@@ -575,10 +604,11 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           gameKey: selectedGame || "unknown",
           pricePerPlayer,
           seatCountInput: walkInSeatCount,
+          selectedZoneRateKey,
+          selectedZoneRateResourceContext,
           seriesType: walkInSeries,
           userId: user._id,
           userName: user.fullName || "Zone Admin",
-          walkInPaymentMode,
           walkInSeatPlayers,
           walkInSeed: Date.now(),
           walkInTeamACaptainSeatNumber,
@@ -586,8 +616,50 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           zoneId: adminZone.id,
           zoneOwnerUid: adminZone.ownerUid || user._id,
         });
+        const amountDue = Math.max(
+          0,
+          Math.ceil(
+            pricePerPlayer * Math.max(0, Number(walkInPayload.bookedSeatCount || 0)),
+          ),
+        );
+        const paidWalkInPayload = {
+          ...walkInPayload,
+          clientCreateRequestId: getOrCreateClientCreateRequestId(),
+          paymentAmount: amountDue,
+          paymentMethod: amountDue > 0 ? "wallet" : "free",
+          paymentMode: "matchhai_pay",
+          paymentReservedSlots: walkInPayload.bookedSeatCount,
+          paymentStatus: "paid",
+        };
 
-        const result = await createZoneWalkInMatchroom(walkInPayload as any);
+        if (amountDue > 0 && !skipPaymentPrompt) {
+          const paymentChoice = await promptPaymentChoice(amountDue);
+          if (paymentChoice === "cancel") {
+            notify({
+              message: "Your walk-in matchroom was not created.",
+              title: "Payment cancelled",
+              type: "warning",
+            });
+            return false;
+          }
+
+          if (paymentChoice === "easypaisa") {
+            setEasypaisaPaymentAmount(amountDue);
+            pendingPaidMatchroomCreateArgsRef.current = null;
+            pendingPaidZoneWalkInCreateArgsRef.current = {
+              ...paidWalkInPayload,
+              paymentMethod: "easypaisa",
+            };
+            setActiveEasypaisaOrderRef(null);
+            setEasypaisaPaymentPhase("idle");
+            resumedEasypaisaOrderRef.current = null;
+            walletCreditedEasypaisaOrderRef.current = null;
+            setShowEasypaisaPhonePrompt(true);
+            return true;
+          }
+        }
+
+        const result = await createZoneWalkInMatchroom(paidWalkInPayload as any);
         if (!result.ok) {
           showToast({
             message: result.message || "Failed to create walk-in matchroom.",
@@ -611,6 +683,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
               } as any),
           },
         ]);
+        createRequestIdRef.current = null;
         return true;
       } catch (error) {
         Logger.error("CreateMatchroom", "Error creating admin walk-in", error);
@@ -722,6 +795,12 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
             scheduledDate: formData.date,
             scheduledTime: formData.time,
             zoneId: selectedZoneId,
+            branchId: selectedBranchId,
+            durationMinutes: duration,
+            requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || null,
+            requestedResourceSurface: selectedZoneRateResourceContext?.surface || null,
+            requestedResourceTier: selectedZoneRateResourceContext?.tier || null,
+            selectedZoneRateKey,
           }),
           "Checking venue availability",
           10000,
@@ -821,6 +900,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
           setEasypaisaPaymentAmount(amountDue);
           pendingPaidMatchroomCreateArgsRef.current =
             buildMatchroomCreateMutationArgs(matchroomData as any);
+          pendingPaidZoneWalkInCreateArgsRef.current = null;
           setActiveEasypaisaOrderRef(null);
           setEasypaisaPaymentPhase("idle");
           resumedEasypaisaOrderRef.current = null;
@@ -932,7 +1012,6 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
     user,
     userProfile,
     walkInBranchId,
-    walkInPaymentMode,
     walkInSeatCount,
     walkInSeatPlayers,
     walkInTeamACaptainSeatNumber,
@@ -997,6 +1076,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setShowEasypaisaPhonePrompt(true);
       resumedEasypaisaOrderRef.current = null;
       pendingPaidMatchroomCreateArgsRef.current = null;
+      pendingPaidZoneWalkInCreateArgsRef.current = null;
       return;
     }
 
@@ -1014,6 +1094,7 @@ export function useMatchroomCreateSubmitFlow(params: Params) {
       setFinalizedEasypaisaMatchroomId(null);
       resumedEasypaisaOrderRef.current = null;
       pendingPaidMatchroomCreateArgsRef.current = null;
+      pendingPaidZoneWalkInCreateArgsRef.current = null;
       createRequestIdRef.current = null;
       notify({
         message: "Your Easypaisa payment was added to your MatchHai wallet. You can send the booking request again and pay with wallet.",

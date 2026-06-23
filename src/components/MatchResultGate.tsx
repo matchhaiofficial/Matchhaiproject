@@ -1,6 +1,6 @@
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import React, { useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, AppState, StyleSheet, Text, View } from "react-native";
 
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -9,6 +9,8 @@ import { useToast } from "../hooks/useToast";
 import { COLORS, FONTS, RADII, SPACING, TEXT_SIZES } from "../theme";
 import { isSuperAdminProfile, isZoneAccount } from "../utils/accountRouting";
 import { isAuthenticatedProfileReady } from "../utils/authReadiness";
+import { getCanonicalGameLabel } from "../utils/gameLabels";
+import { parseScheduledDateTime } from "../utils/matchroomTime";
 import { getUserFacingErrorMessage } from "../utils/userFacingErrors";
 import { AppButton } from "./AppPrimitives";
 import { AppBottomSheet, AppModalBody, AppModalFooter, AppModalHeader } from "./AppModalPrimitives";
@@ -23,12 +25,40 @@ function getTeamNames(room: any) {
   };
 }
 
+function getScheduledDate(room: any) {
+  const fromFields = parseScheduledDateTime(room?.scheduledDate, room?.scheduledTime);
+  if (fromFields) return fromFields;
+
+  const startAt = Number(room?.scheduledStartAt || 0);
+  if (!Number.isFinite(startAt) || startAt <= 0) return null;
+  const fromStartAt = new Date(startAt);
+  return Number.isNaN(fromStartAt.getTime()) ? null : fromStartAt;
+}
+
+function formatResultSchedule(room: any) {
+  const scheduledDate = getScheduledDate(room);
+  if (!scheduledDate) return "Date TBD";
+
+  const dateLabel = scheduledDate.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  const timeLabel = scheduledDate.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${dateLabel} • ${timeLabel}`;
+}
+
 export default function MatchResultGate() {
   const { user, authUser, loading } = useAuth();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const { showToast } = useToast();
   const [selectedWinner, setSelectedWinner] = useState<Winner | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const lastLifecycleSyncAtRef = useRef(0);
   const authenticatedProfileReady = isAuthenticatedProfileReady({
     authLoading: loading,
     convexAuthLoading,
@@ -43,13 +73,37 @@ export default function MatchResultGate() {
     api.matchrooms.getPendingResultForUser,
     userId ? { userId } : "skip",
   ) as any;
+  const syncPendingResultLifecycle = useMutation(
+    (api as any).matchrooms.syncPendingResultLifecycleForCurrentUser,
+  );
   const submitCaptainReport = useMutation(api.matchrooms.submitCaptainReport);
   const submitParticipantVote = useMutation(api.matchrooms.submitParticipantVote);
 
   const room = pending?.room;
   const phase = pending?.phase as "captain" | "participant" | undefined;
   const teamNames = useMemo(() => getTeamNames(room), [room]);
+  const gameLabel = useMemo(() => getCanonicalGameLabel(room?.game), [room?.game]);
+  const scheduleLabel = useMemo(() => formatResultSchedule(room), [room]);
   const visible = Boolean(room && phase);
+
+  const syncResultLifecycle = useCallback(() => {
+    if (!userId) return;
+    const now = Date.now();
+    if (now - lastLifecycleSyncAtRef.current < 30_000) return;
+    lastLifecycleSyncAtRef.current = now;
+    void syncPendingResultLifecycle({}).catch(() => {
+      lastLifecycleSyncAtRef.current = 0;
+    });
+  }, [syncPendingResultLifecycle, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    syncResultLifecycle();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncResultLifecycle();
+    });
+    return () => subscription.remove();
+  }, [syncResultLifecycle, userId]);
 
   const handleSubmit = async () => {
     if (!selectedWinner || !room?._id || !userId || !phase) return;
@@ -113,6 +167,16 @@ export default function MatchResultGate() {
     <AppBottomSheet visible onClose={() => {}} dismissDisabled>
       <AppModalHeader title={title} subtitle={room?.title} />
       <AppModalBody scroll contentContainerStyle={styles.body}>
+        <View style={styles.matchInfoCard}>
+          <View style={styles.matchInfoIcon}>
+            <AppIcon name="sports-esports" size={20} color={COLORS.accent} />
+          </View>
+          <View style={styles.matchInfoTextWrap}>
+            <Text style={styles.matchInfoLabel}>{gameLabel}</Text>
+            <Text style={styles.matchInfoMeta}>{scheduleLabel}</Text>
+          </View>
+        </View>
+
         <View style={styles.notice}>
           <AppIcon name="verified" size={22} color={COLORS.warning} />
           <Text style={styles.noticeText}>{subtitle}</Text>
@@ -173,6 +237,38 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.body,
     fontSize: TEXT_SIZES.body,
     lineHeight: 22,
+  },
+  matchInfoCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardBackground,
+  },
+  matchInfoIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.accent + "18",
+  },
+  matchInfoTextWrap: {
+    flex: 1,
+  },
+  matchInfoLabel: {
+    color: COLORS.text,
+    fontFamily: FONTS.heading,
+    fontSize: TEXT_SIZES.body,
+  },
+  matchInfoMeta: {
+    marginTop: 2,
+    color: COLORS.textSecondary,
+    fontFamily: FONTS.body,
+    fontSize: TEXT_SIZES.caption,
   },
   label: {
     color: COLORS.textSecondary,

@@ -1,5 +1,4 @@
 import { useRouter } from "expo-router";
-import { useConvexAuth, useQuery } from "convex/react";
 import React, { useMemo } from "react";
 import {
     ActivityIndicator,
@@ -10,44 +9,27 @@ import {
 } from "react-native";
 
 import AppHeader from "../../../src/components/AppHeader";
-import { api } from "../../../convex/_generated/api";
 import { AppIcon } from "../../../src/components/AppIcon";
 import { AppButton } from "../../../src/components/AppPrimitives";
-import { useAuth } from "../../../src/context/AuthContext";
 import Screen from "../../../src/components/Screen";
 import { useTabBarClearance } from "../../../src/hooks/useTabBarClearance";
 import { useToast } from "../../../src/hooks/useToast";
 import { useZoneData } from "../../../src/hooks/useZoneData";
 import { useStartDiditKyc } from "../../../src/hooks/useDiditKyc";
+import { useEffectiveKycStatus } from "../../../src/hooks/useEffectiveKycStatus";
 import { COLORS, SPACING } from "../../../src/theme";
-import { isUserFullyVerified } from "../../../src/utils/verificationGate";
 import { getZoneMigrationLabel, isZoneMigrationReady } from "../../../src/utils/zoneLifecycle";
-import { isAuthenticatedProfileReady } from "../../../src/utils/authReadiness";
 import styles from "./branches.styles";
 
 const ZONE_KYC_VERIFICATION_MESSAGE = "Please complete CNIC & face verification to unlock MatchHai features.";
 
 export default function ZoneBranches() {
     const { zone, loading } = useZoneData();
-    const { authUser, user, loading: authLoading } = useAuth();
-    const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
     const { showToast } = useToast();
     const startDiditKyc = useStartDiditKyc();
     const router = useRouter();
     const bottomContentPadding = useTabBarClearance(SPACING.lg);
-    const kycVerified = isUserFullyVerified(authUser, user);
-    const protectedQueryReady = isAuthenticatedProfileReady({
-        authLoading,
-        convexAuthLoading,
-        isAuthenticated,
-        authUserId: authUser?.id,
-        profileAuthId: user?.authId,
-        profileUserId: user?._id,
-    });
-    const currentKyc = useQuery(
-        api.kyc.getCurrentUserKyc,
-        protectedQueryReady ? {} : "skip",
-    );
+    const { currentKyc, accessAllowed: kycVerified } = useEffectiveKycStatus();
     const kycStartActionLabel =
         currentKyc?.status === "rejected"
             ? "Retry Verification"
@@ -85,7 +67,7 @@ export default function ZoneBranches() {
 
     const handleLockedAction = () => {
         showToast({
-            type: "info",
+            type: "error",
             title: "Verify your identity",
             message: ZONE_KYC_VERIFICATION_MESSAGE,
         });

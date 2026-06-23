@@ -249,6 +249,7 @@ export default function MatchroomDetails() {
     displaySlotsB,
     occupiedSeatCount,
     isFull,
+    isWalkInRoom,
     matchCode,
     qrValue,
   } = useMatchroomDetailViewModel({
@@ -271,7 +272,10 @@ export default function MatchroomDetails() {
     isExpired;
   const canViewCheckIn =
     !isTerminalStatus &&
-    (Boolean((room as any)?.canViewCheckIn) || isHost || isJoined);
+    (Boolean((room as any)?.canViewCheckIn) ||
+      isHost ||
+      isJoined ||
+      (isZoneAdmin && isWalkInRoom));
 
   const {
     handleRespondToRequest: handleRespondToRequestAction,
@@ -289,6 +293,7 @@ export default function MatchroomDetails() {
     handleAdminForceCancel: handleAdminForceCancelAction,
     handleInvitePress: handleInvitePressAction,
     handleSendInvite: handleSendInviteAction,
+    handleBookWalkInSeat: handleBookWalkInSeatAction,
     handleManagePlayer: handleManagePlayerAction,
   } = useMatchroomDetailActions({
     id: String(id || ""),
@@ -639,6 +644,7 @@ export default function MatchroomDetails() {
                     canJoin={canJoin}
                     isJoined={isJoined}
                     isZoneAdmin={isZoneAdmin}
+                    isWalkInRoom={isWalkInRoom}
                     requestedSlots={requestedSlots}
                     joining={joining}
                     footerHitSlop={footerHitSlop}
@@ -648,6 +654,7 @@ export default function MatchroomDetails() {
                     getSkillBadgeProps={getSkillBadgeProps}
                     onManagePlayer={handleManagePlayerAction}
                     onInvitePress={handleInvitePressAction}
+                    onBookWalkInSeat={handleBookWalkInSeatAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
                     onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
@@ -671,6 +678,7 @@ export default function MatchroomDetails() {
                     canJoin={canJoin}
                     isJoined={isJoined}
                     isZoneAdmin={isZoneAdmin}
+                    isWalkInRoom={isWalkInRoom}
                     requestedSlots={requestedSlots}
                     joining={joining}
                     footerHitSlop={footerHitSlop}
@@ -680,6 +688,7 @@ export default function MatchroomDetails() {
                     getSkillBadgeProps={getSkillBadgeProps}
                     onManagePlayer={handleManagePlayerAction}
                     onInvitePress={handleInvitePressAction}
+                    onBookWalkInSeat={handleBookWalkInSeatAction}
                     onRequestJoin={handleRequestJoinAction}
                     onCancelRequest={handleCancelRequestAction}
                     onReportPlayer={isZoneAdmin ? openPlayerReport : undefined}
@@ -891,7 +900,7 @@ export default function MatchroomDetails() {
                                 <ActivityIndicator color="#fff" />
                               ) : (
                                 <Text style={styles.getRequestButtonText}>
-                                  Request to Join
+                                  {isWalkInRoom ? "Join Walk-in" : "Request to Join"}
                                 </Text>
                               )}
                             </Pressable>
@@ -1049,7 +1058,9 @@ export default function MatchroomDetails() {
                 {joining ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.getRequestButtonText}>Request to Join</Text>
+                  <Text style={styles.getRequestButtonText}>
+                    {isWalkInRoom ? "Join Walk-in" : "Request to Join"}
+                  </Text>
                 )}
               </Pressable>
             ) : hasPendingPayment ? (

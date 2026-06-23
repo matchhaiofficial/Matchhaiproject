@@ -4,6 +4,11 @@ import { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { PAYMENT_INTENT_TTL_MS } from "./timing";
 import { requireCurrentUser, requireOwnedZone } from "./authz";
+import {
+  assertNoParticipantTimeConflict,
+  assertZoneResourceCapacityAvailable,
+  getBookingRequestStartAtForConflict,
+} from "./bookingConflicts";
 
 const BOOKING_INTENT_TTL_MS = PAYMENT_INTENT_TTL_MS;
 
@@ -539,6 +544,8 @@ export const createRequest = mutation({
     const now = Date.now();
     const normalizedGameKey = normalizeBookingGameKey(args.gameKey);
     const user = await getAuthenticatedBookingUser(ctx, args.userId);
+    const scheduledStartAt = getBookingRequestStartAtForConflict(args);
+    const durationMinutes = Math.max(1, Math.round(Number(args.durationHours || 1) * 60));
 
     if (args.matchroomId) {
       const existingByUser = await ctx.db
@@ -551,6 +558,28 @@ export const createRequest = mutation({
       if (existing) {
         return existing._id;
       }
+    }
+
+    await assertNoParticipantTimeConflict(ctx, {
+      userIds: [String(user._id)],
+      scheduledStartAt,
+      durationMinutes,
+      excludeMatchroomId: args.matchroomId ? String(args.matchroomId) : null,
+      message: "You already have a matchroom or booking request scheduled at this time.",
+    });
+
+    if (args.zoneId) {
+      await assertZoneResourceCapacityAvailable(ctx, {
+        zoneId: String(args.zoneId),
+        gameKey: normalizedGameKey,
+        requestedResourceAssetType: args.requestedResourceAssetType,
+        requestedResourceSurface: args.requestedResourceSurface,
+        requestedResourceTier: args.requestedResourceTier,
+        selectedZoneRateKey: args.selectedZoneRateKey,
+        scheduledStartAt,
+        durationMinutes,
+        excludeMatchroomId: args.matchroomId ? String(args.matchroomId) : null,
+      });
     }
 
     const requestId = await ctx.db.insert("bookingRequests", {

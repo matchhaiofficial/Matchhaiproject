@@ -142,13 +142,28 @@ export function useZoneBookingsActions({
     });
   };
 
-  const handleCounterOffer = async () => {
+  const handleCounterOffer = async (input?: {
+    branchId?: string | null;
+    branchName?: string | null;
+    location?: string | null;
+    resourceIds?: string[];
+  }) => {
     if (!zone?.id || !user?._id || !selectedRequest) return;
+    if (!input?.branchId || !input.resourceIds?.length) {
+      showToast({
+        type: "warning",
+        title: "Allocation required",
+        message: "Select a branch and resources before sending an alternative time.",
+      });
+      return { ok: false as const, message: "Missing required allocation details." };
+    }
 
     logFlowEvent("ZoneBookings", "Sending counter offer", {
       requestId: selectedRequest.id,
       zoneId: zone.id,
       adminUid: user._id,
+      branchId: input.branchId,
+      resourceCount: input.resourceIds.length,
     });
 
     // Build each option from a real local-time instant so a time that crosses
@@ -204,12 +219,13 @@ export function useZoneBookingsActions({
         zoneName: zone.venueBrandName || "Zone",
         zoneOwnerUid: user._id,
         adminUid: user._id,
-        branchId: primaryBranch?.id || undefined,
-        branchName: primaryBranch?.branchDisplayName || null,
+        branchId: input.branchId,
+        branchName: input.branchName || primaryBranch?.branchDisplayName || null,
+        resourceIds: input.resourceIds,
         scheduleOptions: normalizedOptions,
         pricePerPlayer: selectedRequest.budgetPerPlayer || 0,
         currency: selectedRequest.currency || "PKR",
-        location: zone.primaryBranch?.areaLabel || "",
+        location: input.location || zone.primaryBranch?.areaLabel || "",
         expiresInMinutes: 120,
         originalStartAt,
         proposedStartAts,

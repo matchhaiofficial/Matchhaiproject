@@ -406,6 +406,7 @@ export default function PlayerDashboard() {
   const recommendedRooms = ((dashboardSummary?.recommendedRooms || []) as Matchroom[])
     .filter((room) => !isPhysicalGameDisabled(room.game));
   const myTeams = ((dashboardSummary?.myTeams || []) as Team[])
+    .filter((team) => team.status !== "deleted" && !team.deletedAt)
     .filter((team) => !isPhysicalGameDisabled(team.game));
   const nearbyZones = ((dashboardSummary?.nearbyZones || []) as Zone[])
     .filter((zone) => zone.type !== "sports" && getZoneGameLabels(zone).length > 0);

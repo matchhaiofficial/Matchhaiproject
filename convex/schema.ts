@@ -992,6 +992,7 @@ export default defineSchema({
     zoneOwnerUid: v.optional(v.string()),
     branchId: v.optional(v.string()),
     branchName: v.optional(v.string()),
+    resourceIds: v.optional(v.array(v.id("zoneResources"))),
     requestOwnerUid: v.optional(v.string()),
     message: v.optional(v.string()),
     responseExpiresAt: v.optional(v.number()),

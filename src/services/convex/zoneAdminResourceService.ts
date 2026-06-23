@@ -235,6 +235,26 @@ export async function updateBranchResourceStatus(input: {
     }
 }
 
+export async function releaseStaleHeldBranchResources(input: {
+    zoneId: string;
+    branchId: string;
+    currentRequestId?: string | null;
+}) {
+    try {
+        const result = await convex.mutation((api as any).zoneAdminResources.releaseStaleHeldResourcesForBranch, {
+            zoneId: input.zoneId as Id<"zones">,
+            branchId: input.branchId,
+            currentRequestId: input.currentRequestId
+                ? input.currentRequestId as Id<"bookingRequests">
+                : undefined,
+        });
+        return { ok: true as const, released: Number(result?.released || 0) };
+    } catch (error: any) {
+        Logger.warn("zoneAdminResources", "Failed to release stale held resources", error);
+        return { ok: false as const, message: error?.message || "Failed to refresh resources." };
+    }
+}
+
 export async function syncBranchResourcesFromPricing(input: {
     zoneId: string;
     branchId: string;

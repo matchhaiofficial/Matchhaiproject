@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -26,6 +26,7 @@ import {
     type ZoneMatchroomListItem,
 } from "../../../src/services/convex/zoneAdminBookingService";
 import {
+    releaseStaleHeldBranchResources,
     subscribeBranchResources,
     subscribeZoneBranches,
     type ZoneBranch,
@@ -123,6 +124,7 @@ const BOOKING_SOURCE_OPTIONS: FilterOption[] = [
     { key: "admin", label: "Admin" },
 ];
 const ZONE_PAGE_SIZE = 20;
+const ROUTABLE_SEGMENTS = new Set<Segment>(["requests", "pending", "matchrooms", "walkins", "history"]);
 
 const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
 const CONSOLE_GAMES = new Set(["fc25", "fc26", "tekken8"]);
@@ -221,7 +223,7 @@ const resourceMatchesAllocationProfile = (
     if (!resource.isActive) return false;
     if (resource.lifecycleStatus === "held") {
         const linkedRequestId = String(resource.holdRequestId || resource.bookingRequestId || "");
-        if (linkedRequestId && linkedRequestId !== String(request?.id || "")) {
+        if (!linkedRequestId || linkedRequestId !== String(request?.id || "")) {
             return false;
         }
     }
@@ -484,6 +486,7 @@ export default function ZoneBookingsModule() {
         segment?: Segment | Segment[];
         requestId?: string | string[];
         matchroomId?: string | string[];
+        t?: string | string[];
     }>();
     const { user } = useAuth();
     const { zone } = useZoneData();
@@ -554,13 +557,17 @@ export default function ZoneBookingsModule() {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [editingOptionIndex, setEditingOptionIndex] = useState<number | null>(null);
-    const [editingTimeField, setEditingTimeField] = useState<"start" | "end">("start");
+    const [activeTimePicker, setActiveTimePicker] = useState<{
+        optionIndex: number;
+        field: "start" | "end";
+    } | null>(null);
     const [dateDraft, setDateDraft] = useState<Date | null>(new Date());
     const [monthCursor, setMonthCursor] = useState(new Date());
     const [timeDraft, setTimeDraft] = useState(parseTimeToDraft(createDefaultScheduleOption().time));
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
     const matchroomsRequestVersionRef = useRef(0);
     const walkInsRequestVersionRef = useRef(0);
+    const loadWalkInsPageRef = useRef<((options?: { append?: boolean }) => Promise<void>) | null>(null);
 
     const zoneOffers = useQuery(
         api.bookings.listOffersByZone,
@@ -775,9 +782,14 @@ export default function ZoneBookingsModule() {
         zone?.id,
     ]);
 
+    useEffect(() => {
+        loadWalkInsPageRef.current = loadWalkInsPage;
+    }, [loadWalkInsPage]);
+
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
     const deepMatchroomId = Array.isArray(params.matchroomId) ? params.matchroomId[0] : params.matchroomId;
+    const deepRefreshToken = Array.isArray(params.t) ? params.t[0] : params.t;
 
     const {
         branchAreas,
@@ -1018,26 +1030,26 @@ export default function ZoneBookingsModule() {
         setCounterOptions((prev) =>
             prev.map((option, optionIndex) => {
                 if (optionIndex !== index) return option;
-                if (patch.time) {
+                if (Object.prototype.hasOwnProperty.call(patch, "time")) {
                     const startRaw = toClockMinutes(patch.time);
                     const start = startRaw === null
                         ? null
                         : Math.max(allowedStartMin, Math.min(allowedStartMax, startRaw));
                     return {
                         ...option,
-                        ...patch,
-                        time: start === null ? patch.time : fromClockMinutes(start),
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
+                        time: start === null ? patch.time || "" : fromClockMinutes(start),
                         endTime: start === null ? option.endTime : fromClockMinutes(start + originalDurationMinutes),
                     };
                 }
-                if (patch.endTime) {
+                if (Object.prototype.hasOwnProperty.call(patch, "endTime")) {
                     const endRaw = toClockMinutes(patch.endTime);
                     const end = endRaw === null
                         ? null
                         : Math.max(allowedEndMin, Math.min(allowedEndMax, endRaw));
                     return {
                         ...option,
-                        ...patch,
+                        ...(patch.date !== undefined ? { date: patch.date } : {}),
                         endTime: end === null ? patch.endTime : fromClockMinutes(end),
                     };
                 }
@@ -1094,15 +1106,25 @@ export default function ZoneBookingsModule() {
     ]);
 
     useEffect(() => {
-        if (!zone?.id) return;
+        if (!zone?.id || segment !== "walkins") return;
         setWalkInsCursor(null);
         setWalkInsDone(false);
-        void loadWalkInsPage({ append: false });
-    }, [zone?.id, segment === "walkins"]);
+        void loadWalkInsPageRef.current?.({ append: false });
+    }, [deepRefreshToken, segment, zone?.id]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!zone?.id || segment !== "walkins") return undefined;
+            setWalkInsCursor(null);
+            setWalkInsDone(false);
+            void loadWalkInsPageRef.current?.({ append: false });
+            return undefined;
+        }, [segment, zone?.id]),
+    );
 
     useEffect(() => {
-        if (deepSegment === "matchrooms" || deepSegment === "requests" || deepSegment === "history") {
-            setSegment(deepSegment);
+        if (deepSegment && ROUTABLE_SEGMENTS.has(deepSegment as Segment)) {
+            setSegment(deepSegment as Segment);
         }
         if (deepRequestId) {
             setSelectedRequestId(deepRequestId);
@@ -1177,9 +1199,10 @@ export default function ZoneBookingsModule() {
         rejectAlternative,
         createDefaultScheduleOption,
     });
+    const allocationConsumerVisible = showAllocationSheet || showCounterModal;
 
     useEffect(() => {
-        if (!showAllocationSheet || !zone?.id) {
+        if (!allocationConsumerVisible || !zone?.id) {
             setAllocationBranches([]);
             setAllocationResources([]);
             setAllocationSelectedResourceIds([]);
@@ -1206,38 +1229,51 @@ export default function ZoneBookingsModule() {
         );
 
         return () => unsub();
-    }, [primaryBranch, selectedRequest, showAllocationSheet, zone?.id]);
+    }, [allocationConsumerVisible, primaryBranch, selectedRequest, zone?.id]);
 
     useEffect(() => {
-        if (!showAllocationSheet || !zone?.id || !allocationBranchId) {
+        if (!allocationConsumerVisible || !zone?.id || !allocationBranchId) {
             setAllocationResources([]);
             setLoadingAllocationResources(false);
             return;
         }
 
+        let disposed = false;
+        let unsubscribe: (() => void) | null = null;
         setLoadingAllocationResources(true);
-        const unsub = subscribeBranchResources(
-            zone.id,
-            allocationBranchId,
-            (rows) => {
-                setAllocationResources(
-                    rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
-                );
-                setLoadingAllocationResources(false);
-            },
-            () => {
-                setLoadingAllocationResources(false);
-                setErrorText("Failed to load branch resources.");
-            },
-        );
+        void (async () => {
+            await releaseStaleHeldBranchResources({
+                zoneId: zone.id,
+                branchId: allocationBranchId,
+                currentRequestId: selectedRequest?.id || null,
+            });
+            if (disposed) return;
+            unsubscribe = subscribeBranchResources(
+                zone.id,
+                allocationBranchId,
+                (rows) => {
+                    setAllocationResources(
+                        rows.filter((resource) => ["available", "held"].includes(resource.lifecycleStatus)),
+                    );
+                    setLoadingAllocationResources(false);
+                },
+                () => {
+                    setLoadingAllocationResources(false);
+                    setErrorText("Failed to load branch resources.");
+                },
+            );
+        })();
 
-        return () => unsub();
-    }, [allocationBranchId, showAllocationSheet, zone?.id]);
+        return () => {
+            disposed = true;
+            unsubscribe?.();
+        };
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id, zone?.id]);
 
     useEffect(() => {
-        if (!showAllocationSheet) return;
+        if (!allocationConsumerVisible) return;
         setAllocationSelectedResourceIds([]);
-    }, [allocationBranchId, selectedRequest?.id, showAllocationSheet]);
+    }, [allocationBranchId, allocationConsumerVisible, selectedRequest?.id]);
 
     const allocationResourceOptions = useMemo(
         () => buildAllocationResourceOptions(selectedRequest, allocationResources),
@@ -1348,6 +1384,10 @@ export default function ZoneBookingsModule() {
                 time: start,
                 endTime: fromClockMinutes(explicitEndMinutes ?? startMinutes + durationMinutes),
             }]);
+            setAllocationSelectedResourceIds([]);
+            setAllocationBranchId(
+                getRequestFixedBranch(request, allocationBranches, primaryBranch)?.id || primaryBranch?.id || null,
+            );
         } else {
             setCounterOptions([createDefaultScheduleOption()]);
         }
@@ -1383,6 +1423,27 @@ export default function ZoneBookingsModule() {
             if (result.matchroomId) {
                 router.push(`/matchrooms/${result.matchroomId}` as any);
             }
+        }
+    };
+
+    const handleCounterOfferSubmit = async () => {
+        if (!selectedRequest || !allocationBranchId) return;
+        const branch = allocationFixedBranch || allocationBranches.find((item) => item.id === allocationBranchId) || primaryBranch;
+        const result = await handleCounterOffer({
+            branchId: allocationBranchId,
+            branchName: branch?.branchDisplayName || null,
+            location: branch?.areaLabel || zone?.primaryBranch?.areaLabel || zone?.venueBrandName || null,
+            resourceIds: allocationSelectedResourceIds,
+        });
+        if (result && !result.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            return;
+        }
+        if (result?.ok) {
+            setAllocationSelectedResourceIds([]);
+            void loadQueuePage({ append: false });
+            void loadMatchroomsPage({ append: false });
         }
     };
 
@@ -1547,7 +1608,7 @@ export default function ZoneBookingsModule() {
                 setCounterOptions={setCounterOptions}
                 createDefaultScheduleOption={createDefaultScheduleOption}
                 removeCounterOption={removeCounterOption}
-                handleCounterOffer={handleCounterOffer}
+                handleCounterOffer={handleCounterOfferSubmit}
                 showDatePicker={showDatePicker}
                 setShowDatePicker={setShowDatePicker}
                 showTimePicker={showTimePicker}
@@ -1566,9 +1627,21 @@ export default function ZoneBookingsModule() {
                 daysInMonth={daysInMonth}
                 monthYearLabel={monthYearLabel}
                 parseTimeToDraft={parseTimeToDraft}
-                editingTimeField={editingTimeField}
-                setEditingTimeField={setEditingTimeField}
+                activeTimePicker={activeTimePicker}
+                setActiveTimePicker={setActiveTimePicker}
                 validationMessage={counterValidationMessage}
+                request={selectedRequest}
+                branches={allocationBranchesForSheet}
+                selectedBranchId={allocationBranchId}
+                loadingResources={loadingAllocationBranches || loadingAllocationResources}
+                resources={allocationResourceOptions}
+                selectedResourceIds={allocationSelectedResourceIds}
+                onToggleResource={toggleAllocationResourceOption}
+                selectedCount={allocationSelectedUnitCount}
+                requiredCount={getRequiredResourceCount(selectedRequest)}
+                allocationSummary={allocationSelectionSummary}
+                allocationValidationMessage={allocationValidationMessage}
+                allocationCanSubmit={allocationCanSubmit}
             />
             <ZoneBookingsAllocationSheet
                 visible={showAllocationSheet}

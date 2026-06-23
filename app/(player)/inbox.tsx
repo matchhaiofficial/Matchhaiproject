@@ -218,7 +218,10 @@ export default function Inbox() {
 
   const openTeam = useCallback((teamId?: string) => {
     if (!teamId) return;
-    router.push(`/teams/${teamId}` as any);
+    router.push({
+      pathname: `/teams/${teamId}` as any,
+      params: { source: "notification" },
+    });
   }, [router]);
 
   const openMatchroom = useCallback((matchroomId?: string) => {

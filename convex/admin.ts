@@ -33,6 +33,13 @@ function normalizeEmail(email: string) {
   return String(email || "").trim().toLowerCase();
 }
 
+async function scheduleZoneLiveNearbyNotifications(ctx: any, zoneId: Id<"zones">) {
+  await ctx.scheduler.runAfter(0, internal.zones.notifyZoneLiveNearbyPlayersBatch, {
+    zoneId,
+    cursor: null,
+  });
+}
+
 function normalizeUsername(username: string) {
   return String(username || "").trim().toLowerCase();
 }
@@ -164,20 +171,84 @@ async function notifySupportTicketStatusChanged(ctx: any, ticket: any, status: "
 
 function serializeAdminNotification(notification: any) {
   if (!notification) return null;
+  const route = normalizeSuperAdminNotificationRoute(notification);
+  const body = normalizeSuperAdminNotificationBody(notification);
   return {
     id: String(notification._id),
     _id: String(notification._id),
     type: notification.type,
     status: notification.status,
     title: notification.title || "",
-    body: notification.body || "",
-    route: notification.route || notification.data?.href || notification.data?.route || null,
+    body,
+    route,
     data: notification.data || null,
     isRead: notification.isRead === true,
     isArchived: notification.isArchived === true,
     createdAt: notification.createdAt,
     updatedAt: notification.updatedAt,
   };
+}
+
+function superAdminRouteValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function superAdminMatchroomRoute(matchroomId: unknown) {
+  const id = superAdminRouteValue(matchroomId);
+  return id ? `/super-admin/matchroom/${encodeURIComponent(id)}` : "/super-admin";
+}
+
+function normalizeSuperAdminNotificationRoute(notification: any) {
+  const rawRoute = superAdminRouteValue(notification.route || notification.data?.href || notification.data?.route);
+  const role = String(notification.recipientRole || notification.data?.recipientRole || "super_admin").toLowerCase();
+  const type = String(notification.type || notification.data?.canonicalType || "").toLowerCase();
+  const matchroomId = notification.matchroomId || notification.data?.matchroomId;
+
+  if (role === "super_admin" || role === "super-admin") {
+    if (type === "payments.booking_credit") return superAdminMatchroomRoute(matchroomId);
+    if (rawRoute?.startsWith("/matchrooms/")) {
+      const routeMatchroomId = matchroomId || rawRoute.match(/^\/matchrooms\/([^/?#]+)/)?.[1];
+      return superAdminMatchroomRoute(routeMatchroomId);
+    }
+  }
+
+  return rawRoute;
+}
+
+function adminBookingCreditReasonText(reason: unknown) {
+  switch (String(reason || "")) {
+    case "left_before_lock":
+      return "because the player left before the matchroom locked";
+    case "matchroom_expired":
+    case "expired":
+      return "because the matchroom expired before it became final";
+    case "matchroom_cancelled":
+    case "cancelled":
+      return "because the matchroom was cancelled";
+    case "zone_schedule_rejected":
+      return "because the proposed venue schedule was rejected";
+    case "zone_rejected":
+    case "zone_admin_rejected":
+      return "because the venue could not confirm the booking";
+    case "missing_matchroom":
+      return "because the matchroom is no longer available";
+    default:
+      return "because the matchroom did not become final";
+  }
+}
+
+function normalizeSuperAdminNotificationBody(notification: any) {
+  const body = String(notification.body || "");
+  const type = String(notification.type || notification.data?.canonicalType || "").toLowerCase();
+  if (type !== "payments.booking_credit") return body;
+
+  const reason = notification.data?.reason;
+  if (!reason) return body;
+
+  const reasonText = adminBookingCreditReasonText(reason);
+  const rawReasonPattern = new RegExp(`\\(${String(reason).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`, "g");
+  return body.replace(rawReasonPattern, reasonText);
 }
 
 async function getOwnedAdminNotification(ctx: any, adminUserId: Id<"users">, notificationId: Id<"notifications">) {
@@ -2847,9 +2918,12 @@ export const setZoneStatus = mutation({
     }
 
     await ctx.db.patch(args.zoneId, patch);
+    const nextStatus = String((patch.status || zone.status) || "pending-review");
+    const shouldNotifyPlayersZoneLive =
+      nextStatus === "active" &&
+      ["pending-review", "approved_pending_migration"].includes(String(zone.status || ""));
 
     if (zone.ownerUid) {
-      const nextStatus = String((patch.status || zone.status) || "pending-review");
       const copy = zoneStatusNotificationCopy(nextStatus, String(patch.rejectionReason || ""));
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "zone.status_updated",
@@ -2895,6 +2969,9 @@ export const setZoneStatus = mutation({
           href: "/zone/(tabs)/profile",
         },
       });
+    }
+    if (shouldNotifyPlayersZoneLive) {
+      await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
     }
     await insertSuperAdminAuditLog(ctx, admin, {
       action: args.status === "active" ? "approve_zone" : args.status === "rejected" ? "reject_zone" : "update_zone_status",
@@ -2946,6 +3023,7 @@ export const retryZoneMigration = mutation({
         },
         updatedAt: Date.now(),
       });
+      await scheduleZoneLiveNearbyNotifications(ctx, args.zoneId);
       await insertSuperAdminAuditLog(ctx, admin, {
         action: "retry_zone_migration",
         module: "zones",

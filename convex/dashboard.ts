@@ -97,6 +97,10 @@ function dedupeById<T extends { _id: any }>(rows: T[]) {
   return Array.from(byId.values());
 }
 
+function isActiveTeam(team: any) {
+  return Boolean(team) && team.status !== "deleted" && !team.deletedAt;
+}
+
 function countJoinedFriends(room: any, friendIds: Set<string>) {
   if (!Array.isArray(room?.playerUids) || friendIds.size === 0) return 0;
   let total = 0;
@@ -202,7 +206,7 @@ export const getPlayerHomeSummary = query({
 
     const teamDocs = await Promise.all(memberships.slice(0, 10).map((membership) => ctx.db.get(membership.teamId)));
     const myTeams = teamDocs
-      .filter(Boolean)
+      .filter(isActiveTeam)
       .slice(0, 3)
       .map((team: any) => ({ ...team, id: team._id }));
 

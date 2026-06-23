@@ -84,8 +84,7 @@ function WalkInPlayerCard({
       </View>
 
       <Text style={styles.fieldLabel}>
-        {compactRank ? "Name" : "User Name"}
-        <Text style={styles.requiredAsterisk}>*</Text>
+        {compactRank ? "Name (optional)" : "User name (optional)"}
       </Text>
       <View style={styles.inputBox}>
         <TextInput
@@ -100,10 +99,27 @@ function WalkInPlayerCard({
       </View>
 
       <Text style={styles.fieldLabel}>
-        {compactRank ? "Rank" : "Skill tier"}
-        <Text style={styles.requiredAsterisk}>*</Text>
+        {compactRank ? "Rank (optional)" : "Skill tier (optional)"}
       </Text>
       <View style={styles.chipRow}>
+        <Pressable
+          style={[
+            styles.optionChip,
+            !player.skillTier && styles.optionChipActive,
+            compactRank && { paddingHorizontal: 12 },
+          ]}
+          onPress={() => onUpdatePlayerField(player.seatNumber, "skillTier", "")}
+        >
+          <Text
+            style={[
+              styles.optionChipText,
+              !player.skillTier && styles.optionChipTextActive,
+              compactRank && { fontSize: 10 },
+            ]}
+          >
+            Not set
+          </Text>
+        </Pressable>
         {WALKIN_SKILL_TIER_OPTIONS.map((tier) => {
           const isSelected = player.skillTier === tier;
           return (
@@ -168,26 +184,24 @@ export default function WalkInRosterEditor({
         Walk-in Setup<Text style={styles.requiredAsterisk}>*</Text>
       </Text>
       <View style={styles.tabContainer}>
-        {!(selectedGame === "fc26" || selectedGame === "tekken8") ? (
-          <View style={styles.flex1}>
-            <Text style={styles.fieldLabel}>
-              Booked seats<Text style={styles.requiredAsterisk}>*</Text>
-            </Text>
-            <View style={styles.inputBox}>
-              <TextInput
-                style={styles.input}
-                keyboardType="number-pad"
-                placeholder="6"
-                placeholderTextColor="#757575"
-                value={walkInSeatCount}
-                onChangeText={onSeatCountChange}
-              />
-            </View>
-            <Text style={styles.helperTextTiny}>
-              Total seats: {walkInMaxSeatLimit}
-            </Text>
+        <View style={styles.flex1}>
+          <Text style={styles.fieldLabel}>
+            Walk-in players available<Text style={styles.requiredAsterisk}>*</Text>
+          </Text>
+          <View style={styles.inputBox}>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              placeholder="0"
+              placeholderTextColor="#757575"
+              value={walkInSeatCount}
+              onChangeText={onSeatCountChange}
+            />
           </View>
-        ) : null}
+          <Text style={styles.helperTextTiny}>
+            Max players for this format: {walkInMaxSeatLimit}
+          </Text>
+        </View>
       </View>
 
       {walkInBookedSeatCount > 0 ? (
@@ -203,7 +217,9 @@ export default function WalkInRosterEditor({
                 >
                   Team A
                 </Text>
-                {walkInSeatPlayers.slice(0, 5).map((player, idx) => (
+                {walkInSeatPlayers
+                  .slice(0, Math.ceil(walkInBookedSeatCount / 2))
+                  .map((player, idx) => (
                   <WalkInPlayerCard
                     key={`walkin-seat-player-${player.seatNumber}`}
                     captainSeatNumber={walkInTeamACaptainSeatNumber}
@@ -227,7 +243,9 @@ export default function WalkInRosterEditor({
                 >
                   Team B
                 </Text>
-                {walkInSeatPlayers.slice(5, 10).map((player) => (
+                {walkInSeatPlayers
+                  .slice(Math.ceil(walkInBookedSeatCount / 2), walkInBookedSeatCount)
+                  .map((player, idx) => (
                   <WalkInPlayerCard
                     key={`walkin-seat-player-${player.seatNumber}`}
                     captainSeatNumber={walkInTeamBCaptainSeatNumber}
@@ -236,7 +254,7 @@ export default function WalkInRosterEditor({
                     onSelectCaptain={onSelectCaptain}
                     onUpdatePlayerField={onUpdatePlayerField}
                     player={player}
-                    seatLabel={`Player ${player.seatNumber}`}
+                    seatLabel={`Player ${idx + 1}`}
                     selectedGame={selectedGame}
                   />
                 ))}
@@ -245,8 +263,7 @@ export default function WalkInRosterEditor({
           ) : (
             <>
               <Text style={styles.fieldLabel}>
-                Walk-in Player Details
-                <Text style={styles.requiredAsterisk}>*</Text>
+                Walk-in Player Details (optional)
               </Text>
               {walkInSeatPlayers.slice(0, walkInBookedSeatCount).map((player) => (
                 <WalkInPlayerCard

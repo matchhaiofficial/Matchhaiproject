@@ -136,6 +136,13 @@ export function getMatchroomCreateValidationError(
         title: "Invalid Seats",
       };
     }
+    if (seatCount === 0) {
+      return {
+        message: "Please enter how many walk-in players are available.",
+        reason: "missing_walkin_player_count",
+        title: "Missing Player Count",
+      };
+    }
     if (seatCount > maxSeats) {
       return {
         message: `Booked seats cannot exceed total seats (${maxSeats}).`,
@@ -146,11 +153,12 @@ export function getMatchroomCreateValidationError(
 
     if (normalizedBookedSeats > 0) {
       if (isCsStyleGame(selectedGame)) {
+        const teamBSplitIndex = Math.ceil(normalizedBookedSeats / 2);
         const hasTeamAPlayers = walkInSeatPlayers
-          .slice(0, 5)
+          .slice(0, teamBSplitIndex)
           .some((player) => player.name && player.name.trim().length > 0);
         const hasTeamBPlayers = walkInSeatPlayers
-          .slice(5, 10)
+          .slice(teamBSplitIndex, normalizedBookedSeats)
           .some((player) => player.name && player.name.trim().length > 0);
 
         if (hasTeamAPlayers && !walkInTeamACaptainSeatNumber) {
@@ -372,17 +380,21 @@ export function getMatchroomCreateSubmitBlockers(
     if (!Number.isFinite(seatCount) || seatCount < 0) {
       blockers.push("Booked seats cannot be negative");
     }
+    if (Number.isFinite(seatCount) && seatCount === 0) {
+      blockers.push("Enter walk-in player count");
+    }
     if (Number.isFinite(seatCount) && seatCount > maxSeats) {
       blockers.push(`Booked seats cannot exceed ${maxSeats}`);
     }
 
     if (normalizedBookedSeats > 0) {
       if (isCsStyleGame(selectedGame)) {
+        const teamBSplitIndex = Math.ceil(normalizedBookedSeats / 2);
         const hasTeamAPlayers = walkInSeatPlayers
-          .slice(0, 5)
+          .slice(0, teamBSplitIndex)
           .some((player) => player.name && player.name.trim().length > 0);
         const hasTeamBPlayers = walkInSeatPlayers
-          .slice(5, 10)
+          .slice(teamBSplitIndex, normalizedBookedSeats)
           .some((player) => player.name && player.name.trim().length > 0);
 
         if (hasTeamAPlayers && !walkInTeamACaptainSeatNumber) {

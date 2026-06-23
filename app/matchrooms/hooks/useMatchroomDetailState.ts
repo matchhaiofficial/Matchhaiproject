@@ -46,7 +46,7 @@ type Params = { id: string };
 
 export function useMatchroomDetailState({ id }: Params) {
   const router = useRouter();
-  const { user, authUser, refreshSession } = useAuth();
+  const { user, authUser, refreshSession, loading: authLoading } = useAuth();
   const { showToast } = useToast();
   const showToastRef = useRef(showToast);
   const routerRef = useRef(router);
@@ -135,11 +135,32 @@ export function useMatchroomDetailState({ id }: Params) {
   }, [stableRatings]);
 
   // ─── Fetch room (with guard) ─────────────────────────────────────
-  const fetchRoom = useCallback(async () => {
+  const fetchRoom = useCallback(async (options?: { refreshFirst?: boolean; retryPublicProjection?: boolean }) => {
     if (!id || isFetchingRef.current) return;
     isFetchingRef.current = true;
     try {
-      const res = await getMatchroom(id);
+      if (options?.refreshFirst) {
+        await refreshSessionRef.current();
+      }
+
+      let res = await getMatchroom(id);
+      const hasAuthenticatedContext = Boolean(user?._id || authUser?.id);
+      if (
+        options?.retryPublicProjection !== false &&
+        hasAuthenticatedContext &&
+        res.ok &&
+        res.data?.accessLevel === "public"
+      ) {
+        const refreshed = await refreshSessionRef.current();
+        if (refreshed) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          const retry = await getMatchroom(id);
+          if (retry.ok && retry.data) {
+            res = retry;
+          }
+        }
+      }
+
       if (res.ok && res.data) {
         setRoom(res.data);
       } else {
@@ -161,16 +182,18 @@ export function useMatchroomDetailState({ id }: Params) {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, [id]);
+  }, [authUser?.id, id, user?._id]);
 
   useEffect(() => {
-    fetchRoom();
-  }, [fetchRoom]);
+    if (authLoading) return;
+    void fetchRoom();
+  }, [authLoading, fetchRoom]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshSessionRef.current();
-    }, []),
+      if (authLoading) return;
+      void fetchRoom({ refreshFirst: true });
+    }, [authLoading, fetchRoom]),
   );
 
   useEffect(() => {

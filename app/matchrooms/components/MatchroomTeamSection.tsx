@@ -34,6 +34,7 @@ type MatchroomTeamSectionProps = {
   canJoin: boolean;
   isJoined: boolean;
   isZoneAdmin: boolean;
+  isWalkInRoom: boolean;
   requestedSlots: Map<string, string>;
   footerHitSlop: { top: number; bottom: number; left: number; right: number };
   getSlotUserId: (slot: any) => string | null;
@@ -49,12 +50,25 @@ type MatchroomTeamSectionProps = {
   joining?: boolean;
   onManagePlayer: (team: "A" | "B", playerUid: string, playerName: string) => void;
   onInvitePress: (team: "A" | "B", slotId: string) => void;
+  onBookWalkInSeat: (team: "A" | "B", slotId: string) => void;
   onRequestJoin: (teamLabel: string, slotId: string) => void;
   onCancelRequest: () => void;
   onReportPlayer?: (playerUid: string, playerName: string) => void;
 };
 
-function EmptySlotLabel({ slot, styles, canInvite }: { slot: any; styles: any; canInvite?: boolean }) {
+function EmptySlotLabel({
+  slot,
+  styles,
+  canInvite,
+  isZoneAdmin,
+  isWalkInRoom,
+}: {
+  slot: any;
+  styles: any;
+  canInvite?: boolean;
+  isZoneAdmin?: boolean;
+  isWalkInRoom?: boolean;
+}) {
   const isBookedPlaceholder =
     slot.status === "reserved" || slot.status === "confirmed";
   const isOpen = slot.status === "open";
@@ -62,6 +76,8 @@ function EmptySlotLabel({ slot, styles, canInvite }: { slot: any; styles: any; c
   // actionable invite slot instead of a passive "Available Slot".
   const label = isBookedPlaceholder
     ? "Booked Seat"
+    : isOpen && isZoneAdmin && isWalkInRoom
+      ? "Available Seat"
     : isOpen && canInvite
       ? "Invite a friend"
       : "Available Slot";
@@ -91,13 +107,16 @@ function SlotActionButtons({
   slotId,
   canInvite,
   canJoin,
+  canManage,
   isJoined,
   isZoneAdmin,
+  isWalkInRoom,
   requestedSlots,
   joining,
   footerHitSlop,
   styles,
   onInvitePress,
+  onBookWalkInSeat,
   onRequestJoin,
   onCancelRequest,
 }: {
@@ -105,13 +124,16 @@ function SlotActionButtons({
   slotId: string;
   canInvite: boolean;
   canJoin: boolean;
+  canManage: boolean;
   isJoined: boolean;
   isZoneAdmin: boolean;
+  isWalkInRoom: boolean;
   requestedSlots: Map<string, string>;
   joining?: boolean;
   footerHitSlop: { top: number; bottom: number; left: number; right: number };
   styles: any;
   onInvitePress: (team: "A" | "B", slotId: string) => void;
+  onBookWalkInSeat: (team: "A" | "B", slotId: string) => void;
   onRequestJoin: (teamLabel: string, slotId: string) => void;
   onCancelRequest: () => void;
 }) {
@@ -119,6 +141,28 @@ function SlotActionButtons({
     activeScale: 0.985,
   });
   const status = requestedSlots.get(slotId);
+
+  if (isZoneAdmin && isWalkInRoom && canManage) {
+    return joining ? (
+      <View style={[styles.joinSlotButton, { opacity: 0.6 }]}>
+        <ActivityIndicator size="small" color="#FFF" />
+      </View>
+    ) : (
+      <AnimatedPressable
+        style={styles.joinSlotButton}
+        onPress={() => onBookWalkInSeat(team, slotId)}
+        unstable_pressDelay={0}
+        pressRetentionOffset={footerHitSlop}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        hitSlop={footerHitSlop}
+      >
+        <Animated.View style={animatedStyle}>
+          <Text style={styles.joinSlotText}>Book Seat</Text>
+        </Animated.View>
+      </AnimatedPressable>
+    );
+  }
 
   if (!canJoin || isJoined || isZoneAdmin) {
     return canInvite ? (
@@ -244,6 +288,7 @@ export default function MatchroomTeamSection({
   canJoin,
   isJoined,
   isZoneAdmin,
+  isWalkInRoom,
   requestedSlots,
   footerHitSlop,
   getSlotUserId,
@@ -253,6 +298,7 @@ export default function MatchroomTeamSection({
   joining,
   onManagePlayer,
   onInvitePress,
+  onBookWalkInSeat,
   onRequestJoin,
   onCancelRequest,
   onReportPlayer,
@@ -386,7 +432,13 @@ export default function MatchroomTeamSection({
                 </View>
                 </Animated.View>
               ) : (
-                <EmptySlotLabel slot={slot} styles={styles} canInvite={canInvite} />
+                <EmptySlotLabel
+                  slot={slot}
+                  styles={styles}
+                  canInvite={canInvite}
+                  isZoneAdmin={isZoneAdmin}
+                  isWalkInRoom={isWalkInRoom}
+                />
               )}
             </AnimatedPressable>
             {!slot.user && slot.status === "open" ? (
@@ -395,13 +447,16 @@ export default function MatchroomTeamSection({
                 slotId={slot.slotId}
                 canInvite={canInvite}
                 canJoin={canJoin}
+                canManage={canManage}
                 isJoined={isJoined}
                 isZoneAdmin={isZoneAdmin}
+                isWalkInRoom={isWalkInRoom}
                 requestedSlots={requestedSlots}
                 joining={joining}
                 footerHitSlop={footerHitSlop}
                 styles={styles}
                 onInvitePress={onInvitePress}
+                onBookWalkInSeat={onBookWalkInSeat}
                 onRequestJoin={onRequestJoin}
                 onCancelRequest={onCancelRequest}
               />

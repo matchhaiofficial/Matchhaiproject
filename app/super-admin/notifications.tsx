@@ -16,6 +16,7 @@ import {
   type SuperAdminNotificationTab,
 } from "../../src/services/convex/superAdminService";
 import { setLocalBadgeCount } from "../../src/services/localNotifications";
+import { buildNotificationRoute } from "../../src/navigation/routes";
 import { COLORS, FONTS, RADII, SPACING } from "../../src/theme";
 
 function formatDate(value?: number) {
@@ -24,7 +25,19 @@ function formatDate(value?: number) {
 }
 
 function labelForType(type?: string) {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (normalized === "payments.booking_credit") return "Booking Wallet Credit";
   return String(type || "notification").replace(/[._-]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function routeForNotification(item: SuperAdminNotification) {
+  return buildNotificationRoute({
+    type: item.type,
+    route: item.route,
+    recipientRole: "super_admin",
+    matchroomId: item.data?.matchroomId,
+    data: item.data,
+  });
 }
 
 const ALL = "All";
@@ -91,7 +104,7 @@ const NotificationCard = React.memo(function NotificationCard({
   onMarkRead: (item: SuperAdminNotification) => void;
   onOpen: (item: SuperAdminNotification) => void;
 }) {
-  const route = item.route || String(item.data?.href || item.data?.route || "");
+  const route = routeForNotification(item);
   return (
     <AdminListCard
       title={item.title || labelForType(item.type)}
@@ -224,7 +237,7 @@ export default function SuperAdminNotificationsScreen() {
   }, [busyId, showToast]);
 
   const openNotification = useCallback(async (item: SuperAdminNotification) => {
-    const route = item.route || String(item.data?.href || item.data?.route || "");
+    const route = routeForNotification(item);
     if (!route) return;
     if (!item.isRead) await markRead(item);
     router.push(route as any);
