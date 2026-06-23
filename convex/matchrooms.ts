@@ -33,6 +33,10 @@ import {
   DEFAULT_ELO,
 } from "./ratingEngine";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
+import {
+  assertNoParticipantTimeConflict,
+  assertZoneResourceCapacityAvailable,
+} from "./bookingConflicts";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -41,7 +45,7 @@ const MATCH_JOIN_REQUEST_TYPES = new Set(["match_join_request", "match.join_requ
 export const MATCHROOM_LOCKED_MESSAGE =
   "This matchroom is locked because it starts within 24 hours or has been confirmed by the zone. Contact support if you need help.";
 const MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE =
-  "This venue already has a matchroom for the same game at the same scheduled time. Please choose a different time or venue.";
+  "This venue does not have enough available resources for that time slot. Please choose a different time or venue.";
 const INSUFFICIENT_WALLET_BALANCE_MESSAGE =
   "Insufficient wallet balance. Please add funds from Wallet.";
 const MATCHROOM_CREATE_INSUFFICIENT_WALLET_CODE =
@@ -2633,6 +2637,14 @@ async function createSingleSeatBookingIntent(ctx: any, args: {
     throw new Error("Selected slot is no longer available.");
   }
 
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: [String(args.createdByUid)],
+    scheduledStartAt: args.room.scheduledStartAt || args.room.startTime || null,
+    durationMinutes: args.room.durationMinutes || 60,
+    excludeMatchroomId: String(args.room._id),
+    message: "You already have a matchroom or booking request scheduled at this time.",
+  });
+
   const existingIntents = await ctx.db
     .query("bookingIntents")
     .withIndex("by_createdByUid_matchroomId", (q: any) =>
@@ -2713,6 +2725,14 @@ async function createPendingApprovalBookingIntent(ctx: any, args: {
   if (!selection) {
     throw new Error("Selected slot is no longer available.");
   }
+
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: [String(args.createdByUid)],
+    scheduledStartAt: args.room.scheduledStartAt || args.room.startTime || null,
+    durationMinutes: args.room.durationMinutes || 60,
+    excludeMatchroomId: String(args.room._id),
+    message: "You already have a matchroom or booking request scheduled at this time.",
+  });
 
   const existingIntents = await ctx.db
     .query("bookingIntents")
@@ -3581,8 +3601,14 @@ export const checkCreateAvailability = query({
   args: {
     locationMode: v.optional(v.string()),
     zoneId: v.optional(v.string()),
+    branchId: v.optional(v.string()),
     game: v.string(),
     scheduledStartAt: v.number(),
+    durationMinutes: v.optional(v.number()),
+    requestedResourceAssetType: v.optional(v.string()),
+    requestedResourceSurface: v.optional(v.string()),
+    requestedResourceTier: v.optional(v.string()),
+    selectedZoneRateKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -3608,6 +3634,26 @@ export const checkCreateAvailability = query({
           conflictId: String(conflict._id),
           message: MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE,
           reason: "venue_time_conflict",
+        };
+      }
+
+      try {
+        await assertZoneResourceCapacityAvailable(ctx, {
+          zoneId: args.zoneId,
+          branchId: args.branchId,
+          game: args.game,
+          requestedResourceAssetType: args.requestedResourceAssetType,
+          requestedResourceSurface: args.requestedResourceSurface,
+          requestedResourceTier: args.requestedResourceTier,
+          selectedZoneRateKey: args.selectedZoneRateKey,
+          scheduledStartAt: args.scheduledStartAt,
+          durationMinutes: args.durationMinutes || 60,
+        });
+      } catch (error: any) {
+        return {
+          available: false,
+          message: String(error?.message || MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE),
+          reason: "resource_capacity_conflict",
         };
       }
     }
@@ -3857,6 +3903,17 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     if (conflict) {
       throw new Error(MATCHROOM_VENUE_TIME_CONFLICT_MESSAGE);
     }
+    await assertZoneResourceCapacityAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      game: args.game,
+      requestedResourceAssetType: args.requestedResourceAssetType,
+      requestedResourceSurface: args.requestedResourceSurface,
+      requestedResourceTier: args.requestedResourceTier,
+      selectedZoneRateKey: args.selectedZoneRateKey,
+      scheduledStartAt: args.scheduledStartAt,
+      durationMinutes: args.durationMinutes || 60,
+    });
   }
 
   const normalizedPlayers = await Promise.all(
@@ -3872,6 +3929,12 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     ),
   );
   const normalizedPlayerUids = Array.from(new Set(normalizedPlayers.map((player) => String(player.uid))));
+  await assertNoParticipantTimeConflict(ctx, {
+    userIds: normalizedPlayerUids.length ? normalizedPlayerUids : [actorUid],
+    scheduledStartAt: args.scheduledStartAt,
+    durationMinutes: args.durationMinutes || 60,
+    message: "One or more players already have a matchroom or booking request scheduled at this time.",
+  });
   const hostSkill = await requireUserGameSkill(ctx, actorUid, args.game);
   const skillStats = await buildRoomSkillStats(ctx, args.game, normalizedPlayerUids);
   const walletFailure = options?.walletPrecheckHostUser
@@ -3901,6 +3964,7 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
         : undefined,
     zoneId: args.zoneId,
     zoneOwnerUid: args.zoneOwnerUid,
+    branchId: args.branchId || undefined,
     scheduledDate: args.scheduledDate,
     scheduledTime: args.scheduledTime,
     scheduledStartAt: args.scheduledStartAt,
@@ -5207,6 +5271,13 @@ export const requestToJoinMatchroom = mutation({
         const paymentMode = String(room.walkIn?.paymentMode || "guest_pay").toLowerCase();
 
         if (paymentMode === "venue_pay" || amount <= 0) {
+          await assertNoParticipantTimeConflict(ctx, {
+            userIds: [actorUid],
+            scheduledStartAt: room.scheduledStartAt || room.startTime || null,
+            durationMinutes: room.durationMinutes || 60,
+            excludeMatchroomId: String(room._id),
+            message: "You already have a matchroom or booking request scheduled at this time.",
+          });
           const rosterPatch = await buildMatchroomRosterPatch(
             ctx,
             room,
@@ -5891,6 +5962,14 @@ async function confirmMatchroomSeatIntentForUser(
     if (isJoinLocked(room)) {
       throw new Error("This matchroom is locked.");
     }
+
+    await assertNoParticipantTimeConflict(ctx, {
+      userIds: [payerUid],
+      scheduledStartAt: room.scheduledStartAt || room.startTime || null,
+      durationMinutes: room.durationMinutes || 60,
+      excludeMatchroomId: String(room._id),
+      message: "You already have a matchroom or booking request scheduled at this time.",
+    });
 
     const amount = Number(intent.pricing?.totalCost || room.pricing?.perPlayer || 0);
     const walletBalance = Number(payer.walletBalance || 0);

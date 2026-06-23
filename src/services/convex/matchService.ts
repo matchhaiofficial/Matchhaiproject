@@ -595,6 +595,12 @@ export async function checkMatchroomCreateAvailability(input: {
   scheduledDate?: string;
   scheduledTime?: string;
   zoneId?: string | null;
+  branchId?: string | null;
+  durationMinutes?: number | null;
+  requestedResourceAssetType?: string | null;
+  requestedResourceSurface?: string | null;
+  requestedResourceTier?: string | null;
+  selectedZoneRateKey?: string | null;
 }): Promise<Result<{ available: boolean; message?: string | null; reason?: string | null }>> {
   try {
     const scheduledStartAt = parseScheduledStartAt(input.scheduledDate, input.scheduledTime);
@@ -619,6 +625,12 @@ export async function checkMatchroomCreateAvailability(input: {
       locationMode: input.locationMode,
       scheduledStartAt,
       zoneId: input.zoneId || undefined,
+      branchId: input.branchId || undefined,
+      durationMinutes: input.durationMinutes || undefined,
+      requestedResourceAssetType: input.requestedResourceAssetType || undefined,
+      requestedResourceSurface: input.requestedResourceSurface || undefined,
+      requestedResourceTier: input.requestedResourceTier || undefined,
+      selectedZoneRateKey: input.selectedZoneRateKey || undefined,
     });
 
     return {

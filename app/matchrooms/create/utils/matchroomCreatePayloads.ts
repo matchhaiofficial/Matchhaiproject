@@ -68,6 +68,12 @@ export function buildZoneWalkInPayload(params: {
   gameKey: string;
   pricePerPlayer: number;
   seatCountInput: string;
+  selectedZoneRateKey: string | null;
+  selectedZoneRateResourceContext: {
+    assetType: string;
+    tier?: string;
+    surface?: string;
+  } | null;
   seriesType: "BO1" | "BO3" | "BO5";
   userId: string;
   userName: string;
@@ -97,9 +103,13 @@ export function buildZoneWalkInPayload(params: {
   }>;
   paymentMode: WalkInPaymentMode;
   pricePerPlayer: number;
+  requestedResourceAssetType?: string;
+  requestedResourceSurface?: string;
+  requestedResourceTier?: string;
   scheduledDate: string;
   scheduledTime: string;
   seatCount: number;
+  selectedZoneRateKey?: string;
   seriesType: "BO1" | "BO3" | "BO5";
   title: string;
   zoneId: string;
@@ -113,6 +123,8 @@ export function buildZoneWalkInPayload(params: {
     gameKey,
     pricePerPlayer,
     seatCountInput,
+    selectedZoneRateKey,
+    selectedZoneRateResourceContext,
     seriesType,
     userId,
     walkInPaymentMode,
@@ -184,9 +196,13 @@ export function buildZoneWalkInPayload(params: {
     knownPlayers,
     paymentMode: walkInPaymentMode || "matchhai_pay",
     pricePerPlayer,
+    requestedResourceAssetType: selectedZoneRateResourceContext?.assetType || undefined,
+    requestedResourceSurface: selectedZoneRateResourceContext?.surface || undefined,
+    requestedResourceTier: selectedZoneRateResourceContext?.tier || undefined,
     scheduledDate: formData.date,
     scheduledTime: formData.time,
     seatCount: totalSeats,
+    selectedZoneRateKey: selectedZoneRateKey || undefined,
     seriesType,
     title: formData.title.trim() || "Walk-in Matchroom",
     zoneId,

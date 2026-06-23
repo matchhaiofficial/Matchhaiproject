@@ -891,6 +891,10 @@ export default StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
     },
+    allocateBranchChipFullWidth: {
+        alignSelf: "stretch",
+        width: "100%",
+    },
     allocateBranchChipActive: {
         borderColor: COLORS.accent,
         backgroundColor: COLORS.cardDark,

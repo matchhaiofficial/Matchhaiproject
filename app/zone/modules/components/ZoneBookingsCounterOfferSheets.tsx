@@ -237,17 +237,21 @@ export function ZoneBookingsCounterOfferSheets({
 
           <View style={styles.allocateBranchWrap}>
             <Text style={styles.allocateSectionLabel}>Branch fixed for this request</Text>
-            <View style={styles.allocateBranchChipRow}>
-              <View style={[styles.allocateBranchChip, selectedBranch && styles.allocateBranchChipActive]}>
-                <Text
-                  style={[
-                    styles.allocateBranchChipText,
-                    selectedBranch && styles.allocateBranchChipTextActive,
-                  ]}
-                >
-                  {selectedBranch?.branchDisplayName || "Loading branch..."}
-                </Text>
-              </View>
+            <View
+              style={[
+                styles.allocateBranchChip,
+                styles.allocateBranchChipFullWidth,
+                selectedBranch && styles.allocateBranchChipActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.allocateBranchChipText,
+                  selectedBranch && styles.allocateBranchChipTextActive,
+                ]}
+              >
+                {selectedBranch?.branchDisplayName || "Loading branch..."}
+              </Text>
             </View>
           </View>
 

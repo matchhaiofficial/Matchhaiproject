@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "convex/react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -124,6 +124,7 @@ const BOOKING_SOURCE_OPTIONS: FilterOption[] = [
     { key: "admin", label: "Admin" },
 ];
 const ZONE_PAGE_SIZE = 20;
+const ROUTABLE_SEGMENTS = new Set<Segment>(["requests", "pending", "matchrooms", "walkins", "history"]);
 
 const CS_STYLE_GAMES = new Set(["cs2", "cs16", "valorant"]);
 const CONSOLE_GAMES = new Set(["fc25", "fc26", "tekken8"]);
@@ -485,6 +486,7 @@ export default function ZoneBookingsModule() {
         segment?: Segment | Segment[];
         requestId?: string | string[];
         matchroomId?: string | string[];
+        t?: string | string[];
     }>();
     const { user } = useAuth();
     const { zone } = useZoneData();
@@ -565,6 +567,7 @@ export default function ZoneBookingsModule() {
     const [focusedMatchroomId, setFocusedMatchroomId] = useState<string | null>(null);
     const matchroomsRequestVersionRef = useRef(0);
     const walkInsRequestVersionRef = useRef(0);
+    const loadWalkInsPageRef = useRef<((options?: { append?: boolean }) => Promise<void>) | null>(null);
 
     const zoneOffers = useQuery(
         api.bookings.listOffersByZone,
@@ -779,9 +782,14 @@ export default function ZoneBookingsModule() {
         zone?.id,
     ]);
 
+    useEffect(() => {
+        loadWalkInsPageRef.current = loadWalkInsPage;
+    }, [loadWalkInsPage]);
+
     const deepSegment = Array.isArray(params.segment) ? params.segment[0] : params.segment;
     const deepRequestId = Array.isArray(params.requestId) ? params.requestId[0] : params.requestId;
     const deepMatchroomId = Array.isArray(params.matchroomId) ? params.matchroomId[0] : params.matchroomId;
+    const deepRefreshToken = Array.isArray(params.t) ? params.t[0] : params.t;
 
     const {
         branchAreas,
@@ -1098,15 +1106,25 @@ export default function ZoneBookingsModule() {
     ]);
 
     useEffect(() => {
-        if (!zone?.id) return;
+        if (!zone?.id || segment !== "walkins") return;
         setWalkInsCursor(null);
         setWalkInsDone(false);
-        void loadWalkInsPage({ append: false });
-    }, [zone?.id, segment === "walkins"]);
+        void loadWalkInsPageRef.current?.({ append: false });
+    }, [deepRefreshToken, segment, zone?.id]);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!zone?.id || segment !== "walkins") return undefined;
+            setWalkInsCursor(null);
+            setWalkInsDone(false);
+            void loadWalkInsPageRef.current?.({ append: false });
+            return undefined;
+        }, [segment, zone?.id]),
+    );
 
     useEffect(() => {
-        if (deepSegment === "matchrooms" || deepSegment === "requests" || deepSegment === "history") {
-            setSegment(deepSegment);
+        if (deepSegment && ROUTABLE_SEGMENTS.has(deepSegment as Segment)) {
+            setSegment(deepSegment as Segment);
         }
         if (deepRequestId) {
             setSelectedRequestId(deepRequestId);

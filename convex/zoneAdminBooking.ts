@@ -12,6 +12,11 @@ import {
 import { requireKycVerified } from "./kycGate";
 import { getMatchroomLockAt, validateMatchroomScheduleWindow, validateWalkInScheduleWindow, COUNTER_OFFER_TIME_WINDOW_MS } from "./timing";
 import { deductWalletFunds } from "./wallet";
+import {
+  assertSelectedResourcesAvailableForSlot,
+  assertZoneResourceCapacityAvailable,
+  getBookingRequestStartAtForConflict,
+} from "./bookingConflicts";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -1830,6 +1835,26 @@ export const acceptBookingRequest = mutation({
       }
     });
 
+    let allocationStartAt =
+      typeof args.matchroomData.scheduledStartAt === "number" && Number.isFinite(args.matchroomData.scheduledStartAt)
+        ? args.matchroomData.scheduledStartAt
+        : getBookingRequestStartAtForConflict(bookingRequest);
+    if (bookingRequest.matchroomId) {
+      const linkedRoomForSlot: any = await ctx.db.get(bookingRequest.matchroomId);
+      allocationStartAt =
+        Number(linkedRoomForSlot?.scheduledStartAt || linkedRoomForSlot?.startTime || 0) ||
+        allocationStartAt;
+    }
+    await assertSelectedResourcesAvailableForSlot(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId,
+      resourceIds: args.resourceIds,
+      scheduledStartAt: allocationStartAt,
+      durationMinutes: args.matchroomData.durationMinutes || getDurationMinutesFromRequest(bookingRequest),
+      excludeMatchroomId: bookingRequest.matchroomId ? String(bookingRequest.matchroomId) : null,
+      excludeBookingRequestId: String(args.requestId),
+    });
+
     let matchroomId: any;
 
     if (bookingRequest.requestKind === "broadcast_fanout" && bookingRequest.matchroomId) {
@@ -2305,6 +2330,19 @@ export const sendCounterOffer = mutation({
     if (!branchId || !resourceIds.length) {
       throw new Error("Select a branch and resources before sending an alternative time.");
     }
+    const primaryStartAt =
+      typeof primaryOption?.startAt === "number" && Number.isFinite(primaryOption.startAt)
+        ? primaryOption.startAt
+        : parseLocalDateTimeMillis(primaryOption?.date, primaryOption?.time);
+    await assertSelectedResourcesAvailableForSlot(ctx, {
+      zoneId: String(args.zoneId),
+      branchId,
+      resourceIds,
+      scheduledStartAt: primaryStartAt,
+      durationMinutes: getDurationMinutesFromRequest(request),
+      excludeMatchroomId: request.matchroomId ? String(request.matchroomId) : null,
+      excludeBookingRequestId: String(args.requestId),
+    });
 
     await holdResourcesForZoneCounterOffer(ctx, {
       request,
@@ -2613,6 +2651,19 @@ export const respondToCounterOffer = mutation({
             closeRequest: true,
           });
         }
+        const broadcastAcceptedStartAt =
+          typeof chosenOption?.startAt === "number" && Number.isFinite(chosenOption.startAt)
+            ? chosenOption.startAt
+            : parseLocalDateTimeMillis(chosenOption?.date, chosenOption?.time);
+        await assertSelectedResourcesAvailableForSlot(ctx, {
+          zoneId: String(offer.zoneId || request.zoneId || ""),
+          branchId: offer.branchId || request.allocatedBranchId || null,
+          resourceIds: winningResourceIds,
+          scheduledStartAt: broadcastAcceptedStartAt,
+          durationMinutes: getDurationMinutesFromRequest(request),
+          excludeMatchroomId: request.matchroomId ? String(request.matchroomId) : null,
+          excludeBookingRequestId: String(request._id),
+        });
 
         const confirmation = await confirmBroadcastVenue(ctx, {
           matchroomId: request.matchroomId,
@@ -2706,6 +2757,19 @@ export const respondToCounterOffer = mutation({
         request,
         offer,
         option: chosenOption,
+      });
+      const acceptedStartAt =
+        typeof chosenOption?.startAt === "number" && Number.isFinite(chosenOption.startAt)
+          ? chosenOption.startAt
+          : parseLocalDateTimeMillis(chosenOption?.date, chosenOption?.time);
+      await assertSelectedResourcesAvailableForSlot(ctx, {
+        zoneId: String(offer.zoneId || request.zoneId || ""),
+        branchId: offer.branchId || request.allocatedBranchId || null,
+        resourceIds: getOfferResourceIds(offer, request),
+        scheduledStartAt: acceptedStartAt,
+        durationMinutes: getDurationMinutesFromRequest(request),
+        excludeMatchroomId: matchroomId ? String(matchroomId) : null,
+        excludeBookingRequestId: String(request._id),
       });
       const acceptedResourceIds = await bookHeldResourcesForAcceptedCounterOffer(ctx, {
         request,
@@ -2818,6 +2882,10 @@ const createWalkInMatchroomArgsValidator = {
     paymentMode: v.optional(v.union(v.literal("venue_pay"), v.literal("guest_pay"), v.literal("matchhai_pay"))),
     pricePerPlayer: v.optional(v.number()),
     currency: v.optional(v.string()),
+    requestedResourceAssetType: v.optional(v.string()),
+    requestedResourceSurface: v.optional(v.string()),
+    requestedResourceTier: v.optional(v.string()),
+    selectedZoneRateKey: v.optional(v.string()),
     captainSeatNumber: v.optional(v.number()),
     knownPlayers: v.optional(v.array(v.object({
       uid: v.string(),
@@ -2909,6 +2977,17 @@ async function createWalkInMatchroomFromValidatedArgs(ctx: any, args: any, actor
     if (!scheduleValidation.ok) {
       throw new Error(scheduleValidation.message);
     }
+    await assertZoneResourceCapacityAvailable(ctx, {
+      zoneId: args.zoneId,
+      branchId: args.branchId || args.walkIn?.branchId || null,
+      gameKey: args.gameKey,
+      requestedResourceAssetType: args.requestedResourceAssetType,
+      requestedResourceSurface: args.requestedResourceSurface,
+      requestedResourceTier: args.requestedResourceTier,
+      selectedZoneRateKey: args.selectedZoneRateKey,
+      scheduledStartAt,
+      durationMinutes: Math.max(30, Math.floor(args.durationMinutes)),
+    });
     const locationLabel =
       String(args.branchName || "").trim() ||
       String(args.walkIn?.branchName || "").trim() ||
