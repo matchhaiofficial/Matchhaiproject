@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as bookingConflicts from "../bookingConflicts.js";
 import type * as bookings from "../bookings.js";
 import type * as chat from "../chat.js";
 import type * as chatAuth from "../chatAuth.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   auth: typeof auth;
   authz: typeof authz;
+  bookingConflicts: typeof bookingConflicts;
   bookings: typeof bookings;
   chat: typeof chat;
   chatAuth: typeof chatAuth;
