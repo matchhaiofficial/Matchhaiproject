@@ -37,6 +37,7 @@ import {
   assertNoParticipantTimeConflict,
   assertZoneResourceCapacityAvailable,
 } from "./bookingConflicts";
+import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -325,6 +326,7 @@ async function completeMatchroomForResultVerification(
     status: "completed",
     completedAt: now,
     resultVerification,
+    lifecycleDueAt: now,
     updatedAt: now,
   });
 
@@ -951,6 +953,7 @@ async function finalizeMatchroomResult(
 
   await ctx.db.patch(matchroomId, {
     resultVerification: nextVerification,
+    lifecycleDueAt: undefined,
     updatedAt: now,
   });
   await notifyResultFinalized(ctx, { ...room, _id: matchroomId }, winner, source);
@@ -2063,6 +2066,7 @@ async function expireMatchroomForInvalidLifecycle(
           }
         : room.resultVerification,
     updatedAt: now,
+    lifecycleDueAt: undefined,
   });
   await expireBookingIntentsForMatchroom(ctx, matchroomId, reason);
   await expirePendingMatchroomNotifications(ctx, matchroomId, reason);
@@ -2093,6 +2097,7 @@ async function markInvalidResultVerificationForAdminReview(
       validationError: "This matchroom did not pass lifecycle validation for result verification.",
     },
     updatedAt: now,
+    lifecycleDueAt: undefined,
   });
 
   // Alert super admins that this result needs manual review.
@@ -2493,26 +2498,27 @@ export async function buildMatchroomRosterPatch(
   const skillStats = await buildRoomSkillStats(ctx, room.game, nextPlayerUids);
   const currentPlayers = nextPlayers.length;
   const willBeFull = currentPlayers >= room.maxPlayers;
+  const patch = withLifecycleDueAt(room, {
+    players: nextPlayers,
+    playerUids: nextPlayerUids,
+    currentPlayers,
+    slotsA: slotAssignment.slotsA,
+    slotsB: slotAssignment.slotsB,
+    updatedAt: now,
+    totalSkillSum: skillStats.totalSkillSum,
+    ratedPlayerCount: skillStats.ratedPlayerCount,
+    avgSkillScoreLive: skillStats.avgSkillScoreLive,
+    ...slotAssignment.updateData,
+    ...(willBeFull
+      ? { status: "locked" as const, isLocked: true, lockedAt: now }
+      : {}),
+  }, now);
 
   return {
     willBeFull,
     playerRecord,
     requesterSkill,
-    patch: {
-      players: nextPlayers,
-      playerUids: nextPlayerUids,
-      currentPlayers,
-      slotsA: slotAssignment.slotsA,
-      slotsB: slotAssignment.slotsB,
-      updatedAt: now,
-      totalSkillSum: skillStats.totalSkillSum,
-      ratedPlayerCount: skillStats.ratedPlayerCount,
-      avgSkillScoreLive: skillStats.avgSkillScoreLive,
-      ...slotAssignment.updateData,
-      ...(willBeFull
-        ? { status: "locked" as const, isLocked: true, lockedAt: now }
-        : {}),
-    },
+    patch,
   };
 }
 
@@ -3969,6 +3975,21 @@ async function createMatchroomFromValidatedArgs(ctx: any, args: any, options?: {
     scheduledTime: args.scheduledTime,
     scheduledStartAt: args.scheduledStartAt,
     lockAt: args.lockAt || getMatchroomLockAt(args.scheduledStartAt) || undefined,
+    lifecycleDueAt: getLifecycleDueAt({
+      status: "open",
+      bookingSource: args.bookingSource,
+      maxPlayers: args.maxPlayers,
+      playerUids: normalizedPlayerUids,
+      slotsA: args.slotsA,
+      slotsB: args.slotsB,
+      scheduledStartAt: args.scheduledStartAt,
+      lockAt: args.lockAt || getMatchroomLockAt(args.scheduledStartAt) || undefined,
+      durationMinutes: args.durationMinutes,
+      locationMode: args.locationMode,
+      zoneId: args.zoneId,
+      zoneAdminApproved: args.zoneAdminApproved,
+      broadcastRequestStatus: args.locationMode === "broadcast" ? (args.broadcastRequestStatus || "waiting_for_fill") : undefined,
+    }, now),
     expiresAt: args.expiresAt,
     durationMinutes: args.durationMinutes,
     pricing: args.pricing,
@@ -4305,7 +4326,7 @@ export const join = mutation({
     const skillStats = await buildRoomSkillStats(ctx, room.game, nextPlayerUids);
     const willBeFull = nextPlayers.length >= room.maxPlayers;
 
-    await ctx.db.patch(args.matchroomId, {
+    const roomPatch = withLifecycleDueAt(room, {
       players: nextPlayers,
       playerUids: nextPlayerUids,
       currentPlayers: nextPlayers.length,
@@ -4317,6 +4338,7 @@ export const join = mutation({
         ? { status: "locked" as const, isLocked: true, lockedAt: Date.now() }
         : {}),
     });
+    await ctx.db.patch(args.matchroomId, roomPatch);
 
     await syncMatchroomMembers(ctx, args.matchroomId, nextPlayerUids);
 
@@ -4439,7 +4461,7 @@ export const leave = mutation({
     const updatedSlotsB = releaseSlot(room.slotsB || []);
     const skillStats = await buildRoomSkillStats(ctx, room.game, updatedUids);
 
-    await ctx.db.patch(args.matchroomId, {
+    await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, {
       players: updatedPlayers,
       playerUids: updatedUids,
       currentPlayers: updatedPlayers.length,
@@ -4449,7 +4471,7 @@ export const leave = mutation({
       avgSkillScoreLive: skillStats.avgSkillScoreLive,
       totalSkillSum: skillStats.totalSkillSum,
       ratedPlayerCount: skillStats.ratedPlayerCount,
-    });
+    }));
 
     await syncMatchroomMembers(ctx, args.matchroomId, updatedUids);
 
@@ -4530,7 +4552,7 @@ export const updateStatus = mutation({
       updateData.lockedAt = Date.now();
     }
 
-    await ctx.db.patch(args.matchroomId, updateData);
+    await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, updateData));
     if (args.status === "cancelled" || args.status === "expired") {
       await expireBookingIntentsForMatchroom(ctx, args.matchroomId, `matchroom_${args.status}`);
       await expirePendingMatchroomNotifications(ctx, args.matchroomId, `matchroom_${args.status}`);
@@ -4572,7 +4594,7 @@ export const startMatch = mutation({
       throw new Error(`Matchroom cannot start: ${validation.reason}`);
     }
     const startTime = room.startTime || room.scheduledStartAt || Date.now();
-    await ctx.db.patch(args.matchroomId, {
+    await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, {
       status: "in-progress",
       startTime,
       startedAt: Date.now(),
@@ -4581,7 +4603,7 @@ export const startMatch = mutation({
       captainUidA: args.hostUid,
       captainUidB: args.team2Captain,
       updatedAt: Date.now(),
-    });
+    }));
     await captureHeldBookingIntentsForMatchroom(ctx, args.matchroomId);
 
     return { ok: true };
@@ -4876,14 +4898,15 @@ export async function performAdminCancel(
     return { ok: true, message: "Matchroom is already cancelled.", alreadyCancelled: true };
   }
 
-  await ctx.db.patch(args.matchroomId, {
-    status: "cancelled",
+    await ctx.db.patch(args.matchroomId, {
+      status: "cancelled",
     isLocked: true,
     cancelledBy: args.adminUid,
     cancelledAt: Date.now(),
     cancelReason: args.reason,
-    cancelNote: args.note || "",
-    updatedAt: Date.now(),
+      cancelNote: args.note || "",
+      lifecycleDueAt: undefined,
+      updatedAt: Date.now(),
   });
   await expireBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
   await expirePendingMatchroomNotifications(ctx, args.matchroomId, "admin_cancel");
@@ -4958,7 +4981,7 @@ export const updateSlots = mutation({
     updateData.playerUids = playerUids;
     updateData.currentPlayers = playerUids.length;
 
-    await ctx.db.patch(args.matchroomId, updateData);
+    await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, updateData));
     await syncMatchroomMembers(ctx, args.matchroomId, playerUids);
     return { ok: true };
   },
@@ -5114,7 +5137,7 @@ export const syncLifecycleIfDue = mutation({
 
     const startValidation = canStartMatchroom(room, now);
     if (startValidation.ok) {
-      await ctx.db.patch(args.matchroomId, {
+      await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, {
         status: "in-progress",
         startTime: room.startTime || scheduledStartAt,
         startedAt: now,
@@ -5122,7 +5145,7 @@ export const syncLifecycleIfDue = mutation({
         startedPlayerCount: getConfirmedPlayerCount(room),
         captainUidA: room.captainUidA || room.hostUid,
         updatedAt: now,
-      });
+      }, now));
       changed = true;
     }
 
@@ -6368,15 +6391,25 @@ export const runLifecycleSweep = internalMutation({
   handler: async (ctx, args) => {
     const batchSize = Math.max(1, Math.min(50, Number(args.batchSize || 25)));
     const now = Date.now();
+    // Keep the status scan available during the schema/backfill rollout. The
+    // production flag is enabled only after every existing room has a due time.
+    const useIndexedSweep = process.env.MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP === "1";
     let changedRooms = 0;
     let expiredNotifications = 0;
     let inspectedRooms = 0;
 
     for (const status of ["open", "locked", "in-progress", "completed"]) {
-      const rooms = await ctx.db
-        .query("matchrooms")
-        .withIndex("by_status", (q: any) => q.eq("status", status))
-        .take(batchSize);
+      const rooms = useIndexedSweep
+        ? await ctx.db
+            .query("matchrooms")
+            .withIndex("by_status_and_lifecycleDueAt", (q: any) =>
+              q.eq("status", status).lte("lifecycleDueAt", now),
+            )
+            .take(batchSize)
+        : await ctx.db
+            .query("matchrooms")
+            .withIndex("by_status", (q: any) => q.eq("status", status))
+            .take(batchSize);
 
       for (const room of rooms) {
         inspectedRooms += 1;
@@ -6405,6 +6438,7 @@ export const runLifecycleSweep = internalMutation({
               ? await finalizeBroadcastFailure(ctx, room._id, "no_zone_response")
               : await dispatchBroadcastZoneRequestsForMatchroom(ctx, room._id);
             if ((result as any).changed || (result as any).dispatched) changedRooms += 1;
+            if ((result as any).changed || (result as any).dispatched) continue;
           } else if (
             room.broadcastRequestStatus === "waiting_for_zones" &&
             Number(room.broadcastRequestExpiresAt || 0) > 0 &&
@@ -6412,6 +6446,7 @@ export const runLifecycleSweep = internalMutation({
           ) {
             const result = await finalizeBroadcastFailure(ctx, room._id, "no_zone_response");
             if ((result as any).changed) changedRooms += 1;
+            if ((result as any).changed) continue;
           }
         }
 
@@ -6432,7 +6467,7 @@ export const runLifecycleSweep = internalMutation({
               : Boolean(room.zoneId) &&
                 !(room.venueConfirmedAt || room.confirmedZoneId || room.zoneAdminApproved === true);
           if (!awaitingVenue && canStartMatchroom(room, now).ok) {
-            await ctx.db.patch(room._id, {
+            await ctx.db.patch(room._id, withLifecycleDueAt(room, {
               status: "in-progress",
               startTime: room.startTime || room.scheduledStartAt,
               startedAt: now,
@@ -6440,7 +6475,7 @@ export const runLifecycleSweep = internalMutation({
               startedPlayerCount: getConfirmedPlayerCount(room),
               captainUidA: room.captainUidA || room.hostUid,
               updatedAt: now,
-            });
+            }, now));
             changedRooms += 1;
             continue;
           }
@@ -6492,15 +6527,41 @@ export const runLifecycleSweep = internalMutation({
           } else if (validation.ok && (!rv.status || rv.status === "pending")) {
             // Result verification is open and valid — remind captains to report.
             await maybeSendResultVerificationRequired(ctx, room);
+            await ctx.db.patch(room._id, {
+              resultVerification: {
+                ...rv,
+                status: rv.status || "pending",
+                lifecyclePromptedAt: now,
+              },
+              lifecycleDueAt: undefined,
+              updatedAt: now,
+            });
+            changedRooms += 1;
           }
+          continue;
+        }
+
+        // A due room that did not transition has reached the next meaningful
+        // reminder/expiry/start time. Move it forward once so the indexed sweep
+        // never keeps rereading it every two minutes.
+        const lifecycleDueAt = getLifecycleDueAt(room, now);
+        if (room.lifecycleDueAt !== lifecycleDueAt) {
+          await ctx.db.patch(room._id, { lifecycleDueAt, updatedAt: now });
         }
       }
     }
 
-    const pendingNotifications = await ctx.db
-      .query("notifications")
-      .withIndex("by_status", (q: any) => q.eq("status", "pending"))
-      .take(batchSize);
+    const pendingNotifications = useIndexedSweep
+      ? await ctx.db
+          .query("notifications")
+          .withIndex("by_status_and_expiresAt", (q: any) =>
+            q.eq("status", "pending").lte("expiresAt", now),
+          )
+          .take(batchSize)
+      : await ctx.db
+          .query("notifications")
+          .withIndex("by_status", (q: any) => q.eq("status", "pending"))
+          .take(batchSize);
     for (const notification of pendingNotifications) {
       if (!isMatchJoinRequestNotification(notification)) continue;
       if (!notification.expiresAt || notification.expiresAt > now) continue;
@@ -6515,7 +6576,7 @@ export const runLifecycleSweep = internalMutation({
       expiredNotifications += 1;
     }
 
-    return { inspectedRooms, changedRooms, expiredNotifications };
+    return { inspectedRooms, changedRooms, expiredNotifications, useIndexedSweep };
   },
 });
 

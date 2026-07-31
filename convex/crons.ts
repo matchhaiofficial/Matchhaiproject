@@ -3,12 +3,14 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-crons.interval(
-  "matchroom lifecycle sweep",
-  { minutes: 2 },
-  (internal as any).matchrooms.runLifecycleSweep,
-  { batchSize: 25 },
-);
+if (process.env.MATCHHAI_ENABLE_LIFECYCLE_CRON === "1") {
+  crons.interval(
+    "matchroom lifecycle sweep",
+    { minutes: 2 },
+    (internal as any).matchrooms.runLifecycleSweep,
+    { batchSize: 25 },
+  );
+}
 
 crons.interval(
   "zone pilot expiry sweep",

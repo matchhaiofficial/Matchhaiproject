@@ -10,6 +10,7 @@ import {
   getMatchroomLockAt,
   validateMatchroomScheduleWindow,
 } from "./timing";
+import { withLifecycleDueAt } from "./matchroomLifecycle";
 
 export const BROADCAST_COUNTER_RESPONSE_WINDOW_MS = BROADCAST_COUNTER_RESPONSE_WINDOW_MS_FROM_TIMING;
 const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
@@ -654,12 +655,12 @@ export async function finalizeBroadcastFailure(
       ? Number(room.broadcastRequestExpiresAt)
       : now;
 
-  await ctx.db.patch(matchroomId, {
+  await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
     broadcastRequestStatus: nextBroadcastStatus,
     broadcastRequestStartedAt: room.broadcastRequestStartedAt || now,
     broadcastRequestExpiresAt: responseExpiresAt,
     updatedAt: now,
-  });
+  }, now));
 
   for (const request of requests) {
     if (request.requestKind !== "broadcast_fanout") continue;
@@ -751,7 +752,7 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
       if (Number.isFinite(existingExpiresAt)) {
         patch.broadcastRequestExpiresAt = existingExpiresAt;
       }
-      await ctx.db.patch(matchroomId, patch);
+      await ctx.db.patch(matchroomId, withLifecycleDueAt(room, patch, now));
     }
     return {
       dispatched: false,
@@ -782,12 +783,12 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
   );
   if (!responseExpiresAt) {
     const lockAt = getMatchroomLockAt(room.scheduledStartAt);
-    await ctx.db.patch(matchroomId, {
+    await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
       broadcastRequestStatus: "expired",
       broadcastRequestStartedAt: room.broadcastRequestStartedAt || now,
       broadcastRequestExpiresAt: lockAt || now,
       updatedAt: now,
-    });
+    }, now));
     await notifyBroadcastMatchroomCancelledParticipants(ctx, { ...room, _id: matchroomId }, {
       reason: "lock_time_elapsed",
       responseExpiresAt: lockAt || now,
@@ -892,12 +893,12 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
     });
   }
 
-  await ctx.db.patch(matchroomId, {
+  await ctx.db.patch(matchroomId, withLifecycleDueAt(room, {
     broadcastRequestStatus: "waiting_for_zones",
     broadcastRequestStartedAt: now,
     broadcastRequestExpiresAt: responseExpiresAt,
     updatedAt: now,
-  });
+  }, now));
 
   await notifyBroadcastParticipants(ctx, { ...room, _id: matchroomId }, {
     type: "broadcast.started",
@@ -968,7 +969,7 @@ export async function confirmBroadcastVenue(
     room.location ||
     "Zone Venue";
 
-  await ctx.db.patch(input.matchroomId, {
+  await ctx.db.patch(input.matchroomId, withLifecycleDueAt(room, {
     zoneId: String(input.zoneId),
     confirmedZoneId: String(input.zoneId),
     zoneOwnerUid: input.zoneOwnerUid || room.zoneOwnerUid,
@@ -980,7 +981,7 @@ export async function confirmBroadcastVenue(
     broadcastRequestStatus: "zone_confirmed",
     venueConfirmedAt: now,
     updatedAt: now,
-  });
+  }, now));
 
   await bookWinningResourcesForBroadcastRequest(ctx, {
     request: winningRequest,

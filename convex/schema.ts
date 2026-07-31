@@ -604,6 +604,7 @@ export default defineSchema({
     scheduledTime: v.optional(v.string()),
     scheduledStartAt: v.optional(v.number()),
     lockAt: v.optional(v.number()),
+    lifecycleDueAt: v.optional(v.number()),
     expiresAt: v.optional(v.number()),
     durationMinutes: v.optional(v.number()),
     pricing: v.object({
@@ -719,6 +720,7 @@ export default defineSchema({
       resolutionSource: v.optional(v.string()),
       adminReviewReason: v.optional(v.string()),
       validationError: v.optional(v.string()),
+      lifecyclePromptedAt: v.optional(v.number()),
     })),
 
     // Cancellation
@@ -747,6 +749,7 @@ export default defineSchema({
     .index("by_hostUid_and_scheduledStartAt", ["hostUid", "scheduledStartAt"])
     .index("by_hostUid_and_createdAt", ["hostUid", "createdAt"])
     .index("by_status", ["status"])
+    .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_game", ["game"])
     .index("by_status_and_game", ["status", "game"])
     .index("by_status_and_game_and_scheduledStartAt", ["status", "game", "scheduledStartAt"])
@@ -1643,6 +1646,7 @@ export default defineSchema({
   })
     .index("by_toUid", ["toUid"])
     .index("by_status", ["status"])
+    .index("by_status_and_expiresAt", ["status", "expiresAt"])
     .index("by_toUid_and_status", ["toUid", "status"])
     .index("by_toUid_and_type", ["toUid", "type"])
     .index("by_toUid_isRead_createdAt", ["toUid", "isRead", "createdAt"])

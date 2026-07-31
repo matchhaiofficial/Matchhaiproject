@@ -33,8 +33,10 @@ import type * as kyc from "../kyc.js";
 import type * as kycGate from "../kycGate.js";
 import type * as kycNotifications from "../kycNotifications.js";
 import type * as matchroomBroadcast from "../matchroomBroadcast.js";
+import type * as matchroomLifecycle from "../matchroomLifecycle.js";
 import type * as matchroomPricing from "../matchroomPricing.js";
 import type * as matchrooms from "../matchrooms.js";
+import type * as migrations from "../migrations.js";
 import type * as notifications from "../notifications.js";
 import type * as phoneOtp from "../phoneOtp.js";
 import type * as presence from "../presence.js";
@@ -99,8 +101,10 @@ declare const fullApi: ApiFromModules<{
   kycGate: typeof kycGate;
   kycNotifications: typeof kycNotifications;
   matchroomBroadcast: typeof matchroomBroadcast;
+  matchroomLifecycle: typeof matchroomLifecycle;
   matchroomPricing: typeof matchroomPricing;
   matchrooms: typeof matchrooms;
+  migrations: typeof migrations;
   notifications: typeof notifications;
   phoneOtp: typeof phoneOtp;
   presence: typeof presence;
@@ -162,4 +166,5 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
+  migrations: import("@convex-dev/migrations/_generated/component.js").ComponentApi<"migrations">;
 };
