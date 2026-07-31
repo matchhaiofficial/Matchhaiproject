@@ -4,6 +4,7 @@ import { Doc, Id } from "./_generated/dataModel";
 import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import { requireKycVerified } from "./kycGate";
+import { withLifecycleDueAt } from "./matchroomLifecycle";
 
 // ============================================
 // QUERIES
@@ -455,7 +456,9 @@ export const allocateResourcesToRequest = mutation({
       allocatedByUid: actorUid,
       updatedAt: now,
     });
-    await ctx.db.patch(request.matchroomId, {
+    const matchroom = await ctx.db.get(request.matchroomId);
+    if (!matchroom) throw new Error("Matchroom not found.");
+    await ctx.db.patch(request.matchroomId, withLifecycleDueAt(matchroom, {
       zoneId: String(args.zoneId),
       zoneOwnerUid: String(zone.ownerUid || actorUid),
       branchId: args.branchId,
@@ -463,7 +466,7 @@ export const allocateResourcesToRequest = mutation({
       bookingSource: "zone_accepted",
       zoneAdminApproved: true,
       updatedAt: now,
-    });
+    }, now));
     if (request.userId) {
       await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
         type: "resource.allocation_action",
@@ -582,7 +585,9 @@ export const reassignResourcesForRequest = mutation({
       updatedAt: now,
     });
 
-    await ctx.db.patch(request.matchroomId, {
+    const matchroom = await ctx.db.get(request.matchroomId);
+    if (!matchroom) throw new Error("Matchroom not found.");
+    await ctx.db.patch(request.matchroomId, withLifecycleDueAt(matchroom, {
       zoneId: String(args.zoneId),
       zoneOwnerUid: String(zone.ownerUid || actorUid),
       branchId: args.branchId,
@@ -590,7 +595,7 @@ export const reassignResourcesForRequest = mutation({
       bookingSource: "zone_accepted",
       zoneAdminApproved: true,
       updatedAt: now,
-    });
+    }, now));
 
     await recordZoneAuditEvent(ctx, {
       zoneId: String(args.zoneId),

@@ -17,6 +17,7 @@ import {
   assertZoneResourceCapacityAvailable,
   getBookingRequestStartAtForConflict,
 } from "./bookingConflicts";
+import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -881,6 +882,7 @@ async function cancelMatchroomAndReturnPayments(
       isLocked: true,
       cancelledAt: input.now,
       cancelReason: input.reason,
+      lifecycleDueAt: undefined,
       updatedAt: input.now,
     });
   }
@@ -1090,7 +1092,9 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
   }
 
   if (request.matchroomId) {
-    await ctx.db.patch(request.matchroomId, {
+    const matchroom = await ctx.db.get(request.matchroomId);
+    if (!matchroom) throw new Error("Accepted matchroom was not found.");
+    await ctx.db.patch(request.matchroomId, withLifecycleDueAt(matchroom, {
       scheduledDate: input.option.date,
       scheduledTime: input.option.time,
       ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
@@ -1102,7 +1106,7 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
       bookingSource: "zone_accepted",
       zoneAdminApproved: true,
       updatedAt: now,
-    });
+    }, now));
     return request.matchroomId;
   }
 
@@ -1137,6 +1141,19 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     scheduledDate: input.option.date,
     scheduledTime: input.option.time,
     ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
+    lifecycleDueAt: getLifecycleDueAt({
+      status: "open",
+      bookingSource: "zone_accepted",
+      maxPlayers,
+      playerUids: players.map((player) => player.uid),
+      slotsA: slots.slotsA,
+      slotsB: slots.slotsB,
+      scheduledStartAt: acceptedStartAt || undefined,
+      durationMinutes: getDurationMinutesFromRequest(request),
+      locationMode: "zone",
+      zoneId: String(request.zoneId || offer.zoneId),
+      zoneAdminApproved: true,
+    }, now),
     durationMinutes: getDurationMinutesFromRequest(request),
     pricing: {
       perPlayer: Number(request.budgetPerPlayer || offer.proposedPrice || 0),
@@ -1954,7 +1971,9 @@ export const acceptBookingRequest = mutation({
         });
       }
 
-      await ctx.db.patch(matchroomId, {
+      const existingMatchroom = await ctx.db.get(matchroomId);
+      if (!existingMatchroom) throw new Error("Matchroom not found.");
+      await ctx.db.patch(matchroomId, withLifecycleDueAt(existingMatchroom as any, {
         status: "locked",
         isLocked: true,
         zoneId: args.zoneId,
@@ -1966,7 +1985,7 @@ export const acceptBookingRequest = mutation({
         resourceIds: args.resourceIds,
         location: args.location || args.branchName || args.zoneName || args.matchroomData.location || "Zone Venue",
         updatedAt: now,
-      });
+      }, now));
 
       await ctx.db.patch(args.requestId, {
         status: "accepted",
@@ -2698,12 +2717,14 @@ export const respondToCounterOffer = mutation({
             typeof chosenOption.startAt === "number" && Number.isFinite(chosenOption.startAt)
               ? chosenOption.startAt
               : parseLocalDateTimeMillis(chosenOption.date, chosenOption.time);
-          await ctx.db.patch(matchroomId, {
+          const existingMatchroom = await ctx.db.get(matchroomId);
+          if (!existingMatchroom) throw new Error("Matchroom not found.");
+          await ctx.db.patch(matchroomId, withLifecycleDueAt(existingMatchroom, {
             scheduledDate: chosenOption.date,
             scheduledTime: chosenOption.time,
             ...(acceptedStartAt != null ? { scheduledStartAt: acceptedStartAt } : {}),
             updatedAt: now,
-          });
+          }, now));
         }
         await notifyZoneOfferOutcome(ctx, {
           offer,
@@ -2785,7 +2806,9 @@ export const respondToCounterOffer = mutation({
       finalStatus = "accepted";
 
       if (matchroomId) {
-        await ctx.db.patch(matchroomId, {
+        const existingMatchroom = await ctx.db.get(matchroomId);
+        if (!existingMatchroom) throw new Error("Matchroom not found.");
+        await ctx.db.patch(matchroomId, withLifecycleDueAt(existingMatchroom, {
           status: "locked",
           isLocked: true,
           lockedAt: now,
@@ -2793,7 +2816,7 @@ export const respondToCounterOffer = mutation({
           resourceIds: acceptedResourceIds,
           ...(offer.branchName || offer.zoneName ? { location: offer.branchName || offer.zoneName } : {}),
           updatedAt: now,
-        });
+        }, now));
       }
 
       await ctx.db.patch(request._id, {
@@ -3015,6 +3038,20 @@ async function createWalkInMatchroomFromValidatedArgs(ctx: any, args: any, actor
       scheduledTime: args.scheduledTime,
       scheduledStartAt: scheduledStartAt || undefined,
       lockAt: getMatchroomLockAt(scheduledStartAt) || undefined,
+      lifecycleDueAt: getLifecycleDueAt({
+        status: "open",
+        bookingSource: "walkin",
+        maxPlayers: args.seatCount,
+        playerUids: args.playerUids,
+        slotsA: args.slotsA,
+        slotsB: args.slotsB,
+        scheduledStartAt: scheduledStartAt || undefined,
+        lockAt: getMatchroomLockAt(scheduledStartAt) || undefined,
+        durationMinutes: Math.max(30, Math.floor(args.durationMinutes)),
+        locationMode: "zone",
+        zoneId: args.zoneId,
+        zoneAdminApproved: true,
+      }, now),
       durationMinutes: Math.max(30, Math.floor(args.durationMinutes)),
       seriesType: args.seriesType,
       slotsA: args.slotsA,
@@ -3270,7 +3307,7 @@ export const bookWalkInSeat = mutation({
     walkIn.roster = roster;
     walkIn.updatedAt = now;
 
-    await ctx.db.patch(room._id, {
+    await ctx.db.patch(room._id, withLifecycleDueAt(room, {
       slotsA: nextSlotsA,
       slotsB: nextSlotsB,
       players: nextPlayers,
@@ -3278,7 +3315,7 @@ export const bookWalkInSeat = mutation({
       currentPlayers: nextCurrentPlayers,
       walkIn,
       updatedAt: now,
-    });
+    }, now));
 
     await recordZoneAuditEvent(ctx, {
       zoneId: String(room.zoneId),

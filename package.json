@@ -26,6 +26,7 @@
     "@better-auth/expo": "1.4.9",
     "@convex-dev/auth": "^0.0.91",
     "@convex-dev/better-auth": "0.10.11",
+    "@convex-dev/migrations": "^0.3.6",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/lora": "^0.4.2",
     "@expo-google-fonts/martel": "^0.4.1",
