@@ -4197,6 +4197,9 @@ export const createTeamChallengeMatchroom = internalMutation({
     };
 
     const skillStats = await buildRoomSkillStats(ctx, game, playerUids);
+    const slotsA = buildSlots("A", captainA.uid ? captainA : null);
+    const slotsB = buildSlots("B", captainB.uid ? captainB : null);
+    const lockAt = getMatchroomLockAt(scheduledStartAt) || undefined;
 
     const matchroomId = await ctx.db.insert("matchrooms", {
       hostUid: captainA.uid,
@@ -4215,11 +4218,24 @@ export const createTeamChallengeMatchroom = internalMutation({
       scheduledDate: challenge.scheduledDate,
       scheduledTime: challenge.scheduledTime,
       scheduledStartAt,
-      lockAt: getMatchroomLockAt(scheduledStartAt) || undefined,
+      lockAt,
+      lifecycleDueAt: getLifecycleDueAt({
+        status: "open",
+        bookingSource: "team_challenge",
+        maxPlayers,
+        playerUids,
+        slotsA,
+        slotsB,
+        scheduledStartAt,
+        lockAt,
+        locationMode: "zone",
+        zoneId: String(venue.zoneId),
+        zoneAdminApproved: false,
+      }, now),
       pricing: { perPlayer, currency: "PKR" },
       selectedZoneRateKey: challenge.zoneRateKey,
-      slotsA: buildSlots("A", captainA.uid ? captainA : null),
-      slotsB: buildSlots("B", captainB.uid ? captainB : null),
+      slotsA,
+      slotsB,
       captainUidA: captainA.uid,
       captainUidB: captainB.uid || undefined,
       format: challenge.format,
@@ -4898,28 +4914,31 @@ export async function performAdminCancel(
     return { ok: true, message: "Matchroom is already cancelled.", alreadyCancelled: true };
   }
 
-    await ctx.db.patch(args.matchroomId, {
-      status: "cancelled",
+  const cancellationReason = args.reason || "admin_cancel";
+  const cancelledAt = Date.now();
+  await ctx.db.patch(args.matchroomId, {
+    status: "cancelled",
     isLocked: true,
     cancelledBy: args.adminUid,
-    cancelledAt: Date.now(),
-    cancelReason: args.reason,
-      cancelNote: args.note || "",
-      lifecycleDueAt: undefined,
-      updatedAt: Date.now(),
+    cancelledAt,
+    cancelReason: cancellationReason,
+    cancelNote: args.note || "",
+    lifecycleDueAt: undefined,
+    updatedAt: cancelledAt,
   });
-  await expireBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
-  await expirePendingMatchroomNotifications(ctx, args.matchroomId, "admin_cancel");
-  await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
-  await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, "admin_cancel");
+  await expireBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
+  await releaseHeldBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
+  await refundCapturedBookingIntentsForMatchroom(ctx, args.matchroomId, cancellationReason);
+  await refundDirectMatchroomCreatePayment(ctx, args.matchroomId, cancellationReason);
+  await expirePendingMatchroomNotifications(ctx, args.matchroomId, cancellationReason);
   // Team Challenge: return both captains' held funds to their wallets.
   await ctx.runMutation(internal.teamChallenges.settleForMatchroom, {
     matchroomId: args.matchroomId,
     action: "release",
-    reason: "admin_cancel",
+    reason: cancellationReason,
   });
 
-  await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, args.reason, args.note);
+  await notifyMatchroomCancelledPlayers(ctx, room, args.matchroomId, cancellationReason, args.note);
 
   return { ok: true, message: "Lobby cancelled and players notified.", alreadyCancelled: false };
 }
@@ -4943,9 +4962,29 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.matchroomId);
     if (!room) throw new Error("Matchroom not found");
-    await requireRoomActor(ctx, room, ["host"]);
-    await ctx.db.delete(args.matchroomId);
-    return { ok: true };
+    const actor = await requireRoomActor(ctx, room, ["host"]);
+
+    if (room.zoneAdminApproved) {
+      throw new Error("This lobby has been approved by the Zone Admin and cannot be deleted.");
+    }
+
+    const normalizedGame = String(room.game || "").toLowerCase().replace(/[\s-]/g, "");
+    const deletionThreshold = normalizedGame === "cs2"
+      ? 3
+      : ["futsal", "cricket", "indoorcricket"].includes(normalizedGame)
+        ? 6
+        : 2;
+    const playerCount = Array.isArray(room.players) ? room.players.length : 0;
+    if (playerCount >= deletionThreshold) {
+      throw new Error("This lobby has too many joined players to be deleted.");
+    }
+
+    return await performAdminCancel(ctx, {
+      matchroomId: args.matchroomId,
+      adminUid: String(actor.user._id),
+      reason: "host_deleted",
+      note: "Cancelled by the matchroom creator.",
+    });
   },
 });
 
@@ -6203,7 +6242,7 @@ export const kickFromMatchroom = mutation({
     if (captainA?._id === player._id) updates.captainUidA = undefined;
     if (captainB?._id === player._id) updates.captainUidB = undefined;
 
-    await ctx.db.patch(args.matchroomId, updates);
+    await ctx.db.patch(args.matchroomId, withLifecycleDueAt(room, updates, now));
     await syncMatchroomMembers(ctx, args.matchroomId, updatedUids);
 
     // Remove from chatroom
