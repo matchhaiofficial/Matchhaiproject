@@ -65,6 +65,7 @@ export default function TeamChatScreen() {
     }, [memberUsers]);
 
     const sendMessageMutation = useMutation(api.teamChat.sendMessage);
+    const generateUploadUrlMutation = useMutation(api.teamChat.generateUploadUrl);
     const markReadMutation = useMutation(api.teamChat.markRead);
 
     const loading =
@@ -166,6 +167,7 @@ export default function TeamChatScreen() {
                     uri,
                     mimeType: "audio/m4a",
                     fileName: `team_voice_${user._id}_${Date.now()}.m4a`,
+                    generateUploadUrl: () => generateUploadUrlMutation({ teamId }),
                 });
                 await sendMessageMutation({
                     teamId,
@@ -213,6 +215,7 @@ export default function TeamChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "image/jpeg",
                 fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+                generateUploadUrl: () => generateUploadUrlMutation({ teamId }),
             });
             await sendMessageMutation({
                 teamId,
@@ -248,6 +251,7 @@ export default function TeamChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "application/octet-stream",
                 fileName: asset.name || `file_${Date.now()}`,
+                generateUploadUrl: () => generateUploadUrlMutation({ teamId }),
             });
             await sendMessageMutation({
                 teamId,

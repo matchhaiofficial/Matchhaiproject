@@ -1247,6 +1247,21 @@ export const recordKycAuditEvent = internalMutation({
   },
 });
 
+export const generateProfileImageUploadUrl = mutation({
+  args: { sessionToken: v.optional(v.string()) },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
+    if (!authId) throw new Error("Please sign in to continue.");
+    const profile = await ctx.db
+      .query("users")
+      .withIndex("by_authId", (q) => q.eq("authId", authId))
+      .unique();
+    if (!profile) throw new Error("User profile not found.");
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
 export const markProfileImage = mutation({
   args: {
     storageId: v.id("_storage"),

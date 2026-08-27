@@ -645,7 +645,10 @@ export default function EditProfile() {
                 uri: asset.uri,
                 mimeType,
                 fileName: asset.fileName || "profile-image.jpg",
-                convexClient: convex,
+                generateUploadUrl: () => convex.mutation(
+                    api.kyc.generateProfileImageUploadUrl,
+                    { sessionToken },
+                ),
             });
             await convex.mutation(api.kyc.markProfileImage, { storageId: upload.storageId, sessionToken });
             await refreshUser();

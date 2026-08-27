@@ -5,50 +5,41 @@ import { v } from "convex/values";
 // FILE STORAGE
 // ============================================
 
-// Generate upload URL
+export function rejectDeprecatedStorageEndpoint(): never {
+  throw new Error("Deprecated generic storage endpoint is disabled.");
+}
+
+// Retained as fail-closed compatibility stubs. Uploads and reads must use a
+// resource-specific function that verifies the caller's access to that resource.
 export const generateUploadUrl = mutation({
   args: {},
-  handler: async (ctx) => {
-    return await ctx.storage.generateUploadUrl();
-  },
+  returns: v.string(),
+  handler: async () => rejectDeprecatedStorageEndpoint(),
 });
 
-// Get file URL by storage ID
 export const getFileUrl = query({
   args: { storageId: v.id("_storage") },
-  handler: async (ctx, args) => {
-    return await ctx.storage.getUrl(args.storageId);
-  },
+  returns: v.union(v.string(), v.null()),
+  handler: async () => rejectDeprecatedStorageEndpoint(),
 });
 
-// Get multiple file URLs
 export const getFileUrls = query({
   args: { storageIds: v.array(v.id("_storage")) },
-  handler: async (ctx, args) => {
-    const urls = await Promise.all(
-      args.storageIds.map(async (id) => ({
-        storageId: id,
-        url: await ctx.storage.getUrl(id),
-      }))
-    );
-    return urls;
-  },
+  returns: v.array(v.object({
+    storageId: v.id("_storage"),
+    url: v.union(v.string(), v.null()),
+  })),
+  handler: async () => rejectDeprecatedStorageEndpoint(),
 });
 
-// Delete file
 export const deleteFile = mutation({
   args: { storageId: v.id("_storage") },
-  handler: async (ctx, args) => {
-    await ctx.storage.delete(args.storageId);
-    return true;
-  },
+  returns: v.boolean(),
+  handler: async () => rejectDeprecatedStorageEndpoint(),
 });
 
-// Get file metadata
 export const getFileMetadata = query({
   args: { storageId: v.id("_storage") },
-  handler: async (ctx, args) => {
-    const metadata = await ctx.db.system.get(args.storageId);
-    return metadata;
-  },
+  returns: v.any(),
+  handler: async () => rejectDeprecatedStorageEndpoint(),
 });

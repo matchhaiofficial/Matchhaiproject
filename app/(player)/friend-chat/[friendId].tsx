@@ -92,6 +92,7 @@ export default function FriendChatScreen() {
 
     // Mutations
     const sendMessageMutation = useMutation(api.friendChat.sendMessage);
+    const generateUploadUrlMutation = useMutation(api.friendChat.generateUploadUrl);
     const deleteForMeMutation = useMutation(api.friendChat.deleteForMe);
     const markReadMutation = useMutation(api.friendChat.markRead);
     const toggleReactionMutation = useMutation(api.friendChat.toggleReaction);
@@ -259,6 +260,7 @@ export default function FriendChatScreen() {
                     uri,
                     mimeType: "audio/m4a",
                     fileName: `voice_${user._id}_${Date.now()}.m4a`,
+                    generateUploadUrl: () => generateUploadUrlMutation({ chatroomId }),
                 });
 
                 await sendMessageMutation({
@@ -311,6 +313,7 @@ export default function FriendChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "image/jpeg",
                 fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+                generateUploadUrl: () => generateUploadUrlMutation({ chatroomId }),
             });
 
             await sendMessageMutation({
@@ -351,6 +354,7 @@ export default function FriendChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "application/octet-stream",
                 fileName: asset.name || `file_${Date.now()}`,
+                generateUploadUrl: () => generateUploadUrlMutation({ chatroomId }),
             });
 
             await sendMessageMutation({

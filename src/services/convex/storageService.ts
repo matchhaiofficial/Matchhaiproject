@@ -1,21 +1,18 @@
-import { convex as defaultConvex } from "../../lib/convex";
-import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 
 type UploadFileInput = {
     uri: string;
     mimeType: string;
     fileName: string;
-    convexClient?: typeof defaultConvex;
+    generateUploadUrl: () => Promise<string>;
 };
 
 export async function uploadFileToConvex({
     uri,
     mimeType,
-    fileName,
-    convexClient = defaultConvex,
+    generateUploadUrl,
 }: UploadFileInput): Promise<{ storageId: Id<"_storage">; url: string | null }> {
-    const uploadUrl = await convexClient.mutation(api.storage.generateUploadUrl, {});
+    const uploadUrl = await generateUploadUrl();
 
     const localFileResponse = await fetch(uri);
     if (!localFileResponse.ok) {
@@ -38,7 +35,5 @@ export async function uploadFileToConvex({
 
     const payload = await response.json();
     const storageId = payload.storageId as Id<"_storage">;
-    const url = await convexClient.query(api.storage.getFileUrl, { storageId });
-
-    return { storageId, url };
+    return { storageId, url: null };
 }

@@ -136,6 +136,7 @@ export default function MatchroomChatScreen() {
     );
 
     const getOrCreateChatroom = useMutation(api.chat.getOrCreateForMatchroom);
+    const generateChatUploadUrlMutation = useMutation(api.chat.generateChatUploadUrl);
     const sendMessageToMatchroomMutation = useMutation(api.chat.sendMessageToMatchroom);
     const deleteForMeMutation = useMutation(api.chat.deleteForMe);
     const markReadMutation = useMutation(api.chat.markRead);
@@ -374,6 +375,9 @@ export default function MatchroomChatScreen() {
                     uri,
                     mimeType: "audio/m4a",
                     fileName: `voice_${user._id}_${Date.now()}.m4a`,
+                    generateUploadUrl: () => generateChatUploadUrlMutation({
+                        matchroomId: matchroomId as Id<"matchrooms">,
+                    }),
                 });
 
                 await sendMessageToMatchroomMutation({
@@ -441,6 +445,9 @@ export default function MatchroomChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "image/jpeg",
                 fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+                generateUploadUrl: () => generateChatUploadUrlMutation({
+                    matchroomId: matchroomId as Id<"matchrooms">,
+                }),
             });
 
             await sendMessageToMatchroomMutation({
@@ -481,6 +488,9 @@ export default function MatchroomChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "application/octet-stream",
                 fileName: asset.name || `file_${Date.now()}`,
+                generateUploadUrl: () => generateChatUploadUrlMutation({
+                    matchroomId: matchroomId as Id<"matchrooms">,
+                }),
             });
 
             await sendMessageToMatchroomMutation({
@@ -751,7 +761,6 @@ export default function MatchroomChatScreen() {
         </>
     );
 }
-
 
 
 

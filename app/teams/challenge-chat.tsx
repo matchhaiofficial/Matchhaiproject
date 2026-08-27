@@ -86,6 +86,7 @@ export default function TeamChallengeChatScreen() {
     }, [captainUsers]);
 
     const sendMessageMutation = useMutation(api.teamChallengeChat.sendMessage);
+    const generateChatUploadUrlMutation = useMutation(api.teamChallengeChat.generateChatUploadUrl);
     const markReadMutation = useMutation(api.teamChallengeChat.markRead);
     const toggleReactionMutation = useMutation(api.teamChallengeChat.toggleReaction);
     const editMessageMutation = useMutation(api.teamChallengeChat.editMessage);
@@ -304,6 +305,7 @@ export default function TeamChallengeChatScreen() {
                     uri,
                     mimeType: "audio/m4a",
                     fileName: `challenge_voice_${user._id}_${Date.now()}.m4a`,
+                    generateUploadUrl: () => generateChatUploadUrlMutation({ chatId }),
                 });
 
                 await sendMessageMutation({
@@ -370,6 +372,7 @@ export default function TeamChallengeChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "image/jpeg",
                 fileName: asset.fileName || `photo_${Date.now()}.jpg`,
+                generateUploadUrl: () => generateChatUploadUrlMutation({ chatId }),
             });
 
             await sendMessageMutation({
@@ -409,6 +412,7 @@ export default function TeamChallengeChatScreen() {
                 uri: asset.uri,
                 mimeType: asset.mimeType || "application/octet-stream",
                 fileName: asset.name || `file_${Date.now()}`,
+                generateUploadUrl: () => generateChatUploadUrlMutation({ chatId }),
             });
 
             await sendMessageMutation({
