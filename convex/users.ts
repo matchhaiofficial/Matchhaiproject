@@ -318,6 +318,7 @@ export const getBySteamId = query({
       .query("users")
       .withIndex("by_steamId", (q) => q.eq("steamId", args.steamId))
       .unique();
+    if (user?.hidePlatformsPublicly) return null;
     return publicUser(user);
   },
 });
@@ -330,6 +331,7 @@ export const getByPsnAccountId = query({
       .query("users")
       .withIndex("by_psnAccountId", (q) => q.eq("psnAccountId", args.psnAccountId))
       .unique();
+    if (user?.hidePlatformsPublicly) return null;
     return publicUser(user);
   },
 });
@@ -1312,7 +1314,7 @@ export const listPlayers = query({
 
     return users
       .filter((user) => !isUserHiddenFromPublic(user))
-      .map((u) => ({ ...u, id: u._id }));
+      .map((u) => ({ ...publicUser(u), id: u._id }));
   },
 });
 

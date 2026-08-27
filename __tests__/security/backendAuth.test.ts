@@ -149,4 +149,59 @@ describe("publicUser projection (privacy)", () => {
   it("returns null for a missing user", () => {
     expect(publicUser(null)).toBeNull();
   });
+
+  it("enforces hidden areas and gaming platforms in the server projection", () => {
+    const out = publicUser({
+      _id: "u-private",
+      username: "private_player",
+      hideAreasPublicly: true,
+      hidePlatformsPublicly: true,
+      areasPreferred: ["Clifton", "DHA"],
+      steamId: "76561198000000000",
+      steamProfileUrl: "https://steamcommunity.com/profiles/private",
+      steamPersonaName: "Private Steam",
+      steamCs2Hours: 900,
+      steamTekken8Hours: 80,
+      steamFc26Hours: 60,
+      faceitId: "faceit-private",
+      faceitProfileUrl: "https://faceit.com/private",
+      faceitNickname: "PrivateFaceit",
+      faceitGame: "cs2",
+      faceitElo: 2200,
+      faceitSkillLevel: 10,
+      psnAccountId: "psn-private",
+      psnOnlineId: "PrivatePSN",
+      psnStats: { psnOnlineId: "PrivatePSN", fc: { progress: 90 } },
+      xboxGamertag: "PrivateXbox",
+    }) as any;
+
+    expect(out.areasPreferred).toEqual([]);
+    for (const key of [
+      "steamId", "steamProfileUrl", "steamPersonaName", "steamCs2Hours",
+      "steamTekken8Hours", "steamFc26Hours", "faceitId", "faceitProfileUrl",
+      "faceitNickname", "faceitGame", "faceitElo", "faceitSkillLevel",
+      "psnAccountId", "psnOnlineId", "psnStats", "xboxGamertag",
+    ]) {
+      expect(out[key]).toBeNull();
+    }
+  });
+
+  it("preserves explicitly public areas and platform display values", () => {
+    const out = publicUser({
+      _id: "u-public",
+      areasPreferred: ["Clifton"],
+      steamPersonaName: "Public Steam",
+      faceitElo: 1500,
+      psnOnlineId: "PublicPSN",
+      xboxGamertag: "PublicXbox",
+      hideAreasPublicly: false,
+      hidePlatformsPublicly: false,
+    }) as any;
+
+    expect(out.areasPreferred).toEqual(["Clifton"]);
+    expect(out.steamPersonaName).toBe("Public Steam");
+    expect(out.faceitElo).toBe(1500);
+    expect(out.psnOnlineId).toBe("PublicPSN");
+    expect(out.xboxGamertag).toBe("PublicXbox");
+  });
 });

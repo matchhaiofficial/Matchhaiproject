@@ -1,7 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { isUserHiddenFromPublic } from "./userVisibility";
-import { requireCurrentUser } from "./authz";
+import { getPublicAreas, publicUser, requireCurrentUser } from "./authz";
 import { MATCHROOM_LOCK_BEFORE_START_MS } from "./timing";
 
 const ACTIVE_FRIEND_REQUEST_TYPES = new Set(["friend_request", "social.friend_request"]);
@@ -463,6 +463,7 @@ export const listDiscoverPlayers = query({
       .filter((player: any) => String(player._id) !== String(viewerUserId))
       .filter((player: any) => player.accountType === "player")
       .filter((player: any) => !isUserHiddenFromPublic(player))
+      .map((player: any) => publicUser(player))
       .filter(playerHasEnabledGame)
       .filter((player: any) => !search || String(player.username || "").toLowerCase().includes(search))
       .filter((player: any) => args.selectedGame === "all" || playerHasGameEnabled(player, args.selectedGame))
@@ -477,7 +478,7 @@ export const listDiscoverPlayers = query({
         if (args.selectedAvailability === "Offline") return !isPlayerOnline(player);
         return true;
       })
-      .filter((player: any) => matchesAreaSelection(player?.areasPreferred, args.selectedArea))
+      .filter((player: any) => matchesAreaSelection(getPublicAreas(player), args.selectedArea))
       .filter((player: any) => matchesConsolePlatform(player, args.selectedPlatform))
       .filter((player: any) => {
         if (args.selectedCompetitiveIntent === "Any") return true;
@@ -504,7 +505,7 @@ export const listDiscoverPlayers = query({
         playsIndoorCricket: !!player.playsIndoorCricket,
         playsPadel: !!player.playsPadel,
         playsPickleball: !!player.playsPickleball,
-        areasPreferred: Array.isArray(player.areasPreferred) ? player.areasPreferred : [],
+        areasPreferred: getPublicAreas(player),
         psnOnlineId: player.psnOnlineId,
         xboxGamertag: player.xboxGamertag,
         roles: {
@@ -692,7 +693,7 @@ export const listDiscoverTeams = query({
         .filter((team: any) => {
           if (!args.selectedArea || args.selectedArea === "Any") return true;
           const captain = captainMap.get(String(team.captainUid));
-          return matchesAreaSelection(captain?.areasPreferred, args.selectedArea);
+          return matchesAreaSelection(getPublicAreas(captain), args.selectedArea);
         })
         .slice(0, limit)
         .map((team: any) => ({ ...team, id: team._id, isRequested: false }));
@@ -779,7 +780,7 @@ export const listDiscoverTeams = query({
       .filter((team: any) => {
         if (!args.selectedArea || args.selectedArea === "Any") return true;
         const captain = captainMap.get(String(team.captainUid));
-        return matchesAreaSelection(captain?.areasPreferred, args.selectedArea);
+        return matchesAreaSelection(getPublicAreas(captain), args.selectedArea);
       })
       .filter((team: any) => {
         const memberCount = team.memberUids?.length ?? team.memberCount ?? 0;

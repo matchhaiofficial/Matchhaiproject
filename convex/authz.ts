@@ -117,6 +117,16 @@ function publicPsnStats(psnStats: any) {
   };
 }
 
+export function getPublicAreas(user: any): string[] {
+  if (user?.hideAreasPublicly) return [];
+  return Array.isArray(user?.areasPreferred) ? user.areasPreferred : [];
+}
+
+export function getPublicPlatformValue(user: any, field: string): any {
+  if (user?.hidePlatformsPublicly) return null;
+  return user?.[field] ?? null;
+}
+
 export function publicUser(user: any) {
   if (!user) return null;
   return {
@@ -128,7 +138,7 @@ export function publicUser(user: any) {
     bio: user.bio,
     accountType: user.accountType,
     city: user.city,
-    areasPreferred: Array.isArray(user.areasPreferred) ? user.areasPreferred : [],
+    areasPreferred: getPublicAreas(user),
     primaryGames: Array.isArray(user.primaryGames) ? user.primaryGames : [],
     skillScores: user.skillScores || {},
     isOnline: user.isOnline,
@@ -163,22 +173,24 @@ export function publicUser(user: any) {
     padelRole: user.padelRole ?? null,
     pickleballRole: user.pickleballRole ?? null,
 
-    // Verified external-platform connections. These are public-facing identifiers
-    // and display values only — NO tokens, secrets, or raw provider payloads.
-    steamId: user.steamId ?? null,
-    steamProfileUrl: user.steamProfileUrl ?? null,
-    steamPersonaName: user.steamPersonaName ?? null,
-    steamCs2Hours: user.steamCs2Hours ?? null,
-    steamTekken8Hours: user.steamTekken8Hours ?? null,
-    steamFc26Hours: user.steamFc26Hours ?? null,
-    faceitId: user.faceitId ?? null,
-    faceitProfileUrl: user.faceitProfileUrl ?? null,
-    faceitNickname: user.faceitNickname ?? null,
-    faceitGame: user.faceitGame ?? null,
-    faceitElo: user.faceitElo,
-    faceitSkillLevel: user.faceitSkillLevel,
-    psnAccountId: user.psnAccountId ?? null,
-    psnOnlineId: user.psnOnlineId ?? null,
-    psnStats: publicPsnStats(user.psnStats),
+    // Verified external-platform identifiers and display values. Every value is
+    // removed server-side when the owner enables platform privacy; clients never
+    // receive hidden values and therefore cannot bypass the preference.
+    steamId: getPublicPlatformValue(user, "steamId"),
+    steamProfileUrl: getPublicPlatformValue(user, "steamProfileUrl"),
+    steamPersonaName: getPublicPlatformValue(user, "steamPersonaName"),
+    steamCs2Hours: getPublicPlatformValue(user, "steamCs2Hours"),
+    steamTekken8Hours: getPublicPlatformValue(user, "steamTekken8Hours"),
+    steamFc26Hours: getPublicPlatformValue(user, "steamFc26Hours"),
+    faceitId: getPublicPlatformValue(user, "faceitId"),
+    faceitProfileUrl: getPublicPlatformValue(user, "faceitProfileUrl"),
+    faceitNickname: getPublicPlatformValue(user, "faceitNickname"),
+    faceitGame: getPublicPlatformValue(user, "faceitGame"),
+    faceitElo: getPublicPlatformValue(user, "faceitElo"),
+    faceitSkillLevel: getPublicPlatformValue(user, "faceitSkillLevel"),
+    psnAccountId: getPublicPlatformValue(user, "psnAccountId"),
+    psnOnlineId: getPublicPlatformValue(user, "psnOnlineId"),
+    psnStats: user.hidePlatformsPublicly ? null : publicPsnStats(user.psnStats),
+    xboxGamertag: getPublicPlatformValue(user, "xboxGamertag"),
   };
 }
