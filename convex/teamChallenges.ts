@@ -67,7 +67,7 @@ async function resolveUserByAnyId(ctx: any, value?: string | null) {
     .unique();
 }
 
-async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Promise<Id<"users">> {
+export async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Promise<Id<"users">> {
   let authUser: Awaited<ReturnType<typeof authComponent.getAuthUser>> | null = null;
   try {
     authUser = await authComponent.getAuthUser(ctx);
@@ -79,14 +79,6 @@ async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Pr
   const linkedAppUserId = typeof authUser?.userId === "string" ? authUser.userId : null;
   const expectedUser = await resolveUserByAnyId(ctx, expectedUid);
 
-  console.log("[teamChallenges] auth gate", {
-    authId: authRecordId,
-    linkedAppUserId,
-    email: authUser?.email ?? null,
-    expectedUid: expectedUid ?? null,
-    expectedAuthId: expectedUser?.authId ?? null,
-  });
-
   if (linkedAppUserId || authRecordId) {
     const user = await resolveUserByAnyId(ctx, linkedAppUserId) || await resolveUserByAnyId(ctx, authRecordId);
     if (!user) {
@@ -97,11 +89,6 @@ async function getAuthenticatedUserId(ctx: any, expectedUid?: string | null): Pr
       throw new Error("You can only perform this action for your own account");
     }
     return user._id;
-  }
-
-  if (expectedUser) {
-    assertKycAccessAllowed(expectedUser, KYC_VERIFICATION_REQUIRED_MESSAGE);
-    return expectedUser._id;
   }
 
   throw new Error("Not authenticated");
@@ -713,16 +700,7 @@ export const createFull = mutation({
       throw new Error("Team not found");
     }
 
-    let actorId: Id<"users"> = args.captainAUid;
-    try {
-      actorId = await getAuthenticatedUserId(ctx, args.captainAUid);
-    } catch (error) {
-      console.warn("[teamChallenges] createFull auth context unavailable; validating via captain ids", {
-        captainAUid: String(args.captainAUid),
-        challengerCaptainUid: String(challenger.captainUid),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const actorId = await getAuthenticatedUserId(ctx, args.captainAUid);
 
     if (String(actorId) !== String(args.captainAUid)) {
       throw new Error("Only the challenging captain can create this challenge");
