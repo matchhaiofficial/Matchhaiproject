@@ -479,20 +479,6 @@ export async function signInWithEmail(
       });
 
       if (error || !data?.user) {
-        if (isCombinedCredentialError(error)) {
-          const existingUser = await convex.query(api.users.getByEmail, {
-            email: trimmed,
-          });
-
-          if (existingUser) {
-            return {
-              ok: false,
-              message: "Incorrect password. Please try again.",
-              code: "auth/wrong-password",
-            };
-          }
-        }
-
         return { ok: false, message: mapAuthError(error), code: error?.code };
       }
 
@@ -546,10 +532,6 @@ export async function signInWithEmail(
       };
     }
 
-    if (isSuspendedUser(user)) {
-      return suspendedAccountResult();
-    }
-
     // Sign in with the found email
     const { data, error } = await authClient.signIn.email({
       email: user.email,
@@ -560,8 +542,8 @@ export async function signInWithEmail(
       if (isCombinedCredentialError(error)) {
         return {
           ok: false,
-          message: "Incorrect password. Please try again.",
-          code: "auth/wrong-password",
+          message: "Incorrect phone number or password.",
+          code: "auth/invalid-credential",
         };
       }
 
@@ -569,7 +551,12 @@ export async function signInWithEmail(
     }
 
     const authUserData = data.user as AuthUser;
-    if (isSuspendedUser(user)) {
+    const profile = await convex.query(api.users.getByAuthId, { authId: authUserData.id });
+    if (!profile) {
+      await signOutUser().catch(() => null);
+      return { ok: false, message: "User profile not found." };
+    }
+    if (isSuspendedUser(profile)) {
       await signOutUser().catch(() => null);
       return suspendedAccountResult();
     }
@@ -577,7 +564,7 @@ export async function signInWithEmail(
       await markAuthUserOffline(previousAuthId);
     }
 
-    return { ok: true, user: authUserData, userId: user._id };
+    return { ok: true, user: authUserData, userId: profile._id };
   } catch (e: any) {
     console.error("[authService] signInWithEmail error", e);
     return { ok: false, message: mapAuthError(e), code: e?.code };

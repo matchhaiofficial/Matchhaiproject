@@ -250,21 +250,10 @@ export const getPublicById = query({
 export const getByEmail = query({
   args: { email: v.string() },
   handler: async (ctx, args): Promise<any> => {
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", normalizeEmail(args.email)))
-      .unique();
-    if (!existing) return null;
     const actor = await getCurrentUser(ctx);
-    if (actor.user && String(actor.user._id) === String(existing._id)) return existing;
-    return {
-      _id: existing._id,
-      email: existing.email,
-      accountType: existing.accountType,
-      accountStatus: existing.accountStatus,
-      suspendedAt: existing.suspendedAt,
-      suspendedUntil: existing.suspendedUntil,
-    };
+    if (!actor.user) return null;
+    if (normalizeEmail(actor.user.email) !== normalizeEmail(args.email)) return null;
+    return actor.user;
   },
 });
 
@@ -297,16 +286,9 @@ export const getByPhone = query({
       .withIndex("by_phone", (q) => q.eq("phone", normalized))
       .unique();
     if (!existing) return null;
-    const actor = await getCurrentUser(ctx);
-    if (actor.user && String(actor.user._id) === String(existing._id)) return existing;
-    return {
-      _id: existing._id,
-      email: existing.email,
-      accountType: existing.accountType,
-      accountStatus: existing.accountStatus,
-      suspendedAt: existing.suspendedAt,
-      suspendedUntil: existing.suspendedUntil,
-    };
+    // Legacy phone login still needs the Better Auth email until existing
+    // accounts are migrated to Better Auth's phone-number field.
+    return { email: existing.email };
   },
 });
 
