@@ -6,6 +6,7 @@ import { recordZoneAuditEvent } from "./zoneAudit";
 import { requireKycVerified } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import { isUserHiddenFromPublic } from "./userVisibility";
+import { requireCurrentUser, requireSuperAdmin } from "./authz";
 
 const ZONE_LIVE_NEARBY_NOTIFICATION_TYPE = "zone.live_nearby";
 const ZONE_LIVE_NEARBY_NOTIFICATION_BATCH_SIZE = 75;
@@ -163,6 +164,19 @@ function buildAggregateCapacity(branches: any[]) {
   };
 }
 
+async function requireZoneOwnerWithKyc(
+  ctx: any,
+  zoneId: Id<"zones">,
+): Promise<{ profile: any; zone: any }> {
+  const { profile } = await requireKycVerified(ctx);
+  const zone = await ctx.db.get(zoneId);
+  if (!zone) throw new Error("Zone not found");
+  if (String(zone.ownerUid || "") !== String(profile?._id || "")) {
+    throw new Error("You are not authorized to manage this zone.");
+  }
+  return { profile, zone };
+}
+
 // ============================================
 // ZONE QUERIES
 // ============================================
@@ -237,6 +251,10 @@ export const getPublicVenueByIdString = query({
 export const getByOwner = query({
   args: { ownerUid: v.id("users") },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (String(actor.user._id) !== String(args.ownerUid)) {
+      throw new Error("Not authorized");
+    }
     return await ctx.db
       .query("zones")
       .withIndex("by_ownerUid", (q) => q.eq("ownerUid", args.ownerUid))
@@ -248,11 +266,12 @@ export const getByOwner = query({
 export const listActive = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const zones = await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .order("desc")
       .take(args.limit || 50);
+    return zones.map(buildPublicZoneView);
   },
 });
 
@@ -260,10 +279,11 @@ export const listActive = query({
 export const listPendingReview = query({
   args: {},
   handler: async (ctx) => {
+    await requireSuperAdmin(ctx);
     return await ctx.db
       .query("zones")
       .withIndex("by_status", (q) => q.eq("status", "pending-review"))
-      .collect();
+      .take(100);
   },
 });
 
@@ -372,15 +392,19 @@ export const create = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const actor = await requireCurrentUser(ctx);
+    if (String(actor.user._id) !== String(args.ownerUid)) {
+      throw new Error("Not authorized");
+    }
     const now = Date.now();
     const primaryBranch = buildPrimaryBranch(args.branches[0], args.city);
     const capacity = buildAggregateCapacity(args.branches);
     const firstBranchPricing = args.branches[0]?.pricing;
 
     const zoneId = await ctx.db.insert("zones", {
-      ownerUid: args.ownerUid,
-      ownerUsername: args.ownerUsername,
-      ownerFullName: args.ownerFullName,
+      ownerUid: actor.user._id,
+      ownerUsername: actor.user.username,
+      ownerFullName: actor.user.fullName,
       name: args.name,
       venueBrandName: args.venueBrandName,
       contactEmail: args.contactEmail,
@@ -403,7 +427,7 @@ export const create = mutation({
 
     await ctx.runMutation(internal.notifications.createCanonicalFromServer, {
       type: "zone.registration_submitted",
-      toUid: args.ownerUid,
+      toUid: actor.user._id,
       recipientRole: "zone_admin",
       status: "pending",
       dedupeKey: `zone.registration_submitted:${String(zoneId)}`,
@@ -475,7 +499,7 @@ export const update = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireZoneOwnerWithKyc(ctx, args.zoneId);
     const { zoneId, ...updates } = args;
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
@@ -521,9 +545,7 @@ export const addBranch = mutation({
     branch: v.any(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireZoneOwnerWithKyc(ctx, args.zoneId);
 
     const branch = {
       ...args.branch,
@@ -556,9 +578,7 @@ export const updateBranch = mutation({
     updates: v.any(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireZoneOwnerWithKyc(ctx, args.zoneId);
 
     const branches = (zone.branches || []).map((branch: any) =>
       branch.id === args.branchId ? { ...branch, ...args.updates, id: branch.id } : branch
@@ -592,9 +612,7 @@ export const deleteBranch = mutation({
     branchId: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const zone = await ctx.db.get(args.zoneId);
-    if (!zone) throw new Error("Zone not found");
+    const { zone } = await requireZoneOwnerWithKyc(ctx, args.zoneId);
 
     const branches = (zone.branches || []).filter((branch: any) => branch.id !== args.branchId);
     const primary = branches[0];
@@ -623,7 +641,7 @@ export const deleteBranch = mutation({
 export const approve = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
     const zone = await ctx.db.get(args.zoneId);
     if (!zone) throw new Error("Zone not found");
     await ctx.db.patch(args.zoneId, {
@@ -645,7 +663,9 @@ export const reject = mutation({
     rejectionReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
     await ctx.db.patch(args.zoneId, {
       status: "rejected",
       rejectedAt: Date.now(),
@@ -660,7 +680,9 @@ export const reject = mutation({
 export const suspend = mutation({
   args: { zoneId: v.id("zones") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireSuperAdmin(ctx);
+    const zone = await ctx.db.get(args.zoneId);
+    if (!zone) throw new Error("Zone not found");
     await ctx.db.patch(args.zoneId, {
       status: "suspended",
       updatedAt: Date.now(),
@@ -708,11 +730,12 @@ export const createPricingRule = mutation({
     createdByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const { profile } = await requireZoneOwnerWithKyc(ctx, args.zoneId);
     const now = Date.now();
 
     const ruleId = await ctx.db.insert("pricingRules", {
       ...args,
+      createdByUid: String(profile?._id),
       createdAt: now,
       updatedAt: now,
     });
@@ -721,7 +744,7 @@ export const createPricingRule = mutation({
       zoneId: String(args.zoneId),
       module: "pricing",
       action: "create_pricing_rule",
-      actorUid: args.createdByUid || null,
+      actorUid: String(profile?._id),
       targetType: "pricing_rule",
       targetId: String(ruleId),
       summary: `Created pricing rule "${args.name || "Untitled rule"}".`,
@@ -769,12 +792,12 @@ export const updatePricingRule = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
-    const { ruleId, ...updates } = args;
+    const { ruleId, updatedByUid: _updatedByUid, ...updates } = args;
     const existingRule = await ctx.db.get(ruleId);
     if (!existingRule) {
       throw new Error("Pricing rule not found.");
     }
+    const { profile } = await requireZoneOwnerWithKyc(ctx, existingRule.zoneId);
 
     const updateData: Record<string, unknown> = { updatedAt: Date.now() };
     Object.entries(updates).forEach(([key, value]) => {
@@ -789,7 +812,7 @@ export const updatePricingRule = mutation({
       zoneId: String(existingRule.zoneId),
       module: "pricing",
       action: "update_pricing_rule",
-      actorUid: args.updatedByUid || existingRule.createdByUid || null,
+      actorUid: String(profile?._id),
       targetType: "pricing_rule",
       targetId: String(ruleId),
       summary: `Updated pricing rule "${existingRule.name || "Untitled rule"}".`,
@@ -822,11 +845,11 @@ export const deletePricingRule = mutation({
     deletedByUid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
     const existingRule = await ctx.db.get(args.ruleId);
     if (!existingRule) {
       throw new Error("Pricing rule not found.");
     }
+    const { profile } = await requireZoneOwnerWithKyc(ctx, existingRule.zoneId);
 
     await ctx.db.delete(args.ruleId);
 
@@ -834,7 +857,7 @@ export const deletePricingRule = mutation({
       zoneId: String(existingRule.zoneId),
       module: "pricing",
       action: "delete_pricing_rule",
-      actorUid: args.deletedByUid || existingRule.createdByUid || null,
+      actorUid: String(profile?._id),
       targetType: "pricing_rule",
       targetId: String(args.ruleId),
       summary: `Deleted pricing rule "${existingRule.name || "Untitled rule"}".`,
@@ -890,7 +913,7 @@ export const createResource = mutation({
     hourlyRate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    await requireZoneOwnerWithKyc(ctx, args.zoneId);
     const now = Date.now();
 
     const resourceId = await ctx.db.insert("zoneResources", {
@@ -917,7 +940,9 @@ export const updateResourceStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) throw new Error("Resource not found");
+    await requireZoneOwnerWithKyc(ctx, resource.zoneId);
     await ctx.db.patch(args.resourceId, {
       lifecycleStatus: args.lifecycleStatus,
       updatedAt: Date.now(),
@@ -930,7 +955,9 @@ export const updateResourceStatus = mutation({
 export const deleteResource = mutation({
   args: { resourceId: v.id("zoneResources") },
   handler: async (ctx, args) => {
-    await requireKycVerified(ctx);
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) throw new Error("Resource not found");
+    await requireZoneOwnerWithKyc(ctx, resource.zoneId);
     await ctx.db.delete(args.resourceId);
     return true;
   },
