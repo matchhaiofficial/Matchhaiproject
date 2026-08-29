@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/react";
 import { expoClient } from "@better-auth/expo/client";
 import { convexClient } from "@convex-dev/better-auth/client/plugins";
+import { phoneNumberClient } from "better-auth/client/plugins";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 
@@ -14,6 +15,7 @@ export const authClient = createAuthClient({
   baseURL: CONVEX_SITE_URL || "",
   plugins: [
     convexClient(),
+    phoneNumberClient(),
     expoClient({
       scheme: Constants.expoConfig?.scheme as string || "matchhai",
       storagePrefix: "matchhai",
@@ -61,10 +63,9 @@ export const {
   getSession,
 } = authClient;
 
-// Phone number specific methods (if available)
-// Note: Phone auth requires the phoneNumberClient plugin to be properly configured
+// Phone number specific methods
 export const phoneAuth = {
-  signIn: (authClient.signIn as any)?.phoneNumber,
+  signIn: authClient.signIn.phoneNumber,
   signUp: (authClient.signUp as any)?.phoneNumber,
   sendOTP: (authClient as any).phoneNumber?.sendOtp,
   verify: (authClient as any).phoneNumber?.verify,

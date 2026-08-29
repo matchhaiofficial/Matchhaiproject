@@ -127,6 +127,7 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
       expo(),
       convex({ authConfig }),
       phoneNumber({
+        requireVerification: true,
         // OTP sending - placeholder for now (user wants to skip OTP initially)
         sendOTP: async () => {
           console.warn("[Auth] Better Auth phone OTP sending is not configured; use VeevoTech OTP flow.");

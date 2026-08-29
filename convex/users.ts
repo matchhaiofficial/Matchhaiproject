@@ -277,22 +277,6 @@ export const getByUsername = query({
   },
 });
 
-// Get user by phone
-export const getByPhone = query({
-  args: { phone: v.string() },
-  handler: async (ctx, args): Promise<any> => {
-    const normalized = normalizePhone(args.phone);
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_phone", (q) => q.eq("phone", normalized))
-      .unique();
-    if (!existing) return null;
-    // Legacy phone login still needs the Better Auth email until existing
-    // accounts are migrated to Better Auth's phone-number field.
-    return { email: existing.email };
-  },
-});
-
 // Get user by Steam ID
 export const getBySteamId = query({
   args: { steamId: v.string() },

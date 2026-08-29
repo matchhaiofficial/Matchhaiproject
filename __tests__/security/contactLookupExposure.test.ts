@@ -24,18 +24,24 @@ describe("public contact lookup exposure", () => {
     expect(getByEmail).not.toContain("suspendedUntil:");
   });
 
-  it("limits the legacy anonymous phone-login lookup to the required email", () => {
+  it("uses Better Auth phone login without an anonymous Convex contact lookup", () => {
+    const authClient = read("src/lib/auth-client.ts");
+    const authService = read("src/services/convex/authService.ts");
     const users = read("convex/users.ts");
-    const getByPhone = users.slice(
-      users.indexOf("export const getByPhone"),
-      users.indexOf("export const getBySteamId"),
+
+    expect(authClient).toContain("phoneNumberClient()");
+    expect(authService).toContain("authClient.signIn.phoneNumber");
+    expect(authService).not.toContain("api.users.getByPhone");
+    expect(users).not.toContain("export const getByPhone");
+  });
+
+  it("requires Better Auth phone verification before password sign-in", () => {
+    const auth = read("convex/auth.ts");
+    const phonePlugin = auth.slice(
+      auth.indexOf("phoneNumber({"),
+      auth.indexOf("signUpOnVerification"),
     );
 
-    expect(getByPhone).toContain("return { email: existing.email }");
-    expect(getByPhone).not.toContain("_id:");
-    expect(getByPhone).not.toContain("accountType:");
-    expect(getByPhone).not.toContain("accountStatus:");
-    expect(getByPhone).not.toContain("suspendedAt:");
-    expect(getByPhone).not.toContain("suspendedUntil:");
+    expect(phonePlugin).toContain("requireVerification: true");
   });
 });

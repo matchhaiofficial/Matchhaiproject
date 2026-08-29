@@ -461,7 +461,7 @@ export async function signUpWithEmail(
 /**
  * Sign in with email OR phone + password.
  * - If input contains "@": treated as email.
- * - Otherwise: treated as phone (lookup email first, then sign in).
+ * - Otherwise: treated as a verified Better Auth phone number.
  */
 export async function signInWithEmail(
   emailOrPhone: string,
@@ -513,28 +513,8 @@ export async function signInWithEmail(
       };
     }
 
-    // Look up user by normalized phone
-    const user = await convex.query(api.users.getByPhone, { phone: normalizedPhone });
-
-    if (!user) {
-      return {
-        ok: false,
-        code: "auth/user-not-found",
-        message: mapAuthError({ code: "auth/user-not-found" }),
-      };
-    }
-
-    if (!user.email) {
-      return {
-        ok: false,
-        code: "auth/invalid-email",
-        message: "This account does not have an email configured.",
-      };
-    }
-
-    // Sign in with the found email
-    const { data, error } = await authClient.signIn.email({
-      email: user.email,
+    const { data, error } = await authClient.signIn.phoneNumber({
+      phoneNumber: normalizedPhone,
       password,
     });
 
