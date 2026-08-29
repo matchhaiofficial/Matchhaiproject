@@ -1323,9 +1323,21 @@ export const requestPhoneChange = mutation({
     verifiedAt: v.number(),
     sessionToken: v.optional(v.string()),
   },
+  returns: v.boolean(),
   handler: async (ctx, args) => {
     const authId = await getAuthIdFromContextOrSessionToken(ctx, args.sessionToken);
     if (!authId) throw new Error("Please sign in to continue.");
+    const verifiedPhoneHash = await sha256Hex(args.phoneE164);
+    const verifiedPhone: { phoneMasked: string; updatedAt: number } | null = await ctx.runQuery(
+      internal.phoneOtp.getRecentVerified,
+      {
+        phoneHash: verifiedPhoneHash,
+        since: Date.now() - 24 * 60 * 60 * 1000,
+      },
+    );
+    if (!verifiedPhone) {
+      throw new Error("Please verify this phone number again before saving it.");
+    }
     const existing = await ctx.db.query("users").withIndex("by_phone", (q) => q.eq("phone", args.phoneE164)).unique();
     if (existing) throw new Error("This phone number is already registered.");
     const profile = await ctx.db.query("users").withIndex("by_authId", (q) => q.eq("authId", authId)).unique();
@@ -1334,9 +1346,9 @@ export const requestPhoneChange = mutation({
       pendingPhone: null,
       phone: args.phoneE164,
       phoneOtpVerified: true,
-      phoneOtpVerifiedAt: args.verifiedAt,
-      phoneNumberMasked: args.phoneMasked,
-      phoneNumberHash: args.phoneHash,
+      phoneOtpVerifiedAt: verifiedPhone.updatedAt,
+      phoneNumberMasked: verifiedPhone.phoneMasked,
+      phoneNumberHash: verifiedPhoneHash,
       updatedAt: Date.now(),
     });
     return true;
