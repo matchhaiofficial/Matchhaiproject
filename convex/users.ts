@@ -1,7 +1,7 @@
 import { query, mutation, action, internalQuery, internalMutation } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { Id } from "./_generated/dataModel";
-import { api, internal } from "./_generated/api";
+import { api, components, internal } from "./_generated/api";
 import { authComponent } from "./auth";
 import { canViewerAccessPublicUser, isUserHiddenFromPublic } from "./userVisibility";
 import { getCurrentUser, publicUser, requireCurrentUser, requireSelf, requireSelfOrSuperAdmin } from "./authz";
@@ -795,6 +795,20 @@ export const create = mutation({
     if (args.ageRange) insertData.ageRange = args.ageRange;
 
     const userId = await ctx.db.insert("users", insertData as any);
+
+    if (verifiedPhone && normalizedPhone) {
+      await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+        input: {
+          model: "user",
+          where: [{ field: "_id", operator: "eq", value: requestedAuthId }],
+          update: {
+            phoneNumber: normalizedPhone,
+            phoneNumberVerified: true,
+            updatedAt: now,
+          },
+        },
+      });
+    }
 
     return userId;
   },

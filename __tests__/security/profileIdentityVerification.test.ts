@@ -48,4 +48,29 @@ describe("profile identity verification boundaries", () => {
     expect(requestPhoneChange).not.toContain("phoneOtpVerifiedAt: args.verifiedAt");
     expect(requestPhoneChange).not.toContain("phoneNumberHash: args.phoneHash");
   });
+
+  it("syncs a server-verified signup phone to the authenticated Better Auth user", () => {
+    const users = read("convex/users.ts");
+    const createUser = users.slice(
+      users.indexOf("export const create = mutation"),
+      users.indexOf("// Update user profile"),
+    );
+
+    expect(createUser).toContain("components.betterAuth.adapter.updateOne");
+    expect(createUser).toContain('where: [{ field: "_id", operator: "eq", value: requestedAuthId }]');
+    expect(createUser).toContain("phoneNumber: normalizedPhone");
+    expect(createUser).toContain("phoneNumberVerified: true");
+  });
+
+  it("syncs a server-verified phone change to the authenticated Better Auth user", () => {
+    const kyc = read("convex/kyc.ts");
+    const requestPhoneChange = kyc.slice(
+      kyc.indexOf("export const requestPhoneChange"),
+    );
+
+    expect(requestPhoneChange).toContain("components.betterAuth.adapter.updateOne");
+    expect(requestPhoneChange).toContain('where: [{ field: "_id", operator: "eq", value: authId }]');
+    expect(requestPhoneChange).toContain("phoneNumber: args.phoneE164");
+    expect(requestPhoneChange).toContain("phoneNumberVerified: true");
+  });
 });

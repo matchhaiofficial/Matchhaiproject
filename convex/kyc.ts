@@ -1342,6 +1342,18 @@ export const requestPhoneChange = mutation({
     if (existing) throw new Error("This phone number is already registered.");
     const profile = await ctx.db.query("users").withIndex("by_authId", (q) => q.eq("authId", authId)).unique();
     if (!profile) throw new Error("User profile not found.");
+    const now = Date.now();
+    await ctx.runMutation(components.betterAuth.adapter.updateOne, {
+      input: {
+        model: "user",
+        where: [{ field: "_id", operator: "eq", value: authId }],
+        update: {
+          phoneNumber: args.phoneE164,
+          phoneNumberVerified: true,
+          updatedAt: now,
+        },
+      },
+    });
     await ctx.db.patch(profile._id, {
       pendingPhone: null,
       phone: args.phoneE164,
@@ -1349,7 +1361,7 @@ export const requestPhoneChange = mutation({
       phoneOtpVerifiedAt: verifiedPhone.updatedAt,
       phoneNumberMasked: verifiedPhone.phoneMasked,
       phoneNumberHash: verifiedPhoneHash,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
     return true;
   },
