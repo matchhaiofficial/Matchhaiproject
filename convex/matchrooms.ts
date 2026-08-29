@@ -6427,28 +6427,26 @@ export const runLifecycleSweep = internalMutation({
   args: {
     batchSize: v.optional(v.number()),
   },
+  returns: v.object({
+    inspectedRooms: v.number(),
+    changedRooms: v.number(),
+    expiredNotifications: v.number(),
+    useIndexedSweep: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const batchSize = Math.max(1, Math.min(50, Number(args.batchSize || 25)));
     const now = Date.now();
-    // Keep the status scan available during the schema/backfill rollout. The
-    // production flag is enabled only after every existing room has a due time.
-    const useIndexedSweep = process.env.MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP === "1";
     let changedRooms = 0;
     let expiredNotifications = 0;
     let inspectedRooms = 0;
 
     for (const status of ["open", "locked", "in-progress", "completed"]) {
-      const rooms = useIndexedSweep
-        ? await ctx.db
-            .query("matchrooms")
-            .withIndex("by_status_and_lifecycleDueAt", (q: any) =>
-              q.eq("status", status).lte("lifecycleDueAt", now),
-            )
-            .take(batchSize)
-        : await ctx.db
-            .query("matchrooms")
-            .withIndex("by_status", (q: any) => q.eq("status", status))
-            .take(batchSize);
+      const rooms = await ctx.db
+        .query("matchrooms")
+        .withIndex("by_status_and_lifecycleDueAt", (q: any) =>
+          q.eq("status", status).lte("lifecycleDueAt", now),
+        )
+        .take(batchSize);
 
       for (const room of rooms) {
         inspectedRooms += 1;
@@ -6590,17 +6588,12 @@ export const runLifecycleSweep = internalMutation({
       }
     }
 
-    const pendingNotifications = useIndexedSweep
-      ? await ctx.db
-          .query("notifications")
-          .withIndex("by_status_and_expiresAt", (q: any) =>
-            q.eq("status", "pending").lte("expiresAt", now),
-          )
-          .take(batchSize)
-      : await ctx.db
-          .query("notifications")
-          .withIndex("by_status", (q: any) => q.eq("status", "pending"))
-          .take(batchSize);
+    const pendingNotifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_status_and_expiresAt", (q: any) =>
+        q.eq("status", "pending").lte("expiresAt", now),
+      )
+      .take(batchSize);
     for (const notification of pendingNotifications) {
       if (!isMatchJoinRequestNotification(notification)) continue;
       if (!notification.expiresAt || notification.expiresAt > now) continue;
@@ -6615,7 +6608,7 @@ export const runLifecycleSweep = internalMutation({
       expiredNotifications += 1;
     }
 
-    return { inspectedRooms, changedRooms, expiredNotifications, useIndexedSweep };
+    return { inspectedRooms, changedRooms, expiredNotifications, useIndexedSweep: true };
   },
 });
 
