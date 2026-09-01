@@ -2,18 +2,26 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
+import { isMaintenanceJobEnabled } from "./runtimeEnv";
 
 export const expireEndedPilots = internalMutation({
   args: {
     batchSize: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (!isMaintenanceJobEnabled("MATCHHAI_ENABLE_ZONE_PILOT_CRON")) {
+      return { disabled: true, processed: 0 };
+    }
+
     const now = Date.now();
     const batchSize = Math.min(Math.max(args.batchSize || 50, 1), 100);
     const zones = await ctx.db
       .query("zones")
       .withIndex("by_pilotStatus_and_pilotEndsAt", (q: any) =>
-        q.eq("pilotStatus", "active").lte("pilotEndsAt", now)
+        q
+          .eq("pilotStatus", "active")
+          .gte("pilotEndsAt", 0)
+          .lte("pilotEndsAt", now)
       )
       .take(batchSize);
 

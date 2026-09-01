@@ -6,6 +6,13 @@ import { mutation, query, internalMutation } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
+import {
+  CHALLENGE_ABANDON_TTL_MS,
+  CHALLENGE_ACCEPT_TTL_MS,
+  getTeamChallengeLifecycleDueAt,
+  withTeamChallengeLifecycleDueAt,
+} from "./maintenanceDue";
+import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
 
 const venueChoiceValidator = v.object({
   zoneId: v.string(),
@@ -23,6 +30,16 @@ const challengeStatuses = new Set([
   "rejected",
   "expired",
 ]);
+
+async function patchTeamChallengeWithLifecycleDueAt(
+  ctx: any,
+  challenge: any,
+  patch: Record<string, any>,
+  now = Date.now(),
+) {
+  const lifecyclePatch = withTeamChallengeLifecycleDueAt(challenge, patch, now);
+  await ctx.db.patch(challenge._id, lifecyclePatch);
+}
 
 const TEAM_CHALLENGE_MIN_SCHEDULE_DAYS = 2;
 const TEAM_CHALLENGE_MAX_SCHEDULE_MONTHS = 2;
@@ -448,7 +465,7 @@ export const respond = mutation({
       ? { refunded: false, amount: 0 }
       : await refundChallengerPaymentForRejectedChallenge(ctx, args.challengeId, challenge);
 
-    await ctx.db.patch(args.challengeId, {
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: nextStatus,
       chatId,
       lineupB: args.accept ? args.lineupB || challenge.lineupB : challenge.lineupB,
@@ -565,7 +582,7 @@ export const proposeVenue = mutation({
       captainBChoice &&
       captainAChoice.zoneId === captainBChoice.zoneId;
 
-    await ctx.db.patch(args.challengeId, {
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: bothConfirmed ? "venue_confirmed" : "venue_proposed",
       zoneId: bothConfirmed ? args.zoneId : undefined,
       zoneName: bothConfirmed ? venue.venueName : undefined,
@@ -625,7 +642,7 @@ export const confirmVenue = mutation({
       throw new Error("No confirmed venue to finalize");
     }
 
-    await ctx.db.patch(args.challengeId, {
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
       status: "venue_confirmed",
       zoneName: challenge.confirmedVenue.venueName,
       updatedAt: Date.now(),
@@ -765,7 +782,7 @@ export const createFull = mutation({
       }
     }
 
-    const challengeId = await ctx.db.insert("teamChallenges", {
+    const challengeDocument = {
       challengerTeamId: args.challengerTeamId,
       challengerTeamName: args.challengerTeamName,
       opponentTeamId: args.opponentTeamId,
@@ -805,7 +822,11 @@ export const createFull = mutation({
       lineupB: args.lineupB,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const challengeId = await ctx.db.insert(
+      "teamChallenges",
+      withTeamChallengeLifecycleDueAt(null, challengeDocument, now),
+    );
 
     await createChallengeNotification(ctx, {
       type: "team.challenge_received",
@@ -861,7 +882,7 @@ export const update = mutation({
     actorUid: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    await requireCaptain(ctx, args.challengeId, args.actorUid);
+    const { challenge } = await requireCaptain(ctx, args.challengeId, args.actorUid);
     const { challengeId, actorUid: _actorUid, ...updates } = args;
     const patch: Record<string, any> = { updatedAt: Date.now() };
     if (updates.status !== undefined) patch.status = updates.status;
@@ -879,7 +900,7 @@ export const update = mutation({
     if (updates.chatId !== undefined) patch.chatId = updates.chatId;
     if (updates.matchroomId !== undefined) patch.matchroomId = updates.matchroomId;
 
-    await ctx.db.patch(challengeId, patch);
+    await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, patch);
     return true;
   },
 });
@@ -1419,30 +1440,55 @@ export const holdSideFromProvider = internalMutation({
 // the captain's escrow forever. Challenges that already have a linked matchroom
 // are owned by the matchroom lifecycle sweep (which releases via
 // settleForMatchroom), so they are skipped here.
-const CHALLENGE_ACCEPT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // pending, never accepted
-const CHALLENGE_ABANDON_TTL_MS = 14 * 24 * 60 * 60 * 1000; // no scheduled time set
-
 export const expireStaleChallenges = internalMutation({
   args: { batchSize: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    if (!isMaintenanceJobEnabled("MATCHHAI_ENABLE_TEAM_CHALLENGE_EXPIRY_CRON")) {
+      return {
+        disabled: true,
+        ok: true,
+        expiredCount: 0,
+        releasedSides: 0,
+        useIndexedSweep: false,
+      };
+    }
+
     const now = Date.now();
-    const batchSize = Math.max(1, Number(args.batchSize || 25));
+    const batchSize = Math.min(100, Math.max(1, Number(args.batchSize || 25)));
     const nonTerminalStatuses = ["pending", "accepted", "venue_proposed", "venue_confirmed"] as const;
+    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_TEAM_CHALLENGE_EXPIRY_SWEEP");
 
     let expiredCount = 0;
     let releasedSides = 0;
+    let remaining = batchSize;
 
     for (const status of nonTerminalStatuses) {
-      if (expiredCount >= batchSize) break;
-      const rows = await ctx.db
-        .query("teamChallenges")
-        .withIndex("by_status", (q) => q.eq("status", status))
-        .collect();
+      if (remaining <= 0) break;
+      const rows = useIndexedSweep
+        ? await ctx.db
+            .query("teamChallenges")
+            .withIndex("by_status_and_lifecycleDueAt", (q) =>
+              q
+                .eq("status", status)
+                .gte("lifecycleDueAt", 0)
+                .lte("lifecycleDueAt", now),
+            )
+            .take(remaining)
+        : await ctx.db
+            .query("teamChallenges")
+            .withIndex("by_status", (q) => q.eq("status", status))
+            .take(remaining);
 
       for (const challenge of rows) {
-        if (expiredCount >= batchSize) break;
+        if (remaining <= 0) break;
+        remaining -= 1;
         // A linked matchroom exists → the matchroom lifecycle owns expiry/release.
-        if (challenge.matchroomId) continue;
+        if (challenge.matchroomId) {
+          if (challenge.lifecycleDueAt !== undefined) {
+            await ctx.db.patch(challenge._id, { lifecycleDueAt: undefined });
+          }
+          continue;
+        }
 
         const scheduledAt = Number(challenge.scheduledAt || 0);
         const createdAt = Number(challenge.createdAt || 0);
@@ -1451,7 +1497,13 @@ export const expireStaleChallenges = internalMutation({
           status === "pending" && createdAt > 0 && createdAt + CHALLENGE_ACCEPT_TTL_MS < now;
         const abandoned = scheduledAt <= 0 && createdAt > 0 && createdAt + CHALLENGE_ABANDON_TTL_MS < now;
 
-        if (!pastSchedule && !acceptTimedOut && !abandoned) continue;
+        if (!pastSchedule && !acceptTimedOut && !abandoned) {
+          const lifecycleDueAt = getTeamChallengeLifecycleDueAt(challenge, now);
+          if (challenge.lifecycleDueAt !== lifecycleDueAt) {
+            await ctx.db.patch(challenge._id, { lifecycleDueAt });
+          }
+          continue;
+        }
 
         const reason = pastSchedule ? "challenge_expired" : "challenge_abandoned";
         // Return any held captain funds to wallets BEFORE marking expired
@@ -1462,7 +1514,10 @@ export const expireStaleChallenges = internalMutation({
         if (aWasHeld) releasedSides += 1;
         if (bWasHeld) releasedSides += 1;
 
-        await ctx.db.patch(challenge._id, { status: "expired", updatedAt: now });
+        await patchTeamChallengeWithLifecycleDueAt(ctx, challenge, {
+          status: "expired",
+          updatedAt: now,
+        }, now);
 
         for (const captainUid of [challenge.captainAUid, challenge.captainBUid]) {
           if (!captainUid) continue;
@@ -1484,6 +1539,6 @@ export const expireStaleChallenges = internalMutation({
       }
     }
 
-    return { ok: true, expiredCount, releasedSides };
+    return { ok: true, expiredCount, releasedSides, useIndexedSweep };
   },
 });

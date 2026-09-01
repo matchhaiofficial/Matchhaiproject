@@ -9,6 +9,7 @@ import {
   assertZoneResourceCapacityAvailable,
   getBookingRequestStartAtForConflict,
 } from "./bookingConflicts";
+import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
 
 const BOOKING_INTENT_TTL_MS = PAYMENT_INTENT_TTL_MS;
 
@@ -582,7 +583,10 @@ export const createRequest = mutation({
       });
     }
 
-    const requestId = await ctx.db.insert("bookingRequests", {
+    const linkedRoom = args.matchroomId
+      ? await ctx.db.get(args.matchroomId).catch(() => null)
+      : null;
+    const requestId = await ctx.db.insert("bookingRequests", withBookingRequestLifecycleDueAt(null, linkedRoom, {
       userId: user._id,
       gameKey: normalizedGameKey,
       zoneId: args.zoneId,
@@ -623,7 +627,7 @@ export const createRequest = mutation({
       notes: args.notes,
       createdAt: now,
       updatedAt: now,
-    });
+    }, now));
 
     await notifyZoneOwnerOfRequest(ctx, {
       requestId,
@@ -659,10 +663,14 @@ export const updateRequestStatus = mutation({
       const actor = await requireCurrentUser(ctx);
       if (String(request.userId) !== String(actor.user._id)) throw new Error("Not authorized");
     }
-    await ctx.db.patch(args.requestId, {
+    const linkedRoom = request.matchroomId
+      ? await ctx.db.get(request.matchroomId).catch(() => null)
+      : null;
+    const now = Date.now();
+    await ctx.db.patch(args.requestId, withBookingRequestLifecycleDueAt(request, linkedRoom, {
       status: args.status,
-      updatedAt: Date.now(),
-    });
+      updatedAt: now,
+    }, now));
     return true;
   },
 });

@@ -59,6 +59,24 @@
       "expo-audio",
       "expo-notifications",
       "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "forceStaticLinking": [
+              "RNFBApp",
+              "RNFBMessaging"
+            ],
+            "extraPods": [
+              {
+                "name": "GoogleUtilities",
+                "modular_headers": true
+              }
+            ]
+          }
+        }
+      ],
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       [

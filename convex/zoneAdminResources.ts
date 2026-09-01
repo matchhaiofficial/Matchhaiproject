@@ -5,6 +5,7 @@ import { recordZoneAuditEvent } from "./zoneAudit";
 import { api, internal } from "./_generated/api";
 import { requireKycVerified } from "./kycGate";
 import { withLifecycleDueAt } from "./matchroomLifecycle";
+import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
 
 // ============================================
 // QUERIES
@@ -447,17 +448,18 @@ export const allocateResourcesToRequest = mutation({
       });
     }
 
+    const matchroom = await ctx.db.get(request.matchroomId);
+    if (!matchroom) throw new Error("Matchroom not found.");
+
     // Update booking request
-    await ctx.db.patch(args.requestId, {
+    await ctx.db.patch(args.requestId, withBookingRequestLifecycleDueAt(request, matchroom, {
       status: "accepted",
       allocatedBranchId: args.branchId,
       allocatedResourceIds: args.resourceIds,
       allocatedAt: now,
       allocatedByUid: actorUid,
       updatedAt: now,
-    });
-    const matchroom = await ctx.db.get(request.matchroomId);
-    if (!matchroom) throw new Error("Matchroom not found.");
+    }, now));
     await ctx.db.patch(request.matchroomId, withLifecycleDueAt(matchroom, {
       zoneId: String(args.zoneId),
       zoneOwnerUid: String(zone.ownerUid || actorUid),
