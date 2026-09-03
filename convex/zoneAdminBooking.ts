@@ -18,6 +18,11 @@ import {
   getBookingRequestStartAtForConflict,
 } from "./bookingConflicts";
 import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
+import {
+  getBookingRequestLifecycleDueAt,
+  withBookingRequestLifecycleDueAt,
+} from "./maintenanceDue";
+import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
 
 function normalizeGameKey(value?: string | null) {
   const gameKey = String(value || "").trim().toLowerCase();
@@ -208,6 +213,24 @@ async function assertActionableZoneRequest(
   return request;
 }
 
+async function patchBookingRequestWithLifecycleDueAt(
+  ctx: any,
+  request: any,
+  patch: Record<string, any>,
+  now = Date.now(),
+) {
+  const nextMatchroomId = Object.prototype.hasOwnProperty.call(patch, "matchroomId")
+    ? patch.matchroomId
+    : request?.matchroomId;
+  const linkedRoom = nextMatchroomId
+    ? await ctx.db.get(nextMatchroomId as any).catch(() => null)
+    : null;
+  await ctx.db.patch(
+    request._id,
+    withBookingRequestLifecycleDueAt(request, linkedRoom, patch, now),
+  );
+}
+
 async function markZoneBookingRequestExpired(
   ctx: any,
   request: any,
@@ -221,6 +244,7 @@ async function markZoneBookingRequestExpired(
   await ctx.db.patch(request._id, {
     status: "expired",
     lifecycleStatus: reason,
+    lifecycleDueAt: undefined,
     closedReason: reason,
     updatedAt: now,
   });
@@ -248,33 +272,63 @@ export const expireStaleBookingRequests = internalMutation({
     batchSize: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (!isMaintenanceJobEnabled("MATCHHAI_ENABLE_ZONE_BOOKING_EXPIRY_CRON")) {
+      return {
+        disabled: true,
+        inspected: 0,
+        expired: 0,
+        expiredOffers: 0,
+        useIndexedSweep: false,
+      };
+    }
+
     const now = Date.now();
     const batchSize = Math.max(1, Math.min(100, Math.floor(Number(args.batchSize || 50))));
     const statuses = ["open", "pending_payment", "accepted"] as const;
+    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_ZONE_BOOKING_EXPIRY_SWEEP");
     let inspected = 0;
     let expired = 0;
     let expiredOffers = 0;
 
+    let remaining = batchSize;
     for (const status of statuses) {
-      const requests = await ctx.db
-        .query("bookingRequests")
-        .withIndex("by_status", (q: any) => q.eq("status", status))
-        .take(batchSize);
+      if (remaining <= 0) break;
+      const requests = useIndexedSweep
+        ? await ctx.db
+            .query("bookingRequests")
+            .withIndex("by_status_and_lifecycleDueAt", (q: any) =>
+              q
+                .eq("status", status)
+                .gte("lifecycleDueAt", 0)
+                .lte("lifecycleDueAt", now),
+            )
+            .take(remaining)
+        : await ctx.db
+            .query("bookingRequests")
+            .withIndex("by_status", (q: any) => q.eq("status", status))
+            .take(remaining);
 
       for (const request of requests) {
+        remaining -= 1;
         inspected += 1;
         const linkedRoom = request.matchroomId
           ? await ctx.db.get(request.matchroomId).catch(() => null)
           : null;
         const reason = getZoneDecisionExpiryReason(request, linkedRoom, now);
-        if (!reason) continue;
+        if (!reason) {
+          const lifecycleDueAt = getBookingRequestLifecycleDueAt(request, linkedRoom, now);
+          if (request.lifecycleDueAt !== lifecycleDueAt) {
+            await ctx.db.patch(request._id, { lifecycleDueAt });
+          }
+          continue;
+        }
         const result = await markZoneBookingRequestExpired(ctx, request, now, reason);
         if (result.expired) expired += 1;
         expiredOffers += result.expiredOffers;
       }
     }
 
-    return { inspected, expired, expiredOffers };
+    return { inspected, expired, expiredOffers, useIndexedSweep };
   },
 });
 
@@ -1184,12 +1238,12 @@ async function ensureMatchroomForAcceptedOffer(ctx: any, input: {
     updatedAt: now,
   });
 
-  await ctx.db.patch(request._id, {
+  await patchBookingRequestWithLifecycleDueAt(ctx, request, {
     status: "accepted",
     matchroomId,
     lifecycleStatus: "zone_accepted",
     updatedAt: now,
-  });
+  }, now);
 
   return matchroomId;
 }
@@ -1913,15 +1967,16 @@ export const acceptBookingRequest = mutation({
         now,
       });
 
-      await ctx.db.patch(args.requestId, {
+      await patchBookingRequestWithLifecycleDueAt(ctx, bookingRequest, {
         status: "accepted",
         allocatedBranchId: args.branchId,
         allocatedResourceIds: args.resourceIds,
         allocatedAt: now,
         allocatedByUid: args.adminUid,
         lifecycleStatus: "broadcast_offer_pending_selection",
+        responseExpiresAt: offerExpiresAt,
         updatedAt: now,
-      });
+      }, now);
 
       const offerId = await ctx.db.insert("zoneOffers", {
         requestId: args.requestId,
@@ -1987,7 +2042,7 @@ export const acceptBookingRequest = mutation({
         updatedAt: now,
       }, now));
 
-      await ctx.db.patch(args.requestId, {
+      await patchBookingRequestWithLifecycleDueAt(ctx, bookingRequest, {
         status: "accepted",
         matchroomId,
         allocatedBranchId: args.branchId,
@@ -1996,7 +2051,7 @@ export const acceptBookingRequest = mutation({
         allocatedByUid: args.adminUid,
         lifecycleStatus: "zone_accepted",
         updatedAt: now,
-      });
+      }, now);
       await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
     } else {
       for (const resourceId of args.resourceIds) {
@@ -2036,7 +2091,7 @@ export const acceptBookingRequest = mutation({
         updatedAt: now,
       });
 
-      await ctx.db.patch(args.requestId, {
+      await patchBookingRequestWithLifecycleDueAt(ctx, bookingRequest, {
         status: "accepted",
         matchroomId,
         allocatedBranchId: args.branchId,
@@ -2045,7 +2100,7 @@ export const acceptBookingRequest = mutation({
         allocatedByUid: args.adminUid,
         lifecycleStatus: "zone_accepted",
         updatedAt: now,
-      });
+      }, now);
       await markMerchantCapturedForAcceptedMatchroom(ctx, matchroomId);
 
       for (const resourceId of args.resourceIds) {
@@ -2155,7 +2210,7 @@ export const rejectBookingRequest = mutation({
             updatedAt: now,
           };
 
-    await ctx.db.patch(args.requestId, statusPatch);
+    await patchBookingRequestWithLifecycleDueAt(ctx, request, statusPatch, now);
     if (request?.requestKind === "broadcast_fanout") {
       const offers = await ctx.db
         .query("zoneOffers")
@@ -2411,14 +2466,15 @@ export const sendCounterOffer = mutation({
     });
 
     // Update request status
-    await ctx.db.patch(args.requestId, {
+    await patchBookingRequestWithLifecycleDueAt(ctx, request, {
       allocatedBranchId: branchId,
       allocatedResourceIds: resourceIds,
       allocatedAt: now,
       allocatedByUid: actorUid,
       lifecycleStatus: isBroadcastRequest ? "broadcast_counter_offer_pending" : "counter_offer_pending_captains",
+      responseExpiresAt: expiresAt,
       updatedAt: now,
-    });
+    }, now);
 
     // Send notifications to the booking requester and any known captains.
     for (const recipient of recipients) {
@@ -2709,14 +2765,14 @@ export const respondToCounterOffer = mutation({
         patch.selectedOptionIndex = acceptedResponses[0].selectedOptionIndex ?? 0;
         patch.resolvedMatchroomId = matchroomId;
         finalStatus = "accepted";
-        await ctx.db.patch(request._id, {
+        await patchBookingRequestWithLifecycleDueAt(ctx, request, {
           status: "accepted",
           matchroomId,
           lifecycleStatus: "zone_confirmed",
           preferredDate: chosenOption ? new Date(`${chosenOption.date}T00:00:00`).getTime() : request.preferredDate,
           preferredTime: chosenOption?.time || request.preferredTime,
           updatedAt: now,
-        });
+        }, now);
         // Apply the accepted slot to the broadcast matchroom so the lobby shows
         // the agreed time. scheduledStartAt is the source of truth the lobby/
         // lifecycle read, so it must move with the accepted counter-offer.
@@ -2827,7 +2883,7 @@ export const respondToCounterOffer = mutation({
         }, now));
       }
 
-      await ctx.db.patch(request._id, {
+      await patchBookingRequestWithLifecycleDueAt(ctx, request, {
         status: "accepted",
         zoneId: offer.zoneId,
         matchroomId,
@@ -2837,7 +2893,7 @@ export const respondToCounterOffer = mutation({
         allocatedByUid: offer.zoneOwnerUid || request.allocatedByUid || undefined,
         lifecycleStatus: "zone_accepted_locked",
         updatedAt: now,
-      });
+      }, now);
       await notifyZoneOfferOutcome(ctx, {
         offer,
         request,
@@ -2851,11 +2907,11 @@ export const respondToCounterOffer = mutation({
       // Any rejection - cancel the matchroom and refund payments
       patch.status = "rejected";
       finalStatus = "rejected";
-      await ctx.db.patch(request._id, {
+      await patchBookingRequestWithLifecycleDueAt(ctx, request, {
         status: "cancelled",
         lifecycleStatus: "zone_schedule_rejected",
         updatedAt: now,
-      });
+      }, now);
       if (request.matchroomId) {
         await cancelMatchroomAndReturnPayments(ctx, {
           matchroomId: request.matchroomId,

@@ -11,6 +11,7 @@ import {
   validateMatchroomScheduleWindow,
 } from "./timing";
 import { withLifecycleDueAt } from "./matchroomLifecycle";
+import { withBookingRequestLifecycleDueAt } from "./maintenanceDue";
 
 export const BROADCAST_COUNTER_RESPONSE_WINDOW_MS = BROADCAST_COUNTER_RESPONSE_WINDOW_MS_FROM_TIMING;
 const PC_SETUP_GAME_KEYS = ["cs2", "cs16", "valorant"] as const;
@@ -665,12 +666,12 @@ export async function finalizeBroadcastFailure(
   for (const request of requests) {
     if (request.requestKind !== "broadcast_fanout") continue;
     if (!["open", "pending_payment", "accepted"].includes(String(request.status || ""))) continue;
-    await ctx.db.patch(request._id, {
+    await ctx.db.patch(request._id, withBookingRequestLifecycleDueAt(request, room, {
       status: terminalRequestStatus,
       lifecycleStatus,
       closedReason: reason,
       updatedAt: now,
-    });
+    }, now));
     await releaseHeldResourcesForBroadcastRequest(ctx, request, now);
   }
 
@@ -819,7 +820,7 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
     const { zone, targetAreaLabel } = entry;
     const zoneName = zone.venueBrandName || zone.name || "Zone Venue";
     const route = `/zone/modules/bookings?segment=requests&requestId=`;
-    const requestId = await ctx.db.insert("bookingRequests", {
+    const requestId = await ctx.db.insert("bookingRequests", withBookingRequestLifecycleDueAt(null, room, {
       userId: room.hostUid as Id<"users">,
       gameKey: normalizeGameKey(room.game),
       zoneId: zone._id,
@@ -860,7 +861,7 @@ export async function dispatchBroadcastZoneRequestsForMatchroom(
       notes: `Broadcast matchroom fanout for ${zoneName} (${targetAreaLabel}).`,
       createdAt: now,
       updatedAt: now,
-    });
+    }, now));
 
     const requestRoute = `${route}${String(requestId)}`;
     const dedupeKey = `booking.request_submitted:${String(requestId)}:${String(zone.ownerUid)}`;
@@ -996,7 +997,7 @@ export async function confirmBroadcastVenue(
     if (request.requestKind !== "broadcast_fanout") continue;
 
     if (String(request._id) === String(input.winningRequestId)) {
-      await ctx.db.patch(request._id, {
+      await ctx.db.patch(request._id, withBookingRequestLifecycleDueAt(request, room, {
         status: "accepted",
         lifecycleStatus: "zone_confirmed",
         closedReason: "zone_confirmed",
@@ -1005,14 +1006,14 @@ export async function confirmBroadcastVenue(
         allocatedBranchId: input.branchId || undefined,
         allocatedResourceIds: winningResourceIds || undefined,
         updatedAt: now,
-      });
+      }, now));
     } else if (["open", "pending_payment", "accepted"].includes(String(request.status || ""))) {
-      await ctx.db.patch(request._id, {
+      await ctx.db.patch(request._id, withBookingRequestLifecycleDueAt(request, room, {
         status: "cancelled",
         lifecycleStatus: "closed_elsewhere",
         closedReason: CLOSED_ELSEWHERE_REASON,
         updatedAt: now,
-      });
+      }, now));
       await releaseHeldResourcesForBroadcastRequest(ctx, request, now);
     }
 

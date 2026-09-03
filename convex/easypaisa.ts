@@ -8,6 +8,14 @@ import { EasypaisaTransactionType } from "./easypaisaRest";
 import { KYC_VERIFICATION_REQUIRED_MESSAGE, assertKycAccessAllowed } from "./kycGate";
 import { listSuperAdminNotificationRecipients } from "./superAdminAccess";
 import { EASYPAY_CHECKOUT_TTL_MS, getMatchroomLockAt } from "./timing";
+import {
+  getPaymentNextReconcileAt,
+  STALE_PAYMENT_RECONCILE_AFTER_MS,
+  STALE_PAYMENT_RECONCILE_COOLDOWN_MS,
+  STALE_PAYMENT_RECONCILE_MAX_AGE_MS,
+  withPaymentNextReconcileAt,
+} from "./maintenanceDue";
+import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
 
 const EASYPAISA_ENV = String(process.env.EASYPAISA_ENV || "staging").trim().toLowerCase();
 const EASYPAISA_DEFAULT_FLOW = String(process.env.EASYPAISA_DEFAULT_FLOW || "rest").trim().toLowerCase();
@@ -52,6 +60,18 @@ type PaymentStatus =
   | "failed"
   | "expired"
   | "cancelled";
+
+async function patchPaymentTransactionWithNextReconcileAt(
+  ctx: any,
+  transaction: any,
+  patch: Record<string, any>,
+  now = Date.now(),
+) {
+  await ctx.db.patch(
+    transaction._id,
+    withPaymentNextReconcileAt(transaction, patch, now),
+  );
+}
 
 type FinalizeResult = {
   appReturnUrl: string;
@@ -1316,10 +1336,10 @@ export const createCheckoutTransactionWithLock = internalMutation({
       }
     }
 
-    const transactionId = await ctx.db.insert("paymentTransactions", {
-      provider: "easypaisa",
+    const transactionDocument = {
+      provider: "easypaisa" as const,
       kind: args.kind,
-      status: "created",
+      status: "created" as const,
       userId: args.userId,
       bookingIntentId: args.bookingIntentId,
       amount: args.amount,
@@ -1350,7 +1370,11 @@ export const createCheckoutTransactionWithLock = internalMutation({
       callbackCount: 0,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    const transactionId = await ctx.db.insert(
+      "paymentTransactions",
+      withPaymentNextReconcileAt(null, transactionDocument, now),
+    );
 
     const transaction = await ctx.db.get(transactionId);
     if (!transaction) {
@@ -1914,10 +1938,6 @@ export const syncTransactionStatus = action({
 // (processedAt / status==="paid" short-circuits, reference-keyed wallet ops) and
 // already credits the wallet + notifies the payer & super admins when the
 // provider confirms paid but the booking/create can no longer complete.
-const STALE_PAYMENT_RECONCILE_AFTER_MS = 10 * 60 * 1000; // give the client poll/IPN ~10m first
-const STALE_PAYMENT_RECONCILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // don't re-inquire ancient rows
-const STALE_PAYMENT_RECONCILE_COOLDOWN_MS = 30 * 60 * 1000; // throttle re-inquiry of a row that was recently reconciled
-
 export const listStaleActivePaymentTransactions = internalQuery({
   args: {
     olderThanMs: v.number(),
@@ -1930,20 +1950,34 @@ export const listStaleActivePaymentTransactions = internalQuery({
     const floor = now - Math.max(0, args.maxAgeMs);
     const limit = Math.max(1, Math.min(Math.floor(args.limit), 50));
     const activeStatuses: PaymentStatus[] = ["created", "redirected", "token_received", "pending"];
+    const useIndexedReconciler = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_PAYMENT_RECONCILER");
     const out: Array<{ orderRefNum: string }> = [];
     for (const status of activeStatuses) {
       if (out.length >= limit) break;
-      const batch = await ctx.db
-        .query("paymentTransactions")
-        .withIndex("by_provider_and_status_and_createdAt", (q: any) =>
-          q
-            .eq("provider", "easypaisa")
-            .eq("status", status)
-            .gte("createdAt", floor)
-            .lte("createdAt", cutoff),
-        )
-        .order("asc")
-        .take(limit);
+      const remaining = limit - out.length;
+      const batch = useIndexedReconciler
+        ? await ctx.db
+            .query("paymentTransactions")
+            .withIndex("by_provider_and_status_and_nextReconcileAt", (q: any) =>
+              q
+                .eq("provider", "easypaisa")
+                .eq("status", status)
+                .gte("nextReconcileAt", 0)
+                .lte("nextReconcileAt", now),
+            )
+            .order("asc")
+            .take(remaining)
+        : await ctx.db
+            .query("paymentTransactions")
+            .withIndex("by_provider_and_status_and_createdAt", (q: any) =>
+              q
+                .eq("provider", "easypaisa")
+                .eq("status", status)
+                .gte("createdAt", floor)
+                .lte("createdAt", cutoff),
+            )
+            .order("asc")
+            .take(remaining);
       for (const row of batch) {
         out.push({ orderRefNum: row.orderRefNum });
         if (out.length >= limit) break;
@@ -1953,9 +1987,49 @@ export const listStaleActivePaymentTransactions = internalQuery({
   },
 });
 
+export const claimPaymentForReconciliation = internalMutation({
+  args: { orderRefNum: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("paymentTransactions")
+      .withIndex("by_orderRefNum", (q) => q.eq("orderRefNum", args.orderRefNum))
+      .unique();
+    if (!row || row.provider !== "easypaisa") return null;
+    if (!["created", "redirected", "token_received", "pending"].includes(String(row.status))) return null;
+
+    const now = Date.now();
+    const createdAt = Number(row.createdAt || 0);
+    if (!createdAt || now >= createdAt + STALE_PAYMENT_RECONCILE_MAX_AGE_MS) {
+      if (row.nextReconcileAt !== undefined) {
+        await ctx.db.patch(row._id, { nextReconcileAt: undefined });
+      }
+      return null;
+    }
+
+    const dueAt = row.nextReconcileAt ?? getPaymentNextReconcileAt(row, now);
+    if (typeof dueAt !== "number" || dueAt > now) return null;
+
+    const nextReconcileAt = now + STALE_PAYMENT_RECONCILE_COOLDOWN_MS;
+    await ctx.db.patch(row._id, { nextReconcileAt });
+    return { ...row, nextReconcileAt };
+  },
+});
+
 export const reconcileStalePayments = internalAction({
   args: { batchSize: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    if (!isMaintenanceJobEnabled("MATCHHAI_ENABLE_PAYMENT_RECONCILER_CRON")) {
+      return {
+        disabled: true,
+        ok: true,
+        scanned: 0,
+        processed: 0,
+        paid: 0,
+        failedOrExpired: 0,
+        errors: 0,
+      };
+    }
+
     try {
       ensurePaymentConfig();
     } catch (error) {
@@ -1981,15 +2055,13 @@ export const reconcileStalePayments = internalAction({
     let errors = 0;
     for (const stale of staleRows) {
       try {
-        const row: any = await ctx.runQuery((internal as any).easypaisa.getTransactionByOrderRef, {
+        const row: any = await ctx.runMutation((internal as any).easypaisa.claimPaymentForReconciliation, {
           orderRefNum: stale.orderRefNum,
         });
         if (!row) continue;
         // Re-check it is still active — a concurrent IPN/poll may have resolved it.
-        if (!["created", "redirected", "token_received", "pending"].includes(String(row.status))) continue;
         // Throttle: a permanently-stuck row (provider keeps returning pending) is
         // re-inquired at most once per cooldown window instead of every cron tick.
-        if (row.lastCallbackAt && Date.now() - Number(row.lastCallbackAt) < STALE_PAYMENT_RECONCILE_COOLDOWN_MS) continue;
         const result: any = await performProviderInquiryAndApply(ctx, row);
         processed += 1;
         if (result?.status === "paid") paid += 1;
@@ -2102,7 +2174,7 @@ export const markRedirected = internalMutation({
     if (!row || row.processedAt || isTerminalStatus(row.status as PaymentStatus)) {
       return row;
     }
-    await ctx.db.patch(row._id, {
+    await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
       status: row.status === "created" ? "redirected" : row.status,
       providerPayload: {
         ...(row.providerPayload || {}),
@@ -2135,7 +2207,7 @@ export const registerProviderToken = internalMutation({
       return row;
     }
 
-    await ctx.db.patch(row._id, {
+    await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
       authToken: args.authToken,
       status: row.status === "created" ? "token_received" : row.status,
       providerPayload: {
@@ -2213,7 +2285,7 @@ export const applyProviderUpdate = internalMutation({
         ? "provider_order_reference_mismatch"
         : "provider_amount_mismatch";
       const currentPayload = row.providerPayload || {};
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         providerStatus: normalized.transactionStatus || normalized.responseCode || undefined,
         providerDescription: normalized.responseDesc || undefined,
         providerPayload: {
@@ -2300,7 +2372,7 @@ export const applyProviderUpdate = internalMutation({
       && normalized.resolvedStatus === "paid"
       && args.source !== "inquiry"
     ) {
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: row.status,
         lastError: "terminal_state_requires_provider_inquiry",
@@ -2397,7 +2469,7 @@ export const applyProviderUpdate = internalMutation({
           };
         }
       }
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         providerPayload: sourcePayload,
         status: "paid",
@@ -2429,7 +2501,7 @@ export const applyProviderUpdate = internalMutation({
         });
       }
 
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: "expired",
         lastError: undefined,
@@ -2457,7 +2529,7 @@ export const applyProviderUpdate = internalMutation({
     }
 
     if (normalized.resolvedStatus === "pending" || keepInquiryPending) {
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: row.status === "redirected" || row.status === "token_received" ? row.status : "pending",
         lastError: keepInquiryPending ? "inquiry_unverified" : undefined,
@@ -2484,7 +2556,7 @@ export const applyProviderUpdate = internalMutation({
         });
       }
 
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: "expired",
         lastError: undefined,
@@ -2512,7 +2584,7 @@ export const applyProviderUpdate = internalMutation({
     }
 
     if (normalized.resolvedStatus !== "paid") {
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: "failed",
         lastError: undefined,
@@ -2703,7 +2775,7 @@ export const applyProviderUpdate = internalMutation({
         }
       }
 
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         providerPayload: row.kind === "booking_intent"
           ? { ...sourcePayload, bookingFundsMode: "wallet_hold" }
@@ -2761,7 +2833,7 @@ export const applyProviderUpdate = internalMutation({
         && !createdWalletTopupMatchroomId;
 
       if (walletCreditedBookingFailure) {
-        await ctx.db.patch(row._id, {
+        await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
           ...callbackPatch,
           providerPayload: { ...sourcePayload, bookingFundsMode: "wallet_hold" },
           status: "paid",
@@ -2815,7 +2887,7 @@ export const applyProviderUpdate = internalMutation({
           };
         }
 
-        await ctx.db.patch(row._id, {
+        await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
           ...callbackPatch,
           providerPayload: fallbackPayload,
           status: "paid",
@@ -2852,7 +2924,7 @@ export const applyProviderUpdate = internalMutation({
         amount: row.amount,
         message,
       });
-      await ctx.db.patch(row._id, {
+      await patchPaymentTransactionWithNextReconcileAt(ctx, row, {
         ...callbackPatch,
         status: "pending",
         lastError: message,

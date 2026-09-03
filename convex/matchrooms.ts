@@ -38,6 +38,11 @@ import {
   assertZoneResourceCapacityAvailable,
 } from "./bookingConflicts";
 import { getLifecycleDueAt, withLifecycleDueAt } from "./matchroomLifecycle";
+import {
+  withBookingRequestLifecycleDueAt,
+  withTeamChallengeLifecycleDueAt,
+} from "./maintenanceDue";
+import { isMaintenanceJobEnabled, isRuntimeFlagEnabled } from "./runtimeEnv";
 
 // Constants
 const ONE_DAY_MS = JOIN_REQUEST_TTL_MS;
@@ -2192,7 +2197,7 @@ async function dispatchZoneAdminRequestForFullMatchroom(
   if (!host) return null;
 
   const now = Date.now();
-  const requestId = await ctx.db.insert("bookingRequests", {
+  const requestId = await ctx.db.insert("bookingRequests", withBookingRequestLifecycleDueAt({}, room, {
     userId: host._id,
     gameKey: normalizeGameKey(room.game) || String(room.game || ""),
     zoneId: room.zoneId as Id<"zones">,
@@ -2232,7 +2237,7 @@ async function dispatchZoneAdminRequestForFullMatchroom(
     status: "open",
     createdAt: now,
     updatedAt: now,
-  });
+  }, now));
 
   // Notify the zone admin that the matchroom is full and ready for confirmation.
   await maybeNotifyZoneAdminMatchroomFull(ctx, matchroomId, room);
@@ -4262,13 +4267,13 @@ export const createTeamChallengeMatchroom = internalMutation({
 
     await syncMatchroomMembers(ctx, matchroomId, playerUids);
 
-    await ctx.db.patch(args.challengeId, {
+    await ctx.db.patch(args.challengeId, withTeamChallengeLifecycleDueAt(challenge, {
       matchroomId,
       status: "admin_pending",
       zoneId: venue.zoneId as Id<"zones">,
       zoneName: venue.venueName,
       updatedAt: now,
-    });
+    }, now));
 
     await dispatchZoneAdminRequestForFullMatchroom(ctx, matchroomId, { force: true });
 
@@ -6428,29 +6433,45 @@ export const runLifecycleSweep = internalMutation({
     batchSize: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const batchSize = Math.max(1, Math.min(50, Number(args.batchSize || 25)));
+    if (!isMaintenanceJobEnabled("MATCHHAI_ENABLE_LIFECYCLE_CRON")) {
+      return {
+        disabled: true,
+        inspectedRooms: 0,
+        changedRooms: 0,
+        expiredNotifications: 0,
+        useIndexedSweep: false,
+      };
+    }
+
+    const batchSize = Math.max(1, Math.min(50, Math.floor(Number(args.batchSize || 25))));
     const now = Date.now();
     // Keep the status scan available during the schema/backfill rollout. The
     // production flag is enabled only after every existing room has a due time.
-    const useIndexedSweep = process.env.MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP === "1";
+    const useIndexedSweep = isRuntimeFlagEnabled("MATCHHAI_USE_INDEXED_LIFECYCLE_SWEEP");
     let changedRooms = 0;
     let expiredNotifications = 0;
     let inspectedRooms = 0;
 
+    let remainingRooms = batchSize;
     for (const status of ["open", "locked", "in-progress", "completed"]) {
+      if (remainingRooms <= 0) break;
       const rooms = useIndexedSweep
         ? await ctx.db
             .query("matchrooms")
             .withIndex("by_status_and_lifecycleDueAt", (q: any) =>
-              q.eq("status", status).lte("lifecycleDueAt", now),
+              q
+                .eq("status", status)
+                .gte("lifecycleDueAt", 0)
+                .lte("lifecycleDueAt", now),
             )
-            .take(batchSize)
+            .take(remainingRooms)
         : await ctx.db
             .query("matchrooms")
             .withIndex("by_status", (q: any) => q.eq("status", status))
-            .take(batchSize);
+            .take(remainingRooms);
 
       for (const room of rooms) {
+        remainingRooms -= 1;
         inspectedRooms += 1;
         if (shouldExpireForNotFull(room, now)) {
           const result = await expireMatchroomForInvalidLifecycle(
@@ -6594,7 +6615,10 @@ export const runLifecycleSweep = internalMutation({
       ? await ctx.db
           .query("notifications")
           .withIndex("by_status_and_expiresAt", (q: any) =>
-            q.eq("status", "pending").lte("expiresAt", now),
+            q
+              .eq("status", "pending")
+              .gte("expiresAt", 0)
+              .lte("expiresAt", now),
           )
           .take(batchSize)
       : await ctx.db

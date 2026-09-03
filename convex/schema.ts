@@ -520,6 +520,7 @@ export default defineSchema({
     lastError: v.optional(v.string()),
     processedAt: v.optional(v.number()),
     expiresAt: v.optional(v.number()),
+    nextReconcileAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -535,6 +536,7 @@ export default defineSchema({
     .index("by_status_and_createdAt", ["status", "createdAt"])
     .index("by_provider_and_createdAt", ["provider", "createdAt"])
     .index("by_provider_and_status_and_createdAt", ["provider", "status", "createdAt"])
+    .index("by_provider_and_status_and_nextReconcileAt", ["provider", "status", "nextReconcileAt"])
     .index("by_provider_and_kind_and_createdAt", ["provider", "kind", "createdAt"]),
 
   // ============================================
@@ -935,6 +937,7 @@ export default defineSchema({
     allocatedAt: v.optional(v.number()),
     allocatedByUid: v.optional(v.string()),
     lifecycleStatus: v.optional(v.string()),
+    lifecycleDueAt: v.optional(v.number()),
     notes: v.optional(v.string()),
 
     createdAt: v.number(),
@@ -944,6 +947,7 @@ export default defineSchema({
     .index("by_zoneId", ["zoneId"])
     .index("by_matchroomId", ["matchroomId"])
     .index("by_status", ["status"])
+    .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_gameKey", ["gameKey"])
     .index("by_zoneId_and_status", ["zoneId", "status"])
     .index("by_zoneId_and_status_and_updatedAt", ["zoneId", "status", "updatedAt"])
@@ -1196,6 +1200,7 @@ export default defineSchema({
     zoneId: v.optional(v.id("zones")),
     zoneName: v.optional(v.string()),
     scheduledAt: v.optional(v.number()),
+    lifecycleDueAt: v.optional(v.number()),
 
     // Result
     result: v.optional(
@@ -1213,6 +1218,7 @@ export default defineSchema({
     .index("by_challengerTeamId", ["challengerTeamId"])
     .index("by_opponentTeamId", ["opponentTeamId"])
     .index("by_status", ["status"])
+    .index("by_status_and_lifecycleDueAt", ["status", "lifecycleDueAt"])
     .index("by_matchroomId", ["matchroomId"]),
 
   // ============================================
