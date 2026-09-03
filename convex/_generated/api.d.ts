@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as adminPasswordRecovery from "../adminPasswordRecovery.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as bookingConflicts from "../bookingConflicts.js";
@@ -28,6 +29,7 @@ import type * as easypaisaNode from "../easypaisaNode.js";
 import type * as easypaisaRest from "../easypaisaRest.js";
 import type * as externalApis from "../externalApis.js";
 import type * as friendChat from "../friendChat.js";
+import type * as fullDataReset from "../fullDataReset.js";
 import type * as http from "../http.js";
 import type * as kyc from "../kyc.js";
 import type * as kycGate from "../kycGate.js";
@@ -41,6 +43,7 @@ import type * as migrations from "../migrations.js";
 import type * as notifications from "../notifications.js";
 import type * as phoneOtp from "../phoneOtp.js";
 import type * as presence from "../presence.js";
+import type * as protectedDataReset from "../protectedDataReset.js";
 import type * as psnTokenCache from "../psnTokenCache.js";
 import type * as pushNotifications from "../pushNotifications.js";
 import type * as pushNotificationsActions from "../pushNotificationsActions.js";
@@ -79,6 +82,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  adminPasswordRecovery: typeof adminPasswordRecovery;
   auth: typeof auth;
   authz: typeof authz;
   bookingConflicts: typeof bookingConflicts;
@@ -98,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   easypaisaRest: typeof easypaisaRest;
   externalApis: typeof externalApis;
   friendChat: typeof friendChat;
+  fullDataReset: typeof fullDataReset;
   http: typeof http;
   kyc: typeof kyc;
   kycGate: typeof kycGate;
@@ -111,6 +116,7 @@ declare const fullApi: ApiFromModules<{
   notifications: typeof notifications;
   phoneOtp: typeof phoneOtp;
   presence: typeof presence;
+  protectedDataReset: typeof protectedDataReset;
   psnTokenCache: typeof psnTokenCache;
   pushNotifications: typeof pushNotifications;
   pushNotificationsActions: typeof pushNotificationsActions;
